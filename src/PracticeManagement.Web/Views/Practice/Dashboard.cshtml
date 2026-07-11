@@ -1,0 +1,96 @@
+@using PracticeManagement.Web.Models
+@{ ViewData["Title"] = "Practice Dashboard"; var screens = ViewBag.Screens as PracticeScreen[] ?? Array.Empty<PracticeScreen>(); }
+
+<section class="pm-page-heading compact pm-dashboard-heading">
+    <div>
+        <p class="pm-eyebrow">Practice Management</p>
+        <h1>Organization Practice Dashboard</h1>
+        <p>Operational view of source statements, practices, instances, dependencies, evidence, and items needing attention.</p>
+    </div>
+    <label class="pm-dashboard-org-filter">
+        <span>Organization</span>
+        <select id="dashboardOrganization"><option value="">Loading organizations...</option></select>
+    </label>
+</section>
+
+<section class="pm-dashboard-kpi-grid" aria-label="Practice Management dashboard summaries">
+    <article class="pm-dashboard-card" data-dashboard-section="controls">
+        <div class="pm-dashboard-card-title"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><h2>Source Statements</h2></div>
+        <div class="pm-dashboard-primary"><span data-summary="TotalOrganizationControls">0</span><small>Total</small></div>
+        <div class="pm-mini-metrics">
+            <span><b data-summary="NotUpdatedControls">0</b> Not Updated</span>
+            <span><b data-summary="ApplicableControls">0</b> Applicable</span>
+            <span><b data-summary="NotApplicableControls">0</b> Not Applicable</span>
+            <span><b data-summary="DeferredControls">0</b> Deferred</span>
+            <span><b data-summary="AcceptedRiskControls">0</b> Accepted Risk</span>
+        </div>
+    </article>
+    <article class="pm-dashboard-card" data-dashboard-section="practices">
+        <div class="pm-dashboard-card-title"><i class="fa-solid fa-list-check" aria-hidden="true"></i><h2>Practices</h2></div>
+        <div class="pm-dashboard-primary"><span data-summary="TotalPractices">0</span><small>Total</small></div>
+        <div class="pm-mini-metrics">
+            <span><b data-summary="ApplicablePractices">0</b> Applicable</span>
+            <span><b data-summary="NotUpdatedPractices">0</b> Not Updated</span>
+            <span><b data-summary="NotApplicablePractices">0</b> Not Applicable</span>
+        </div>
+    </article>
+    <article class="pm-dashboard-card" data-dashboard-section="instances">
+        <div class="pm-dashboard-card-title"><i class="fa-solid fa-network-wired" aria-hidden="true"></i><h2>Practice Instances</h2></div>
+        <div class="pm-dashboard-primary"><span data-summary="TotalPracticeInstances">0</span><small>Total</small></div>
+        <div class="pm-mini-metrics">
+            <span><b data-summary="ActivePracticeInstances">0</b> Active</span>
+            <span><b data-summary="CriticalPracticeInstances">0</b> Critical</span>
+            <span><b data-summary="InstancesWithoutOwner">0</b> No Owner</span>
+            <span><b data-summary="InstancesWithoutDependencies">0</b> No Dependencies</span>
+            <span><b data-summary="InstancesWithoutEvidenceConfiguration">0</b> No Evidence</span>
+        </div>
+    </article>
+    <article class="pm-dashboard-card" data-dashboard-section="dependencies">
+        <div class="pm-dashboard-card-title"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><h2>Dependencies</h2></div>
+        <div class="pm-dashboard-primary"><span data-summary="OpenDependencyMappingItems">0</span><small>Open Mapping</small></div>
+        <div class="pm-mini-metrics">
+            <span><b data-summary="ToolDependencies">0</b> Tools</span>
+            <span><b data-summary="VendorDependencies">0</b> Vendors</span>
+            <span><b data-summary="ApplicationDependencies">0</b> Applications</span>
+            <span><b data-summary="AssetDependencies">0</b> Assets</span>
+            <span><b data-summary="PersonDependencies">0</b> People</span>
+            <span><b data-summary="SinglePointDependencies">0</b> Single Point</span>
+        </div>
+    </article>
+    <article class="pm-dashboard-card" data-dashboard-section="evidence">
+        <div class="pm-dashboard-card-title"><i class="fa-solid fa-file-circle-check" aria-hidden="true"></i><h2>Evidence</h2></div>
+        <div class="pm-dashboard-primary"><span data-summary="EvidenceConfiguredCount">0</span><small>Configured</small></div>
+        <div class="pm-mini-metrics">
+            <span><b data-summary="EvidenceNotConfiguredCount">0</b> Not Configured</span>
+            <span><b data-summary="AlignedEvidence">0</b> Aligned</span>
+            <span><b data-summary="EnhancedEvidence">0</b> Enhanced</span>
+            <span><b data-summary="NotAlignedEvidence">0</b> Not Aligned</span>
+        </div>
+    </article>
+    <article class="pm-dashboard-card" data-dashboard-section="resolve">
+        <div class="pm-dashboard-card-title"><i class="fa-solid fa-arrows-spin" aria-hidden="true"></i><h2>Resolve Status</h2></div>
+        <div class="pm-dashboard-primary"><span data-summary="PendingResolveItems">0</span><small>Pending</small></div>
+        <div class="pm-mini-metrics">
+            <span><b data-summary="ResolvedItems">0</b> Resolved</span>
+            <span><b data-summary="PartiallyResolvedItems">0</b> Partial</span>
+            <span><b data-summary="OpenDependencyMappingItems">0</b> Open Mapping</span>
+        </div>
+    </article>
+</section>
+
+<section class="pm-dashboard-layout pm-dashboard-layout-single">
+    <article class="pm-panel pm-dashboard-attention">
+        <div class="pm-section-heading">
+            <h2>Attention Required</h2>
+            <p>Actionable items for the selected organization.</p>
+        </div>
+        <div class="pm-attention-list" id="attentionList">
+            <div class="pm-empty compact">Loading dashboard...</div>
+        </div>
+    </article>
+</section>
+
+@section Scripts {
+    <script>window.pmApi="@ViewBag.ApiBaseUrl";</script>
+    <script src="~/js/practice-dashboard.js" asp-append-version="true"></script>
+}

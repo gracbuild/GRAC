@@ -1,0 +1,79 @@
+@model PracticeManagement.Web.Models.LoginViewModel
+@{
+    Layout = null;
+    var loginAction = Context.Request.Path.StartsWithSegments("/OrganizationManagement", StringComparison.OrdinalIgnoreCase)
+        ? Url.Content("~/OrganizationManagement/Login")
+        : Url.Action("Index", "Login");
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GRAC | Log in</title>
+    <link rel="icon" type="image/x-icon" href="~/css/Images/favicon.ico" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/fontawesome-free/css/all.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/icheck-bootstrap/icheck-bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/sweet-alert.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/dist/css/adminlte.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/cacca-styles.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/login.css" asp-append-version="true" />
+</head>
+<body class="login-split">
+    <div id="Loader" class="div-loader" style="display:none;">
+        <div class="loader"></div>
+    </div>
+
+    <div class="login-wrapper">
+        <div class="split-card">
+            <div class="brand-panel">
+                <div class="brand-inner">
+                    <div class="brand-logo">
+                        <img src="~/css/Images/Logo.png" alt="GRAC Logo" loading="lazy" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-panel">
+                <div class="form-card">
+                    <div class="greeting">
+                        <h1>Welcome to GRAC</h1>
+                    </div>
+
+                    <form action="@loginAction" method="post" id="LoginForm" novalidate>
+                        @Html.AntiForgeryToken()
+                        <input asp-for="ReturnUrl" type="hidden" />
+                        <div asp-validation-summary="ModelOnly" class="validation-message" role="alert"></div>
+
+                        <div class="form-group mb-3">
+                            <label asp-for="LoginId" class="form-label">User ID / Email ID</label>
+                            <input asp-for="LoginId" id="txtUserName" type="text" class="form-control" placeholder="Enter User ID or Email ID" autocomplete="username" tabindex="1" autofocus />
+                            <span asp-validation-for="LoginId" class="validation-message"></span>
+                        </div>
+
+                        <div class="form-group mb-4">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <label asp-for="Password" class="form-label mb-0">Password</label>
+                            </div>
+                            <input asp-for="Password" id="txtPassword" type="password" class="form-control" placeholder="Enter Password" autocomplete="current-password" tabindex="2" />
+                            <span asp-validation-for="Password" class="validation-message"></span>
+                        </div>
+
+                        <button type="submit" id="btnLogin" class="btn btn-primary btn-signin mt-4" tabindex="3">Sign In</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="~/lib/FrontEnd/plugins/jquery/jquery.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="~/lib/FrontEnd/dist/js/adminlte.min.js"></script>
+    <script src="~/js/crypto-js.min.js"></script>
+    <script src="~/js/sweet-alert.min.js"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    <script src="~/js/login.js" asp-append-version="true"></script>
+    <partial name="_ValidationScriptsPartial" />
+</body>
+</html>

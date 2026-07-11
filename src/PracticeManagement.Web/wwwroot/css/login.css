@@ -1,0 +1,213 @@
+:root {
+  --brand-navy: #0b1228;
+  --brand-blue: #4e78f5;
+  --text-muted: #6b7280;
+  --border-color: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body.login-split {
+  margin: 0;
+  overflow-x: hidden;
+  background: #fff;
+  color: #1f2937;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.login-wrapper {
+  max-width: 1480px;
+  margin: 24px 16px 24px auto;
+  padding: 0 16px;
+}
+
+.split-card {
+  display: grid;
+  grid-template-columns: minmax(520px, .9fr) minmax(460px, 1.1fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: stretch;
+}
+
+.brand-panel {
+  display: flex;
+  min-height: calc(100vh - 48px);
+  align-items: center;
+  justify-content: center;
+  padding: 36px;
+  border-radius: 24px;
+  background: var(--brand-navy);
+  animation: slide-in-left 1s cubic-bezier(.4, 0, .2, 1) .4s both;
+}
+
+.brand-logo {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.brand-logo img {
+  position: relative;
+  z-index: 2;
+  width: auto;
+  height: 80px;
+  filter: drop-shadow(0 4px 8px #0002);
+  transition: transform .3s ease;
+}
+
+.brand-logo:hover img {
+  transform: scale(1.05) translateY(-2px);
+}
+
+.brand-logo.shimmer::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, transparent, #ffffff22, #ffffff44, #ffffff22, transparent);
+  content: "";
+  transform: translate(-50%, -50%) translateX(-100%);
+  animation: shimmer 1.2s ease-in-out;
+}
+
+.form-panel {
+  display: flex;
+  align-items: center;
+  padding-right: clamp(16px, 3vw, 40px);
+  animation: slide-in-right 1.2s cubic-bezier(.4, 0, .2, 1) .6s both;
+}
+
+.form-card {
+  width: 100%;
+  max-width: 358px;
+  animation: fade-in-up .8s cubic-bezier(.4, 0, .2, 1) 1s both;
+}
+
+.greeting h1 {
+  margin: 0 0 24px;
+  color: var(--text-muted);
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.greeting p {
+  margin: 0 0 24px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.password-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.form-control {
+  width: 100%;
+  height: 44px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  outline: none;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+  font-size: 14px;
+  transition: all .25s ease;
+}
+
+.form-control:focus {
+  border-color: #b8c7fb;
+  box-shadow: 0 0 0 3px #4e78f526;
+}
+
+.btn-signin {
+  width: 100%;
+  height: 46px;
+  border: 1px solid var(--brand-blue);
+  border-radius: 8px;
+  background: var(--brand-blue);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  transition: all .25s ease;
+}
+
+.btn-signin:hover {
+  box-shadow: 0 4px 12px #4e78f54d;
+  transform: translateY(-2px);
+}
+
+.forgot-link {
+  display: inline-flex;
+  color: var(--brand-blue);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
+}
+
+.validation-message {
+  display: block;
+  margin: 0 0 10px;
+  color: #b42318;
+  font-size: 12px;
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  from { opacity: 0; transform: translate(-50%, -50%) translateX(-100%); }
+  50% { opacity: 1; }
+  to { opacity: 0; transform: translate(-50%, -50%) translateX(100%); }
+}
+
+@media (max-width: 992px) {
+  .login-wrapper {
+    margin: 16px auto;
+  }
+
+  .split-card {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-panel {
+    min-height: 280px;
+  }
+
+  .form-panel {
+    justify-content: center;
+    padding: 12px;
+  }
+}

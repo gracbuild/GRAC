@@ -1,0 +1,455 @@
+@using PracticeManagement.Web.Models
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@{
+    var screens = ViewBag.Screens as PracticeScreen[] ?? Array.Empty<PracticeScreen>();
+    var menuItems = ViewBag.MenuItems as IReadOnlyList<PracticeMenuItem> ?? Array.Empty<PracticeMenuItem>();
+    var currentArea = Context.Request.Query["areaKey"].ToString();
+    var moduleTitle = Convert.ToString(ViewBag.ModuleTitle) ?? "Practice Management";
+    var appBasePath = Convert.ToString(ViewBag.AppBasePath);
+    if (string.IsNullOrWhiteSpace(appBasePath)) appBasePath = Context.Request.PathBase.Value ?? "";
+    var isOrganizationManagementModule = ViewBag.IsOrganizationManagementModule as bool? ?? false;
+    var logoutUrl = isOrganizationManagementModule && string.IsNullOrWhiteSpace(Context.Request.PathBase.Value)
+        ? Url.Content("~/OrganizationManagement/Login/Logout")
+        : Url.Action("Logout", "Login");
+    if (string.IsNullOrWhiteSpace(currentArea)) currentArea = ViewContext.RouteData.Values["areaKey"]?.ToString() ?? "";
+    var isDashboard = string.IsNullOrWhiteSpace(currentArea);
+    var dashboardScreen = screens.FirstOrDefault(x => x.Key == "dashboard");
+    var onboardingRoot = screens.FirstOrDefault(x => x.Key == "organization-setup");
+    var administrationRoot = screens.FirstOrDefault(x => x.Key == "organization-administration");
+    var dependencyRoot = screens.FirstOrDefault(x => x.Key == "organization-dependencies");
+    var onboardingScreens = screens.Where(x => x.Group == PracticeScreen.OrganizationOnboardingGroup && x.Key != "organization-setup").ToArray();
+    var organizationScreens = screens.Where(x => x.Group == PracticeScreen.OrganizationAdministrationGroup && x.Key != "organization-administration").ToArray();
+    var dependencyScreens = screens.Where(x => x.Group == PracticeScreen.OrganizationDependenciesGroup && x.Key != "organization-dependencies").ToArray();
+    var resolveScreen = screens.FirstOrDefault(x => x.Key == "resolve");
+    var workbenchScreens = screens.Where(x => x.Group == PracticeScreen.DependencyWorkbenchGroup).ToArray();
+    var practiceScreens = screens.Where(x => x.Group == PracticeScreen.PracticeManagementGroup && x.Key != "resolve").ToArray();
+    var onboardingOpen = onboardingRoot?.Key == currentArea || onboardingScreens.Any(x => x.Key == currentArea);
+    var organizationOpen = administrationRoot?.Key == currentArea || organizationScreens.Any(x => x.Key == currentArea);
+    var dependencyOpen = dependencyRoot?.Key == currentArea || dependencyScreens.Any(x => x.Key == currentArea);
+    var workbenchOpen = (resolveScreen?.Key == currentArea) || workbenchScreens.Any(x => x.Key == currentArea);
+    var practiceOpen = practiceScreens.Any(x => x.Key == currentArea) || workbenchOpen;
+    var currentGroup = isOrganizationManagementModule ? "Organization Management" : onboardingOpen ? PracticeScreen.OrganizationOnboardingGroup : organizationOpen ? PracticeScreen.OrganizationAdministrationGroup : dependencyOpen ? PracticeScreen.OrganizationDependenciesGroup : practiceOpen ? PracticeScreen.PracticeManagementGroup : "Practice Management";
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] | @moduleTitle | GRAC</title>
+    <meta name="csrf-token" content="@Antiforgery.GetAndStoreTokens(Context).RequestToken" />
+    <link rel="icon" type="image/x-icon" href="~/css/Images/favicon.ico" />
+    <link rel="stylesheet" href="~/css/cacca-styles.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/phosphor/regular/style.css" />
+    <link rel="stylesheet" href="~/css/phosphor/bold/style.css" />
+    <link rel="stylesheet" href="~/css/phosphor/light/style.css" />
+    <link rel="stylesheet" href="~/css/phosphor/thin/style.css" />
+    <link rel="stylesheet" href="~/css/phosphor/fill/style.css" />
+    <link rel="stylesheet" href="~/css/phosphor/duotone/style.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/fontawesome-free/css/all.min.css" />
+    <link rel="stylesheet" href="~/lib/fontawesome/css/all.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/tempusdominus-bootstrap-4/css/tempusdominus-bootstrap-4.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/icheck-bootstrap/icheck-bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/jqvmap/jqvmap.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/dist/css/adminlte.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/overlayScrollbars/css/OverlayScrollbars.min.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/daterangepicker/daterangepicker.css" />
+    <link rel="stylesheet" href="~/lib/FrontEnd/plugins/summernote/summernote-bs4.min.css" />
+    <link rel="stylesheet" href="~/css/sweet-alert.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/grac-dialog.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/control-management.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/repository-actions.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/practice-management.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/topbar-auth.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/PracticeManagement.Web.styles.css" asp-append-version="true" />
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('cacca_sidebar_collapsed');
+                if (saved !== null && JSON.parse(saved)) {
+                    document.addEventListener('DOMContentLoaded', function () {
+                        document.body.classList.add('sidebar-collapse');
+                    });
+                }
+            } catch (e) { }
+        })();
+    </script>
+</head>
+<body class="hold-transition sidebar-mini layout-fixed sidebar-open layout-footer-fixed">
+    <nav class="main-header navbar navbar-expand navbar-white navbar-light">
+        <ul class="navbar-nav">
+            <li class="nav-item">
+                <a class="nav-link" data-widget="pushmenu" href="#" role="button" aria-label="Toggle navigation">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M7.49984 18.3334H12.4998C16.6665 18.3334 18.3332 16.6667 18.3332 12.5V7.50002C18.3332 3.33335 16.6665 1.66669 12.4998 1.66669H7.49984C3.33317 1.66669 1.6665 3.33335 1.6665 7.50002V12.5C1.6665 16.6667 3.33317 18.3334 7.49984 18.3334Z" stroke="#292D32" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M7.5 1.66669V18.3334" stroke="#292D32" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </a>
+            </li>
+            <li class="nav-item d-none d-sm-flex align-items-center">
+                <ol class="breadcrumb mb-0">
+                    <li class="breadcrumb-item"><a asp-controller="Practice" asp-action="Index">Home</a></li>
+                    <li class="breadcrumb-item">@currentGroup</li>
+                    @if (!isDashboard)
+                    {
+                        <li class="breadcrumb-item active" aria-current="page">@ViewData["Title"]</li>
+                    }
+                </ol>
+            </li>
+        </ul>
+        <ul class="navbar-nav ml-auto">
+            <li class="nav-item dropdown">
+                <a class="nav-link" data-toggle="dropdown" href="#" aria-label="User menu">
+                    <div class="user-panel d-flex">
+                        <div class="image">
+                            <img src="~/lib/FrontEnd/dist/img/avatar5.png" class="img-circle elevation-2" alt="User Image" />
+                        </div>
+                        <div class="info"><span id="spnUserName">Practice Admin</span></div>
+                    </div>
+                </a>
+                <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right cacca-ddw">
+                    <form class="logout-form" action="@logoutUrl" method="post">
+                        @Html.AntiForgeryToken()
+                        <button class="dropdown-item" type="submit"><i class="fa fa-power-off"></i> Sign Out</button>
+                    </form>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-widget="fullscreen" href="#" role="button" aria-label="Fullscreen"><i class="fas fa-expand-arrows-alt"></i></a>
+            </li>
+        </ul>
+    </nav>
+
+    <aside class="main-sidebar sidebar-dark-primary elevation-4">
+        <a asp-controller="Practice" asp-action="Index" class="brand-link">
+            <img src="~/css/Images/Logo.png" class="brand-image logo-expanded" alt="GRAC" />
+            <img src="~/css/Images/logo-cacca.png" class="brand-image logo-collapsed" alt="GRAC" />
+        </a>
+        <div class="sidebar">
+            <nav class="mt-2">
+                <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
+                    @if (menuItems.Any())
+                    {
+                        @await Html.PartialAsync("_PracticeMenuTree", menuItems, new ViewDataDictionary(ViewData) { ["CurrentArea"] = currentArea })
+                    }
+                    @if (!menuItems.Any())
+                    {
+                        @if (dashboardScreen is not null)
+                        {
+                            <li class="nav-item">
+                                <a asp-controller="Practice" asp-action="Index" class="nav-link @(isDashboard ? "active" : "")">
+                                    <i class="nav-icon fas fa-@dashboardScreen.Icon"></i><p>@dashboardScreen.Title</p>
+                                </a>
+                            </li>
+                        }
+                        @if (onboardingRoot is not null || onboardingScreens.Any())
+                        {
+                            <li class="nav-item @(onboardingOpen ? "menu-open" : "")">
+                                <a href="#" class="nav-link @(onboardingOpen ? "active" : "")">
+                                    <i class="nav-icon fas fa-building"></i><p>Organization Setup<i class="right fas fa-angle-left"></i></p>
+                                </a>
+                                <ul class="nav nav-treeview">
+                                    @if (onboardingRoot is not null)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="OrganizationSetup" asp-route-areaKey="@onboardingRoot.Key" class="nav-link @(onboardingRoot.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@onboardingRoot.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                    @foreach (var screen in onboardingScreens)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="OrganizationSetup" asp-route-areaKey="@screen.Key" class="nav-link @(screen.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@screen.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+                        @if (administrationRoot is not null || organizationScreens.Any())
+                        {
+                            <li class="nav-item @(organizationOpen ? "menu-open" : "")">
+                                <a href="#" class="nav-link @(organizationOpen ? "active" : "")">
+                                    <i class="nav-icon fas fa-sitemap"></i><p>Organization Administration<i class="right fas fa-angle-left"></i></p>
+                                </a>
+                                <ul class="nav nav-treeview">
+                                    @if (administrationRoot is not null)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="OrganizationAdministration" asp-route-areaKey="@administrationRoot.Key" class="nav-link @(administrationRoot.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@administrationRoot.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                    @foreach (var screen in organizationScreens)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="OrganizationAdministration" asp-route-areaKey="@screen.Key" class="nav-link @(screen.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@screen.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+                        @if (dependencyRoot is not null && !dependencyScreens.Any())
+                        {
+                            <li class="nav-item">
+                                <a asp-controller="Practice" asp-action="OrganizationDependenciesIndex" class="nav-link @(dependencyOpen ? "active" : "")">
+                                    <i class="nav-icon fas fa-diagram-project"></i><p>@dependencyRoot.Title</p>
+                                </a>
+                            </li>
+                        }
+                        else if (dependencyRoot is not null || dependencyScreens.Any())
+                        {
+                            <li class="nav-item @(dependencyOpen ? "menu-open" : "")">
+                                <a href="#" class="nav-link @(dependencyOpen ? "active" : "")">
+                                    <i class="nav-icon fas fa-diagram-project"></i><p>Organization Dependencies<i class="right fas fa-angle-left"></i></p>
+                                </a>
+                                <ul class="nav nav-treeview">
+                                    @if (dependencyRoot is not null)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="OrganizationDependencies" asp-route-areaKey="@dependencyRoot.Key" class="nav-link @(dependencyRoot.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@dependencyRoot.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                    @foreach (var screen in dependencyScreens)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="OrganizationDependencies" asp-route-areaKey="@screen.Key" class="nav-link @(screen.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@screen.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+                        @if (practiceScreens.Any() || resolveScreen is not null || workbenchScreens.Any())
+                        {
+                            <li class="nav-item @(practiceOpen ? "menu-open" : "")">
+                                <a href="#" class="nav-link @(practiceOpen ? "active" : "")">
+                                    <i class="nav-icon fas fa-clipboard-check"></i><p>Practice Management<i class="right fas fa-angle-left"></i></p>
+                                </a>
+                                <ul class="nav nav-treeview">
+                                    @foreach (var screen in practiceScreens)
+                                    {
+                                        <li class="nav-item">
+                                            <a asp-controller="Practice" asp-action="PracticeManagement" asp-route-areaKey="@screen.Key" class="nav-link @(screen.Key == currentArea ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>@screen.Title</p>
+                                            </a>
+                                        </li>
+                                    }
+                                    @if (resolveScreen is not null || workbenchScreens.Any())
+                                    {
+                                        <li class="nav-item @(workbenchOpen ? "menu-open" : "")">
+                                            <a href="#" class="nav-link @(workbenchOpen ? "active" : "")">
+                                                <i class="far fa-circle nav-icon"></i><p>Resolve<i class="right fas fa-angle-left"></i></p>
+                                            </a>
+                                            <ul class="nav nav-treeview">
+                                                @if (resolveScreen is not null)
+                                                {
+                                                    <li class="nav-item">
+                                                        <a asp-controller="Practice" asp-action="PracticeManagement" asp-route-areaKey="@resolveScreen.Key" class="nav-link @(resolveScreen.Key == currentArea ? "active" : "")">
+                                                            <i class="far fa-dot-circle nav-icon"></i><p>Resolve Registers</p>
+                                                        </a>
+                                                    </li>
+                                                }
+                                                @foreach (var screen in workbenchScreens)
+                                                {
+                                                    <li class="nav-item">
+                                                        <a asp-controller="Practice" asp-action="PracticeManagement" asp-route-areaKey="@screen.Key" class="nav-link @(screen.Key == currentArea ? "active" : "")">
+                                                            <i class="far fa-dot-circle nav-icon"></i><p>@screen.Title</p>
+                                                        </a>
+                                                    </li>
+                                                }
+                                            </ul>
+                                        </li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+                    }
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <div class="content-wrapper">
+        <div id="Loader" class="div-loader" style="display:none;"><div class="loader"></div></div>
+        <main role="main" class="content">
+            <input id="HostName" name="HostName" value="@ViewBag.HostName" type="hidden" />
+            <div class="container-fluid">@RenderBody()</div>
+        </main>
+    </div>
+
+    <script src="~/lib/FrontEnd/plugins/jquery/jquery.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/jquery-ui/jquery-ui.min.js"></script>
+    <script>$.widget.bridge('uibutton', $.ui.button)</script>
+    <script src="~/lib/FrontEnd/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/sparklines/sparkline.js"></script>
+    <script src="~/lib/FrontEnd/plugins/jquery-knob/jquery.knob.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/moment/moment.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/daterangepicker/daterangepicker.js"></script>
+    <script src="~/lib/FrontEnd/plugins/tempusdominus-bootstrap-4/js/tempusdominus-bootstrap-4.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/summernote/summernote-bs4.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/overlayScrollbars/js/jquery.overlayScrollbars.min.js"></script>
+    <script src="~/lib/FrontEnd/dist/js/adminlte.js"></script>
+    <script src="~/lib/FrontEnd/plugins/jquery-validation/jquery.validate.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/datatables/jquery.dataTables.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/datatables-bs4/js/dataTables.bootstrap4.min.js"></script>
+    <script src="~/lib/FrontEnd/plugins/datatables-buttons/js/dataTables.buttons.min.js"></script>
+    <script src="~/js/crypto-js.min.js"></script>
+    <script src="~/js/sweet-alert.min.js"></script>
+    <script src="~/js/sweetalert-compat.js"></script>
+    <script src="~/js/grac-dialog.js" asp-append-version="true"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    <script src="~/js/cacca-scripts.js" asp-append-version="true"></script>
+    <script>
+        window.pmPathBase = "@appBasePath";
+        window.appBasePath = window.pmPathBase || "";
+        window.pmBuildUrl = function (path) {
+            path = String(path || "");
+            if (!path || path === "#") return path || "#";
+            if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(path)) return path;
+            var base = (window.appBasePath || "").replace(/\/+$/, "");
+            return base + "/" + path.replace(/^\/+/, "");
+        };
+        window.HostName = $("#HostName").val();
+        window.pmCurrentArea = "@currentArea";
+        window.addEventListener('error', function (event) {
+            console.error('PracticeManagement menu/rendering error', event.message, event.filename, event.lineno, event.error);
+        });
+        function syncPracticeMenuState() {
+            try {
+                var nav = document.querySelector('.nav-sidebar');
+                if (!nav) return;
+
+                var activeLinks = Array.prototype.slice.call(nav.querySelectorAll('.nav-link.active, .nav-link.active-parent, .nav-link.active-current'));
+                if (!activeLinks.length && window.pmCurrentArea) {
+                    activeLinks = Array.prototype.slice.call(nav.querySelectorAll('[data-menu-key="' + window.pmCurrentArea + '"] > .nav-link'));
+                    activeLinks.forEach(function (link) {
+                        link.classList.add('active', 'active-current');
+                        var li = link.closest('.nav-item');
+                        if (li) li.classList.add('active');
+                    });
+                }
+                if (!activeLinks.length) {
+                    var currentUrl = new URL(window.location.href);
+                    var currentPath = currentUrl.pathname.replace(/\/+$/, '').toLowerCase();
+                    var currentSearch = currentUrl.search.toLowerCase();
+                    activeLinks = Array.prototype.slice.call(nav.querySelectorAll('a.nav-link[href]')).filter(function (link) {
+                        var href = link.getAttribute('href') || '';
+                        if (!href || href === '#') return false;
+                        var linkPath = new URL(href, window.location.origin);
+                        var pathMatches = linkPath.pathname.replace(/\/+$/, '').toLowerCase() === currentPath;
+                        var search = linkPath.search.toLowerCase();
+                        return pathMatches && (!search || search === currentSearch);
+                    });
+                    activeLinks.forEach(function (link) {
+                        link.classList.add('active', 'active-current');
+                        var li = link.closest('.nav-item');
+                        if (li) li.classList.add('active');
+                    });
+                }
+
+                activeLinks.forEach(function (link) {
+                    var item = link.closest('.nav-item');
+                    while (item) {
+                        var manuallyCollapsed = item.dataset.userCollapsed === 'true';
+                        item.classList.toggle('menu-open', !manuallyCollapsed);
+                        var parentLink = item.querySelector(':scope > .nav-link');
+                        if (parentLink && parentLink !== link && parentLink.getAttribute('href') === '#') {
+                            parentLink.classList.add('active-parent');
+                        }
+                        var tree = item.querySelector(':scope > .nav-treeview');
+                        if (tree) {
+                            tree.style.display = manuallyCollapsed ? 'none' : 'block';
+                            if (manuallyCollapsed) tree.setAttribute('hidden', 'hidden');
+                            else tree.removeAttribute('hidden');
+                        }
+                        item = item.parentElement && item.parentElement.closest('.nav-item');
+                    }
+                });
+                var activeItem = nav.querySelector('.nav-item.active > .nav-link.active');
+                if (activeItem && activeItem.scrollIntoView) activeItem.scrollIntoView({ block: 'nearest' });
+            } catch (error) {
+                console.error('PracticeManagement menu state sync failed', error);
+            }
+        }
+        function bindPracticeMenuClickPersistence() {
+            var nav = document.querySelector('.nav-sidebar');
+            if (!nav || nav.dataset.activeStateBound === 'true') return;
+            nav.dataset.activeStateBound = 'true';
+            nav.addEventListener('click', function (event) {
+                var link = event.target.closest && event.target.closest('a.nav-link');
+                if (!link || !nav.contains(link)) return;
+                var href = (link.getAttribute('href') || '').trim();
+                var item = link.closest('.nav-item');
+                var childTree = item && item.querySelector(':scope > .nav-treeview');
+
+                if (href === '#' && childTree) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                    var shouldOpen = !item.classList.contains('menu-open');
+                    item.dataset.userCollapsed = shouldOpen ? 'false' : 'true';
+                    item.classList.toggle('menu-open', shouldOpen);
+                    link.classList.toggle('active-parent', shouldOpen);
+                    childTree.style.display = shouldOpen ? 'block' : 'none';
+                    if (shouldOpen) childTree.removeAttribute('hidden');
+                    else childTree.setAttribute('hidden', 'hidden');
+                    return false;
+                }
+
+                if (href && href !== '#') {
+                    nav.querySelectorAll('.nav-link.active-current').forEach(function (active) {
+                        active.classList.remove('active-current');
+                        if (!active.classList.contains('active-parent')) active.classList.remove('active');
+                    });
+                    link.classList.add('active', 'active-current');
+                    if (item) item.classList.add('active');
+                    var parent = item;
+                    while (parent) {
+                        parent.dataset.userCollapsed = 'false';
+                        parent.classList.add('menu-open');
+                        var parentLink = parent.querySelector(':scope > .nav-link');
+                        if (parentLink && parentLink !== link && parentLink.getAttribute('href') === '#') {
+                            parentLink.classList.add('active-parent');
+                        }
+                        var tree = parent.querySelector(':scope > .nav-treeview');
+                        if (tree) {
+                            tree.style.display = 'block';
+                            tree.removeAttribute('hidden');
+                        }
+                        parent = parent.parentElement && parent.parentElement.closest('.nav-item');
+                    }
+                }
+            }, true);
+        }
+        function enforcePracticeMenuState() {
+            bindPracticeMenuClickPersistence();
+            syncPracticeMenuState();
+            window.setTimeout(syncPracticeMenuState, 50);
+            window.setTimeout(syncPracticeMenuState, 250);
+            window.setTimeout(syncPracticeMenuState, 750);
+        }
+        document.addEventListener('DOMContentLoaded', enforcePracticeMenuState);
+        window.addEventListener('load', enforcePracticeMenuState);
+        try {
+            new MutationObserver(function () {
+                if (document.body.classList.contains('sidebar-collapse')) syncPracticeMenuState();
+            }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        } catch (e) { }
+        $(document).on('shown.lte.treeview collapsed.lte.treeview expanded.lte.treeview', syncPracticeMenuState);
+        $(document).on('collapsed.lte.pushmenu shown.lte.pushmenu', function () {
+            try { localStorage.setItem('cacca_sidebar_collapsed', document.body.classList.contains('sidebar-collapse')); } catch (e) { }
+            syncPracticeMenuState();
+        });
+    </script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

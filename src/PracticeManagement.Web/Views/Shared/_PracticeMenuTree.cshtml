@@ -1,0 +1,84 @@
+@model IReadOnlyList<PracticeManagement.Web.Models.PracticeMenuItem>
+@using PracticeManagement.Web.Models
+@{
+    var currentArea = Convert.ToString(ViewData["CurrentArea"]) ?? "";
+}
+
+@foreach (var item in Model)
+{
+    var isCurrent = item.MenuKey.Equals(currentArea, StringComparison.OrdinalIgnoreCase);
+    var isOpen = isCurrent || item.Children.Any(child => IsCurrentOrParent(child, currentArea));
+    var hasChildren = item.Children.Count > 0;
+    <li class="nav-item @(isCurrent ? "active" : "") @(isOpen && hasChildren ? "menu-open" : "")" data-menu-key="@item.MenuKey">
+        <a href="@MenuUrl(item)" class="nav-link @(isCurrent ? "active" : isOpen ? "active-parent" : "")">
+            <i class="nav-icon @IconClass(item, hasChildren)"></i>
+            <p>
+                @item.MenuName
+                @if (hasChildren)
+                {
+                    <i class="right fas fa-angle-left"></i>
+                }
+            </p>
+        </a>
+        @if (hasChildren)
+        {
+            <ul class="nav nav-treeview">
+                @await Html.PartialAsync("_PracticeMenuTree", item.Children, new ViewDataDictionary(ViewData) { ["CurrentArea"] = currentArea })
+            </ul>
+        }
+    </li>
+}
+
+@functions {
+    private static bool IsCurrentOrParent(PracticeMenuItem item, string currentArea) =>
+        item.MenuKey.Equals(currentArea, StringComparison.OrdinalIgnoreCase)
+        || item.Children.Any(child => IsCurrentOrParent(child, currentArea));
+
+    private string MenuUrl(PracticeMenuItem item)
+    {
+        if (item.Children.Count > 0) return "#";
+        if (!string.IsNullOrWhiteSpace(item.MenuUrl)) return NormalizeMenuUrl(item.MenuUrl);
+        if (item.Screen is null) return "#";
+        if (item.Screen.Key == "dashboard") return Url.Action("Index", "Practice") ?? "#";
+        if (item.Screen.Group == PracticeScreen.OrganizationOnboardingGroup) return Url.Action("OrganizationSetup", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
+        if (item.Screen.Group == PracticeScreen.OrganizationAdministrationGroup) return Url.Action("OrganizationAdministration", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
+        if (item.Screen.Group == PracticeScreen.OrganizationDependenciesGroup) return Url.Action("OrganizationDependencies", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
+        return Url.Action("PracticeManagement", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
+    }
+
+    private string NormalizeMenuUrl(string menuUrl)
+    {
+        var value = menuUrl.Trim();
+        if (string.IsNullOrWhiteSpace(value) || value == "#") return "#";
+        if (Uri.TryCreate(value, UriKind.Absolute, out _)) return value;
+        if (value.Equals("dashboard", StringComparison.OrdinalIgnoreCase)) return Url.Action("Index", "Practice") ?? "#";
+        if (value.Equals("resolve", StringComparison.OrdinalIgnoreCase)) return Url.Action("Resolve", "Practice") ?? "#";
+
+        if (value.StartsWith("~/", StringComparison.Ordinal)) return Url.Content(value);
+
+        var pathBase = Context.Request.PathBase.Value?.Trim('/') ?? "";
+        value = value.Replace('\\', '/').TrimStart('/');
+        if (!string.IsNullOrWhiteSpace(pathBase)
+            && value.StartsWith(pathBase + "/", StringComparison.OrdinalIgnoreCase))
+            value = value[(pathBase.Length + 1)..];
+
+        return Url.Content("~/" + value);
+    }
+
+    private static string IconClass(PracticeMenuItem item, bool hasChildren)
+    {
+        if (!string.IsNullOrWhiteSpace(item.IconClass))
+        {
+            var icon = item.IconClass.Trim();
+            if (icon.StartsWith("fa ", StringComparison.OrdinalIgnoreCase)
+                || icon.StartsWith("fas ", StringComparison.OrdinalIgnoreCase)
+                || icon.StartsWith("far ", StringComparison.OrdinalIgnoreCase)
+                || icon.StartsWith("fab ", StringComparison.OrdinalIgnoreCase))
+                return icon;
+            return $"fas fa-{icon}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Screen?.Icon)) return $"fas fa-{item.Screen.Icon}";
+        return hasChildren ? "fas fa-folder" : "far fa-circle";
+    }
+}

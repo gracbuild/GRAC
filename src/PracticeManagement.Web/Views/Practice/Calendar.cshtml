@@ -1,0 +1,117 @@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    ViewData["Title"] = Model.Title;
+    var permissions = ViewBag.Permissions as string[] ?? [];
+}
+
+<div class="pm-page-heading">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+    <div class="pm-actions">
+        <a class="pm-button" asp-controller="Practice" asp-action="Index"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
+    </div>
+</div>
+
+<section class="pm-panel pm-calendar-container">
+    <!-- Toolbar -->
+    <div class="cal-toolbar">
+        <div class="cal-toolbar-left">
+            <select id="calOrganizationFilter"><option value="">All organizations</option></select>
+            <button class="pm-button primary small" id="calGenerate" type="button" title="Generate schedules from practice instances with assurance frequency">
+                <i class="fa-solid fa-calendar-plus" aria-hidden="true"></i> Generate Schedules
+            </button>
+        </div>
+        <div class="cal-toolbar-center">
+            <button class="pm-button icon" id="calPrev" type="button" title="Previous"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+            <button class="pm-button small" id="calToday" type="button">Today</button>
+            <button class="pm-button icon" id="calNext" type="button" title="Next"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+            <h2 id="calTitle" class="cal-title">July 2026</h2>
+        </div>
+        <div class="cal-toolbar-right">
+            <div class="cal-view-toggle">
+                <button class="pm-button small active" data-cal-view="month">Month</button>
+                <button class="pm-button small" data-cal-view="week">Week</button>
+                <button class="pm-button small" data-cal-view="day">Day</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar grid -->
+    <div id="calGrid" class="cal-grid cal-month-view">
+        <!-- Rendered by JavaScript -->
+    </div>
+</section>
+
+<!-- Side panel for event details -->
+<div id="calSidePanel" class="cal-side-panel" hidden>
+    <div class="cal-side-header">
+        <h3 id="calSideTitle">Event Details</h3>
+        <button class="pm-icon-button" id="calSideClose" type="button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+    <div id="calSideBody" class="cal-side-body">
+        <!-- Event details rendered by JS -->
+    </div>
+</div>
+
+<!-- Generate Schedules Dialog -->
+<dialog id="calGenerateDialog">
+    <form id="calGenerateForm">
+        <div class="pm-dialog-heading">
+            <div><h2>Generate Assurance Schedules</h2><p>Create schedule rules from practice instances with an assurance frequency.</p></div>
+            <button type="button" id="calGenerateClose" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div id="calGenerateMessage" class="pm-message" hidden></div>
+        <div class="pm-form-grid">
+            <label class="pm-field"><span>Organization</span><select id="genOrganization" required><option value="">Select organization</option></select></label>
+            <label class="pm-field"><span>Anchor Date (first occurrence)</span><input id="genAnchorDate" type="date" required /></label>
+        </div>
+        <div id="genInstanceList" class="cal-gen-instance-list">
+            <p class="pm-empty">Select an organization to see eligible practice instances.</p>
+        </div>
+        <div class="pm-dialog-actions">
+            <button type="button" class="pm-button" id="calGenerateCancel">Cancel</button>
+            <button type="button" class="pm-button primary" id="calGenerateSubmit">Generate Selected</button>
+        </div>
+    </form>
+</dialog>
+
+<!-- Edit Schedule Dialog -->
+<dialog id="calEditDialog">
+    <form id="calEditForm">
+        <div class="pm-dialog-heading">
+            <div><h2 id="calEditTitle">Edit Schedule</h2><p>Move, skip, or modify this assurance occurrence.</p></div>
+            <button type="button" id="calEditClose" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div id="calEditMessage" class="pm-message" hidden></div>
+        <div class="pm-form-grid">
+            <label class="pm-field"><span>Practice Instance</span><input id="editPracticeInstance" type="text" readonly /></label>
+            <label class="pm-field"><span>Current Date</span><input id="editCurrentDate" type="date" readonly /></label>
+            <label class="pm-field"><span>Action</span>
+                <select id="editAction">
+                    <option value="Move">Move to a different date</option>
+                    <option value="Skip">Skip this occurrence</option>
+                </select>
+            </label>
+            <label class="pm-field" id="editNewDateField"><span>New Date</span><input id="editNewDate" type="date" /></label>
+            <label class="pm-field"><span>Reason</span><textarea id="editReason" rows="2" placeholder="Reason for change..."></textarea></label>
+            <label class="pm-field pm-field-checkbox"><input id="editApplyFuture" type="checkbox" /> <span>Apply to this and all future occurrences</span></label>
+        </div>
+        <div class="pm-dialog-actions">
+            <button type="button" class="pm-button" id="calEditCancel">Cancel</button>
+            <button type="button" class="pm-button primary" id="calEditSubmit">Save Change</button>
+        </div>
+    </form>
+</dialog>
+
+@section Scripts {
+    <script>
+        window.pmScreen=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model));
+        window.pmApi="@ViewBag.ApiBaseUrl";
+        window.pmPermissions=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(permissions));
+    </script>
+    <link rel="stylesheet" href="~/css/practice-calendar.css" asp-append-version="true" />
+    <script src="~/js/practice-calendar.js" asp-append-version="true"></script>
+}

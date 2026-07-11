@@ -1,0 +1,1929 @@
+/* ------------------------------------------------------------------
+   practice-management.css
+   -----------------------
+   Aligns Practice Management screens with the Control Management
+   visual standard.  All values below re-use the exact GRAC design
+   tokens declared in control-management.css and cacca-styles.css
+   (colour palette, typography, spacing, border-radius, shadow) so
+   PracticeManagement inherits the same theme rather than defining
+   a new one.
+
+   Practice Management markup uses a `pm-` class prefix, whereas
+   Control Management uses the un-prefixed class names.  This file
+   provides aliased selectors so PM markup renders identically to
+   CM without touching the view markup.
+   ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------
+   1. Page heading (matches .page-heading)
+   ------------------------------------------------------------------ */
+.pm-page-heading {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding: 14px 16px;
+}
+
+.pm-page-heading.compact {
+    padding: 12px 14px;
+}
+
+.pm-page-heading h1 {
+    color: var(--grac-ink, #172033);
+    font-size: 22px;
+    font-weight: 750;
+    line-height: 1.18;
+    margin: 2px 0;
+}
+
+.pm-page-heading p {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    margin: 0;
+}
+
+.pm-eyebrow {
+    color: var(--grac-blue, #2465ca);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    margin: 0 0 2px;
+    text-transform: uppercase;
+}
+
+.pm-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+/* ------------------------------------------------------------------
+   2. Panels / cards (matches .panel)
+   ------------------------------------------------------------------ */
+.pm-panel,
+.pm-setup-card,
+.pm-subscription-card {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    padding: 14px;
+}
+
+.pm-panel p,
+.pm-setup-card p {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    margin: 0;
+}
+
+.pm-section-heading {
+    align-items: baseline;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 12px;
+}
+
+.pm-section-heading h2 {
+    color: var(--grac-ink, #172033);
+    font-size: 16px;
+    font-weight: 750;
+    margin: 0 0 4px;
+}
+
+.pm-section-heading p {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    margin: 0;
+}
+
+/* ------------------------------------------------------------------
+   3. Buttons (matches .button family)
+   ------------------------------------------------------------------ */
+.pm-button {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #d3dae7;
+    border-radius: 7px;
+    color: #27344e;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    gap: 7px;
+    justify-content: center;
+    min-height: 32px;
+    padding: 6px 11px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.pm-button:hover {
+    background: #f2f6ff;
+    color: var(--grac-blue, #2465ca);
+    text-decoration: none;
+}
+
+.pm-button.primary {
+    background: var(--grac-blue, #2465ca);
+    border-color: var(--grac-blue, #2465ca);
+    color: #fff;
+}
+
+.pm-button.primary:hover {
+    background: #1f58b2;
+    color: #fff;
+}
+
+.pm-button.danger {
+    border-color: #f1c4c4;
+    color: var(--grac-danger, #b42318);
+}
+
+.pm-button.recommendation {
+    border-color: #cfe0ff;
+    background: #eef5ff;
+    color: #1d4ed8;
+}
+
+.pm-button.recommendation.clear {
+    background: #fff;
+    border-color: #d3dae7;
+    color: #536077;
+}
+
+.pm-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.pm-button.icon,
+.pm-compact-icon,
+.pm-icon-button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 7px;
+    color: #25344e;
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 18px;
+    height: 30px;
+    justify-content: center;
+    padding: 0;
+    width: 30px;
+}
+
+.pm-button.icon:hover,
+.pm-compact-icon:hover,
+.pm-icon-button:hover {
+    background: #eef4ff;
+    color: var(--grac-blue, #2465ca);
+}
+
+/* ------------------------------------------------------------------
+   4. Toolbars (matches .toolbar)
+   ------------------------------------------------------------------ */
+.pm-toolbar,
+.pm-setup-toolbar,
+.pm-tree-toolbar,
+.pm-recommendation-toolbar {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.pm-toolbar-compact {
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pm-toolbar input,
+.pm-toolbar select,
+.pm-setup-toolbar input,
+.pm-setup-toolbar select,
+.pm-tree-toolbar input,
+.pm-recommendation-toolbar input {
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    color: var(--grac-ink, #172033);
+    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    height: 34px;
+    padding: 7px 9px;
+}
+
+.pm-toolbar input,
+.pm-setup-toolbar input,
+.pm-tree-toolbar input {
+    flex: 1;
+    min-width: 220px;
+}
+
+.pm-setup-toolbar label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #536077;
+    font-size: 12px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.pm-setup-toolbar label span {
+    color: #536077;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.pm-recommendation-toolbar span {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+}
+
+/* ------------------------------------------------------------------
+   5. Tabs (setup / workspace)
+   ------------------------------------------------------------------ */
+.pm-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+}
+
+.pm-tabs button {
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: #536077;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: -1px;
+    padding: 8px 12px;
+}
+
+.pm-tabs button:hover {
+    color: var(--grac-blue, #2465ca);
+}
+
+.pm-tabs button.active {
+    color: var(--grac-blue, #2465ca);
+    border-bottom-color: var(--grac-blue, #2465ca);
+}
+
+.pm-setup-tab-panel {
+    display: none;
+}
+
+.pm-setup-tab-panel.active {
+    display: block;
+}
+
+/* ------------------------------------------------------------------
+   6. Forms (matches .form-grid / .form-field)
+   ------------------------------------------------------------------ */
+.pm-form-grid {
+    display: grid;
+    gap: 12px 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pm-form-grid-compact {
+    gap: 8px 12px;
+}
+
+.pm-form-grid .form-field,
+.pm-form-grid label {
+    color: #536077;
+    display: block;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.pm-form-grid .form-field.full,
+.pm-form-grid label.full {
+    grid-column: 1 / -1;
+}
+
+.pm-form-grid input:not([type="checkbox"]),
+.pm-form-grid select,
+.pm-form-grid textarea {
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    color: var(--grac-ink, #172033);
+    display: block;
+    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    height: 34px;
+    margin-top: 6px;
+    padding: 7px 9px;
+    width: 100%;
+}
+
+.pm-form-grid textarea {
+    height: auto;
+    min-height: 76px;
+}
+
+.pm-message {
+    background: #fff2f0;
+    border-radius: 7px;
+    color: var(--grac-danger, #b42318);
+    font-weight: 700;
+    margin-bottom: 12px;
+    padding: 10px;
+    font-size: 12px;
+}
+
+.pm-message.success {
+    background: #e6f4ed;
+    color: #187747;
+}
+
+.pm-message.info {
+    background: #eef5ff;
+    color: #2454a6;
+}
+
+/* ------------------------------------------------------------------
+   7. Dialog heading / actions (matches .dialog-*)
+   ------------------------------------------------------------------ */
+.pm-dialog-heading {
+    align-items: flex-start;
+    display: flex;
+    gap: 18px;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.pm-dialog-heading h2 {
+    color: var(--grac-ink, #172033);
+    font-size: 20px;
+    font-weight: 750;
+    margin: 0;
+}
+
+.pm-dialog-heading p {
+    color: var(--grac-muted, #758095);
+    font-size: 13px;
+    margin: 4px 0 0;
+}
+
+.pm-dialog-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 18px;
+}
+
+/* ------------------------------------------------------------------
+   8. Grids / tables (matches .table-wrap)
+   ------------------------------------------------------------------ */
+.pm-table-wrap {
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    overflow: auto;
+}
+
+.pm-table-wrap table {
+    border-collapse: collapse;
+    color: #25344e;
+    font-size: 13px;
+    width: 100%;
+}
+
+.pm-table-wrap th {
+    background: var(--grac-soft, #f7f9fc);
+    border-bottom: 1px solid #e5e9f0;
+    color: #6a778d;
+    font-size: 12px;
+    font-weight: 750;
+    padding: 10px 11px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.pm-table-wrap td {
+    border-bottom: 1px solid #edf0f5;
+    line-height: 1.25;
+    padding: 10px 11px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.pm-table-wrap tbody tr:nth-child(even) td {
+    background: #fbfcff;
+}
+
+.pm-table-wrap tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td {
+    background: var(--grac-row-hover-bg, #eaf4ff);
+    color: var(--grac-row-hover-text, inherit);
+}
+
+.pm-table-wrap th:last-child,
+.pm-table-wrap td:last-child {
+    text-align: center;
+    width: 58px;
+}
+
+.pm-empty {
+    color: var(--grac-muted, #758095);
+    padding: 20px 10px;
+    text-align: center;
+    font-size: 13px;
+}
+
+.pm-empty.compact {
+    padding: 12px;
+}
+
+/* ------------------------------------------------------------------
+   9. Pager (matches .grid-pager / .audit-pager)
+   ------------------------------------------------------------------ */
+.pm-pager {
+    align-items: center;
+    color: #53627a;
+    display: flex;
+    font-size: 13px;
+    font-weight: 650;
+    gap: 12px;
+    justify-content: space-between;
+    padding: 12px 4px 2px;
+}
+
+.pm-pager > div {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+}
+
+.pm-pager label {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+    margin: 0;
+}
+
+.pm-pager select {
+    background: #fff;
+    border: 1px solid #d7e0ec;
+    border-radius: 8px;
+    color: var(--grac-ink, #172033);
+    font-weight: 650;
+    height: 34px;
+    min-width: 72px;
+    padding: 0 8px;
+}
+
+/* ------------------------------------------------------------------
+   10. Home / Hero (Views/Home/Index.cshtml)
+   ------------------------------------------------------------------ */
+.pm-hero {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    margin-bottom: 14px;
+    padding: 22px 20px;
+}
+
+.pm-hero h1 {
+    color: var(--grac-ink, #172033);
+    font-size: 24px;
+    font-weight: 750;
+    margin: 4px 0;
+}
+
+.pm-hero p {
+    color: var(--grac-muted, #758095);
+    font-size: 13px;
+    margin: 4px 0 12px;
+}
+
+.pm-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-bottom: 14px;
+}
+
+.pm-list {
+    display: grid;
+    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pm-list li {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #25344e;
+}
+
+/* ------------------------------------------------------------------
+   11. Dashboard KPI grid (matches CM .kpis pattern)
+   ------------------------------------------------------------------ */
+.pm-dashboard-heading {
+    align-items: flex-start;
+}
+
+.pm-dashboard-org-filter {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+    margin: 0;
+}
+
+.pm-dashboard-org-filter span {
+    color: #536077;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.pm-dashboard-org-filter select {
+    background: #fff;
+    border: 1px solid #d7e0ec;
+    border-radius: 8px;
+    color: var(--grac-ink, #172033);
+    font-size: 13px;
+    font-weight: 650;
+    height: 34px;
+    min-width: 240px;
+    padding: 0 10px;
+}
+
+.pm-dashboard-kpi-grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-bottom: 14px;
+}
+
+.pm-dashboard-card {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+}
+
+.pm-dashboard-card-title {
+    align-items: center;
+    color: var(--grac-blue, #2465ca);
+    display: flex;
+    gap: 10px;
+}
+
+.pm-dashboard-card-title h2 {
+    color: var(--grac-ink, #172033);
+    font-size: 15px;
+    font-weight: 750;
+    margin: 0;
+}
+
+.pm-dashboard-card-title i {
+    color: var(--grac-blue, #2465ca);
+    font-size: 18px;
+}
+
+.pm-dashboard-primary {
+    align-items: baseline;
+    color: #183b72;
+    display: flex;
+    gap: 8px;
+}
+
+.pm-dashboard-primary span {
+    color: #183b72;
+    display: block;
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1;
+    padding: 4px 0;
+}
+
+.pm-dashboard-primary small {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.pm-mini-metrics {
+    color: var(--grac-muted, #758095);
+    display: grid;
+    gap: 4px 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    font-size: 12px;
+}
+
+.pm-mini-metrics span {
+    align-items: baseline;
+    display: inline-flex;
+    gap: 6px;
+    line-height: 1.3;
+}
+
+.pm-mini-metrics b {
+    color: var(--grac-ink, #172033);
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.pm-dashboard-layout {
+    display: grid;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.pm-dashboard-layout-single {
+    grid-template-columns: 1fr;
+}
+
+.pm-dashboard-attention {
+    padding: 14px;
+}
+
+.pm-attention-list {
+    display: grid;
+    gap: 8px;
+}
+
+.pm-attention-list > * {
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fff;
+    font-size: 13px;
+    color: #25344e;
+}
+
+/* ------------------------------------------------------------------
+   12. Organization Setup / Subscription layout
+   ------------------------------------------------------------------ */
+.pm-setup {
+    display: block;
+}
+
+.pm-setup-layout {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+}
+
+.pm-setup-main {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.pm-subscription-tree {
+    background: #f8fbff;
+    border: 1px solid #e2eaf5;
+    border-radius: 8px;
+    color: #25344e;
+    font-size: 12px;
+    max-height: 380px;
+    overflow: auto;
+    padding: 10px 12px;
+}
+
+/* ------------------------------------------------------------------
+   13. Resolve / Dependency Workbench layout
+   ------------------------------------------------------------------ */
+.pm-workbench-layout {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+}
+
+.pm-workbench-categories {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.pm-workbench-title {
+    color: var(--grac-ink, #172033);
+    font-size: 14px;
+    font-weight: 750;
+    margin: 0 0 8px;
+}
+
+.pm-workbench-category-list {
+    display: grid;
+    gap: 4px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pm-workbench-category-list li,
+.pm-workbench-category-list a,
+.pm-workbench-category-list button {
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: #25344e;
+    cursor: pointer;
+    display: block;
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    text-align: left;
+    text-decoration: none;
+    width: 100%;
+}
+
+.pm-workbench-category-list a:hover,
+.pm-workbench-category-list button:hover,
+.pm-workbench-category-list .active {
+    background: #eaf2ff;
+    color: var(--grac-blue, #2465ca);
+}
+
+.pm-workbench-main {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
+.pm-workbench-context {
+    background: #f8fbff;
+    border: 1px solid #e1e7f0;
+    border-radius: 9px;
+    color: #344054;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 12px;
+    gap: 8px 12px;
+    padding: 9px 12px;
+}
+
+/* ------------------------------------------------------------------
+   14. Hierarchical Tree Grid (mirrors ControlManagement's tree-grid)
+   ------------------------------------------------------------------
+   The Release-Statement drill-in (organization-controls) and the
+   Practice-Instance drill-in (organization-requirements) both render
+   a hierarchical grid.  The row markup follows the same pattern the
+   Control Management module uses (parent row -> indented child rows
+   -> expand/collapse toggle -> standard vertical 3-dot menu) but with
+   a pm- prefix.  Styling below mirrors repository-actions.css in
+   Control Management so both modules look visually identical.
+   ------------------------------------------------------------------ */
+
+/* Screen-reader-only label used inside the 3-dot action button.
+   Bootstrap 4 ships .sr-only but not .visually-hidden, so we alias
+   it here to keep the "Actions" label from bleeding into the UI. */
+.pm-action-trigger .visually-hidden,
+.pm-table-wrap .visually-hidden {
+    border: 0;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+}
+
+/* Indented tree cell.
+   Applies --level based left padding so children sit under parents. */
+.pm-tree-indent {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+    padding-left: calc(var(--level, 0) * 20px);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.pm-tree-indent > strong {
+    color: #172033;
+    font-weight: 700;
+}
+
+/* Expand/collapse round button - matches .tree-toggle in CM. */
+.pm-tree-toggle {
+    align-items: center;
+    background: #eef5ff;
+    border: 1px solid #d7e3f5;
+    border-radius: 999px;
+    color: #2563eb;
+    cursor: pointer;
+    display: inline-grid;
+    flex: 0 0 20px;
+    height: 20px;
+    justify-content: center;
+    padding: 0;
+    place-items: center;
+    transition: background .15s ease, transform .15s ease;
+    width: 20px;
+}
+
+.pm-tree-toggle:hover {
+    background: #dbeafe;
+    transform: scale(1.04);
+}
+
+.pm-tree-toggle:focus-visible {
+    outline: 2px solid #2465ca;
+    outline-offset: 2px;
+}
+
+.pm-tree-toggle i {
+    font-size: 9px;
+    line-height: 1;
+}
+
+/* Empty slot that aligns leaf rows with parent rows. */
+.pm-tree-spacer {
+    display: inline-grid;
+    flex: 0 0 20px;
+    height: 20px;
+    width: 20px;
+}
+
+/* Continuation "branch" line rendered inside child rows for the
+   practice-instance drill-in (mirrors CM's tree-toggle-spacer). */
+.pm-tree-branch {
+    background: linear-gradient(to right, transparent 0 9px, #cad4e4 9px 11px, transparent 11px);
+    display: inline-block;
+    flex: 0 0 22px;
+    height: 16px;
+    margin-right: 8px;
+    vertical-align: middle;
+    width: 22px;
+}
+
+/* Folder / document icons inside the tree cell.
+   Colours match CM's .req-tree-source .fa-folder and
+   .req-tree-statement .fa-file-lines rules. */
+.pm-tree-indent .fa-folder,
+.pm-source-node-row td .fa-folder {
+    color: #e0a11a;
+    font-size: 13px;
+}
+
+.pm-tree-indent .fa-layer-group,
+.pm-source-node-row td .fa-layer-group {
+    color: #1f5fbf;
+    font-size: 12px;
+    margin-right: 6px;
+}
+
+.pm-tree-indent .fa-file-lines,
+.pm-statement-child-row td .fa-file-lines {
+    color: #2465ca;
+    font-size: 12px;
+}
+
+/* Parent rows - Source Structure / Practice.
+   Bold text on a soft blue background so the hierarchy is immediately
+   visible.  Selectors are tbody tr.class to beat the nth-child(even)
+   alternate-row shading defined earlier in this file. */
+.pm-table-wrap tbody tr.pm-source-node-row td,
+.pm-table-wrap tbody tr.pm-release-source-row td,
+.pm-table-wrap tbody tr.pm-tree-parent td {
+    background: #f6f9fd;
+    color: #172033;
+    font-weight: 650;
+}
+
+.pm-table-wrap tbody tr.pm-source-node-row td:first-child,
+.pm-table-wrap tbody tr.pm-release-source-row td:first-child,
+.pm-table-wrap tbody tr.pm-tree-parent td:first-child {
+    border-left: 3px solid transparent;
+}
+
+/* Child rows - Framework Statements / Practice Instances.
+   Normal weight, plain background, indented.  Explicit reset of the
+   alternate-row background so hierarchy stays readable. */
+.pm-table-wrap tbody tr.pm-statement-child-row td,
+.pm-table-wrap tbody tr.pm-tree-child td {
+    background: #fff;
+    color: #344054;
+    font-weight: 500;
+}
+
+/* Inline sub-heading between practice groups (Framework Statement
+   label above a set of practices).  Sits flush under the parent. */
+.pm-table-wrap tbody tr.pm-statement-row td {
+    background: #f0f4fa;
+    color: #475467;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 11px;
+}
+
+/* Release drill-in context row (release label + back button). */
+.pm-table-wrap tbody tr.pm-release-context-row td {
+    align-items: center;
+    background: #eef5ff;
+    color: #172033;
+    display: flex;
+    flex-wrap: wrap;
+    font-weight: 700;
+    gap: 12px;
+    padding: 10px 11px;
+}
+
+.pm-table-wrap tbody tr.pm-release-context-row [data-release-statements-back] {
+    margin-right: 4px;
+}
+
+.pm-table-wrap tbody tr.pm-release-context-row span {
+    color: #667085;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Truncate long statement text but keep the tooltip. */
+.pm-statement-text {
+    display: inline-block;
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+/* Practice title sitting next to the toggle button inside the parent
+   row's first column. */
+.pm-tree-title {
+    align-items: center;
+    color: #172033;
+    display: inline-flex;
+    font-weight: 700;
+    gap: 6px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+/* Vertical 3-dot action button - mirrors CM's .action-menu-trigger. */
+.pm-action-trigger {
+    align-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: #536077;
+    cursor: pointer;
+    display: inline-grid;
+    font-size: 14px;
+    height: 32px;
+    justify-content: center;
+    padding: 0;
+    place-items: center;
+    width: 32px;
+}
+
+.pm-action-trigger:hover,
+.pm-action-trigger[aria-expanded="true"] {
+    background: #f7f9fc;
+    border-color: #d5dce7;
+    color: #2465ca;
+}
+
+.pm-action-trigger:focus-visible {
+    outline: 2px solid #2465ca;
+    outline-offset: 2px;
+}
+
+.pm-action-trigger i,
+.pm-action-trigger i::before {
+    color: currentColor !important;
+    display: inline-block !important;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* Tighter 3-dot button when it sits inside a compact tree cell. */
+.pm-table-wrap tbody tr.pm-tree-parent .pm-action-trigger,
+.pm-table-wrap tbody tr.pm-tree-child .pm-action-trigger,
+.pm-table-wrap tbody tr.pm-statement-child-row .pm-action-trigger {
+    border-radius: 6px;
+    height: 26px;
+    width: 26px;
+}
+
+.pm-table-wrap tbody tr.pm-tree-parent .pm-action-trigger i,
+.pm-table-wrap tbody tr.pm-tree-child .pm-action-trigger i,
+.pm-table-wrap tbody tr.pm-statement-child-row .pm-action-trigger i {
+    font-size: 12px;
+}
+
+/* Wrap around the 3-dot button so hover states stay contained. */
+.pm-inline-actions {
+    display: inline-flex;
+    justify-content: center;
+    position: relative;
+}
+
+/* Action-menu popover - mirrors CM's .action-menu. */
+.pm-action-menu {
+    background: #fff;
+    border: 1px solid #dfe5ee;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px #17203322;
+    display: grid;
+    min-width: 160px;
+    padding: 5px;
+    position: fixed;
+    z-index: 1000;
+}
+
+.pm-action-menu button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    color: #344054;
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    font-size: 12px;
+    gap: 9px;
+    padding: 8px 9px;
+    text-align: left;
+    width: 100%;
+}
+
+.pm-action-menu button:hover,
+.pm-action-menu button:focus {
+    background: #f2f6fc;
+    outline: none;
+}
+
+.pm-action-menu button i {
+    color: #667085;
+    width: 13px;
+}
+
+.pm-action-menu button[data-action="inactive"],
+.pm-action-menu button[data-action="retire"],
+.pm-action-menu button[data-action="delete"] {
+    color: #a92828;
+}
+
+.pm-action-menu button[data-action="inactive"] i,
+.pm-action-menu button[data-action="retire"] i,
+.pm-action-menu button[data-action="delete"] i {
+    color: #a92828;
+}
+
+/* Compact tree cells share the same first-column padding so the
+   toggle button + icon + label stack lines up regardless of level. */
+.pm-table-wrap tbody tr.pm-tree-parent td:first-child,
+.pm-table-wrap tbody tr.pm-tree-child td:first-child,
+.pm-table-wrap tbody tr.pm-source-node-row td:first-child,
+.pm-table-wrap tbody tr.pm-statement-child-row td:first-child,
+.pm-table-wrap tbody tr.pm-release-source-row td:first-child {
+    padding: 8px 11px;
+}
+
+/* Actions column stays narrow inside the tree grid. */
+.pm-table-wrap tbody tr.pm-tree-parent td:last-child,
+.pm-table-wrap tbody tr.pm-tree-child td:last-child,
+.pm-table-wrap tbody tr.pm-statement-child-row td:last-child {
+    text-align: center;
+    width: 52px;
+}
+
+/* Full-width section/context rows must not inherit the 58px Actions
+   width the base .pm-table-wrap td:last-child rule enforces. */
+.pm-table-wrap tbody tr.pm-source-node-row td[colspan],
+.pm-table-wrap tbody tr.pm-statement-row td[colspan],
+.pm-table-wrap tbody tr.pm-release-context-row td[colspan] {
+    text-align: left;
+    width: auto;
+}
+
+/* Clickable framework/release label inside the Organization Controls
+   grid.  Rendered as plain link-styled text - no button chrome. */
+.pm-link,
+.pm-link-button {
+    background: transparent;
+    border: 0;
+    color: var(--grac-blue, #2465ca);
+    cursor: pointer;
+    display: inline;
+    font: inherit;
+    font-weight: 700;
+    padding: 0;
+    text-align: left;
+    text-decoration: none;
+}
+
+.pm-link:hover,
+.pm-link:focus-visible,
+.pm-link-button:hover,
+.pm-link-button:focus-visible {
+    outline: none;
+    text-decoration: underline;
+}
+
+/* Framework summary row - clickable drill-in into a release. */
+.pm-table-wrap tbody tr.pm-framework-summary-row {
+    cursor: pointer;
+}
+
+.pm-table-wrap tbody tr.pm-framework-summary-row:focus-visible {
+    outline: 2px solid var(--grac-blue, #2465ca);
+    outline-offset: -2px;
+}
+
+.pm-framework-summary-row td:first-child {
+    font-weight: 700;
+}
+
+/* Organization Onboarding - Repository Subscription tree.
+   Uses the same visual language as CM's map-tree-row: indented row,
+   round toggle chip, folder/document icon, hover + selected states. */
+.pm-subscription-tree .pm-subscription-branch {
+    display: block;
+}
+
+.pm-subscription-tree .pm-tree-row {
+    align-items: center;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: #344054;
+    display: flex;
+    font-size: 12px;
+    gap: 8px;
+    margin: 1px 0;
+    min-height: 30px;
+    padding: 4px 8px 4px calc(8px + var(--tree-depth, 0) * 20px);
+    transition: background-color .16s ease, border-color .16s ease;
+}
+
+.pm-subscription-tree .pm-tree-row.authority {
+    background: #eaf2ff;
+    color: #14213d;
+    font-weight: 700;
+}
+
+.pm-subscription-tree .pm-tree-row.artifact {
+    background: #f8fafc;
+    color: #344054;
+    font-weight: 650;
+}
+
+.pm-subscription-tree .pm-tree-row.release {
+    background: #fff;
+    cursor: pointer;
+}
+
+.pm-subscription-tree .pm-tree-row.release.recommended {
+    background: #eef7ee;
+    border-color: #b6dcbd;
+}
+
+.pm-subscription-tree .pm-tree-row:hover {
+    background: var(--grac-row-hover-bg, #eaf4ff);
+    border-color: transparent;
+}
+
+.pm-subscription-tree .pm-tree-row.release:has(input[type="checkbox"]:checked) {
+    background: #eaf2ff;
+    border-color: #b7c7dc;
+}
+
+.pm-subscription-tree .pm-tree-row .pm-tree-icon {
+    flex: 0 0 14px;
+    font-size: 12px;
+    width: 14px;
+}
+
+.pm-subscription-tree .pm-tree-row.authority .pm-tree-icon.fa-building-columns {
+    color: #1f5fbf;
+}
+
+.pm-subscription-tree .pm-tree-row.artifact .pm-tree-icon.fa-folder {
+    color: #e0a11a;
+}
+
+.pm-subscription-tree .pm-tree-row.release .pm-tree-icon.fa-file-lines {
+    color: #2465ca;
+}
+
+.pm-subscription-tree .pm-tree-row input[type="checkbox"] {
+    accent-color: var(--grac-blue, #2465ca);
+    margin: 0;
+}
+
+.pm-subscription-tree .pm-tree-row small {
+    color: #667085;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 4px;
+}
+
+/* ------------------------------------------------------------------
+   14b. Multi-select combo (mirrors ControlManagement's checkbox-combo)
+   ------------------------------------------------------------------
+   The Organization Setup Attributes card and the record dialog both
+   use `.pm-checkcombo` (custom multi-select).  Without these rules
+   the trigger inherits the browser's default button chrome, so each
+   selected value looks like a small boxed text with a black border.
+   Styling below matches CM's .checkbox-combo* system and renders
+   the selected values as inline tags/chips.
+   ------------------------------------------------------------------ */
+
+/* Field wrapper (label + control). */
+.pm-form-grid .pm-field,
+.pm-field {
+    color: #536077;
+    display: grid;
+    font-size: 13px;
+    font-weight: 650;
+    gap: 6px;
+    min-width: 0;
+}
+
+.pm-field.full {
+    grid-column: 1 / -1;
+}
+
+.pm-field > span {
+    color: #536077;
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+/* Combo container. */
+.pm-checkcombo {
+    position: relative;
+}
+
+.pm-checkcombo.full {
+    grid-column: 1 / -1;
+}
+
+/* Trigger button - the "input-like" thing that shows selected chips. */
+.pm-checkcombo-trigger {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    color: #172033;
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    gap: 8px;
+    justify-content: space-between;
+    min-height: 40px;
+    padding: 6px 10px;
+    text-align: left;
+    width: 100%;
+}
+
+.pm-checkcombo-trigger:hover,
+.pm-checkcombo-trigger:focus-visible {
+    border-color: var(--grac-blue, #2465ca);
+    outline: none;
+}
+
+.pm-checkcombo-trigger:disabled,
+.pm-checkcombo-trigger[disabled] {
+    background: #f8fafc;
+    color: #98a2b3;
+    cursor: not-allowed;
+}
+
+.pm-checkcombo-trigger.field-error {
+    border-color: #d92d20;
+    box-shadow: 0 0 0 3px rgba(217, 45, 32, .08);
+}
+
+/* Container for chips + placeholder. */
+.pm-checkcombo-value,
+[data-checkcombo-text] {
+    align-items: center;
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Chevron caret on the right side. */
+.pm-checkcombo-caret {
+    color: #667085;
+    flex: 0 0 auto;
+    font-size: 11px;
+    margin-left: 6px;
+    transition: transform .15s ease;
+}
+
+.pm-checkcombo.open .pm-checkcombo-caret,
+.pm-checkcombo-trigger[aria-expanded="true"] .pm-checkcombo-caret {
+    transform: rotate(180deg);
+}
+
+/* Individual selected chip. */
+.pm-checkcombo-chip {
+    align-items: center;
+    background: #eef5ff;
+    border: 1px solid #d7e3f5;
+    border-radius: 999px;
+    color: #1d4ed8;
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 3px 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Muted "Select..." placeholder when nothing is selected. */
+.pm-checkcombo-placeholder {
+    color: #98a2b3;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* Dropdown menu with the searchable options list. */
+.pm-checkcombo-menu {
+    background: #fff;
+    border: 1px solid #dfe5ee;
+    border-radius: 7px;
+    box-shadow: 0 10px 25px #17203322;
+    display: grid;
+    gap: 4px;
+    grid-template-rows: auto minmax(0, 1fr);
+    left: 0;
+    max-height: 260px;
+    overflow: hidden;
+    padding: 6px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    width: 100%;
+    z-index: 40;
+}
+
+.pm-checkcombo-menu[hidden] {
+    display: none;
+}
+
+.pm-checkcombo-search {
+    border: 1px solid #d5dce7;
+    border-radius: 6px;
+    color: #172033;
+    font-size: 12px;
+    padding: 7px 9px;
+    width: 100%;
+}
+
+.pm-checkcombo-search:focus {
+    border-color: var(--grac-blue, #2465ca);
+    outline: none;
+}
+
+.pm-checkcombo-options {
+    display: grid;
+    gap: 2px;
+    max-height: 195px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+}
+
+/* Each option is a <label data-checkcombo-option>. */
+[data-checkcombo-option] {
+    align-items: center;
+    border-radius: 5px;
+    color: #344054;
+    cursor: pointer;
+    display: flex;
+    font-size: 12px;
+    font-weight: 500;
+    gap: 8px;
+    line-height: 1.3;
+    padding: 6px 8px;
+}
+
+[data-checkcombo-option]:hover {
+    background: #f2f6fc;
+}
+
+[data-checkcombo-option] input[type="checkbox"] {
+    accent-color: var(--grac-blue, #2465ca);
+    margin: 0;
+}
+
+[data-checkcombo-option][hidden] {
+    display: none;
+}
+
+.pm-checkcombo-options .pm-empty.compact {
+    padding: 12px 8px;
+}
+
+/* ------------------------------------------------------------------
+   15. Responsive fallbacks (mirrors CM breakpoints)
+   ------------------------------------------------------------------ */
+@media (max-width: 1180px) {
+    .pm-dashboard-kpi-grid,
+    .pm-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .pm-setup-layout,
+    .pm-workbench-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .pm-dashboard-kpi-grid,
+    .pm-grid,
+    .pm-form-grid,
+    .pm-mini-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .pm-page-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .pm-actions {
+        justify-content: flex-start;
+    }
+}
+
+/* ------------------------------------------------------------------
+   15. Organization Setup - Subscription Tree alignment
+   ------------------------------------------------------------------
+   renderSubscriptionTree() in practice.js emits:
+     .pm-tree-branch > .pm-tree-row.authority/.artifact/.release
+   with an inline --tree-depth custom property per row.  These rules
+   consume --tree-depth for indentation and style the +/- toggle,
+   spacer, and release checkbox rows so every level lines up under
+   its parent.
+   ------------------------------------------------------------------ */
+
+/* The subscription tree reuses the .pm-tree-branch class name as a
+   plain block wrapper.  Neutralise the inline "branch line" styling
+   that class carries in the drill-in tree grids (section 14). */
+.pm-subscription-tree .pm-tree-branch {
+    background: none;
+    display: block;
+    flex: none;
+    height: auto;
+    margin: 0;
+    vertical-align: baseline;
+    width: auto;
+}
+
+/* One tree row per authority / artifact / release. Indentation is
+   driven by --tree-depth (0, 1, 2) set inline by practice.js. */
+.pm-subscription-tree .pm-tree-row {
+    align-items: center;
+    border-radius: 6px;
+    display: flex;
+    gap: 8px;
+    line-height: 1.35;
+    margin: 1px 0;
+    min-height: 28px;
+    padding: 3px 8px 3px calc(8px + var(--tree-depth, 0) * 22px);
+}
+
+.pm-subscription-tree .pm-tree-row:hover {
+    background: #eef4fd;
+}
+
+.pm-subscription-tree .pm-tree-row.authority strong {
+    color: #172033;
+    font-size: 12.5px;
+    font-weight: 750;
+}
+
+.pm-subscription-tree .pm-tree-row.artifact > span {
+    color: #25344e;
+    font-weight: 600;
+}
+
+/* Round +/- expand-collapse toggle (matches .pm-tree-toggle look). */
+.pm-subscription-tree .pm-tree-row [data-tree-toggle] {
+    align-items: center;
+    background: #eef5ff;
+    border: 1px solid #d7e3f5;
+    border-radius: 999px;
+    color: #2563eb;
+    cursor: pointer;
+    display: inline-grid;
+    flex: 0 0 20px;
+    font-size: 13px;
+    font-weight: 700;
+    height: 20px;
+    line-height: 1;
+    padding: 0;
+    place-items: center;
+    transition: background .15s ease, transform .15s ease;
+    width: 20px;
+}
+
+.pm-subscription-tree .pm-tree-row [data-tree-toggle]:hover {
+    background: #dbeafe;
+    transform: scale(1.04);
+}
+
+.pm-subscription-tree .pm-tree-row [data-tree-toggle]:focus-visible {
+    outline: 2px solid #2465ca;
+    outline-offset: 2px;
+}
+
+/* Empty slot that keeps leaf (release) rows aligned with rows that
+   carry a toggle button. */
+.pm-subscription-tree .tree-spacer {
+    display: inline-block;
+    flex: 0 0 20px;
+    height: 20px;
+    width: 20px;
+}
+
+/* Release rows are <label>s with a checkbox. */
+.pm-subscription-tree label.pm-tree-row {
+    cursor: pointer;
+    margin: 0;
+}
+
+.pm-subscription-tree .pm-tree-row.release input[type="checkbox"] {
+    accent-color: #2465ca;
+    flex: 0 0 auto;
+    height: 14px;
+    margin: 0;
+    width: 14px;
+}
+
+/* ------------------------------------------------------------------
+   View Obligations dialog (accordion grouped by Framework Release)
+   ------------------------------------------------------------------ */
+.pm-obligation-dialog {
+    background: transparent;
+    border: none;
+    height: 75vh;
+    max-height: 75vh;
+    max-width: 85vw;
+    padding: 0;
+    width: 85vw;
+}
+
+.pm-obligation-dialog::backdrop {
+    background: rgba(23, 32, 51, 0.45);
+}
+
+.pm-obligation-modal {
+    background: #f5f7fb;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 10px;
+    box-shadow: 0 18px 50px rgba(23, 32, 51, 0.25);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.pm-obligation-header {
+    align-items: center;
+    background: #fff;
+    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    display: flex;
+    gap: 14px;
+    padding: 14px 18px;
+}
+
+.pm-obligation-header > div {
+    flex: 1 1 auto;
+}
+
+.pm-obligation-header h2 {
+    color: var(--grac-ink, #172033);
+    font-size: 18px;
+    font-weight: 750;
+    margin: 0;
+}
+
+.pm-obligation-header p {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    margin: 2px 0 0;
+}
+
+.pm-obligation-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin: 4px 0 2px;
+}
+
+.pm-obligation-context span {
+    color: var(--grac-ink, #172033);
+    font-size: 13px;
+}
+
+.pm-obligation-context em {
+    color: var(--grac-muted, #758095);
+    font-style: normal;
+    font-weight: 500;
+    margin-right: 4px;
+}
+
+.pm-obligation-count {
+    color: var(--grac-muted, #758095);
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.pm-modal-close {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #d3dae7;
+    border-radius: 7px;
+    color: #27344e;
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 14px;
+    height: 32px;
+    justify-content: center;
+    width: 32px;
+}
+
+.pm-modal-close:hover {
+    background: #eef3fb;
+}
+
+.pm-obligation-toolbar {
+    background: #fff;
+    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 18px;
+}
+
+.pm-obligation-toolbar label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 220px;
+}
+
+.pm-obligation-toolbar label.grow {
+    flex: 1 1 280px;
+}
+
+.pm-obligation-toolbar label span {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+}
+
+.pm-obligation-toolbar select,
+.pm-obligation-toolbar input {
+    background: #fff;
+    border: 1px solid #d3dae7;
+    border-radius: 7px;
+    color: var(--grac-ink, #172033);
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+}
+
+.pm-obligation-toolbar select:focus-visible,
+.pm-obligation-toolbar input:focus-visible {
+    outline: 2px solid var(--grac-blue, #2465ca);
+    outline-offset: 1px;
+}
+
+.pm-obligation-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    padding: 14px 18px 18px;
+}
+
+.pm-obligation-empty {
+    background: #fff;
+    border: 1px dashed #d3dae7;
+    border-radius: 8px;
+    color: var(--grac-muted, #758095);
+    font-size: 13px;
+    padding: 26px;
+    text-align: center;
+}
+
+.pm-obligation-group {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    overflow: hidden;
+}
+
+.pm-obligation-group-toggle {
+    align-items: center;
+    background: #f0f4fb;
+    border: none;
+    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    color: var(--grac-ink, #172033);
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 750;
+    gap: 10px;
+    padding: 11px 14px;
+    text-align: left;
+    width: 100%;
+}
+
+.pm-obligation-group.collapsed .pm-obligation-group-toggle {
+    border-bottom: none;
+}
+
+.pm-obligation-group-toggle i {
+    color: var(--grac-blue, #2465ca);
+    flex: 0 0 auto;
+    font-size: 12px;
+}
+
+.pm-obligation-group-toggle em {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.pm-obligation-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+}
+
+.pm-obligation-card {
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-left: 3px solid var(--grac-blue, #2465ca);
+    border-radius: 8px;
+    padding: 11px 13px;
+}
+
+.pm-obligation-card h4 {
+    color: var(--grac-ink, #172033);
+    font-size: 13.5px;
+    font-weight: 700;
+    line-height: 1.35;
+    margin: 0 0 8px;
+}
+
+.pm-obligation-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.pm-obligation-chip {
+    align-items: baseline;
+    background: #eef3fb;
+    border-radius: 999px;
+    color: var(--grac-ink, #172033);
+    display: inline-flex;
+    font-size: 12px;
+    gap: 6px;
+    padding: 3px 10px;
+}
+
+.pm-obligation-chip em {
+    color: var(--grac-muted, #758095);
+    font-size: 10.5px;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+}
+
+.pm-obligation-evidence {
+    border-top: 1px dashed #d3dae7;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 8px;
+}
+
+.pm-obligation-evidence-title {
+    color: var(--grac-muted, #758095);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+}
+
+.pm-obligation-evidence-row {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    gap: 12px;
+}
+
+.pm-obligation-evidence-row strong {
+    color: var(--grac-ink, #172033);
+    font-weight: 650;
+}
+
+.pm-obligation-evidence-row span {
+    color: #46536d;
+}
+
+.pm-obligation-evidence-row em {
+    color: var(--grac-muted, #758095);
+    font-style: normal;
+    max-width: 46ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+    .pm-obligation-dialog {
+        height: 92vh;
+        max-height: 92vh;
+        max-width: 96vw;
+        width: 96vw;
+    }
+}
+
+.pm-subscription-tree .pm-tree-row.release > span:last-child {
+    align-items: baseline;
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+.pm-subscription-tree .pm-tree-row.release small {
+    color: #64748b;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+/* Applicability-engine recommended releases. */
+.pm-subscription-tree .pm-tree-row.release.recommended {
+    background: #f0f7ec;
+    box-shadow: inset 3px 0 0 #4d9a3f;
+}
+
+.pm-subscription-tree .pm-tree-row.release.recommended:hover {
+    background: #e6f2df;
+}

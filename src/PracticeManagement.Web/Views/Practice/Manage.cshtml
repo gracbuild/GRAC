@@ -1,0 +1,254 @@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    ViewData["Title"] = Model.Title;
+    var permissions = ViewBag.Permissions as string[] ?? [];
+    var isOrganizationOnboarding = Model.Key == "organization-setup";
+    var isOrganizationAdministration = Model.Key == "organization-administration";
+    var isOrganizationDependencies = Model.Key == "organization-dependencies";
+    var isDependencyWorkbench = Model.Key.StartsWith("workbench-", StringComparison.OrdinalIgnoreCase);
+    var isResolve = Model.Key == "resolve" || Model.Key == "practice-operationalization";
+    var isReadOnlyAssuranceView = Model.Key == "assurance-dashboard" || Model.Key == "assurance-trends" || Model.Key == "practice-health" || Model.Key == "audit-intelligence" || Model.Key == "risk-intelligence";
+    var isOrganizationWorkspace = isOrganizationOnboarding || isOrganizationAdministration || isOrganizationDependencies;
+    var setupChildTabs = isOrganizationDependencies
+        ? new[] {
+            new { Key = "dependency-applications", Title = "Applications", Description = "Business applications supporting organizational practices." },
+            new { Key = "dependency-tools", Title = "Tools", Description = "Utility tools supporting execution of practices." },
+            new { Key = "dependency-vendors", Title = "Vendors", Description = "Third parties providing services or products." },
+            new { Key = "dependency-assets", Title = "Assets", Description = "Physical or logical assets supporting practices." },
+            new { Key = "dependency-processes", Title = "Processes", Description = "Business processes supporting organizational execution." }
+        }
+        : isOrganizationAdministration
+        ? new[] {
+            new { Key = "locations", Title = "Location", Description = "Locations under the selected organization." },
+            new { Key = "departments", Title = "Department", Description = "Departments under the selected organization." },
+            new { Key = "business-functions", Title = "Business Function", Description = "Business functions under the selected organization." },
+            new { Key = "teams", Title = "Teams", Description = "Teams under the selected organization." },
+            new { Key = "committees", Title = "Committees", Description = "Committees under the selected organization." },
+            new { Key = "users", Title = "Users / Employees", Description = "Employees and users available for ownership and assignment." }
+        }
+        : new[] {
+            new { Key = "locations", Title = "Location", Description = "Locations under the selected organization." },
+            new { Key = "departments", Title = "Department", Description = "Departments under the selected organization." },
+            new { Key = "business-functions", Title = "Business Function", Description = "Business functions under the selected organization." },
+            new { Key = "teams", Title = "Teams", Description = "Teams under the selected organization." },
+            new { Key = "committees", Title = "Committees", Description = "Committees under the selected organization." },
+            new { Key = "users", Title = "Users / Employees", Description = "Employees and users available for ownership and assignment." }
+        };
+}
+
+<div class="pm-page-heading @(isOrganizationWorkspace || Model.Key == "organizations" ? "compact" : "")">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+    <div class="pm-actions">
+        @if (!isOrganizationWorkspace && Model.Key != "organizations")
+        {
+        <a class="pm-button" id="pageBackBtn" asp-controller="Practice" asp-action="Index"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
+        }
+        @if (!isOrganizationWorkspace && !isDependencyWorkbench && Model.Key != "organizations" && Model.Key != "audit-trace" && Model.Key != "control-applicability" && !isResolve && !isReadOnlyAssuranceView && permissions.Contains("ADD"))
+        {
+            <button class="pm-button primary" id="addRecord" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> @(Model.Key == "organization-controls" ? "Add Release" : Model.Key == "organization-requirements" || Model.Key == "practices" ? "Add Practice" : Model.Key == "practice-instances" ? "Add New Instance" : Model.Key == "assurance-generation" ? "Generate Activity" : Model.Key == "assurance-activities" ? "Add Activity" : "Add Record")</button>
+        }
+    </div>
+</div>
+
+@if (isOrganizationWorkspace)
+{
+<section class="pm-panel pm-setup" id="organizationSetup">
+    <div class="pm-setup-toolbar">
+        <label><span>Organization</span><select id="setupOrganization"><option value="">@(isOrganizationOnboarding ? "New Organization" : "Select Organization")</option></select></label>
+        @if (isOrganizationOnboarding)
+        {
+            <button class="pm-button primary" id="saveOrganizationSetup" type="button">Save Organization Setup</button>
+        }
+    </div>
+    <div id="setupMessage" class="pm-message" hidden></div>
+    <div class="pm-tabs" role="tablist" aria-label="Organization Setup Sections">
+        @if (!isOrganizationDependencies)
+        {
+        <button type="button" class="active" data-setup-tab="organization">Organization</button>
+        }
+        @for (var i = 0; i < setupChildTabs.Length; i++)
+        {
+            var tab = setupChildTabs[i];
+            var activeClass = isOrganizationDependencies && i == 0 ? "active" : "";
+            <button type="button" class="@activeClass" data-setup-tab="@tab.Key">@tab.Title</button>
+        }
+    </div>
+    @if (!isOrganizationDependencies)
+    {
+    <div class="pm-setup-tab-panel active" data-setup-panel="organization">
+    <div class="pm-setup-layout">
+        <div class="pm-setup-main">
+            <section class="pm-setup-card">
+                <div class="pm-section-heading">
+                    <h2>Organization Basic Details</h2>
+                    <p>Core organization profile used across practice intelligence.</p>
+                </div>
+                <div class="pm-form-grid pm-form-grid-compact" id="setupBasicFields" data-setup-readonly="@isOrganizationAdministration.ToString().ToLowerInvariant()"></div>
+            </section>
+            <section class="pm-setup-card">
+                <div class="pm-section-heading">
+                    <h2>Organization Attributes</h2>
+                    <p>Applicability drivers, business profile, and technology context.</p>
+                </div>
+                <div class="pm-form-grid pm-form-grid-compact" id="setupAttributeFields" data-setup-readonly="@isOrganizationAdministration.ToString().ToLowerInvariant()"></div>
+            </section>
+        </div>
+        @if (isOrganizationOnboarding)
+        {
+        <aside class="pm-setup-card pm-subscription-card">
+            <div class="pm-section-heading">
+                <h2>Repository Subscription</h2>
+                <p>Select applicable Authority / Artifact / Release items.</p>
+            </div>
+            <div class="pm-tree-toolbar">
+                <input id="subscriptionSearch" placeholder="Search authority, artifact, release..." />
+                <button class="pm-button icon pm-compact-icon" id="expandSubscriptionTree" type="button" title="Expand All" aria-label="Expand All">+</button>
+                <button class="pm-button icon pm-compact-icon" id="collapseSubscriptionTree" type="button" title="Collapse All" aria-label="Collapse All">-</button>
+            </div>
+            <div class="pm-recommendation-toolbar">
+                <button class="pm-button recommendation" id="recommendFrameworks" type="button">Recommended Frameworks</button>
+                <button class="pm-button recommendation clear" id="clearRecommendations" type="button">Clear</button>
+                <span id="recommendationSummary">Recommendations are user-confirmed before save.</span>
+            </div>
+            <div class="pm-subscription-tree" id="subscriptionTree">Loading repository tree...</div>
+        </aside>
+        }
+    </div>
+    </div>
+    }
+    @for (var i = 0; i < setupChildTabs.Length; i++)
+    {
+        var tab = setupChildTabs[i];
+        var activeClass = isOrganizationDependencies && i == 0 ? "active" : "";
+        <div class="pm-setup-tab-panel @activeClass" data-setup-panel="@tab.Key">
+            <section class="pm-setup-card">
+                <div class="pm-section-heading inline">
+                    <div>
+                        <h2>@tab.Title</h2>
+                        <p>@tab.Description</p>
+                    </div>
+                    <button class="pm-button primary small" type="button" data-setup-add="@tab.Key"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add @tab.Title</button>
+                </div>
+                <div class="pm-toolbar compact">
+                    <input data-setup-search="@tab.Key" placeholder="Search @tab.Title..." />
+                    <button class="pm-button icon" type="button" data-setup-refresh="@tab.Key" title="Refresh"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+                </div>
+                <div class="pm-table-wrap compact">
+                    <table>
+                        <thead data-setup-head="@tab.Key"></thead>
+                        <tbody data-setup-body="@tab.Key"><tr><td class="pm-empty">Select an organization.</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    }
+    <dialog id="recordDialog">
+        <form id="recordForm">
+            <div class="pm-dialog-heading">
+                <div><h2 id="dialogTitle">Organization Setup</h2><p>Complete the required fields and save your changes.</p></div>
+                <button type="button" id="closeRecord" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <div id="formMessage" class="pm-message" hidden></div>
+            <div id="recordFields" class="pm-form-grid"></div>
+            <div class="pm-dialog-actions">
+                <button type="button" class="pm-button" id="cancelRecord">Cancel / Back</button>
+                <button type="button" class="pm-button primary" id="saveRecord">Save</button>
+            </div>
+        </form>
+    </dialog>
+</section>
+}
+else
+{
+var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model.Key == "organization-controls";
+<section class="pm-panel">
+    <div class="pm-toolbar @(usesApplicabilityFilters ? "pm-toolbar-compact" : "")">
+        <input id="search" placeholder="Search..." @(Model.Key == "organization-requirements" ? "hidden" : "") />
+        <select id="organizationFilter"><option value="">All organizations</option></select>
+        @if (Model.Key == "organization-requirements" || Model.Key == "organization-controls")
+        {
+            <select id="subscribedFrameworkFilter"><option value="">All subscribed frameworks</option></select>
+        }
+        @if (Model.Key == "organization-controls")
+        {
+            <select id="sourceFilter"><option value="">All sources</option><option value="repository">Repository</option><option value="organization">Organization</option></select>
+        }
+        <select id="status"><option value="">@(usesApplicabilityFilters ? "All applicability statuses" : "All statuses")</option></select>
+        <select id="originTypeFilter" @(usesApplicabilityFilters ? "hidden" : "")><option value="">All origins</option></select>
+        <select id="criticalityFilter" @(Model.Key == "organization-requirements" ? "hidden" : "")><option value="">All criticalities</option></select>
+        <input id="ownerFilter" placeholder="Owner..." @(usesApplicabilityFilters ? "hidden" : "") />
+        <input id="dateFromFilter" type="date" title="Entered from" @(usesApplicabilityFilters ? "hidden" : "") />
+        <input id="dateToFilter" type="date" title="Entered to" @(usesApplicabilityFilters ? "hidden" : "") />
+        @if (usesApplicabilityFilters)
+        {
+            <button class="pm-button" id="clearFilters" type="button">Clear Filter</button>
+        }
+        <button class="pm-button icon" id="refresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+    </div>
+    <div class="@(isResolve ? "pm-workbench-layout" : "")">
+        @if (isResolve)
+        {
+        <aside class="pm-workbench-categories" aria-label="Resolve Registers">
+            <div class="pm-workbench-title">Registers</div>
+            <div id="workbenchCategories" class="pm-workbench-category-list">
+                <button type="button" class="active">Loading...</button>
+            </div>
+        </aside>
+        }
+        <div class="@(isResolve ? "pm-workbench-main" : "")">
+            @if (isResolve)
+            {
+            <div class="pm-workbench-context">
+                <strong id="workbenchHeading">Resolve</strong>
+                <span id="workbenchHint">Showing Practice Instances assigned to you.</span>
+            </div>
+            }
+            <div class="pm-table-wrap">
+                <table>
+                    <thead id="practiceGridHead"><tr>@foreach (var column in Model.Columns) { <th>@column</th> }<th>Actions</th></tr></thead>
+                    <tbody id="practiceRows"><tr><td colspan="@(Model.Columns.Length + 1)" class="pm-empty">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="pm-pager">
+        <button class="pm-button" id="previousPage" type="button">Previous</button>
+        <span id="pageInfo">Page 1</span>
+        <button class="pm-button" id="nextPage" type="button">Next</button>
+        <select id="pageSize">
+            <option value="10">10 / page</option>
+            <option value="25" selected>25 / page</option>
+            <option value="50">50 / page</option>
+            <option value="100">100 / page</option>
+        </select>
+    </div>
+</section>
+
+<dialog id="recordDialog">
+    <form id="recordForm">
+        <div class="pm-dialog-heading">
+            <div><h2 id="dialogTitle">@Model.Title</h2><p>Complete the required fields and save your changes.</p></div>
+            <button type="button" id="closeRecord" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div id="formMessage" class="pm-message" hidden></div>
+        <div id="recordFields" class="pm-form-grid"></div>
+        <div class="pm-dialog-actions">
+            <button type="button" class="pm-button" id="cancelRecord">Cancel / Back</button>
+            <button type="button" class="pm-button primary" id="saveRecord">Save</button>
+        </div>
+    </form>
+</dialog>
+}
+
+@section Scripts {
+    <script>
+        window.pmScreen=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model));
+        window.pmApi="@ViewBag.ApiBaseUrl";
+        window.pmPermissions=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(permissions));
+    </script>
+    <script src="~/js/practice.js" asp-append-version="true"></script>
+}

@@ -22,11 +22,11 @@ public sealed class PracticeRepositoryController(
 {
     private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase)
     {
-        "organizations", "organization-setup", "organization-metadata", "locations", "departments", "business-functions", "teams", "committees", "users",
+        "organizations", "organization-setup", "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "locations", "departments", "business-functions", "teams", "committees", "users",
         "roles", "role-menu-permissions", "user-role-assignments",
         "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets", "dependency-processes",
         "user-assignments", "owner-mappings", "applicability-discovery", "applicability-results",
-        "repository-subscriptions", "repository-import", "organization-controls", "release-statements", "statement-applicability", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "organization-requirements",
+        "repository-subscriptions", "subscription-owner", "repository-import", "organization-controls", "release-statements", "statement-applicability", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "organization-requirements",
         "control-applicability", "requirement-applicability", "practices", "practice-instances", "practice-operationalization", "practice-dependency-resolutions",
         "resolve",
         "workbench-all", "workbench-applications", "workbench-tools", "workbench-vendors", "workbench-assets", "workbench-teams", "workbench-committees", "workbench-processes", "workbench-locations",
@@ -83,8 +83,14 @@ public sealed class PracticeRepositoryController(
             var action = request.Action.Equals("RETIRE", StringComparison.OrdinalIgnoreCase)
                 ? "DELETE"
                 : request.Id.GetValueOrDefault() > 0 ? "EDIT" : "ADD";
-            if (!permissionPolicy.IsAllowed(principal.Roles, request.EntityType, action))
-                return new PracticeRepositoryResult(false, "You do not have permission to perform this action.");
+            // subscription-owner and related derived entity types are
+            // gated by the same permission as organization-controls
+            // (Source Statements). Without this mapping, PM_ORG_ADMIN
+            // would fall back to the entity type's raw permission key,
+            // which isn't in the roles config.
+            var permissionKey = ApiPermissionArea(request.EntityType);
+            if (!permissionPolicy.IsAllowed(principal.Roles, permissionKey, action))
+                return new PracticeRepositoryResult(false, "You do not have Update Owner permission for this release.");
 
             return await service.ManageAsync(new PracticeRepositoryCommand
             {
@@ -169,13 +175,57 @@ public sealed class PracticeRepositoryController(
             : JsonSerializer.Deserialize<Dictionary<string, object?>>(data.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
+        // Rule 5 — release/statement scope enforcement needs the caller's
+        // employee_id + dataScope in the _security envelope so both the
+        // C# fallbacks and the SP layer can call fn_visible_releases /
+        // fn_visible_statements. Values are populated by the Web-tier
+        // gateway from the session identity (see
+        // PracticeManagementGatewayController.AddOrganizationAccessContext).
+        long? callerEmployeeId = null;
+        if (values.TryGetValue("callerEmployeeId", out var employeeIdRaw))
+            callerEmployeeId = ToInt64(employeeIdRaw);
+        string? callerDataScope = null;
+        if (values.TryGetValue("callerDataScope", out var scopeRaw))
+            callerDataScope = scopeRaw?.ToString();
+        string? callerRoleName = null;
+        if (values.TryGetValue("callerRoleName", out var roleRaw))
+            callerRoleName = roleRaw?.ToString();
+
         values["_security"] = new
         {
             isSystemAdmin = principal.Roles.Any(role => role.Equals("PM_ADMIN", StringComparison.OrdinalIgnoreCase)),
-            subject = principal.Subject
+            subject = principal.Subject,
+            employeeId = callerEmployeeId,
+            dataScope = string.IsNullOrWhiteSpace(callerDataScope) ? "ORGANIZATION" : callerDataScope,
+            roleName = callerRoleName ?? ""
         };
         return JsonSerializer.SerializeToElement(values);
     }
+
+    // Mirror of the gateway's PermissionArea — release / statement /
+    // subscription-owner actions all resolve to organization-controls
+    // so they share the Source Statements permission line.
+    private static string ApiPermissionArea(string entityType) =>
+        entityType.Equals("release-statements", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("custom-release-statements", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase)
+            ? "organization-controls"
+            : entityType;
+
+    private static long? ToInt64(object? value) => value switch
+    {
+        null => null,
+        long l => l,
+        int i => i,
+        JsonElement je when je.ValueKind == JsonValueKind.Number && je.TryGetInt64(out var v) => v,
+        JsonElement je when je.ValueKind == JsonValueKind.String && long.TryParse(je.GetString(), out var v) => v,
+        string s when long.TryParse(s, out var v) => v,
+        _ => null
+    };
 
     private void CaptureSecureQueryDiagnostic(SecureRepositoryRequest request)
     {

@@ -11,6 +11,13 @@
   };
   const api = window.pmApi || buildAppUrl("practice-management-gateway");
   const permissions = new Set(window.pmPermissions || []);
+  // Rules 3 + 4 — session identity for role-based release/statement gating.
+  // dataScope ∈ { GLOBAL, ORGANIZATION, RELEASE, STATEMENT, PRACTICE, INSTANCE }.
+  const sessionDataScope = String(window.pmDataScope || "ORGANIZATION").toUpperCase();
+  const sessionRoleName = String(window.pmRoleName || "");
+  const sessionEmployeeId = String(window.pmEmployeeId || "");
+  const isOrgScopedAdmin = sessionDataScope === "GLOBAL" || sessionDataScope === "ORGANIZATION";
+  const isEmployeeScope = !isOrgScopedAdmin; // RELEASE/STATEMENT/PRACTICE/INSTANCE
   const rows = document.querySelector("#practiceRows");
   const dialog = document.querySelector("#recordDialog");
   const fieldsHost = document.querySelector("#recordFields");
@@ -68,7 +75,7 @@
   // Structure tree with Source Statement child rows.
   const isSourceStatements = screen.Key === "organization-controls";
   const sourceStatementState = { level: "releases", release: null, releases: [], rows: [], collapsedNodes: new Set(), isCustomRelease: false };
-  const releaseSummaryColumns = ["Framework / Release", "Authority", "Artifact", "Version", "Total Statements", "Applicable Statements", "Not Updated Statements", "Not Applicable Statements"];
+  const releaseSummaryColumns = ["Framework / Release", "Authority", "Artifact", "Version", "Owner", "Total Statements", "Applicable Statements", "Not Updated Statements", "Not Applicable Statements", "Actions"];
   const statementTreeColumns = ["Source Node / Hierarchy", "Statement Reference", "Statement Title", "Statement Text", "Applicability Status", "Practice Count", "Actions"];
   const customStatementFlatColumns = ["Hierarchy", "Source Structure Node", "Statement Reference", "Statement Title", "Statement Text", "Applicability Status", "Practice Count", "Actions"];
   // Source Structure state for custom releases
@@ -226,7 +233,12 @@
     select("industry", "Industry", "industries", true),
     select("entityType", "Entity Type", "entity-types", true),
     select("country", "Country", "countries", true),
-    select("status", "Status", "status-active", true)
+    select("status", "Status", "status-active", true),
+    // Rule 1 + Rule 6 — every new org gets an auto-provisioned
+    // Organisation GRAC Admin. Operator must supply the admin email at
+    // creation time so credentials can be sent (best-effort).
+    text("adminEmail", "Admin Email (Org GRAC Admin)", true),
+    text("adminName", "Admin Full Name")
   ];
   const setupAttributeSchema = [
     select("deposit_taking_status", "Deposit Taking Status", "yes-no"),
@@ -249,7 +261,7 @@
     "committees": ["view", "edit", "inactive"],
     "roles": ["view", "edit", "inactive"],
     "role-menu-permissions": ["view", "edit", "inactive"],
-    "users": ["view", "edit", "inactive"],
+    "users": ["view", "edit", "resendCredentials", "inactive"],
     "dependency-applications": ["view", "edit", "inactive"],
     "dependency-tools": ["view", "edit", "inactive"],
     "dependency-vendors": ["view", "edit", "inactive"],
@@ -294,6 +306,13 @@
     edit: "Edit",
     inactive: "Inactive/Delete",
     manage: "Manage",
+    // Rule 3 — release-level actions on the Source Statements Level 1 grid.
+    releaseView: "View Statements",
+    releaseEdit: "Edit Release",
+    releaseRetire: "Retire Release",
+    releaseUpdateOwner: "Update Owner",
+    // Rule 6 — best-effort "Resend credentials" action on the Users tab.
+    resendCredentials: "Resend Credentials",
     markApplicability: "Mark Applicability",
     updateApplicability: "Update Applicability",
     configure: "Configure",
@@ -318,6 +337,11 @@
     edit: "fa-pen",
     inactive: "fa-ban",
     manage: "fa-sliders",
+    releaseView: "fa-eye",
+    releaseEdit: "fa-pen",
+    releaseRetire: "fa-ban",
+    releaseUpdateOwner: "fa-user-gear",
+    resendCredentials: "fa-envelope",
     markApplicability: "fa-clipboard-check",
     updateApplicability: "fa-clipboard-check",
     configure: "fa-gear",
@@ -788,18 +812,49 @@
       setupMessage.hidden = true;
       const organization = collectSetupFields(setupBasicFields);
       organization.id = setupState.organizationId ? Number(setupState.organizationId) : 0;
+      const isNewOrganization = !organization.id || organization.id <= 0;
       const attributes = collectSetupFields(setupAttributeFields);
       const recommendations = [...setupState.recommendations.entries()].map(([releaseId, item]) => ({
         releaseId: Number(releaseId),
         reason: item.reason,
         confidence: item.confidence
       }));
-      await fetchJson(`${api}/organization-setup`, {
+      const saveResult = await fetchJson(`${api}/organization-setup`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
         body: JSON.stringify({ id: organization.id, data: { organization, attributes, releaseIds: [...setupState.selectedReleases].map(Number), recommendations } })
       });
-      setupMessage.textContent = "Organization setup saved successfully.";
+
+      // Rule 6 — best-effort admin provisioning for newly-created orgs.
+      // Never let this step block the "org saved" confirmation.
+      let provisioningNote = "";
+      if (isNewOrganization) {
+        const newOrgId = extractNewOrganizationId(saveResult) || setupState.organizationId;
+        const adminEmail = String(organization.adminEmail || "").trim();
+        if (newOrgId && adminEmail) {
+          try {
+            const provisionResp = await fetchJson(`${api}/organization-admin/provision-and-notify`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+              body: JSON.stringify({
+                organizationId: Number(newOrgId),
+                adminEmail,
+                adminName: String(organization.adminName || adminEmail),
+                organizationName: String(organization.name || organization.code || "")
+              })
+            });
+            provisioningNote = provisionResp?.credentialsEmailed
+              ? " Admin credentials were emailed."
+              : " Admin was provisioned; credential email failed — use Resend from the Users tab.";
+          } catch (provisionError) {
+            provisioningNote = ` Admin provisioning failed: ${provisionError.message}`;
+          }
+        } else if (!adminEmail) {
+          provisioningNote = " (No admin email supplied — admin not provisioned.)";
+        }
+      }
+
+      setupMessage.textContent = "Organization setup saved successfully." + provisioningNote;
       setupMessage.hidden = false;
       await loadLookups();
       populateSetupOrganizationSelector();
@@ -812,6 +867,15 @@
       setupMessage.textContent = error.message;
       setupMessage.hidden = false;
     }
+  }
+
+  function extractNewOrganizationId(saveResult) {
+    if (!saveResult) return 0;
+    const data = saveResult.data || saveResult.Data;
+    if (!data) return 0;
+    const first = Array.isArray(data) ? (Array.isArray(data[0]) ? data[0][0] : data[0]) : data;
+    if (!first) return 0;
+    return Number(first.OrganizationId || first.organizationId || first.NewOrganizationId || first.newOrganizationId || 0) || 0;
   }
 
   function currentSetupPayload() {
@@ -1218,6 +1282,16 @@
 
   function updateAddButtonLabel() {
     if (!isSourceStatements || !addButton) return;
+    // Rule 4 — employees never see Add Release / Add Source Statement /
+    // Manage Source Structure buttons. Only Applicability Marking is
+    // allowed on the statement rows.
+    if (isEmployeeScope) {
+      addButton.hidden = true;
+      const structureBtn = document.getElementById("manageSourceStructureBtn");
+      if (structureBtn) structureBtn.hidden = true;
+      return;
+    }
+    addButton.hidden = false;
     const label = sourceStatementState.level === "statements" ? "Add Source Statement" : "Add Release";
     addButton.innerHTML = `<i class="fa-solid fa-plus" aria-hidden="true"></i> ${label}`;
     // Show/hide "Manage Source Structure" button for custom releases
@@ -1266,23 +1340,55 @@
       } else if (sourceFilterValue === "organization") {
         releases = releases.filter(release => Number(valueOf(release, "ReleaseId") || 0) < 0);
       }
+      // Rule 4 — employee-scope users only see releases they own or are
+      // assigned to. Server-side filtering via fn_visible_releases is the
+      // source of truth; this client-side filter is a defence-in-depth
+      // narrow-down against rows the API might still return.
+      if (isEmployeeScope) {
+        const empId = sessionEmployeeId ? Number(sessionEmployeeId) : 0;
+        releases = releases.filter(release =>
+          Number(valueOf(release, "OwnerId") || 0) === empId
+          || String(valueOf(release, "IsAssignedToCurrentUser") || "").toLowerCase() === "true"
+        );
+      }
       sourceStatementState.releases = releases;
+      state.records = releases; // needed by allowedActions() for the 3-dot menu
       logListTrace("response", { level: "releases", rowCount: releases.length });
       if (!releases.length) {
         rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">No subscribed framework releases found for the selected organization. Subscribe releases in Organization Setup - Repository Subscription.</td></tr>`;
         renderPager();
         return;
       }
-      rows.innerHTML = releases.map((release, index) => `<tr class="pm-release-source-row" data-release-index="${index}" style="cursor:pointer" title="View Source Statements for this release">
+      rows.innerHTML = releases.map((release, index) => {
+        const ownerLabel = String(valueOf(release, "OwnerName") || "").trim();
+        const ownerCell = ownerLabel
+          ? escapeHtml(ownerLabel)
+          : `<span class="pm-empty compact" style="color:#94a3b8">Unassigned</span>`;
+        return `<tr class="pm-release-source-row" data-release-index="${index}" style="cursor:pointer" title="View Source Statements for this release">
         <td><i class="fa-solid fa-chevron-right" aria-hidden="true"></i> <strong>${escapeHtml(valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion"))}</strong></td>
         <td>${escapeHtml(valueOf(release, "Authority") || valueOf(release, "AuthorityCode"))}</td>
         <td>${escapeHtml(valueOf(release, "ArtifactName") || valueOf(release, "ArtifactCode"))}</td>
         <td>${escapeHtml(valueOf(release, "ReleaseVersion"))}</td>
+        <td>${ownerCell}</td>
         <td>${escapeHtml(valueOf(release, "TotalStatementsCount") ?? valueOf(release, "TotalRequirementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "ApplicableStatementsCount") ?? valueOf(release, "ApplicableMarkedRequirementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "NotUpdatedStatementsCount") ?? valueOf(release, "NotUpdatedRequirementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "NotApplicableStatementsCount") ?? valueOf(release, "NotApplicableDeferredRequirementsCount") ?? 0)}</td>
-      </tr>`).join("");
+        <td class="pm-actions-cell" data-stop-row-click>${releaseActionsMarkup(index, release)}</td>
+      </tr>`;
+      }).join("");
+
+      // Rule 4 — Employee-scope users see ONLY assigned releases and land
+      // directly on the statements list when they open the only release
+      // they have. If the filter left one row, auto-drill.
+      if (isEmployeeScope && releases.length === 1) {
+        const only = releases[0];
+        sourceStatementState.release = mapReleaseSelection(only);
+        sourceStatementState.isCustomRelease = Number(valueOf(only, "ReleaseId") || 0) < 0;
+        sourceStatementState.level = "statements";
+        await loadSourceStatements();
+        return;
+      }
     } catch (error) {
       rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">${escapeHtml(error.message || "Unable to load subscribed framework releases.")}</td></tr>`;
       logListTrace("error", { level: "releases", message: error.message || String(error) });
@@ -1427,6 +1533,100 @@
   }
 
   // --- Add Custom Release form (organization-specific, not repository) ---
+  // Rule 3 — Update Owner action for the 3-dot menu on subscribed
+  // framework release rows (Level 1 of Source Statements). Reassigns
+  // repository_subscription.owner_id.
+  //
+  // Resolves the subscription id from the row in this order:
+  //   1. SubscriptionId column (present after the recent API fix, both
+  //      centrally-subscribed and Custom rows).
+  //   2. For Custom releases the ReleaseId is `-1 * subscription_id`, so
+  //      Math.abs(ReleaseId) is a safe fallback.
+  //   3. If neither works we surface the specific reason.
+  function openReleaseOwnerForm(release) {
+    const orgId = Number(valueOf(release, "OrganizationId") || organizationFilter?.value || 0);
+    const releaseIdRaw = Number(valueOf(release, "ReleaseId") || 0);
+    let subscriptionId = Number(valueOf(release, "SubscriptionId") || 0);
+    if (!subscriptionId && releaseIdRaw < 0) subscriptionId = Math.abs(releaseIdRaw);
+    if (!orgId) { alert("Organization is required to update the release owner."); return; }
+    if (!subscriptionId) {
+      alert("Release subscription id could not be resolved from this row. Please refresh the list and try again.");
+      return;
+    }
+    // Set activeFormRecord so lookupItemsFor("users") filters employees
+    // by the correct organizationId (Rule 3, step 3 — only Active
+    // employees of the same Organization appear in the picker).
+    state.activeFormRecord = { OrganizationId: orgId };
+    state.mode = "updateReleaseOwner";
+    state.id = subscriptionId;
+    state.formEntity = "subscription-owner";
+    formMessage.hidden = true;
+    document.querySelector("#dialogTitle").textContent = "Update Release Owner";
+    const releaseTitle = valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion") || "";
+    // IMPORTANT: bind the picker to the `users-id` lookup, NOT `users`.
+    // In 02_Create_Procedures.sql the `users` lookup emits
+    // `employee_name` as its Value (used for legacy free-text owners),
+    // while `users-id` emits the numeric employee_id — which is what
+    // repository_subscription.owner_id needs. Using the wrong lookup
+    // was the reason the API kept rejecting saves with
+    // "Please select an employee to assign as the release owner."
+    const employeeOptions = optionsFor("users-id", valueOf(release, "OwnerId"));
+    fieldsHost.innerHTML = `
+      <input name="organizationId" type="hidden" value="${escapeHtml(orgId)}">
+      <input name="subscriptionId" type="hidden" value="${escapeHtml(subscriptionId)}">
+      <label class="pm-field"><span>Release</span><input value="${escapeHtml(releaseTitle)}" disabled></label>
+      <label class="pm-field"><span>Source</span><input value="${escapeHtml(valueOf(release, "SubscriptionType") || (releaseIdRaw < 0 ? "Custom" : "Central"))}" disabled></label>
+      <label class="pm-field"><span>Owner<span class="required"> *</span></span><select name="ownerId" required>${employeeOptions}</select></label>`;
+    saveButton.hidden = false;
+    dialog.showModal();
+  }
+
+  // Rule 3 — Retire action for the Custom-release-only menu items.
+  // Marks the subscription inactive via the standard retire endpoint.
+  // Rule 6 — best-effort resend of the one-time credentials to an
+  // Organization GRAC Admin. Reuses the same provision-and-notify
+  // endpoint; the SP updates the password hash + resets
+  // email_credentials_sent, then the email service tries again.
+  async function resendUserCredentials(record) {
+    const email = valueOf(record, "Email") || valueOf(record, "EmployeeCode");
+    const orgId = organizationFilter?.value || valueOf(record, "OrganizationId");
+    if (!email || !orgId) { alert("Cannot resend credentials — missing email or organization."); return; }
+    if (!confirm(`Resend admin credentials to ${email}?`)) return;
+    try {
+      const resp = await fetchJson(`${api}/organization-admin/provision-and-notify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({
+          organizationId: Number(orgId),
+          adminEmail: String(email),
+          adminName: String(valueOf(record, "EmployeeName") || email),
+          organizationName: (organizationFilter?.selectedOptions?.[0]?.textContent || "").trim()
+        })
+      });
+      alert(resp?.credentialsEmailed
+        ? "Credentials email sent successfully."
+        : `Credentials were re-generated but the email could not be delivered. Reason: ${resp?.emailFailureReason || "unknown"}.`);
+    } catch (error) {
+      alert(error.message || "Unable to resend credentials.");
+    }
+  }
+
+  async function retireCustomRelease(release) {
+    const subscriptionId = Number(valueOf(release, "SubscriptionId") || 0);
+    if (!subscriptionId) { alert("Cannot retire this release."); return; }
+    if (!confirm(`Retire release "${valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion")}"?`)) return;
+    try {
+      await fetchJson(`${api}/repository-subscriptions/retire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({ id: subscriptionId })
+      });
+      await loadSourceStatements();
+    } catch (error) {
+      alert(error.message || "Unable to retire the release.");
+    }
+  }
+
   function openCustomReleaseForm() {
     const orgId = organizationFilter?.value || "";
     if (!orgId) { alert("Please select an organization first."); return; }
@@ -2021,6 +2221,50 @@
     </button>`;
   }
 
+  // Rule 3 — build the 3-dot menu markup for a subscribed-framework
+  // release row. Admin (GLOBAL/ORGANIZATION scope) sees View + Update
+  // Owner always; Edit/Retire only when the release is Custom.
+  // Employees (narrower scope) never see this menu — they auto-drill
+  // into the statements list via Rule 4.
+  function releaseActionsMarkup(index, release) {
+    if (isEmployeeScope) return "";
+    // NOTE: no inline onclick here — the delegated click handler on
+    // #practiceRows already special-cases `.pm-action-trigger` to skip
+    // the row-drill, and adding `event.stopPropagation()` on the button
+    // would stop the click from bubbling up to that delegated handler,
+    // so openActionMenu would never run.
+    return `<button type="button" class="pm-action-trigger" data-release-menu-index="${escapeHtml(index)}" aria-haspopup="menu" aria-expanded="false" title="Actions">
+      <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="visually-hidden">Actions</span>
+    </button>`;
+  }
+
+  function allowedReleaseActions(release) {
+    if (!release || isEmployeeScope) return [];
+    const isCustom = Number(valueOf(release, "ReleaseId") || 0) < 0
+      || String(valueOf(release, "SubscriptionType") || "").toLowerCase() === "custom";
+    const list = ["releaseView", "releaseUpdateOwner"];
+    if (isCustom) list.push("releaseEdit", "releaseRetire");
+    return list.filter(action => {
+      if (action === "releaseView") return permissions.has("VIEW");
+      if (action === "releaseUpdateOwner") return permissions.has("EDIT") || permissions.has("ADD");
+      if (action === "releaseEdit") return permissions.has("EDIT") || permissions.has("ADD");
+      if (action === "releaseRetire") return permissions.has("DELETE");
+      return false;
+    });
+  }
+
+  // Normalises a subscribed-framework row into the shape
+  // sourceStatementState.release expects.
+  function mapReleaseSelection(release) {
+    return {
+      subscriptionId: Number(valueOf(release, "SubscriptionId") || 0),
+      releaseId: valueOf(release, "ReleaseId"),
+      organizationId: Number(valueOf(release, "OrganizationId") || organizationFilter?.value || 0),
+      title: valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion"),
+      subscriptionType: valueOf(release, "SubscriptionType") || ""
+    };
+  }
+
   function allowedActions(record = null) {
     let actions = actionDefinitions[screen.Key] || ["view", "edit", "inactive"];
     const applicabilityStatus = row => {
@@ -2030,13 +2274,19 @@
       return text;
     };
     if (screen.Key === "organization-controls" && sourceStatementState.isCustomRelease && sourceStatementState.level === "statements") {
-      actions = ["view", "edit", "inactive"];
+      // Rule 4 — employees can only mark applicability on custom statements,
+      // not edit / inactive them.
+      actions = isEmployeeScope ? ["view", "markApplicability"] : ["view", "edit", "inactive"];
     } else if (screen.Key === "organization-controls" && record) {
       const applicability = applicabilityStatus(record);
       const manuallyAdded = valueOf(record, "IsManuallyAdded") === true || String(valueOf(record, "IsManuallyAdded")).toLowerCase() === "true" || String(valueOf(record, "IsManuallyAdded")) === "1";
-      if (applicability === "not updated") actions = ["markApplicability", "view", ...(manuallyAdded ? ["edit", "inactive"] : [])];
-      else if (applicability === "applicable") actions = ["practices", "view", ...(manuallyAdded ? ["edit"] : [])];
-      else actions = ["updateApplicability", "view", ...(manuallyAdded ? ["edit"] : [])];
+      // Rule 4 — employees never get edit/inactive on statements; only
+      // Applicability Marking (Mark or Update) and View.
+      const manualExtras = isEmployeeScope ? [] : (manuallyAdded ? ["edit", "inactive"] : []);
+      const manualEditOnly = isEmployeeScope ? [] : (manuallyAdded ? ["edit"] : []);
+      if (applicability === "not updated") actions = ["markApplicability", "view", ...manualExtras];
+      else if (applicability === "applicable") actions = [...(isEmployeeScope ? [] : ["practices"]), "view", ...manualEditOnly];
+      else actions = ["updateApplicability", "view", ...manualEditOnly];
     }
     if (screen.Key === "organization-requirements" && record) {
       const applicability = applicabilityStatus(record);
@@ -2053,7 +2303,7 @@
     return actions.filter(action => {
       if (action === "view") return permissions.has("VIEW");
       if (action === "viewObligations" || action === "viewOperationalization" || action === "dependencyIntelligence") return permissions.has("VIEW");
-      if (action === "edit" || action === "configure" || action === "manage" || action === "map" || action === "subscribe" || action === "markApplicability" || action === "updateApplicability" || action === "resolveDependencies" || action === "modifyDependencies" || action === "bulkResolution" || action === "manageRoles") return permissions.has("EDIT") || permissions.has("ADD");
+      if (action === "edit" || action === "configure" || action === "manage" || action === "map" || action === "subscribe" || action === "markApplicability" || action === "updateApplicability" || action === "resolveDependencies" || action === "modifyDependencies" || action === "bulkResolution" || action === "manageRoles" || action === "resendCredentials") return permissions.has("EDIT") || permissions.has("ADD");
       if (action === "inactive") return permissions.has("DELETE");
       if (action === "accept" || action === "reject") return permissions.has("APPROVE") || permissions.has("EDIT");
       if (action === "practice" || action === "practices" || action === "instances" || action === "evidence" || action === "dependencies") return permissions.has("VIEW");
@@ -2062,8 +2312,18 @@
   }
 
   function openActionMenu(trigger) {
-    const index = trigger.dataset.actionMenuIndex;
-    const actions = allowedActions(state.records[Number(index)] || null);
+    // Rule 3 — the Source Statements Level-1 grid uses a separate
+    // release-scoped menu because its actions (View Statements, Update
+    // Owner, Edit / Retire Custom) differ from the regular record
+    // actions.
+    const releaseIndex = trigger.dataset.releaseMenuIndex;
+    const index = releaseIndex ?? trigger.dataset.actionMenuIndex;
+    const record = releaseIndex !== undefined
+      ? sourceStatementState.releases[Number(releaseIndex)] || null
+      : state.records[Number(index)] || null;
+    const actions = releaseIndex !== undefined
+      ? allowedReleaseActions(record)
+      : allowedActions(record);
     closeActionMenu();
     actionTrigger = trigger;
     actionTrigger.setAttribute("aria-expanded", "true");
@@ -3472,6 +3732,14 @@
         if (saveMessage && saveMessage !== "Saved successfully.") window.alert(saveMessage);
         return;
       }
+      // Update Owner: reload the release summary so the new owner shows.
+      if (state.formEntity === "subscription-owner") {
+        dialog.close();
+        await loadSourceStatements();
+        const saveMessage = saveResult.message || saveResult.Message || "Release owner updated successfully.";
+        window.alert(saveMessage);
+        return;
+      }
       dialog.close();
       await loadLookups();
       if (isOrganizationWorkspace) {
@@ -3517,6 +3785,23 @@
   }
 
   function handleAction(action, index) {
+    // Rule 3 — release-level actions on the Source Statements Level 1 grid.
+    if (isSourceStatements && sourceStatementState.level === "releases"
+        && (action === "releaseView" || action === "releaseUpdateOwner"
+            || action === "releaseEdit" || action === "releaseRetire")) {
+      const release = sourceStatementState.releases[Number(index)];
+      if (!release) return placeholderAction(action);
+      if (action === "releaseView") {
+        sourceStatementState.release = mapReleaseSelection(release);
+        sourceStatementState.isCustomRelease = Number(valueOf(release, "ReleaseId") || 0) < 0
+          || String(valueOf(release, "SubscriptionType") || "").toLowerCase() === "custom";
+        sourceStatementState.level = "statements";
+        return loadSourceStatements();
+      }
+      if (action === "releaseUpdateOwner") return openReleaseOwnerForm(release);
+      if (action === "releaseEdit") return openCustomReleaseForm(release);
+      if (action === "releaseRetire") return retireCustomRelease(release);
+    }
     const record = state.records[Number(index)] || {};
     if (isSourceStatements && sourceStatementState.level === "statements" && sourceStatementState.isCustomRelease) {
       if (action === "view") return openCustomStatementView(record);
@@ -3549,6 +3834,7 @@
       return openUserRoleAssignmentForm(record, action === "view");
     }
     const id = valueOf(record, "Id");
+    if (action === "resendCredentials" && screen.Key === "users") return resendUserCredentials(record);
     if (action === "view" || action === "edit") openForm(action, id);
     else if (action === "markApplicability" || action === "updateApplicability") openForm("applicability", id);
     else if (action === "inactive") retire(id);

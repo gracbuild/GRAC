@@ -6,3 +6,4 @@ artifacts/
 .vs/
 bin/
 obj/
+**/Properties/PublishProfiles/FolderProfile1.pubxml

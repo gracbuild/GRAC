@@ -1,9 +1,18 @@
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @model PracticeManagement.Web.Models.LoginViewModel
 @{
     Layout = null;
-    var loginAction = Context.Request.Path.StartsWithSegments("/OrganizationManagement", StringComparison.OrdinalIgnoreCase)
-        ? Url.Content("~/OrganizationManagement/Login")
-        : Url.Action("Index", "Login");
+    // Build form action explicitly — Url.Action can pick the
+    // organization-management-login route via LinkGenerator scoring and
+    // emit /OrganizationManagement/Login on a Practice Management host,
+    // which then gets double-prefixed by PathBase.
+    var pathBase = Context.Request.PathBase.Value?.TrimEnd('/') ?? "";
+    var isOrgMgmt = string.Equals(Configuration["Module:Key"], "OrganizationManagement", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(pathBase, "/OrganizationManagement", StringComparison.OrdinalIgnoreCase)
+        || (string.IsNullOrEmpty(pathBase) && Context.Request.Path.StartsWithSegments("/OrganizationManagement", StringComparison.OrdinalIgnoreCase));
+    var loginAction = isOrgMgmt && string.IsNullOrEmpty(pathBase)
+        ? "/OrganizationManagement/Login"
+        : $"{pathBase}/Login";
 }
 <!DOCTYPE html>
 <html lang="en">

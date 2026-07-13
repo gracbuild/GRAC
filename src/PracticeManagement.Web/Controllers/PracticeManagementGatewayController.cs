@@ -17,8 +17,222 @@ public sealed class PracticeManagementGatewayController(
     NavigationContextProtector navigationContextProtector,
     IConfiguration configuration,
     PasswordHasher passwordHasher,
+    IPracticeEmailService emailService,
     ILogger<PracticeManagementGatewayController> logger) : ControllerBase
 {
+    // Rule 6 — provisioning + credential email for the auto-created
+    // Organisation GRAC Admin. Called by the JS layer immediately after
+    // a successful organization-setup save. The plaintext OTP is
+    // generated and hashed here on the Web tier (which owns
+    // PasswordHasher); only the hash reaches the API + DB.
+    [HttpPost("organization-admin/provision-and-notify")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ProvisionAndNotifyOrganizationAdmin([FromBody] OrganizationAdminProvisionRequest request, CancellationToken cancellationToken)
+    {
+        if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
+        if (request is null || request.OrganizationId <= 0 || string.IsNullOrWhiteSpace(request.AdminEmail))
+            return BadRequest(new { success = false, message = "organizationId and adminEmail are required." });
+        // Only Admins (system or org-scoped) may auto-provision another
+        // org's admin; the org-scope guard still applies for non-system admins.
+        if (!permissionPolicy.IsAllowed(Roles(), "organization-setup", "ADD")
+            && !permissionPolicy.IsAllowed(Roles(), "users", "ADD"))
+            return Forbid();
+        if (!IsSystemAdmin() && !AllowedOrganizationIds().Contains(request.OrganizationId))
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "You do not have access to the selected organization." });
+
+        var oneTimePassword = GenerateOneTimePassword();
+        var passwordHash = passwordHasher.Hash(oneTimePassword);
+        var provisionPayload = JsonSerializer.SerializeToElement(new
+        {
+            organizationId = request.OrganizationId,
+            adminEmail = request.AdminEmail.Trim(),
+            adminName = string.IsNullOrWhiteSpace(request.AdminName) ? request.AdminEmail.Trim() : request.AdminName.Trim(),
+            passwordHash
+        });
+        var securedPayload = AddOrganizationAccessContext(provisionPayload);
+
+        string provisionRaw;
+        try
+        {
+            provisionRaw = await client.ManageAsync(Token(), new SecureRepositoryRequest
+            {
+                EntityType = "organization-admin-provision",
+                Action = "SAVE",
+                OrganizationId = request.OrganizationId,
+                Data = securedPayload
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            var correlationId = HttpContext.TraceIdentifier;
+            logger.LogError(ex, "PracticeManagement admin provisioning failed {CorrelationId}", correlationId);
+            return StatusCode(StatusCodes.Status502BadGateway,
+                new { success = false, message = $"Unable to provision the organisation admin. Reference: {correlationId}" });
+        }
+
+        var provisionResult = ExtractProvisionResult(provisionRaw);
+        if (provisionResult is null)
+        {
+            logger.LogWarning("Organization admin provisioning returned no rows. Payload={Payload}", Truncate(provisionRaw, 500));
+            return StatusCode(StatusCodes.Status502BadGateway,
+                new { success = false, message = "The organisation admin could not be provisioned." });
+        }
+
+        // Best-effort SMTP send. Failures never abort provisioning.
+        var loginUrl = configuration["Email:LoginUrl"] ?? BuildDefaultLoginUrl();
+        var emailResult = await emailService.SendAdminCredentialsAsync(
+            provisionResult.Email,
+            request.AdminName ?? provisionResult.Email,
+            request.OrganizationName ?? "",
+            loginUrl,
+            oneTimePassword,
+            cancellationToken);
+
+        if (emailResult.Delivered)
+        {
+            try
+            {
+                var markPayload = AddOrganizationAccessContext(JsonSerializer.SerializeToElement(new
+                {
+                    organizationId = request.OrganizationId,
+                    employeeId = provisionResult.EmployeeId
+                }));
+                await client.ManageAsync(Token(), new SecureRepositoryRequest
+                {
+                    EntityType = "organization-admin-mark-emailed",
+                    Action = "SAVE",
+                    OrganizationId = request.OrganizationId,
+                    Data = markPayload
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Failing to flip the flag is non-fatal — the admin still
+                // has valid credentials; the Users tab will just keep the
+                // "Resend credentials" action available.
+                logger.LogWarning(ex,
+                    "PracticeEmailService delivered credentials but flagging email_credentials_sent failed. EmployeeId={EmployeeId} CorrelationId={CorrelationId}",
+                    provisionResult.EmployeeId, emailResult.CorrelationId);
+            }
+        }
+
+        return Ok(new
+        {
+            success = true,
+            employeeId = provisionResult.EmployeeId,
+            alreadyExisted = provisionResult.AlreadyExisted,
+            credentialsEmailed = emailResult.Delivered,
+            emailCorrelationId = emailResult.CorrelationId,
+            emailFailureReason = emailResult.FailureReason
+        });
+    }
+
+    private static string GenerateOneTimePassword()
+    {
+        // 14 chars of URL-safe base64 (~84 bits of entropy) is plenty for
+        // a one-time password that must be changed on first sign-in.
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(10);
+        return Convert.ToBase64String(bytes).Replace('+', 'A').Replace('/', 'B').TrimEnd('=');
+    }
+
+    private string BuildDefaultLoginUrl()
+    {
+        var scheme = Request.Scheme;
+        var host = Request.Host.Value;
+        var pathBase = Request.PathBase.HasValue ? Request.PathBase.Value : "";
+        return $"{scheme}://{host}{pathBase}/Login";
+    }
+
+    private static string Truncate(string value, int max) =>
+        string.IsNullOrEmpty(value) || value.Length <= max ? value ?? "" : value[..max];
+
+    private static OrganizationAdminProvisionResult? ExtractProvisionResult(string apiResponse)
+    {
+        if (string.IsNullOrWhiteSpace(apiResponse)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(apiResponse);
+            if (!TryGetPropertyCaseInsensitive(document.RootElement, "data", out var data)) return null;
+            JsonElement? firstRow = data.ValueKind switch
+            {
+                JsonValueKind.Array when data.GetArrayLength() > 0 => FirstRow(data[0]),
+                JsonValueKind.Object => FirstRow(data),
+                _ => null
+            };
+            if (firstRow is null) return null;
+            var row = firstRow.Value;
+            return new OrganizationAdminProvisionResult(
+                EmployeeId: TryReadLong(row, "EmployeeId") ?? TryReadLong(row, "employeeId") ?? 0,
+                RoleId: TryReadLong(row, "RoleId") ?? TryReadLong(row, "roleId") ?? 0,
+                Email: TryReadString(row, "Email") ?? TryReadString(row, "email") ?? "",
+                AlreadyExisted: TryReadBool(row, "AlreadyExisted") ?? TryReadBool(row, "alreadyExisted") ?? false);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static JsonElement? FirstRow(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+            return element.GetArrayLength() > 0 ? element[0] : null;
+        return element.ValueKind == JsonValueKind.Object ? element : null;
+    }
+
+    private static bool TryGetPropertyCaseInsensitive(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind != JsonValueKind.Object) { value = default; return false; }
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+        value = default;
+        return false;
+    }
+
+    private static long? TryReadLong(JsonElement row, string name)
+    {
+        if (!TryGetPropertyCaseInsensitive(row, name, out var value)) return null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt64(out var num) => num,
+            JsonValueKind.String when long.TryParse(value.GetString(), out var num) => num,
+            _ => null
+        };
+    }
+
+    private static string? TryReadString(JsonElement row, string name) =>
+        TryGetPropertyCaseInsensitive(row, name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool? TryReadBool(JsonElement row, string name)
+    {
+        if (!TryGetPropertyCaseInsensitive(row, name, out var value)) return null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when value.TryGetInt32(out var num) => num == 1,
+            JsonValueKind.String => string.Equals(value.GetString(), "true", StringComparison.OrdinalIgnoreCase)
+                                    || value.GetString() == "1",
+            _ => null
+        };
+    }
+
+    public sealed class OrganizationAdminProvisionRequest
+    {
+        public int OrganizationId { get; set; }
+        public string AdminEmail { get; set; } = "";
+        public string? AdminName { get; set; }
+        public string? OrganizationName { get; set; }
+    }
+
+    private sealed record OrganizationAdminProvisionResult(long EmployeeId, long RoleId, string Email, bool AlreadyExisted);
+
     [HttpGet("diagnostics/config")]
     public IActionResult ConfigDiagnostics()
     {
@@ -268,6 +482,17 @@ public sealed class PracticeManagementGatewayController(
                 ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
         values["allowedOrganizationIds"] = AllowedOrganizationIds();
+        // Rule 5 — thread the caller's employee_id, dataScope, and roleName
+        // through to the SPs / C# helpers so release / statement scope
+        // enforcement can happen inside pm_get_practice_repository and
+        // pm_manage_practice_repository.
+        var employeeIdString = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey);
+        if (long.TryParse(employeeIdString, out var employeeId) && employeeId > 0)
+            values["callerEmployeeId"] = employeeId;
+        var dataScope = HttpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey);
+        if (!string.IsNullOrWhiteSpace(dataScope)) values["callerDataScope"] = dataScope;
+        var roleName = HttpContext.Session.GetString(PracticeSessionIdentity.RoleNameKey);
+        if (!string.IsNullOrWhiteSpace(roleName)) values["callerRoleName"] = roleName;
         return JsonSerializer.SerializeToElement(values);
     }
 
@@ -286,7 +511,7 @@ public sealed class PracticeManagementGatewayController(
 
     private static readonly HashSet<string> OrganizationScopedEntityTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "organization-metadata", "repository-subscriptions", "locations", "departments", "business-functions", "teams", "committees",
+        "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "repository-subscriptions", "subscription-owner", "locations", "departments", "business-functions", "teams", "committees",
         "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets",
         "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability",
         "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", "dependencies", "evidence-configurations",
@@ -301,6 +526,7 @@ public sealed class PracticeManagementGatewayController(
         || entityType.Equals("custom-release-statements", StringComparison.OrdinalIgnoreCase)
         || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
         || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
+        || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase)
             ? "organization-controls"
             : entityType;
 
@@ -310,7 +536,8 @@ public sealed class PracticeManagementGatewayController(
         if (entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase)
             || entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
             || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
-            || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase))
+            || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
+            || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase))
             return permissionPolicy.IsAllowed(Roles(), area, "ADD") || permissionPolicy.IsAllowed(Roles(), area, "EDIT");
         return permissionPolicy.IsAllowed(Roles(), area, action);
     }

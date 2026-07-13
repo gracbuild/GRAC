@@ -121,6 +121,59 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 return new(false, "You do not have access to the selected organization.");
             }
 
+            // Rule 5 — release/statement-scope enforcement. GLOBAL /
+            // ORGANIZATION scopes pass through unchanged; narrower scopes
+            // must resolve against fn_visible_releases / fn_visible_statements.
+            // Additionally, employees (any non-Admin scope) may only invoke
+            // Applicability Marking on statements — every other release-
+            // or statement-level manage action is refused. See Rules 4/5.
+            if (!JsonSecurityIsSystemAdmin(payload))
+            {
+                var callerScope = JsonSecurityDataScope(payload);
+                var isEmployeeScope = callerScope is not ("GLOBAL" or "ORGANIZATION");
+                var callerEmployeeId = JsonSecurityEmployeeId(payload) ?? 0L;
+                var orgIdForScope = requestedOrganizationId ?? 0;
+
+                if (isEmployeeScope
+                    && procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Employees can only touch statement-applicability. Every
+                    // other release / statement / structure change is refused.
+                    if (entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
+                        || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
+                        || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
+                        || entityType.Equals("repository-subscriptions", StringComparison.OrdinalIgnoreCase)
+                        || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase))
+                    {
+                        logger.LogWarning("PracticeManagement API blocked employee-scope write. EntityType={EntityType} EmployeeId={EmployeeId} Scope={Scope}",
+                            entityType, callerEmployeeId, callerScope);
+                        return new(false, "Your role only permits Applicability Marking on assigned releases.");
+                    }
+                }
+
+                // Release-level guard: any action carrying a subscriptionId
+                // must resolve for the caller. Statement-applicability
+                // payloads carry frameworkStatementId + releaseId, so the
+                // release check is enough there too.
+                var subscriptionForScope = JsonInt(payload, "subscriptionId");
+                if (subscriptionForScope.HasValue && orgIdForScope > 0
+                    && !await HasReleaseAccessAsync(connection, callerEmployeeId, callerScope, orgIdForScope, subscriptionForScope.Value, cancellationToken))
+                {
+                    logger.LogWarning("PracticeManagement API blocked release access. EntityType={EntityType} EmployeeId={EmployeeId} SubscriptionId={SubscriptionId} Scope={Scope}",
+                        entityType, callerEmployeeId, subscriptionForScope.Value, callerScope);
+                    return new(false, "You are not assigned to this release.");
+                }
+
+                var customStatementForScope = JsonInt(payload, "customStatementId");
+                if (customStatementForScope.HasValue && orgIdForScope > 0
+                    && !await HasStatementAccessAsync(connection, callerEmployeeId, callerScope, orgIdForScope, customStatementForScope.Value, cancellationToken))
+                {
+                    logger.LogWarning("PracticeManagement API blocked statement access. EntityType={EntityType} EmployeeId={EmployeeId} CustomStatementId={CustomStatementId} Scope={Scope}",
+                        entityType, callerEmployeeId, customStatementForScope.Value, callerScope);
+                    return new(false, "You are not assigned to this statement.");
+                }
+            }
+
             if (procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase)
                 && entityType.Equals("menu-master", StringComparison.OrdinalIgnoreCase))
             {
@@ -183,6 +236,31 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             {
                 await SaveCustomReleaseSourceStructureAsync(connection, payload, enteredBy, cancellationToken);
                 return new(true, "Saved successfully.");
+            }
+            // Rule 6 — provisioning the auto-created Organisation GRAC Admin
+            // is a separate step from the org save so that failures do not
+            // roll back the org creation. The gateway (Web) invokes this
+            // right after a successful organization-setup save.
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("organization-admin-provision", StringComparison.OrdinalIgnoreCase))
+            {
+                var provisionResult = await ProvisionOrganizationAdminAsync(connection, payload, enteredBy, cancellationToken);
+                return new(true, "Success", provisionResult);
+            }
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("organization-admin-mark-emailed", StringComparison.OrdinalIgnoreCase))
+            {
+                await MarkCredentialsEmailedAsync(connection, payload, enteredBy, cancellationToken);
+                return new(true, "Marked.");
+            }
+            // Rule 3 — Update Owner action on the subscribed-framework
+            // release list. Validates ownership + returns granular errors
+            // instead of a single opaque "Cannot update" message.
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase))
+            {
+                var updateResult = await UpdateSubscriptionOwnerAsync(connection, payload, enteredBy, cancellationToken);
+                return updateResult;
             }
 
             var canUseOrganizationFallback = CanUseOrganizationFallback(payload);
@@ -525,14 +603,26 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
+            -- Fix for Update Owner action — the subscribed-frameworks
+            -- summary now surfaces subscription_id / owner_id / subscription_type
+            -- so the UI can act on the actual repository_subscription row
+            -- rather than the framework release id. Multiple subscriptions
+            -- against the same (org, release) collapse to the earliest one.
             ;WITH subscribed AS (
-                SELECT DISTINCT s.organization_id,s.release_id,COALESCE(s.artifact_id,r.artifact_id) artifact_id
+                SELECT
+                    s.organization_id,
+                    s.release_id,
+                    COALESCE(s.artifact_id,r.artifact_id) artifact_id,
+                    MIN(s.subscription_id) subscription_id,
+                    MAX(s.owner_id) owner_id,
+                    MAX(s.subscription_type) subscription_type
                 FROM grac_practice.repository_subscription s
                 JOIN grac_new.release r ON r.release_id=s.release_id
                 WHERE s.status='Active'
                   AND ISNULL(s.subscription_status,'Active')='Active'
                   AND s.release_id IS NOT NULL
                   AND (@organization_id IS NULL OR s.organization_id=@organization_id)
+                GROUP BY s.organization_id, s.release_id, COALESCE(s.artifact_id,r.artifact_id)
             ),
             -- Statement-level counts. Repository statements (grac_new.framework_statement,
             -- Active, attached to an Active node of the same release) drive the count;
@@ -565,6 +655,14 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             SELECT
                 r.release_id ReleaseId,
                 a.artifact_id ArtifactId,
+                sub.subscription_id SubscriptionId,
+                COALESCE(sub.subscription_type, N'Central') SubscriptionType,
+                sub.owner_id OwnerId,
+                CASE
+                    WHEN own.employee_id IS NULL THEN N''
+                    ELSE own.employee_code + N' - ' + own.employee_name
+                END OwnerName,
+                sub.organization_id OrganizationId,
                 auth.authority_code AuthorityCode,
                 auth.authority_name Authority,
                 a.artifact_code ArtifactCode,
@@ -580,6 +678,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             LEFT JOIN grac_new.artifact a ON a.artifact_id=COALESCE(sub.artifact_id,r.artifact_id)
             LEFT JOIN grac_new.authority auth ON auth.authority_id=a.authority_id
             LEFT JOIN organization_statement_counts osc ON osc.organization_id=sub.organization_id AND osc.release_id=sub.release_id
+            LEFT JOIN grac_practice.organization_employee own ON own.employee_id=sub.owner_id
+                AND own.organization_id=sub.organization_id
 
             ORDER BY Authority,ArtifactName,ReleaseVersion;
             """;
@@ -597,6 +697,14 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 SELECT
                     -1 * s.subscription_id ReleaseId,
                     CAST(NULL AS BIGINT) ArtifactId,
+                    s.subscription_id SubscriptionId,
+                    N'Custom' SubscriptionType,
+                    s.owner_id OwnerId,
+                    CASE
+                        WHEN own.employee_id IS NULL THEN N''
+                        ELSE own.employee_code + N' - ' + own.employee_name
+                    END OwnerName,
+                    s.organization_id OrganizationId,
                     N'ORG' AuthorityCode,
                     N'Organization' Authority,
                     N'CUSTOM' ArtifactCode,
@@ -608,6 +716,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     0 NotUpdatedStatementsCount,
                     0 NotApplicableStatementsCount
                 FROM grac_practice.repository_subscription s
+                LEFT JOIN grac_practice.organization_employee own ON own.employee_id=s.owner_id
+                    AND own.organization_id=s.organization_id
                 WHERE s.subscription_type=N'Custom'
                   AND s.status=N'Active'
                   AND ISNULL(s.subscription_status,N'Active')=N'Active'
@@ -2742,6 +2852,40 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         catch (JsonException) { return null; }
     }
 
+    // Rule 5 — accessor for the caller's employee_id inside _security.
+    private static long? JsonSecurityEmployeeId(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            if (!document.RootElement.TryGetProperty("_security", out var security)) return null;
+            if (!security.TryGetProperty("employeeId", out var element)) return null;
+            return element.ValueKind switch
+            {
+                JsonValueKind.Number when element.TryGetInt64(out var v) => v,
+                JsonValueKind.String when long.TryParse(element.GetString(), out var v) => v,
+                _ => null
+            };
+        }
+        catch (JsonException) { return null; }
+    }
+
+    // Rule 5 — accessor for the caller's data scope inside _security.
+    // Defaults to "ORGANIZATION" — anything narrower must be set
+    // explicitly by the Web tier from the session.
+    private static string JsonSecurityDataScope(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            if (!document.RootElement.TryGetProperty("_security", out var security)) return "ORGANIZATION";
+            if (!security.TryGetProperty("dataScope", out var scope) || scope.ValueKind != JsonValueKind.String) return "ORGANIZATION";
+            var value = scope.GetString();
+            return string.IsNullOrWhiteSpace(value) ? "ORGANIZATION" : value!.ToUpperInvariant();
+        }
+        catch (JsonException) { return "ORGANIZATION"; }
+    }
+
     private static bool JsonSecurityIsSystemAdmin(string payload)
     {
         try
@@ -2832,6 +2976,197 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         Add(command, "@subject", subject);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is bool allowed ? allowed : Convert.ToInt32(result) == 1;
+    }
+
+    // Rule 5 — scope check for release-level actions. GLOBAL/ORGANIZATION
+    // scopes always pass; narrower scopes must own the release (via
+    // grac_practice.pm_is_release_visible from migration 034).
+    private static async Task<bool> HasReleaseAccessAsync(
+        DbConnection connection,
+        long employeeId,
+        string dataScope,
+        int organizationId,
+        int subscriptionId,
+        CancellationToken cancellationToken)
+    {
+        if (subscriptionId <= 0) return false;
+        var scope = string.IsNullOrWhiteSpace(dataScope) ? "ORGANIZATION" : dataScope.ToUpperInvariant();
+        if (scope is "GLOBAL" or "ORGANIZATION") return true;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT grac_practice.pm_is_release_visible(@employee_id, @data_scope, @organization_id, @subscription_id);";
+        Add(command, "@employee_id", employeeId);
+        Add(command, "@data_scope", scope);
+        Add(command, "@organization_id", organizationId);
+        Add(command, "@subscription_id", subscriptionId);
+        try
+        {
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is bool allowed ? allowed : (result != null && Convert.ToInt32(result) == 1);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException)
+        {
+            // Migration 034 not yet applied — fall open for GLOBAL/ORGANIZATION
+            // (checked above) and closed otherwise.
+            return false;
+        }
+    }
+
+    // Rule 5 — scope check for statement-level actions.
+    private static async Task<bool> HasStatementAccessAsync(
+        DbConnection connection,
+        long employeeId,
+        string dataScope,
+        int organizationId,
+        int customStatementId,
+        CancellationToken cancellationToken)
+    {
+        if (customStatementId <= 0) return false;
+        var scope = string.IsNullOrWhiteSpace(dataScope) ? "ORGANIZATION" : dataScope.ToUpperInvariant();
+        if (scope is "GLOBAL" or "ORGANIZATION") return true;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT grac_practice.pm_is_statement_visible(@employee_id, @data_scope, @organization_id, @custom_statement_id);";
+        Add(command, "@employee_id", employeeId);
+        Add(command, "@data_scope", scope);
+        Add(command, "@organization_id", organizationId);
+        Add(command, "@custom_statement_id", customStatementId);
+        try
+        {
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is bool allowed ? allowed : (result != null && Convert.ToInt32(result) == 1);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException)
+        {
+            return false;
+        }
+    }
+
+    // Rule 6 — provision the Organisation GRAC Admin employee for a
+    // newly-created org. Called by the Web gateway right after the
+    // organization-setup save succeeds. Payload keys:
+    //   organizationId, adminEmail, adminName, passwordHash
+    // The plaintext OTP is generated on the Web side; only the hash
+    // enters this API.
+    private static async Task<List<List<Dictionary<string, object?>>>> ProvisionOrganizationAdminAsync(
+        DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
+    {
+        var organizationId = JsonInt(payload, "organizationId")
+            ?? throw new InvalidOperationException("organization-admin-provision requires organizationId.");
+        var adminEmail = JsonText(payload, "adminEmail")
+            ?? throw new InvalidOperationException("organization-admin-provision requires adminEmail.");
+        var adminName = JsonText(payload, "adminName") ?? adminEmail;
+        var passwordHash = JsonText(payload, "passwordHash")
+            ?? throw new InvalidOperationException("organization-admin-provision requires passwordHash.");
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "grac_practice.pm_create_organization_admin";
+        command.CommandType = CommandType.StoredProcedure;
+        Add(command, "@organization_id", organizationId);
+        Add(command, "@admin_email", adminEmail);
+        Add(command, "@admin_name", adminName);
+        Add(command, "@password_hash", passwordHash);
+        Add(command, "@entered_by", enteredBy ?? "system");
+        return await ReadTablesAsync(command, cancellationToken);
+    }
+
+    // Rule 3 — Update Owner action for a subscribed framework release.
+    // Runs a rich validation before mutating repository_subscription and
+    // returns specific messages so the UI can tell the user exactly
+    // what's wrong (subscription missing, wrong org, employee wrong org,
+    // employee inactive, subscription retired, etc.).
+    private static async Task<PracticeRepositoryResult> UpdateSubscriptionOwnerAsync(
+        DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
+    {
+        var subscriptionId = JsonInt(payload, "subscriptionId");
+        var organizationId = JsonInt(payload, "organizationId");
+        var ownerId = JsonInt(payload, "ownerId");
+
+        if (!subscriptionId.HasValue || subscriptionId.Value <= 0)
+            return new(false, "Release subscription not found. Please refresh the release list and try again.");
+        if (!organizationId.HasValue || organizationId.Value <= 0)
+            return new(false, "Organization is required to update the release owner.");
+        if (!ownerId.HasValue || ownerId.Value <= 0)
+            return new(false, "Please select an employee to assign as the release owner.");
+
+        // 1. Verify the subscription exists and belongs to the requested organization.
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT s.organization_id, s.status, ISNULL(s.subscription_status, 'Active') subscription_status
+                FROM grac_practice.repository_subscription s
+                WHERE s.subscription_id = @subscription_id;
+                """;
+            Add(command, "@subscription_id", subscriptionId.Value);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return new(false, "Release subscription not found.");
+            var orgOnRow = Convert.ToInt64(reader["organization_id"]);
+            var statusOnRow = Convert.ToString(reader["status"]) ?? "";
+            var subscriptionStatusOnRow = Convert.ToString(reader["subscription_status"]) ?? "";
+            if (orgOnRow != organizationId.Value)
+                return new(false, "Release does not belong to this Organization.");
+            if (!string.Equals(statusOnRow, "Active", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(subscriptionStatusOnRow, "Active", StringComparison.OrdinalIgnoreCase))
+                return new(false, "Release is retired or inactive.");
+        }
+
+        // 2. Verify the employee belongs to the same org and is Active.
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT e.organization_id, e.status
+                FROM grac_practice.organization_employee e
+                WHERE e.employee_id = @owner_id;
+                """;
+            Add(command, "@owner_id", ownerId.Value);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return new(false, "Selected employee could not be found.");
+            var empOrg = Convert.ToInt64(reader["organization_id"]);
+            var empStatus = Convert.ToString(reader["status"]) ?? "";
+            if (empOrg != organizationId.Value)
+                return new(false, "Employee does not belong to this Organization.");
+            if (!string.Equals(empStatus, "Active", StringComparison.OrdinalIgnoreCase))
+                return new(false, "Selected employee is not Active.");
+        }
+
+        // 3. Perform the assignment. Note the WHERE also re-checks
+        //    organization_id + status='Active' so a concurrent retire
+        //    can't be silently overwritten.
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                UPDATE grac_practice.repository_subscription
+                SET owner_id = @owner_id,
+                    updated_by = @entered_by,
+                    updated_dt = SYSUTCDATETIME()
+                WHERE subscription_id = @subscription_id
+                  AND organization_id = @organization_id
+                  AND status = 'Active';
+                SELECT @@ROWCOUNT AS RowsAffected;
+                """;
+            Add(command, "@subscription_id", subscriptionId.Value);
+            Add(command, "@organization_id", organizationId.Value);
+            Add(command, "@owner_id", ownerId.Value);
+            Add(command, "@entered_by", enteredBy ?? "system");
+            var rowsAffected = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken) ?? 0);
+            if (rowsAffected == 0)
+                return new(false, "Release could not be updated (it may have been retired). Please refresh and try again.");
+        }
+        return new(true, "Release owner updated successfully.");
+    }
+
+    // Rule 6 — best-effort flag flipped after successful SMTP send.
+    private static async Task MarkCredentialsEmailedAsync(
+        DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
+    {
+        var employeeId = JsonInt(payload, "employeeId")
+            ?? throw new InvalidOperationException("organization-admin-mark-emailed requires employeeId.");
+        await using var command = connection.CreateCommand();
+        command.CommandText = "grac_practice.pm_mark_credentials_emailed";
+        command.CommandType = CommandType.StoredProcedure;
+        Add(command, "@employee_id", employeeId);
+        Add(command, "@entered_by", enteredBy ?? "system");
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public static object? GetLastSqlDiagnostic()

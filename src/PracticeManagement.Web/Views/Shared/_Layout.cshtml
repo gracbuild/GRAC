@@ -8,9 +8,14 @@
     var appBasePath = Convert.ToString(ViewBag.AppBasePath);
     if (string.IsNullOrWhiteSpace(appBasePath)) appBasePath = Context.Request.PathBase.Value ?? "";
     var isOrganizationManagementModule = ViewBag.IsOrganizationManagementModule as bool? ?? false;
-    var logoutUrl = isOrganizationManagementModule && string.IsNullOrWhiteSpace(Context.Request.PathBase.Value)
-        ? Url.Content("~/OrganizationManagement/Login/Logout")
-        : Url.Action("Logout", "Login");
+    var pathBaseForLogout = Context.Request.PathBase.Value?.TrimEnd('/') ?? "";
+    // Build logout URL explicitly — Url.Action can pick the
+    // organization-management-login route and emit
+    // /OrganizationManagement/Login/Logout on a Practice Management host,
+    // which then gets double-prefixed by PathBase.
+    var logoutUrl = isOrganizationManagementModule && string.IsNullOrEmpty(pathBaseForLogout)
+        ? "/OrganizationManagement/Login/Logout"
+        : $"{pathBaseForLogout}/Login/Logout";
     if (string.IsNullOrWhiteSpace(currentArea)) currentArea = ViewContext.RouteData.Values["areaKey"]?.ToString() ?? "";
     var isDashboard = string.IsNullOrWhiteSpace(currentArea);
     var dashboardScreen = screens.FirstOrDefault(x => x.Key == "dashboard");

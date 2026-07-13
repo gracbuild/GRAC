@@ -101,6 +101,12 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
         ViewBag.Screens = await VisibleScreens(cancellationToken);
         ViewBag.MenuItems = await VisibleMenu(cancellationToken);
         ViewBag.Permissions = ActionsFor(areaKey);
+        // Rules 3 + 4 — Source Statements needs to render actions and
+        // filter releases based on the caller's role scope, not just
+        // permissions. Expose the session identity to the view layer.
+        ViewBag.DataScope = HttpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION";
+        ViewBag.RoleName = HttpContext.Session.GetString(PracticeSessionIdentity.RoleNameKey) ?? "";
+        ViewBag.EmployeeId = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey) ?? "";
         if (areaKey.Equals("practice-operationalization", StringComparison.OrdinalIgnoreCase)) areaKey = "resolve";
         var screen = PracticeScreen.All.FirstOrDefault(x => x.Key.Equals(areaKey, StringComparison.OrdinalIgnoreCase));
         if (screen is null) return NotFound();
@@ -120,6 +126,9 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
         ViewBag.Screens = await VisibleScreens(cancellationToken);
         ViewBag.MenuItems = await VisibleMenu(cancellationToken);
         ViewBag.Permissions = ActionsFor(areaKey);
+        ViewBag.DataScope = HttpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION";
+        ViewBag.RoleName = HttpContext.Session.GetString(PracticeSessionIdentity.RoleNameKey) ?? "";
+        ViewBag.EmployeeId = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey) ?? "";
         var screen = PracticeScreen.All.FirstOrDefault(x => x.Key.Equals(areaKey, StringComparison.OrdinalIgnoreCase));
         if (screen is null) return NotFound();
         var allowedGroup = screen.Group.Equals(PracticeScreen.PracticeManagementGroup, StringComparison.OrdinalIgnoreCase)
@@ -177,10 +186,14 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
         return permissionPolicy.ActionsFor(Roles(), areaKey);
     }
 
+    // Strict — module identity comes from positive configuration, the
+    // deployed PathBase, or an explicit moduleKey route value. Do NOT
+    // widen this to Request.Path segments — a Practice Management host
+    // must never flip into OrgMgmt mode because of a bad redirect.
     private bool IsOrganizationManagementModule() =>
-        configuration["Module:Key"]?.Equals("OrganizationManagement", StringComparison.OrdinalIgnoreCase) == true
+        string.Equals(configuration["Module:Key"], "OrganizationManagement", StringComparison.OrdinalIgnoreCase)
         || Request.PathBase.Equals("/OrganizationManagement", StringComparison.OrdinalIgnoreCase)
-        || RouteData.Values["moduleKey"]?.ToString()?.Equals("OrganizationManagement", StringComparison.OrdinalIgnoreCase) == true;
+        || string.Equals(RouteData.Values["moduleKey"]?.ToString(), "OrganizationManagement", StringComparison.OrdinalIgnoreCase);
 
     private string ModuleTitle() => IsOrganizationManagementModule() ? "Organization Management" : "Practice Management";
 
@@ -195,10 +208,13 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
 
     private IActionResult RedirectToLogin()
     {
-        var returnUrl = Request.Path + Request.QueryString;
+        // returnUrl MUST include PathBase — Request.Path is post-strip,
+        // so a raw Path+QueryString would send the browser to the wrong
+        // origin after login on a hosted PathBase deployment.
+        var returnUrl = Request.PathBase + Request.Path + Request.QueryString;
         var moduleBase = ModuleRouteBase();
         return string.IsNullOrWhiteSpace(moduleBase)
-            ? RedirectToAction("Index", "Login", new { returnUrl })
+            ? LocalRedirect($"/Login?returnUrl={Uri.EscapeDataString(returnUrl)}")
             : LocalRedirect($"{moduleBase}/Login?returnUrl={Uri.EscapeDataString(returnUrl)}");
     }
 

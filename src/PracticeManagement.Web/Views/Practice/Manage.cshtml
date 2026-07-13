@@ -249,6 +249,10 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         window.pmScreen=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model));
         window.pmApi="@ViewBag.ApiBaseUrl";
         window.pmPermissions=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(permissions));
+        // Rules 3 + 4 — role scope drives per-row actions and release filtering on Source Statements.
+        window.pmDataScope="@(ViewBag.DataScope ?? "ORGANIZATION")";
+        window.pmRoleName="@(ViewBag.RoleName ?? "")";
+        window.pmEmployeeId="@(ViewBag.EmployeeId ?? "")";
     </script>
     <script src="~/js/practice.js" asp-append-version="true"></script>
 }

@@ -106,16 +106,35 @@ public sealed class LoginController(
         return DefaultRedirectToLogin();
     }
 
-    private IActionResult DefaultRedirect() =>
-        IsOrganizationManagementRequest() ? LocalRedirect("/OrganizationManagement") : RedirectToAction("Index", "Practice");
+    private IActionResult DefaultRedirect()
+    {
+        var pathBase = CurrentPathBase();
+        return IsOrganizationManagementRequest()
+            ? LocalRedirect(BuildLocalUrl(pathBase, "/OrganizationManagement"))
+            : LocalRedirect(BuildLocalUrl(pathBase, "/Practice"));
+    }
 
-    private IActionResult DefaultRedirectToLogin() =>
-        IsOrganizationManagementRequest() ? LocalRedirect("/OrganizationManagement/Login") : RedirectToAction(nameof(Index));
+    private IActionResult DefaultRedirectToLogin()
+    {
+        var pathBase = CurrentPathBase();
+        return IsOrganizationManagementRequest()
+            ? LocalRedirect(BuildLocalUrl(pathBase, "/OrganizationManagement/Login"))
+            : LocalRedirect(BuildLocalUrl(pathBase, "/Login"));
+    }
 
+    // Strict — anchor the module identity on positive configuration and
+    // on the deployed PathBase only. Do NOT infer OrganizationManagement
+    // from Request.Path segments; otherwise a stray "/OrganizationManagement"
+    // in the URL (e.g. after a bad redirect) permanently poisons the
+    // module mode for a Practice Management host.
     private bool IsOrganizationManagementRequest() =>
-        configuration["Module:Key"]?.Equals("OrganizationManagement", StringComparison.OrdinalIgnoreCase) == true
-        || Request.PathBase.Equals("/OrganizationManagement", StringComparison.OrdinalIgnoreCase)
-        || Request.Path.StartsWithSegments("/OrganizationManagement", StringComparison.OrdinalIgnoreCase);
+        string.Equals(configuration["Module:Key"], "OrganizationManagement", StringComparison.OrdinalIgnoreCase)
+        || Request.PathBase.Equals("/OrganizationManagement", StringComparison.OrdinalIgnoreCase);
+
+    private string CurrentPathBase() => Request.PathBase.Value?.TrimEnd('/') ?? "";
+
+    private static string BuildLocalUrl(string pathBase, string path) =>
+        string.IsNullOrEmpty(pathBase) ? path : $"{pathBase}{path}";
 
     private static IEnumerable<string> ExpandPermissionAliases(IEnumerable<string> permissions)
     {

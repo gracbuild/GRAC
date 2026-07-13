@@ -10,6 +10,7 @@ builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 builder.Services.AddHttpClient<SecurePracticeClient>();
 builder.Services.AddScoped<PracticeLoginService>();
 builder.Services.AddScoped<PracticeMenuService>();
+builder.Services.AddSingleton<IPracticeEmailService, PracticeEmailService>();
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
 builder.Services.AddSingleton<EnvelopeCrypto>();
 builder.Services.AddSingleton<SignedAccessTokenService>();
@@ -62,6 +63,21 @@ app.UseRouting();
 app.UseSession();
 app.UseRateLimiter();
 app.UseAuthorization();
+
+// Practice Management explicit routes are registered FIRST so URL
+// generation for controller=Practice, action=Index or controller=Login
+// never accidentally picks the OrganizationManagement route below
+// (whose defaults would otherwise satisfy the requested values and
+// emit /OrganizationManagement/... URLs on a Practice Management host).
+app.MapControllerRoute(
+    name: "practice-management-login",
+    pattern: "Login/{action=Index}",
+    defaults: new { controller = "Login" });
+
+app.MapControllerRoute(
+    name: "practice-management-home",
+    pattern: "Practice/{areaKey?}",
+    defaults: new { controller = "Practice", action = "Index" });
 
 app.MapControllerRoute(
     name: "organization-management-login",

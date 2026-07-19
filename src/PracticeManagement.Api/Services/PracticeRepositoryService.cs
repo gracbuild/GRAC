@@ -1735,12 +1735,16 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 q.origin_type OriginType,
                 q.repository_requirement_id RepositoryRequirementId,
                 q.org_statement_id OrgStatementId,
-                q.organization_control_id OrganizationControlId,
-                COALESCE(oc.control_code,fs.statement_reference) ControlCode,
-                COALESCE(oc.control_name,fs.statement_title) ControlName,
-                COALESCE(CONCAT(oc.control_code,N' - ',oc.control_name),CONCAT(fs.statement_reference,N' - ',fs.statement_title)) MappedControl,
-                COALESCE(ofs.release_id,oc.release_id) ReleaseId,
-                COALESCE(r.artifact_id,oc.artifact_id) ArtifactId,
+                COALESCE(filter_oc.organization_control_id,q.organization_control_id) OrganizationControlId,
+                COALESCE(filter_oc.control_code,oc.control_code,fs.statement_reference) ControlCode,
+                COALESCE(filter_oc.control_name,oc.control_name,fs.statement_title) ControlName,
+                COALESCE(
+                    CONCAT(filter_oc.control_code,N' - ',filter_oc.control_name),
+                    CONCAT(oc.control_code,N' - ',oc.control_name),
+                    CONCAT(fs.statement_reference,N' - ',fs.statement_title)
+                ) MappedControl,
+                COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id) ReleaseId,
+                COALESCE(r.artifact_id,filter_oc.artifact_id,oc.artifact_id) ArtifactId,
                 q.requirement_code Code,
                 q.requirement_name Name,
                 q.requirement_statement Statement,
@@ -1769,6 +1773,28 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 AND fs.release_id=ofs.release_id
             LEFT JOIN grac_new.release r ON r.release_id=ofs.release_id
             LEFT JOIN grac_practice.organization_control oc ON oc.organization_control_id=q.organization_control_id
+            -- Migration 057 introduced grac_practice.organization_control_requirement to
+            -- carry the many-to-many mapping between Controls and Practices. When two
+            -- Applicable Controls share the same repository requirement, the second one
+            -- reuses the existing Practice (dedup) and only a mapping row is added — the
+            -- Practice's primary organization_control_id still points at the *first*
+            -- Applicable Control. filter_oc lets the drilled-in control drive the
+            -- displayed ControlCode/ControlName/MappedControl/ReleaseId/ArtifactId
+            -- when the caller filters by @organization_control_id and the Practice is
+            -- reached through a mapping row instead of the primary column.
+            LEFT JOIN grac_practice.organization_control filter_oc
+                ON @organization_control_id IS NOT NULL
+                AND filter_oc.organization_control_id=@organization_control_id
+                AND filter_oc.organization_id=q.organization_id
+                AND (
+                    q.organization_control_id=@organization_control_id
+                    OR EXISTS(
+                        SELECT 1
+                        FROM grac_practice.organization_control_requirement m
+                        WHERE m.organization_requirement_id=q.organization_requirement_id
+                          AND m.organization_control_id=@organization_control_id
+                          AND m.status='Active')
+                )
             LEFT JOIN grac_practice.record_status_master rs ON rs.record_status_id=q.record_status_id
             LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=q.applicability_status_id
             LEFT JOIN grac_practice.implementation_status_master ims ON ims.implementation_status_id=q.implementation_status_id
@@ -1796,14 +1822,27 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                   SELECT 1
                   FROM grac_practice.repository_subscription s
                   WHERE s.organization_id=q.organization_id
-                    AND s.release_id=COALESCE(ofs.release_id,oc.release_id)
+                    AND s.release_id=COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id)
                     AND s.status='Active'
                     AND ISNULL(s.subscription_status,'Active')='Active'
               )
               AND (@p_id=0 OR q.organization_requirement_id=@p_id)
               AND (@organization_id IS NULL OR q.organization_id=@organization_id)
-              AND (@organization_control_id IS NULL OR q.organization_control_id=@organization_control_id)
-              AND (@release_id IS NULL OR COALESCE(ofs.release_id,oc.release_id)=@release_id)
+              -- Accept the requirement if it is linked to @organization_control_id
+              -- either through the legacy "primary" column on organization_requirement
+              -- OR through the many-to-many organization_control_requirement mapping
+              -- created by migration 057. Without the mapping lookup, a Practice that
+              -- was deduped under Control 43's primary key becomes invisible when the
+              -- user drills in from Control 16 that shares the same repo requirement.
+              AND (@organization_control_id IS NULL
+                   OR q.organization_control_id=@organization_control_id
+                   OR EXISTS(
+                       SELECT 1
+                       FROM grac_practice.organization_control_requirement m
+                       WHERE m.organization_requirement_id=q.organization_requirement_id
+                         AND m.organization_control_id=@organization_control_id
+                         AND m.status='Active'))
+              AND (@release_id IS NULL OR COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id)=@release_id)
               -- Statement-scoped view: resolve statement membership through
               -- organization_statement_practice_mapping so a practice linked to
               -- multiple applicable statements appears under each of them.
@@ -1820,8 +1859,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
               AND (@origin_type IS NULL OR q.origin_type=@origin_type)
               AND (@date_from IS NULL OR q.entered_dt>=@date_from)
               AND (@date_to IS NULL OR q.entered_dt<DATEADD(DAY,1,@date_to))
-              AND (@p_search='' OR ISNULL(q.requirement_code,'') LIKE '%'+@p_search+'%' OR ISNULL(q.requirement_name,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(fs.statement_reference,'') LIKE '%'+@p_search+'%' OR ISNULL(fs.statement_title,'') LIKE '%'+@p_search+'%')
-            ORDER BY COALESCE(rsmap.SourceStructureDisplayOrder,2147483647),COALESCE(rsmap.FrameworkStatementDisplayOrder,2147483647),COALESCE(fs.statement_reference,oc.control_code),q.requirement_code OFFSET @offset ROWS FETCH NEXT @page_size ROWS ONLY;
+              AND (@p_search='' OR ISNULL(q.requirement_code,'') LIKE '%'+@p_search+'%' OR ISNULL(q.requirement_name,'') LIKE '%'+@p_search+'%' OR ISNULL(filter_oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(filter_oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(fs.statement_reference,'') LIKE '%'+@p_search+'%' OR ISNULL(fs.statement_title,'') LIKE '%'+@p_search+'%')
+            ORDER BY COALESCE(rsmap.SourceStructureDisplayOrder,2147483647),COALESCE(rsmap.FrameworkStatementDisplayOrder,2147483647),COALESCE(fs.statement_reference,filter_oc.control_code,oc.control_code),q.requirement_code OFFSET @offset ROWS FETCH NEXT @page_size ROWS ONLY;
             """;
         command.CommandType = CommandType.Text;
         Add(command, "@p_id", id);

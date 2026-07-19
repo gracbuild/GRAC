@@ -1,0 +1,741 @@
+@*
+    Task Center — tabbed layout (P4, standard GRAC grid style)
+    Uses the same DOM patterns as Manage.cshtml:
+      * pm-tabs / pm-tab-panel for tab shell
+      * pm-table-wrap + bare <table> for grids (same CSS as Practice Instances)
+      * pm-action-trigger for 3-dot menus
+      * pm-pager with pm-button
+
+    Scope change:
+      "Gaps" (Practice Instances requiring implementation work) moved
+      OUT of Task Center into its own module — see Views/Practice/Partials/gaps.cshtml
+      and migration 050. Task Center is now purely for TASKS:
+        * Implementation Tasks (workflow-driven)
+        * Assurance Tasks       (workflow-driven, placeholder)
+        * Custom Tasks          (owner-authored via + New Task)
+
+      The "+ New Task" button creates ONLY Custom tasks (task_type_code =
+      'Custom'). Implementation / Assurance tasks are created upstream —
+      Implementation tasks via Gap Center's "Add Implementation Task"
+      action, Assurance tasks via the assurance subsystem (later phase).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="taskCenterUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-flag-checkered pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="taskCenterUnavailableTitle">Task Center is not yet enabled for this organization.</h2>
+        <p id="taskCenterUnavailableBody">Ask a GRAC Admin to turn on the <code>screen.tasks</code> feature flag in your organization settings.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="taskCenterRoot" hidden>
+
+    <div class="pm-tabs" role="tablist" aria-label="Task Center tabs">
+        <button role="tab" data-tab="implementation" class="active" aria-selected="true">Implementation Tasks <span class="pm-badge" id="tabCountImpl">0</span></button>
+        <button role="tab" data-tab="assurance"                     aria-selected="false">Assurance Tasks <span class="pm-badge" id="tabCountAssurance">0</span></button>
+        <button role="tab" data-tab="custom"                        aria-selected="false">Custom Tasks <span class="pm-badge" id="tabCountCustom">0</span></button>
+    </div>
+
+    <div class="pm-toolbar">
+        <select id="taskFilterOrganization">
+            <option value="">All organizations</option>
+        </select>
+        <input id="taskCenterSearch" type="text" placeholder="Search subject / instance / practice..." />
+        <button class="pm-button icon" id="taskRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="taskAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> New Task
+        </button>
+    </div>
+
+    @* Gaps tab was moved out into its own Gap Center module (see gaps.cshtml + migration 050). *@
+
+    <!-- Implementation Tasks tab -->
+    <div class="pm-tab-panel" data-panel="implementation">
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task #</th><th>Task Name</th><th>Practice Instance</th><th>Practice</th>
+                        <th>Assigned To</th><th>Priority</th><th>Target Date</th>
+                        <th>Workflow</th><th>Current Stage</th><th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="taskBody-implementation"><tr><td colspan="11" class="pm-empty">Select an organization to load tasks.</td></tr></tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="implementation">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
+    <!-- Assurance Tasks tab -->
+    <div class="pm-tab-panel" data-panel="assurance" hidden>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task #</th><th>Assurance Activity</th><th>Practice Instance</th><th>Practice</th>
+                        <th>Assigned To</th><th>Priority</th><th>Due Date</th>
+                        <th>Workflow</th><th>Current Stage</th><th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="taskBody-assurance"><tr><td colspan="11" class="pm-empty">No Assurance tasks yet. Auto-generation lands in a later phase.</td></tr></tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="assurance">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
+    <!-- Custom Tasks tab -->
+    <div class="pm-tab-panel" data-panel="custom" hidden>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task #</th><th>Task Name</th><th>Related Entity</th><th>Related Record</th>
+                        <th>Assigned To</th><th>Priority</th><th>Target Date</th>
+                        <th>Workflow</th><th>Current Stage</th><th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="taskBody-custom"><tr><td colspan="11" class="pm-empty">No custom tasks yet. Click + New Task to create one.</td></tr></tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="custom">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
+</section>
+
+@* Add Implementation Task modal — exposes window.__openAddImplTask *@
+<partial name="Partials/_add-implementation-task-modal" model="Model" />
+
+@* New Task dialog — locked to task_type_code = 'Custom' *@
+<dialog id="newTaskDialog" style="border:none; border-radius:8px; padding:0; max-width:620px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="newTaskForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">New Task (Custom)</h2>
+            <button type="button" id="newTaskClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="newTaskMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; margin-bottom:14px;">
+            <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div>
+            <div id="newTaskOrgLabel" style="font-weight:600; color:#0f172a;">—</div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Task Name <span style="color:#b91c1c;">*</span>
+                <input id="newTaskTitle" type="text" maxlength="250" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
+                <textarea id="newTaskDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            </label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Assigned To <span style="color:#b91c1c;">*</span>
+                    <select id="newTaskAssignee" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="">Loading employees...</option>
+                    </select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
+                    <select id="newTaskPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="Low">Low</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Start Date
+                    <input id="newTaskStartDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Target Date
+                    <input id="newTaskTargetDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
+                <textarea id="newTaskRemarks" rows="2" maxlength="1000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="newTaskCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="newTaskSubmit" class="pm-button primary">Create Task</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    // Published deployments run under a PathBase (e.g. "/Practicemanagement"
+    // per appsettings.json). The layout exposes it as window.appBasePath;
+    // prepend it to every same-origin fetch so the URL becomes
+    // `${basePath}/practice/api/...` -- otherwise the request hits
+    // `/practice/api/...` at the origin root and returns 404 in production
+    // even though it works locally where PathBase is empty.
+    //
+    // IMPORTANT: this IIFE runs at script-parse time -- BEFORE the layout's
+    // trailing inline script that sets window.pmPathBase. If we captured
+    // APP_BASE eagerly here it would always be '' in published builds.
+    // Resolve lazily inside U() so the actual fetch URL is computed at call
+    // time (which happens on DOMContentLoaded / user interaction -- well
+    // after every inline layout script has run).
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    let selectedOrgId = null;
+    let activeTab     = 'implementation';   // was 'gaps' — Gaps moved to its own module
+    let pagesByTab    = { implementation: 1, assurance: 1, custom: 1 };
+    const PAGE_SIZE   = 25;
+    let searchDebounce = null;
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    async function init() {
+        const orgs = await loadOrgs();
+        const root    = document.getElementById('taskCenterRoot');
+        const unavail = document.getElementById('taskCenterUnavailable');
+        if (!orgs.length) {
+            unavail.hidden = false;
+            document.getElementById('taskCenterUnavailableTitle').textContent = 'No organizations are available for your account.';
+            document.getElementById('taskCenterUnavailableBody').textContent  = 'Ask a GRAC Admin to map your account to an organization.';
+            return;
+        }
+        root.hidden = false;
+        populateOrgSelect(orgs);
+        document.getElementById('taskFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('taskRefreshBtn').addEventListener('click', reloadCurrentTab);
+        document.getElementById('taskAddBtn').addEventListener('click', openNewTaskDialog);
+        document.getElementById('taskCenterSearch').addEventListener('input', function () {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(function () { pagesByTab[activeTab] = 1; reloadCurrentTab(); }, 300);
+        });
+        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (btn) {
+            btn.addEventListener('click', function () { switchTab(btn.getAttribute('data-tab')); });
+        });
+        wirePagers();
+        wireNewTaskDialog();
+        wireRowMenu();
+
+        // Deep-link support for Gap Center → Task Center hand-off.
+        //   Example: /Practice/Index/tasks#tab=implementation&search=INST-001
+        // Parse the hash once, apply tab + search, then rely on onOrgChange
+        // to fire the actual data load.
+        applyDeepLinkFromHash();
+
+        await onOrgChange();
+    }
+
+    function applyDeepLinkFromHash() {
+        const raw = (window.location.hash || '').replace(/^#/, '');
+        if (!raw) return;
+        const params = new URLSearchParams(raw);
+        const tab = (params.get('tab') || '').toLowerCase();
+        const q   = params.get('search') || '';
+        if (tab === 'implementation' || tab === 'assurance' || tab === 'custom') {
+            activeTab = tab;
+            document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
+                const on = b.getAttribute('data-tab') === tab;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            document.querySelectorAll('.pm-tab-panel').forEach(function (p) {
+                p.hidden = p.getAttribute('data-panel') !== tab;
+            });
+        }
+        if (q) {
+            const input = document.getElementById('taskCenterSearch');
+            if (input) input.value = q;
+        }
+    }
+
+    async function loadOrgs() {
+        try {
+            const r = await fetch(U('/practice/api/organizations/allowed'), { credentials: 'same-origin' });
+            if (!r.ok) return [];
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            return rows.map(function (row) {
+                return {
+                    value: String(row.organizationId || row.OrganizationId || ''),
+                    label: String(row.organizationName || row.OrganizationName || '')
+                };
+            }).filter(function (o) { return o.value; });
+        } catch (_) { return []; }
+    }
+    function populateOrgSelect(orgs) {
+        // Unified behavior (Gap Center + Task Center):
+        //   * No "Select organization" placeholder -- first permitted
+        //     org is auto-selected so records load on initial page.
+        //   * Single-org users: dropdown disabled (nothing to switch to).
+        //   * Multi-org users: dropdown enabled, change handler reloads.
+        //   * Empty list handled upstream in init() (unavailable banner).
+        const sel = document.getElementById('taskFilterOrganization');
+        sel.innerHTML = '';
+        for (const o of orgs) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            sel.appendChild(opt);
+        }
+        if (orgs.length > 0) sel.value = orgs[0].value;
+        sel.disabled = orgs.length <= 1;
+    }
+    async function onOrgChange() {
+        closeRowMenu();
+        selectedOrgId = document.getElementById('taskFilterOrganization').value || null;
+        pagesByTab = { implementation: 1, assurance: 1, custom: 1 };
+        // If the New Task dialog happens to be open, refresh its assignees.
+        const dlg = document.getElementById('newTaskDialog');
+        if (dlg && dlg.open && selectedOrgId) {
+            populateAssignees(document.getElementById('newTaskAssignee'), selectedOrgId);
+        }
+        await refreshCounts();
+        await reloadCurrentTab();
+    }
+
+    async function refreshCounts() {
+        if (!selectedOrgId) { setCounts(null); return; }
+        try {
+            const r = await fetch(U('/practice/api/tasks/counts?organizationId=') + encodeURIComponent(selectedOrgId), { credentials: 'same-origin' });
+            if (!r.ok) { setCounts(null); return; }
+            setCounts(await r.json());
+        } catch (_) { setCounts(null); }
+    }
+    function setCounts(c) {
+        // gapsCount intentionally NOT surfaced here — Gap Center owns that
+        // metric now. Task Center only shows counts for actual tasks.
+        document.getElementById('tabCountImpl').textContent      = c ? c.implementationCount : 0;
+        document.getElementById('tabCountAssurance').textContent = c ? c.assuranceCount      : 0;
+        document.getElementById('tabCountCustom').textContent    = c ? c.customCount         : 0;
+    }
+
+    function switchTab(tab) {
+        closeRowMenu();
+        activeTab = tab;
+        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
+            const on = b.getAttribute('data-tab') === tab;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('.pm-tab-panel').forEach(function (p) {
+            p.hidden = p.getAttribute('data-panel') !== tab;
+        });
+        reloadCurrentTab();
+    }
+    async function reloadCurrentTab() {
+        closeRowMenu();
+        if (!selectedOrgId) return;
+        if (activeTab === 'implementation') return loadTasks('Implementation');
+        if (activeTab === 'assurance')      return loadTasks('Assurance');
+        if (activeTab === 'custom')         return loadTasks('Custom');
+    }
+
+    async function loadTasks(typeCode) {
+        const q = document.getElementById('taskCenterSearch').value.trim();
+        const key = typeCode.toLowerCase();
+        const tabKey = key === 'implementation' ? 'implementation'
+                     : key === 'assurance'      ? 'assurance'
+                     :                              'custom';
+        const p = pagesByTab[tabKey];
+        const url = U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&taskTypeCode=' + encodeURIComponent(typeCode)
+                  + '&page=' + p + '&pageSize=' + PAGE_SIZE
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        const body = document.getElementById('taskBody-' + tabKey);
+        if (body) body.innerHTML = '<tr><td colspan="11" class="pm-empty">Loading...</td></tr>';
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderTaskRows(tabKey, await r.json());
+        } catch (err) {
+            if (body) body.innerHTML = '<tr><td colspan="11" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>';
+        }
+    }
+    function renderTaskRows(tabKey, payload) {
+        const body = document.getElementById('taskBody-' + tabKey);
+        if (!body) return;
+        body.innerHTML = '';
+        const rows = (payload && payload.rows) || [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="11" class="pm-empty">No tasks yet.</td></tr>';
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-task-id',       String(r.taskId));
+                tr.setAttribute('data-task-state',    r.currentStatusCode || '');
+                tr.setAttribute('data-task-terminal', r.currentStatusIsTerminal ? '1' : '0');
+                tr.innerHTML = [
+                    '<td>T-' + escape(r.organizationId) + '-' + escape(r.taskId) + '</td>',
+                    '<td>' + escape(r.subjectTitle) + '</td>',
+                    '<td>' + escape(r.linkedInstanceId ? 'Instance ' + r.linkedInstanceId : (r.subjectEntityType + ' ' + r.subjectEntityId)) + '</td>',
+                    '<td>' + escape(r.linkedPracticeId ? 'Practice ' + r.linkedPracticeId : '') + '</td>',
+                    '<td>' + escape(r.assignedToEmployeeId || '') + '</td>',
+                    '<td>' + escape(r.priority) + '</td>',
+                    '<td>' + escape(r.slaDueAt || '') + '</td>',
+                    '<td></td>',
+                    '<td></td>',
+                    '<td>' + formatBadge(r.currentStatusName) + '</td>',
+                    '<td>' + actionTrigger(tabKey, i) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        }
+        updatePager(tabKey, payload);
+    }
+
+    function actionTrigger(tab, index) {
+        return '<button type="button" class="pm-action-trigger" data-tab-action="' + escape(tab) + '" data-row-index="' + index + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+    function formatBadge(v) { return v ? '<span class="pm-badge">' + escape(v) + '</span>' : ''; }
+    function wirePagers() {
+        document.querySelectorAll('.pm-pager').forEach(function (nav) {
+            const tab = nav.getAttribute('data-pager');
+            if (!tab) return;
+            nav.querySelector('[data-pg="prev"]').addEventListener('click', function () {
+                if (pagesByTab[tab] > 1) { pagesByTab[tab]--; reloadCurrentTab(); }
+            });
+            nav.querySelector('[data-pg="next"]').addEventListener('click', function () {
+                pagesByTab[tab]++; reloadCurrentTab();
+            });
+        });
+    }
+    function updatePager(tab, payload) {
+        const nav = document.querySelector('.pm-pager[data-pager="' + tab + '"]');
+        if (!nav) return;
+        nav.querySelector('[data-pg="label"]').textContent = 'Page ' + (payload && payload.pageNumber || 1);
+        nav.querySelector('[data-pg="total"]').textContent = (payload && payload.totalCount || 0) + ' total';
+    }
+    function escape(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Row 3-dot menu
+    // -----------------------------------------------------------------
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trigger) {
+        if (!openMenuEl) return;
+        const r  = trigger.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top = top + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trigger, items) {
+        closeRowMenu();
+        openMenuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + escape(it.icon) + '" aria-hidden="true"></i> ' + escape(it.label);
+            if (it.disabled) { b.disabled = true; b.title = it.disabledReason || ''; }
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[task-center] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trigger);
+    }
+    function buildRowMenu(tr) {
+        // Gap-row branch removed — Implementation gap rows now live in
+        // Gap Center (Views/Practice/Partials/gaps.cshtml) which builds
+        // its own 3-dot menu with View Practice Instance / Add
+        // Implementation Task / View Existing Tasks.
+        const taskId = tr.getAttribute('data-task-id');
+        const currentState = tr.getAttribute('data-task-state') || '';
+        const isTerminal = tr.getAttribute('data-task-terminal') === '1';
+        const base = [
+            { icon: 'fa-eye',              label: 'View',
+                action: function () { openTaskViewDrawer(taskId); } },
+            { icon: 'fa-pen',              label: 'Edit',
+                disabled: isTerminal, disabledReason: 'Task is closed.',
+                action: function () { alert('Edit will land alongside the workflow subsystem (Phase 2/3).'); } },
+            { icon: 'fa-arrows-turn-right',label: 'Update Status',
+                disabled: isTerminal, disabledReason: 'Task is closed.',
+                action: function () { openUpdateTaskStatus(taskId, currentState); } },
+            { icon: 'fa-user-plus',        label: 'Assign / Reassign',
+                disabled: isTerminal, disabledReason: 'Task is closed.',
+                action: function () { openAssignTask(taskId); } }
+        ];
+        if (activeTab === 'assurance') {
+            base.push({ icon: 'fa-shield-halved', label: 'View Assurance Activity',
+                action: function () { alert('Assurance drill-down lands with Phase 6.'); } });
+        }
+        base.push({ icon: 'fa-clock-rotate-left', label: 'View Workflow History',
+            action: function () { alert('Workflow history opens with Phase 2/3.'); } });
+        if (activeTab !== 'assurance') {
+            base.push({ icon: 'fa-lock',
+                label: activeTab === 'custom' ? 'Close / Inactivate' : 'Close Task',
+                disabled: isTerminal, disabledReason: 'Already closed.',
+                action: function () { closeTaskAction(taskId); } });
+        }
+        return base;
+    }
+    function wireRowMenu() {
+        const root = document.getElementById('taskCenterRoot');
+        if (root) {
+            root.addEventListener('click', function (e) {
+                const trigger = e.target.closest('.pm-action-trigger');
+                if (!trigger || !root.contains(trigger)) return;
+                e.preventDefault(); e.stopPropagation();
+                const tr = trigger.closest('tr');
+                if (!tr) return;
+                if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+                openRowMenu(trigger, buildRowMenu(tr));
+            });
+        }
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu')) return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+
+    // -----------------------------------------------------------------
+    // Row-menu action helpers
+    // -----------------------------------------------------------------
+    async function openTaskViewDrawer(taskId) {
+        try {
+            const r = await fetch(U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId), { credentials: 'same-origin' });
+            const body = await r.json();
+            const row  = body && body.rows && body.rows.find(function (x) { return String(x.taskId) === String(taskId); });
+            if (!row) { alert('Task #' + taskId + ' — details not available.'); return; }
+            alert('Task #' + row.taskId
+                + '\nType: '     + (row.taskTypeName || row.taskTypeCode)
+                + '\nSubject: '  + (row.subjectTitle || '')
+                + '\nStatus: '   + (row.currentStatusName || '')
+                + '\nAssignee: ' + (row.assignedToEmployeeId || '—')
+                + '\nPriority: ' + (row.priority || '')
+                + '\nSLA: '      + (row.slaDueAt || '—'));
+        } catch (err) { alert('Load failed: ' + err.message); }
+    }
+    async function openUpdateTaskStatus(taskId, currentState) {
+        const next = prompt('Update status for Task #' + taskId
+            + '\nCurrent: ' + (currentState || '—')
+            + '\nEnter new status code (Assigned, InProgress, PendingReview, Escalated, Cancelled):');
+        if (!next) return;
+        try {
+            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/transition', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                body: JSON.stringify({ toStatusCode: next.trim() })
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (r.ok) { reloadCurrentTab(); refreshCounts(); }
+            else     { alert((b.error || 'Transition failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
+        } catch (err) { alert('Network error: ' + err.message); }
+    }
+    async function openAssignTask(taskId) {
+        try {
+            const emps = await fetchOrgEmployees(selectedOrgId);
+            if (!emps.length) { alert('No active employees for this organization.'); return; }
+            const options = emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName + (e.employeeCode ? ' (' + e.employeeCode + ')' : ''); }).join('\n');
+            const picked = prompt('Assign Task #' + taskId + ' to employee id.\nOptions:\n' + options + '\n\nEnter employee id:');
+            if (!picked) return;
+            const empId = Number(picked.trim());
+            if (!empId) { alert('Invalid employee id.'); return; }
+            const resp = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/assign', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                body: JSON.stringify({ assignedToEmployeeId: empId })
+            });
+            const b = await resp.json().catch(function () { return {}; });
+            if (resp.ok) { reloadCurrentTab(); }
+            else         { alert((b.error || 'Assign failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
+        } catch (err) { alert('Network error: ' + err.message); }
+    }
+    async function closeTaskAction(taskId) {
+        if (!confirm('Close Task #' + taskId + '? This cannot be undone via the UI.')) return;
+        try {
+            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/close', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                body: JSON.stringify({ reasonCode: 'MANUAL_CLOSE', reasonText: 'Closed from Task Center 3-dot menu.' })
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (r.ok) { reloadCurrentTab(); refreshCounts(); }
+            else     { alert((b.error || 'Close failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
+        } catch (err) { alert('Network error: ' + err.message); }
+    }
+
+    // -----------------------------------------------------------------
+    // Shared org-employees fetch — reused by Assign / Reassign and New Task.
+    // Hits the existing /practice/api/organizations/{id}/employees endpoint.
+    // -----------------------------------------------------------------
+    async function fetchOrgEmployees(orgId) {
+        if (!orgId) return [];
+        const url = U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees';
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' from ' + url);
+        const arr = await r.json();
+        return Array.isArray(arr) ? arr : [];
+    }
+    async function populateAssignees(selectEl, orgId, keepValue) {
+        selectEl.innerHTML = '<option value="">Loading employees...</option>';
+        selectEl.disabled  = true;
+        try {
+            const arr = await fetchOrgEmployees(orgId);
+            selectEl.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = arr.length ? '— select an employee —' : 'No active employees for this organization';
+            selectEl.appendChild(placeholder);
+            for (const emp of arr) {
+                const opt = document.createElement('option');
+                opt.value = String(emp.employeeId);
+                let label = emp.employeeName || '';
+                if (emp.employeeCode) label += ' (' + emp.employeeCode + ')';
+                opt.textContent = label;
+                if (emp.email) opt.title = emp.email;
+                selectEl.appendChild(opt);
+            }
+            if (keepValue) selectEl.value = String(keepValue);
+        } catch (err) {
+            selectEl.innerHTML = '<option value="">Failed to load: ' + escape(err.message) + '</option>';
+        } finally { selectEl.disabled = false; }
+    }
+
+    // -----------------------------------------------------------------
+    // New Task (Custom) dialog wiring
+    // -----------------------------------------------------------------
+    function setNewTaskMsg(text, kind) {
+        const el = document.getElementById('newTaskMessage');
+        if (!el) return;
+        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+        el.style.display = 'block'; el.textContent = text;
+        if (kind === 'error') { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
+        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
+        else { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+    }
+    function openNewTaskDialog() {
+        if (!selectedOrgId) {
+            alert('Select an organization first — the Assigned To dropdown scopes to that organization.');
+            return;
+        }
+        const dlg = document.getElementById('newTaskDialog');
+        if (!dlg) return;
+        setNewTaskMsg(null);
+        ['newTaskTitle','newTaskDescription','newTaskStartDate','newTaskTargetDate','newTaskRemarks']
+            .forEach(function (id) { const el = document.getElementById(id); if (el) el.value = ''; });
+        const pr = document.getElementById('newTaskPriority'); if (pr) pr.value = 'Medium';
+        const sub = document.getElementById('newTaskSubmit'); if (sub) sub.disabled = false;
+        const orgSel = document.getElementById('taskFilterOrganization');
+        const lbl = document.getElementById('newTaskOrgLabel');
+        if (lbl) lbl.textContent = (orgSel && orgSel.options[orgSel.selectedIndex] && orgSel.options[orgSel.selectedIndex].textContent) || ('Organization ' + selectedOrgId);
+        // Always refresh — org may have changed since last open.
+        populateAssignees(document.getElementById('newTaskAssignee'), selectedOrgId);
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else { dlg.setAttribute('open','open'); dlg.style.display='block'; }
+        setTimeout(function () { const t = document.getElementById('newTaskTitle'); if (t) t.focus(); }, 40);
+    }
+    function closeNewTaskDialog() {
+        const dlg = document.getElementById('newTaskDialog');
+        if (!dlg) return;
+        if (typeof dlg.close === 'function') dlg.close();
+        else { dlg.removeAttribute('open'); dlg.style.display = 'none'; }
+    }
+    function wireNewTaskDialog() {
+        const dlg = document.getElementById('newTaskDialog');
+        if (!dlg) return;
+        const closeB = document.getElementById('newTaskClose');
+        const canB   = document.getElementById('newTaskCancel');
+        const form   = document.getElementById('newTaskForm');
+        if (closeB) closeB.addEventListener('click', closeNewTaskDialog);
+        if (canB)   canB.addEventListener('click',   closeNewTaskDialog);
+        dlg.addEventListener('click', function (e) {
+            const r = dlg.getBoundingClientRect();
+            if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeNewTaskDialog();
+        });
+        if (!form) return;
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const title    = document.getElementById('newTaskTitle').value.trim();
+            const assignee = document.getElementById('newTaskAssignee').value;
+            if (!title)    { setNewTaskMsg('Task Name is required.', 'error'); return; }
+            if (!assignee) { setNewTaskMsg('Assigned To is required — select an employee.', 'error'); return; }
+            const submit = document.getElementById('newTaskSubmit');
+            submit.disabled = true; setNewTaskMsg('Saving...');
+            const targetDate = document.getElementById('newTaskTargetDate').value;
+            const startDate  = document.getElementById('newTaskStartDate').value;
+            const payload = {
+                organizationId:       Number(selectedOrgId),
+                taskTypeCode:         'Custom',
+                subjectEntityType:    'Custom',
+                subjectEntityId:      0,
+                subjectTitle:         title,
+                subjectDescription:   document.getElementById('newTaskDescription').value.trim() || null,
+                priority:             document.getElementById('newTaskPriority').value,
+                assignedToEmployeeId: Number(assignee),
+                targetDate:           targetDate ? new Date(targetDate + 'T00:00:00Z').toISOString() : null,
+                startDate:            startDate  ? new Date(startDate  + 'T00:00:00Z').toISOString() : null,
+                remarks:              document.getElementById('newTaskRemarks').value.trim() || null
+            };
+            try {
+                const r = await fetch(U('/practice/api/tasks'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) {
+                    setNewTaskMsg('Task #' + (b.taskId || '?') + ' created.', 'ok');
+                    setTimeout(function () {
+                        closeNewTaskDialog();
+                        refreshCounts();
+                        if (activeTab === 'custom') reloadCurrentTab();
+                    }, 900);
+                } else {
+                    setNewTaskMsg((b.error || 'Request failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : ''), 'error');
+                    submit.disabled = false;
+                }
+            } catch (err) {
+                setNewTaskMsg('Network error: ' + err.message, 'error');
+                submit.disabled = false;
+            }
+        });
+    }
+})();
+</script>

@@ -66,14 +66,26 @@
   const isOrganizationWorkspace = isOrganizationOnboarding || isOrganizationAdministration || isOrganizationDependencies;
   const isOperationalizationWorkbench = screen.Key === "resolve" || screen.Key === "practice-operationalization";
   const workbenchScreens = new Set(["workbench-applications", "workbench-tools", "workbench-vendors", "workbench-assets", "workbench-teams", "workbench-committees", "workbench-processes", "workbench-locations"]);
-  const organizationScopedScreens = new Set(["organization-metadata", "repository-subscriptions", "locations", "departments", "business-functions", "teams", "committees", "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets", "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability", "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", ...workbenchScreens]);
+  const organizationScopedScreens = new Set(["organization-metadata", "repository-subscriptions", "locations", "departments", "business-functions", "teams", "committees", "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets", "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability", "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve",
+    // 'source-statements' is the auto-drill alias for the organization-controls
+    // Source Statements grid (added by migration 056). Treat it as
+    // organization-scoped so populateFilters auto-picks the first organization
+    // and downstream handlers (subscribed framework filter + grid load) run
+    // exactly like the parent organization-controls screen.
+    "source-statements",
+    ...workbenchScreens]);
   const lastOrganizationKey = "grac.practice.selectedOrganizationId";
   let actionMenu = null;
   let actionTrigger = null;
   // Source Statements (organization-controls) two-level drill-down:
-  // Level 1 = subscribed Framework Release summary, Level 2 = Source
-  // Structure tree with Source Statement child rows.
-  const isSourceStatements = screen.Key === "organization-controls";
+  // Level 1 = subscribed Framework Release summary (RS2), Level 2 = Source
+  // Structure tree with Source Statement child rows (RS3).
+  //
+  // The dedicated 'source-statements' screen key (added by migration 056)
+  // aliases the same view but auto-drills into the first available release
+  // so the Source Statements menu opens directly on the RS3 grid.
+  const isSourceStatementDetail = screen.Key === "source-statements";
+  const isSourceStatements = screen.Key === "organization-controls" || isSourceStatementDetail;
   const sourceStatementState = { level: "releases", release: null, releases: [], rows: [], collapsedNodes: new Set(), isCustomRelease: false };
   const releaseSummaryColumns = ["Framework / Release", "Authority", "Artifact", "Version", "Owner", "Total Statements", "Applicable Statements", "Not Updated Statements", "Not Applicable Statements", "Actions"];
   const statementTreeColumns = ["Source Node / Hierarchy", "Statement Reference", "Statement Title", "Statement Text", "Applicability Status", "Practice Count", "Actions"];
@@ -185,6 +197,15 @@
     "origin-types": [{ value: "Repository", label: "Repository" }, { value: "Organization", label: "Organization" }, { value: "Hybrid", label: "Hybrid" }],
     "criticality": [{ value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }],
     "assurance-modes": [{ value: "Manual", label: "Manual" }, { value: "Automated", label: "Automated" }],
+    // Q13/Q14/Q15 v5 — Implementation Status catalog. Backend auto-syncs
+    // implementation_status_id from this text value via trigger
+    // tr_pm_practice_instance_impl_status_sync (migration 045).
+    "implementation-status": [
+      { value: "Not Implemented",        label: "Not Implemented" },
+      { value: "Partially Implemented",  label: "Partially Implemented" },
+      { value: "Implemented",            label: "Implemented" },
+      { value: "Not Applicable",         label: "Not Applicable" }
+    ],
     "subscription-types": [{ value: "Automatic", label: "Automatic" }, { value: "Manual", label: "Manual" }],
     "frequency-master": [{ value: "1", label: "Daily" }, { value: "2", label: "Weekly" }, { value: "3", label: "Monthly" }, { value: "4", label: "Quarterly" }, { value: "5", label: "Half-Yearly" }, { value: "6", label: "Annual" }, { value: "7", label: "Event Driven" }, { value: "8", label: "Continuous" }, { value: "9", label: "Custom" }],
     "frequency-units": [{ value: "Day", label: "Day" }, { value: "Week", label: "Week" }, { value: "Month", label: "Month" }, { value: "Quarter", label: "Quarter" }, { value: "Year", label: "Year" }],
@@ -223,7 +244,7 @@
     "control-applicability": [select("organizationId", "Organization", "organizations", false, { readonly: true }), text("code", "Control Code", false, { readonly: true }), text("name", "Control Name", false, { readonly: true }), select("originType", "Origin Type", "origin-types", false, { readonly: true }), text("isManuallyAdded", "Manually Added", false, { readonly: true }), select("applicabilityStatus", "Applicability Status", "applicability-status", true), area("exclusionJustification", "Justification"), select("primaryOwner", "Primary Owner", "users"), select("secondaryOwner", "Secondary Owner", "users"), select("businessFunctionId", "Business Function", "business-functions"), select("criticality", "Criticality", "criticality", true), select("status", "Status", "status-active", true)],
     "organization-requirements": [select("organizationId", "Organization", "organizations", true), hidden("originType"), hidden("applicabilityStatus"), hidden("status"), hidden("implementationStatus"), text("code", "Practice Code", true), text("name", "Practice Name", true), area("statement", "Description"), select("practiceOwnerId", "Owner", "users-id"), select("businessFunctionId", "Business Function", "business-functions"), select("criticality", "Criticality", "criticality"), area("remarks", "Remarks")],
     "practices": [select("organizationId", "Organization", "organizations", true), hidden("organizationRequirementId"), select("originType", "Origin Type", "origin-types", true), text("code", "Practice Code", true), text("name", "Practice Name", true), area("description", "Description"), select("applicabilityStatus", "Applicability Status", "applicability-status", true), select("practiceOwnerId", "Owner", "users-id"), area("exclusionJustification", "Reason / Justification"), select("status", "Status", "status-active", true)],
-    "practice-instances": [hidden("organizationRequirementId"), hidden("practiceId"), select("organizationId", "Organization", "organizations", true, { readonly: true }), text("code", "Instance Code", true), text("name", "Instance Name", true), select("primaryOwnerId", "Instance Owner", "users-id", true), hidden("departmentId"), text("department", "Owner Department", false, { readonly: true }), select("businessFunctionId", "Business Function", "business-functions"), select("executionFrequencyId", "Execution Frequency", "frequency-master", true), select("assuranceFrequencyId", "Assurance Frequency", "frequency-master", true), select("assuranceMode", "Practice Type", "assurance-modes", true), select("criticality", "Criticality", "criticality", true), { name: "dependencyTypeIds", label: "Dependencies", type: "comboChecks", lookup: "dependency-types" }, { name: "evidenceTypeIds", label: "Evidence Types", type: "comboChecks", lookup: "evidence-types" }, select("status", "Status", "status-active", true)],
+    "practice-instances": [hidden("organizationRequirementId"), hidden("practiceId"), select("organizationId", "Organization", "organizations", true, { readonly: true }), text("code", "Instance Code", true), text("name", "Instance Name", true), select("primaryOwnerId", "Instance Owner", "users-id", true), hidden("departmentId"), text("department", "Owner Department", false, { readonly: true }), select("businessFunctionId", "Business Function", "business-functions"), select("executionFrequencyId", "Execution Frequency", "frequency-master", true), select("assuranceFrequencyId", "Assurance Frequency", "frequency-master", true), select("assuranceMode", "Practice Type", "assurance-modes", true), select("criticality", "Criticality", "criticality", true), select("implementationStatus", "Implementation Status", "implementation-status", true), { name: "dependencyTypeIds", label: "Dependencies", type: "comboChecks", lookup: "dependency-types" }, { name: "evidenceTypeIds", label: "Evidence Types", type: "comboChecks", lookup: "evidence-types" }, select("status", "Status", "status-active", true)],
     "dependencies": [select("practiceInstanceId", "Practice Instance", "practice-instances", true), select("dependencyTypeId", "Dependency Type", "dependency-types", true), text("name", "Dependency Name", true), text("reference", "Reference"), text("ownerName", "Owner"), select("criticalityId", "Criticality", "criticality-master", true), select("statusId", "Status", "record-status", true)],
     "evidence-configurations": [select("practiceInstanceId", "Practice Instance", "practice-instances", true), select("evidenceTypeId", "Evidence Type", "evidence-types", true), select("assuranceTypeId", "Assurance Type", "assurance-types", true), text("retentionPeriod", "Retention Period"), select("collectionMethodId", "Collection Method", "collection-methods", true), select("collectionFrequencyId", "Collection Frequency", "frequency-master"), select("evidenceOwner", "Evidence Owner", "users"), select("statusId", "Status", "record-status", true)]
   };
@@ -570,10 +591,27 @@
       const organizations = state.lookups.organizations || [];
       const emptyLabel = organizationScopedScreens.has(screen.Key) ? "Select organization" : "All organizations";
       organizationFilter.innerHTML = `<option value="">${emptyLabel}</option>${organizations.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
-      const savedOrganizationId = ["organization-controls", "control-applicability"].includes(screen.Key) ? "" : getSavedOrganizationId();
+      // source-statements + organization-controls always pick the first org
+      // so the user lands directly on data instead of a "Select organization"
+      // stub. Other org-scoped screens honour the last-selected org from
+      // localStorage first.
+      const skipSavedForFirstPick = ["organization-controls", "control-applicability", "source-statements"].includes(screen.Key);
+      const savedOrganizationId = skipSavedForFirstPick ? "" : getSavedOrganizationId();
       if (organizationScopedScreens.has(screen.Key) && !state.navigationCode) {
         const selected = organizations.find(item => String(item.value) === savedOrganizationId) || organizations[0];
-        if (selected) organizationFilter.value = String(selected.value);
+        if (selected) {
+          const nextValue = String(selected.value);
+          const previousValue = organizationFilter.value;
+          organizationFilter.value = nextValue;
+          // Programmatic .value assignment doesn't fire the change listener,
+          // so the subscribed-framework filter + grid load would still be
+          // gated on an empty selection. Fire it manually when the effective
+          // value actually changed so downstream handlers (loadSubscribedFrameworks
+          // + resetToFirstPage) run for the auto-picked organization.
+          if (previousValue !== nextValue) {
+            organizationFilter.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
       }
     }
     if (status) {
@@ -700,7 +738,11 @@
     const tables = result.data || result.Data || [];
     const org = tables[0]?.[0] || {};
     const attributes = tables[1] || [];
-    setupState.treeRows = isOrganizationOnboarding ? (tables[2] || []) : [];
+    // Organization Administration reuses the repository tree payload
+    // (tables[2]) so the "Subscribed Releases" read-only panel can render
+    // without a second API round-trip. The interactive tree is still
+    // onboarding-only.
+    setupState.treeRows = (isOrganizationOnboarding || isOrganizationAdministration) ? (tables[2] || []) : [];
     setupState.attributes = attributes.reduce((all, row) => {
       all[row.MetadataKey || row.metadataKey] = parseAttributeValue(row);
       return all;
@@ -711,7 +753,62 @@
     renderSetupBasic(org);
     renderSetupAttributes();
     if (isOrganizationOnboarding) renderSubscriptionTree();
+    if (isOrganizationAdministration) renderSubscribedReleasesReadonly();
     await loadSetupChildRows(setupState.activeTab);
+  }
+
+  // Renders the Subscribed Releases side panel on the Organization
+  // Administration page. Read-only list grouped Authority -> Artifact ->
+  // Release so it mirrors the onboarding tree without any editing affordance.
+  function renderSubscribedReleasesReadonly() {
+    const container = document.getElementById("subscribedReleasesList");
+    if (!container) return;
+    if (!setupState.organizationId) {
+      container.textContent = "Select an organization to view subscribed releases.";
+      return;
+    }
+    const subscribed = setupState.treeRows.filter(row => row.IsSubscribed || row.isSubscribed);
+    if (!subscribed.length) {
+      container.textContent = "This organization has no active repository subscriptions.";
+      return;
+    }
+    // Group subscribed releases by Authority -> Artifact.
+    const groups = new Map();
+    subscribed.forEach(row => {
+      const authorityKey = String(row.AuthorityId || row.authorityId || "");
+      if (!groups.has(authorityKey)) {
+        groups.set(authorityKey, {
+          code: row.AuthorityCode || row.authorityCode || "",
+          name: row.AuthorityName || row.authorityName || "",
+          artifacts: new Map()
+        });
+      }
+      const authority = groups.get(authorityKey);
+      const artifactKey = String(row.ArtifactId || row.artifactId || "");
+      if (!authority.artifacts.has(artifactKey)) {
+        authority.artifacts.set(artifactKey, {
+          code: row.ArtifactCode || row.artifactCode || "",
+          name: row.ArtifactName || row.artifactName || "",
+          releases: []
+        });
+      }
+      authority.artifacts.get(artifactKey).releases.push({
+        id: String(row.ReleaseId || row.releaseId),
+        version: row.ReleaseVersion || row.releaseVersion || "",
+        status: row.ReleaseStatus || row.releaseStatus || ""
+      });
+    });
+    container.innerHTML = [...groups.values()].map(authority => `
+      <div class="pm-tree-branch">
+        <div class="pm-tree-row authority" style="--tree-depth:0"><strong>${escapeHtml(authority.code || "")}${authority.code && authority.name ? " - " : ""}${escapeHtml(authority.name || "")}</strong></div>
+        ${[...authority.artifacts.values()].map(artifact => `
+          <div class="pm-tree-row artifact" style="--tree-depth:1"><span>${escapeHtml(artifact.code || "")}${artifact.code && artifact.name ? " - " : ""}${escapeHtml(artifact.name || "")}</span></div>
+          ${artifact.releases.map(release => `
+            <div class="pm-tree-row release" style="--tree-depth:2"><span class="tree-spacer"></span><span>${escapeHtml(release.version)}${release.status ? ` <small>${escapeHtml(release.status)}</small>` : ""}</span></div>
+          `).join("")}
+        `).join("")}
+      </div>
+    `).join("");
   }
 
   function renderSetupBasic(org) {
@@ -1001,10 +1098,52 @@
       const rowIndex = Number(action.dataset.setupIndex || 0);
       const row = setupState.childRows[entity]?.[rowIndex];
       if (!row) return;
+      // Close the popover BEFORE the async form-open runs so the menu
+      // doesn't linger visually on top of the modal dialog.
+      closeActionMenu();
       if (action.dataset.setupAction === "view") openSetupChildForm(entity, "view", valueOf(row, "Id"), row);
       if (action.dataset.setupAction === "edit") openSetupChildForm(entity, "edit", valueOf(row, "Id"), row);
       if (action.dataset.setupAction === "inactive") retireSetupChild(entity, valueOf(row, "Id"));
     });
+
+    // 3-dot trigger inside the Organization Administration / Dependencies
+    // child-tab tables. Builds the same floating .pm-action-menu the main
+    // grids use so the sidebar looks visually identical everywhere.
+    document.addEventListener("click", event => {
+      const trigger = event.target.closest(".pm-action-trigger[data-setup-menu-index]");
+      if (!trigger) return;
+      // Toggle: a second click on the same trigger closes the menu.
+      if (actionTrigger === trigger) { closeActionMenu(); return; }
+      openSetupActionMenu(trigger);
+    });
+  }
+
+  function openSetupActionMenu(trigger) {
+    const entity   = trigger.dataset.setupMenuEntity;
+    const rowIndex = Number(trigger.dataset.setupMenuIndex || 0);
+    const record   = setupState.childRows[entity]?.[rowIndex];
+    if (!record) return;
+    closeActionMenu();
+    actionTrigger = trigger;
+    actionTrigger.setAttribute("aria-expanded", "true");
+    actionMenu = document.createElement("div");
+    actionMenu.className = "pm-action-menu";
+    actionMenu.setAttribute("role", "menu");
+    actionMenu.innerHTML = `
+      <button type="button" role="menuitem"
+              data-setup-action="view"  data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
+        <i class="fa-solid fa-eye" aria-hidden="true"></i> View
+      </button>
+      <button type="button" role="menuitem"
+              data-setup-action="edit"  data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
+        <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+      </button>
+      <button type="button" role="menuitem"
+              data-setup-action="inactive" data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
+        <i class="fa-solid fa-ban" aria-hidden="true"></i> Inactive
+      </button>`;
+    document.body.appendChild(actionMenu);
+    positionActionMenu(trigger);
   }
 
   function activateSetupTab(tabKey) {
@@ -1043,14 +1182,22 @@
         body.innerHTML = `<tr><td colspan="${columns.length + 1}" class="pm-empty">No data found.</td></tr>`;
         return;
       }
+      // Actions cell uses the same 3-dot trigger pattern the main grids
+      // use (see `actions(index)` + `openActionMenu`). The previous inline
+      // menu markup rendered View/Edit/Inactive as always-visible pills
+      // -- inconsistent with every other grid in the app. The trigger's
+      // data-setup-menu-* attributes let the delegated click handler
+      // build a floating .pm-action-menu popover on click.
       body.innerHTML = records.map((row, index) => `<tr>${columns.map(column => `<td>${formatCell(valueOf(row, column))}</td>`).join("")}
         <td><div class="pm-inline-actions">
-          <button type="button" class="pm-action-trigger" title="Actions"><i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical"></i></button>
-          <div class="pm-inline-menu">
-            <button type="button" data-setup-action="view" data-setup-entity="${escapeHtml(entity)}" data-setup-index="${index}"><i class="fa-solid fa-eye"></i> View</button>
-            <button type="button" data-setup-action="edit" data-setup-entity="${escapeHtml(entity)}" data-setup-index="${index}"><i class="fa-solid fa-pen"></i> Edit</button>
-            <button type="button" data-setup-action="inactive" data-setup-entity="${escapeHtml(entity)}" data-setup-index="${index}"><i class="fa-solid fa-ban"></i> Inactive</button>
-          </div>
+          <button type="button" class="pm-action-trigger"
+                  data-setup-menu-entity="${escapeHtml(entity)}"
+                  data-setup-menu-index="${index}"
+                  aria-haspopup="menu" aria-expanded="false"
+                  title="Actions">
+            <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
+            <span class="visually-hidden">Actions</span>
+          </button>
         </div></td></tr>`).join("");
     } catch (error) {
       body.innerHTML = `<tr><td colspan="${columns.length + 1}" class="pm-empty">${escapeHtml(error.message || "Unable to load setup records.")}</td></tr>`;
@@ -1259,11 +1406,17 @@
     if (sourceStatementState.release && String(sourceStatementState.release.organizationId) !== String(organizationId)) {
       sourceStatementState.level = "releases";
       sourceStatementState.release = null;
+      // Org changed -- allow the source-statements screen to auto-drill
+      // into the new org's first release again (bug: without this reset,
+      // the screen shows the release summary instead of statements).
+      sourceStatementState.hasAutoDrilled = false;
     }
     if (sourceStatementState.release && subscribedFrameworkFilter?.value
       && String(subscribedFrameworkFilter.value) !== String(sourceStatementState.release.releaseId)) {
       sourceStatementState.level = "releases";
       sourceStatementState.release = null;
+      // Release filter changed -- treat as a new drill target.
+      sourceStatementState.hasAutoDrilled = false;
     }
     if (sourceStatementState.level === "statements" && sourceStatementState.release) {
       if (sourceStatementState.isCustomRelease) {
@@ -1355,10 +1508,36 @@
       state.records = releases; // needed by allowedActions() for the 3-dot menu
       logListTrace("response", { level: "releases", rowCount: releases.length });
       if (!releases.length) {
-        rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">No subscribed framework releases found for the selected organization. Subscribe releases in Organization Setup - Repository Subscription.</td></tr>`;
+        // Empty state -- when on the dedicated Source Statements screen,
+        // keep the statement-tree columns (per requirement 6) so the user
+        // doesn't see a release-summary column set with no rows.
+        if (isSourceStatementDetail) {
+          if (tableHead) tableHead.innerHTML = `<tr>${statementTreeColumns.map(column => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`;
+          rows.innerHTML = `<tr><td colspan="${statementTreeColumns.length}" class="pm-empty">No subscribed releases found. Subscribe releases in Governance - Repository Subscriptions.</td></tr>`;
+        } else {
+          rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">No subscribed framework releases found for the selected organization. Subscribe releases in Organization Setup - Repository Subscription.</td></tr>`;
+        }
         renderPager();
         return;
       }
+
+      // If we're going to auto-drill anyway (source-statements screen,
+      // or employee-scope + 1 release), skip painting the release
+      // summary grid entirely -- rendering then instantly replacing it
+      // makes the RS2 grid flash on organization change.
+      const willAutoDrill =
+        (isEmployeeScope && releases.length === 1) ||
+        (isSourceStatementDetail && !sourceStatementState.hasAutoDrilled && releases.length >= 1);
+      if (willAutoDrill) {
+        const only = releases[0];
+        sourceStatementState.release = mapReleaseSelection(only);
+        sourceStatementState.isCustomRelease = Number(valueOf(only, "ReleaseId") || 0) < 0;
+        sourceStatementState.level = "statements";
+        sourceStatementState.hasAutoDrilled = true;
+        await loadSourceStatements();
+        return;
+      }
+
       rows.innerHTML = releases.map((release, index) => {
         const ownerLabel = String(valueOf(release, "OwnerName") || "").trim();
         const ownerCell = ownerLabel
@@ -1381,11 +1560,21 @@
       // Rule 4 — Employee-scope users see ONLY assigned releases and land
       // directly on the statements list when they open the only release
       // they have. If the filter left one row, auto-drill.
-      if (isEmployeeScope && releases.length === 1) {
+      //
+      // Same auto-drill fires on the dedicated 'source-statements' screen
+      // (migration 056) so the Source Statements menu opens directly on
+      // the Level 2 statement grid. Gated by hasAutoDrilled so the Back
+      // button on that screen doesn't re-drill in a loop.
+      const shouldAutoDrillEmployee = isEmployeeScope && releases.length === 1;
+      const shouldAutoDrillDetail   = isSourceStatementDetail
+                                     && !sourceStatementState.hasAutoDrilled
+                                     && releases.length >= 1;
+      if (shouldAutoDrillEmployee || shouldAutoDrillDetail) {
         const only = releases[0];
         sourceStatementState.release = mapReleaseSelection(only);
         sourceStatementState.isCustomRelease = Number(valueOf(only, "ReleaseId") || 0) < 0;
         sourceStatementState.level = "statements";
+        sourceStatementState.hasAutoDrilled = true;
         await loadSourceStatements();
         return;
       }
@@ -2129,11 +2318,22 @@
       renderRequirementControlGroups();
       return;
     }
-    rows.innerHTML = state.records.map((row, index) => `<tr>${currentColumns().map(column => {
-      const value = column === "Register" ? (valueOf(row, "Register") || valueOf(row, "DependencyCategory")) : valueOf(row, column);
-      const title = column === "SourceFrameworkRelease" ? ` title="${escapeHtml(value)}"` : "";
-      return `<td${title}>${formatCell(value)}</td>`;
-    }).join("")}<td>${actions(index)}</td></tr>`).join("");
+    // Q13/Q14/Q15 — expose a stable per-row identifier via data-record-id
+    // so partial-hosted UI hooks (e.g. Add Implementation Task) can resolve
+    // the row's primary key without needing access to the internal state
+    // closure. Falls back to empty string when no id-like field is present.
+    rows.innerHTML = state.records.map((row, index) => {
+      const rowId = valueOf(row, "Id")
+        || valueOf(row, "PracticeInstanceId")
+        || valueOf(row, "PracticeId")
+        || valueOf(row, "OrganizationControlId")
+        || "";
+      return `<tr data-record-id="${escapeHtml(rowId)}">${currentColumns().map(column => {
+        const value = column === "Register" ? (valueOf(row, "Register") || valueOf(row, "DependencyCategory")) : valueOf(row, column);
+        const title = column === "SourceFrameworkRelease" ? ` title="${escapeHtml(value)}"` : "";
+        return `<td${title}>${formatCell(value)}</td>`;
+      }).join("")}<td>${actions(index)}</td></tr>`;
+    }).join("");
   }
 
   function renderStatementPracticeRows() {
@@ -3883,6 +4083,13 @@
     if (isSourceStatements) {
       const back = event.target.closest("[data-release-back]");
       if (back) {
+        // On the dedicated Source Statements screen the release list is
+        // owned by the sibling Repository Subscriptions menu -- redirect
+        // there rather than showing the list under the wrong URL/heading.
+        if (isSourceStatementDetail) {
+          window.location.href = "/Practice/Index/organization-controls";
+          return;
+        }
         sourceStatementState.level = "releases";
         sourceStatementState.release = null;
         sourceStatementState.isCustomRelease = false;

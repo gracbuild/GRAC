@@ -2517,7 +2517,17 @@ BEGIN
    ) practice
    LEFT JOIN grac_practice.organization_employee emp ON emp.employee_id=practice.practice_owner_id
    WHERE (@p_id=0 OR q.organization_requirement_id=@p_id) AND (@organization_id IS NULL OR q.organization_id=@organization_id)
-     AND q.organization_control_id=@organization_control_id
+     -- Accept the Practice if it is linked to @organization_control_id either
+     -- through the legacy "primary" column on organization_requirement OR
+     -- through the many-to-many organization_control_requirement mapping added
+     -- by migration 057 (dedup of shared repository requirements).
+     AND (q.organization_control_id=@organization_control_id
+          OR EXISTS(
+              SELECT 1
+              FROM grac_practice.organization_control_requirement m
+              WHERE m.organization_requirement_id=q.organization_requirement_id
+                AND m.organization_control_id=@organization_control_id
+                AND m.status='Active'))
      AND (@p_status='' OR q.record_status_id=@filter_record_status_id OR q.status=@p_status OR q.applicability_status=@p_status OR q.implementation_status=@p_status OR q.applicability_status_id=(SELECT applicability_status_id FROM grac_practice.applicability_status_master WHERE status_code=@p_status OR status_name=@p_status)) AND (@origin_type IS NULL OR q.origin_type=@origin_type)
      AND (@date_from IS NULL OR q.entered_dt>=@date_from) AND (@date_to IS NULL OR q.entered_dt<DATEADD(DAY,1,@date_to))
      AND (@p_search='' OR requirement_code LIKE '%'+@p_search+'%' OR requirement_name LIKE '%'+@p_search+'%')
@@ -4325,46 +4335,51 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
   WHERE organization_control_id=@p_id;
   IF @@ROWCOUNT=0 THROW 51022,'Selected organization control was not found.',1;
 
+  -- ------------------------------------------------------------------
+  -- Practice import + cleanup delegated to the helpers created by
+  -- migration 057 (grac_practice.sp_apply_practices_for_control /
+  -- sp_unapply_practices_for_control). Those SPs:
+  --   * Dedup practices by (organization_id, repository_requirement_id)
+  --     across Controls -- no duplicate Practice rows when the same
+  --     ISO practice is mapped to multiple applicable Controls.
+  --   * Maintain the many-to-many mapping in
+  --     grac_practice.organization_control_requirement so the app can
+  --     see every Control that a Practice belongs to.
+  --   * On Not Applicable / Deferred / Retired: soft-inactivate only
+  --     THIS control's mapping rows; the Practice itself only gets
+  --     soft-inactivated when no active mapping remains.
+  -- The 'primary' organization_control_id column on organization_requirement
+  -- stays populated for back-compat with the ~89 existing SP/view callers.
+  -- ------------------------------------------------------------------
   IF @control_applicability_status='Applicable'
   BEGIN
     DECLARE @mapped_requirements INT=0;
     DECLARE @imported_requirements INT=0;
-    SELECT @mapped_requirements=COUNT(1)
-    FROM grac_practice.organization_control oc
-    JOIN grac_new.control repo_control ON (repo_control.control_id=oc.repository_control_id OR repo_control.control_code=oc.control_code) AND repo_control.status='Active'
-    JOIN grac_new.control_requirement_map crm ON crm.control_id=repo_control.control_id AND crm.status='Active'
-    JOIN grac_new.requirement q ON q.requirement_id=crm.requirement_id AND q.status='Active'
-    WHERE oc.organization_control_id=@p_id
-      AND ISNULL(oc.origin_type,'Repository') IN ('Repository','Hybrid');
+    EXEC grac_practice.sp_apply_practices_for_control
+      @organization_control_id = @p_id,
+      @actor                   = @p_usr_id,
+      @mapped_count            = @mapped_requirements OUTPUT,
+      @imported_count          = @imported_requirements OUTPUT;
 
-    INSERT grac_practice.organization_requirement(
-      organization_id,origin_type,repository_requirement_id,organization_control_id,requirement_code,requirement_name,
-      requirement_statement,objective,applicability_status,applicability_status_id,implementation_status,implementation_status_id,status,record_status_id,entered_by)
-    SELECT oc.organization_id,'Repository',q.requirement_id,oc.organization_control_id,q.requirement_code,q.requirement_name,
-      q.requirement_statement,q.objective,'Not Updated',@not_updated_applicability_status_id,'Not Started',@not_started_implementation_status_id,'Active',@active_record_status_id,@p_usr_id
-    FROM grac_practice.organization_control oc
-    JOIN grac_new.control repo_control ON (repo_control.control_id=oc.repository_control_id OR repo_control.control_code=oc.control_code) AND repo_control.status='Active'
-    JOIN grac_new.control_requirement_map crm ON crm.control_id=repo_control.control_id AND crm.status='Active'
-    JOIN grac_new.requirement q ON q.requirement_id=crm.requirement_id AND q.status='Active'
-    WHERE oc.organization_control_id=@p_id
-      AND ISNULL(oc.origin_type,'Repository') IN ('Repository','Hybrid')
-      AND NOT EXISTS(
-        SELECT 1
-        FROM grac_practice.organization_requirement existing
-        WHERE existing.organization_id=oc.organization_id
-          AND existing.organization_control_id=oc.organization_control_id
-          AND (
-              existing.requirement_code=q.requirement_code
-              OR existing.repository_requirement_id=q.requirement_id
-          )
-      );
-    SET @imported_requirements=@@ROWCOUNT;
     IF @mapped_requirements=0
       SET @result_message=N'Control applicability saved. No requirements are mapped to this control in the repository.';
     ELSE IF @imported_requirements=0
       SET @result_message=N'Control applicability saved. Requirements mapped to this control were already imported.';
     ELSE
       SET @result_message=CONCAT(N'Control applicability saved. ',@imported_requirements,N' practice(s) imported into Organization Practices.');
+  END
+  ELSE IF @control_applicability_status IN ('Not Applicable','Deferred','Retired','Accepted Risk')
+  BEGIN
+    DECLARE @unmapped_requirements INT=0;
+    EXEC grac_practice.sp_unapply_practices_for_control
+      @organization_control_id = @p_id,
+      @actor                   = @p_usr_id,
+      @deactivated_count       = @unmapped_requirements OUTPUT;
+
+    IF @unmapped_requirements=0
+      SET @result_message=N'Control applicability saved.';
+    ELSE
+      SET @result_message=CONCAT(N'Control applicability saved. ',@unmapped_requirements,N' practice mapping(s) deactivated for this control.');
   END
  END
  ELSE IF @p_entity_type='organization-requirements'

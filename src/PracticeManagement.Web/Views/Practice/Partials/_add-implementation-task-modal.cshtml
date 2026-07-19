@@ -1,0 +1,488 @@
+@*
+    Practice Instance workflow — two modals + row-menu injection  (v5)
+
+    v5 delivers the full flow per user's latest requirement:
+      * Two dialogs:
+          1. Add Implementation Task
+          2. Update Implementation Status
+      * Row-menu injection is CONDITIONAL:
+          - "Update Implementation Status" is always added
+          - "Add Implementation Task" only when status is
+            "Not Implemented" or "Partially Implemented"
+          - Neither is added when status is "Implemented" (except future
+            "View Tasks" — deferred)
+      * All timing deferred to DOMContentLoaded so window.pmScreen is
+        defined before the guard runs.
+*@
+
+@* ---------- Dialog 1: Add Implementation Task ---------- *@
+<dialog id="implTaskDialog" style="border:none; border-radius:8px; padding:0; max-width:600px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="implTaskForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Add Implementation Task</h2>
+            <button type="button" id="implTaskClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="implTaskMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 16px;">
+            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Practice Instance</div><div id="implTaskCtxInstance" style="font-weight:600; color:#0f172a;">—</div></div>
+            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Practice</div><div id="implTaskCtxPractice" style="font-weight:600; color:#0f172a;">—</div></div>
+            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div><div id="implTaskCtxOrg" style="font-weight:600; color:#0f172a;">—</div></div>
+            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Implementation Status</div><div id="implTaskCtxImplStatus" style="font-weight:600; color:#b45309;">—</div></div>
+            <input type="hidden" id="implTaskInstanceId" />
+        </div>
+        <div style="display:grid; grid-template-columns:1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Task Name <span style="color:#b91c1c;">*</span>
+                <input id="implTaskName" type="text" maxlength="250" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" /></label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
+                <textarea id="implTaskDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; resize:vertical;"></textarea></label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Assigned To <span style="color:#b91c1c;">*</span>
+                    <select id="implTaskAssignee" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;">
+                        <option value="">Loading employees…</option>
+                    </select>
+                    <small style="color:#94a3b8; margin-top:2px;">Active employees of this instance's organization only.</small>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Target Date
+                    <input id="implTaskTargetDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" /></label>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
+                    <select id="implTaskPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;">
+                        <option value="Low">Low</option><option value="Medium" selected>Medium</option><option value="High">High</option><option value="Critical">Critical</option></select></label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
+                    <input id="implTaskStatus" type="text" value="Open" readonly style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; background:#f1f5f9;" /></label>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
+                <textarea id="implTaskRemarks" rows="2" maxlength="1000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; resize:vertical;"></textarea></label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="implTaskCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="implTaskSubmit" class="pm-button primary">Create Task</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- Dialog 2: Update Implementation Status ---------- *@
+<dialog id="implStatusDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="implStatusForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Update Implementation Status</h2>
+            <button type="button" id="implStatusClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="implStatusMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px;">
+            <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Practice Instance</div>
+            <div id="implStatusCtxInstance" style="font-weight:600; color:#0f172a;">—</div>
+            <input type="hidden" id="implStatusInstanceId" />
+        </div>
+        <div style="display:grid; grid-template-columns:1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Current Status
+                <input id="implStatusCurrent" type="text" readonly style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; background:#f1f5f9;" /></label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">New Status <span style="color:#b91c1c;">*</span>
+                <select id="implStatusNew" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;">
+                    <option value="">— select —</option>
+                </select></label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Effective Date
+                <input id="implStatusEffective" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" /></label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
+                <textarea id="implStatusRemarks" rows="3" maxlength="2000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; resize:vertical;"></textarea></label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="implStatusCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="implStatusSubmit" class="pm-button primary">Update Status</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+
+    try { console.debug('[impl-task v5] partial script loaded'); } catch (e) {}
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        setTimeout(init, 0);
+    }
+
+    // Published deployments run under a PathBase (e.g. "/Practicemanagement"
+    // per appsettings.json). The layout exposes it as window.appBasePath;
+    // prepend it to every same-origin fetch so the URL becomes
+    // `${basePath}/practice/api/...` -- otherwise the request hits
+    // `/practice/api/...` at the origin root and returns 404 in production
+    // even though it works locally where PathBase is empty.
+    //
+    // IMPORTANT: this IIFE runs at script-parse time -- BEFORE the layout's
+    // trailing inline script that sets window.pmPathBase. If we captured
+    // APP_BASE eagerly here it would always be '' in published builds.
+    // Resolve lazily inside U() so the actual fetch URL is computed at call
+    // time (which happens on DOMContentLoaded / user interaction -- well
+    // after every inline layout script has run).
+    function U(p) {
+        return String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    }
+
+    // Cached implementation-status options (fetched once).
+    var statusOptions = null;
+
+    function init() {
+        // Guard: only initialise on screens that host this modal via the
+        // <partial name="Partials/_add-implementation-task-modal" /> include.
+        // Currently that's the Practice Instances screen (which auto-injects
+        // the 3-dot row menu items) AND Gap Center (which calls
+        // window.__openAddImplTask directly from its Implementation Gaps
+        // 3-dot menu). If pmScreen is missing, still try to wire the
+        // dialogs so the "not loaded" fallback in gaps.cshtml never fires.
+        var key = window.pmScreen ? String(window.pmScreen.Key || window.pmScreen.key || '') : '';
+        if (key && key !== 'practice-instances' && key !== 'gaps') return;
+
+        var taskDlg   = document.getElementById('implTaskDialog');
+        var statusDlg = document.getElementById('implStatusDialog');
+        if (!taskDlg || !statusDlg) return;
+
+        wireTaskDialog(taskDlg);
+        wireStatusDialog(statusDlg);
+        // Only inject items into the practice-instances grid's 3-dot menu.
+        // Gap Center builds its own row menu (see gaps.cshtml → buildRowMenu)
+        // and just calls window.__openAddImplTask() directly, so injection
+        // would duplicate the entries there.
+        if (key === 'practice-instances') wireMenuInjection();
+    }
+
+    // ---------- helpers ----------
+    function setMsg(el, text, kind) {
+        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+        el.style.display = 'block';
+        el.textContent = text;
+        if (kind === 'error')   { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
+        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
+        else                    { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+    }
+    function showDlg(d)  { if (typeof d.showModal === 'function') d.showModal(); else { d.setAttribute('open','open'); d.style.display='block'; } }
+    function closeDlg(d) { if (typeof d.close === 'function') d.close();   else { d.removeAttribute('open'); d.style.display='none'; } }
+    function backdropClose(d) { d.addEventListener('click', function (e) { var r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeDlg(d); }); }
+    // Cached diagnostic string surfaced to the UI when the fetch fails.
+    var statusOptionsLastError = null;
+
+    function fetchStatusOptions() {
+        if (statusOptions && statusOptions.length) return Promise.resolve(statusOptions);
+        statusOptionsLastError = null;
+        var url = U('/practice/api/instances/implementation-status-options');
+        return fetch(url, { credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) {
+                    return r.text().then(function (body) {
+                        statusOptionsLastError = 'HTTP ' + r.status + ' from ' + url +
+                            (body ? ' — ' + body.slice(0, 400) : '');
+                        try { console.error('[impl-task v5] status-options fetch non-OK', r.status, body); } catch (e) {}
+                        return [];
+                    });
+                }
+                return r.json().then(function (data) {
+                    if (!Array.isArray(data)) {
+                        statusOptionsLastError = 'Response was not an array; got: ' + JSON.stringify(data).slice(0, 200);
+                        return [];
+                    }
+                    if (data.length === 0) {
+                        statusOptionsLastError = 'API returned 200 but zero active status rows. Verify grac_practice.implementation_status_master has is_active=1 rows.';
+                    }
+                    return data;
+                });
+            })
+            .then(function (arr) { statusOptions = Array.isArray(arr) ? arr : []; return statusOptions; })
+            .catch(function (err) {
+                statusOptionsLastError = 'Network / fetch failure: ' + (err && err.message ? err.message : String(err));
+                try { console.error('[impl-task v5] status-options fetch threw', err); } catch (e) {}
+                statusOptions = [];
+                return statusOptions;
+            });
+    }
+
+    // ============================================================
+    // Dialog 1 — Add Implementation Task
+    // ============================================================
+    function wireTaskDialog(dlg) {
+        var form       = document.getElementById('implTaskForm');
+        var closeBtn   = document.getElementById('implTaskClose');
+        var cancelBtn  = document.getElementById('implTaskCancel');
+        var msg        = document.getElementById('implTaskMessage');
+        var inHiddenId = document.getElementById('implTaskInstanceId');
+        var ctxInst    = document.getElementById('implTaskCtxInstance');
+        var ctxPrac    = document.getElementById('implTaskCtxPractice');
+        var ctxOrg     = document.getElementById('implTaskCtxOrg');
+        var ctxStat    = document.getElementById('implTaskCtxImplStatus');
+        var inName     = document.getElementById('implTaskName');
+        var inDesc     = document.getElementById('implTaskDescription');
+        var inAssignee = document.getElementById('implTaskAssignee');
+        var inTarget   = document.getElementById('implTaskTargetDate');
+        var inPriority = document.getElementById('implTaskPriority');
+        var inRemarks  = document.getElementById('implTaskRemarks');
+        var submitBtn  = document.getElementById('implTaskSubmit');
+
+        closeBtn && closeBtn.addEventListener('click', function () { closeDlg(dlg); });
+        cancelBtn && cancelBtn.addEventListener('click', function () { closeDlg(dlg); });
+        backdropClose(dlg);
+
+        function populateAssigneeOptions(instanceId, keepValue) {
+            // Loads active employees of the instance's org and populates
+            // the Assigned To select. Called on modal open.
+            inAssignee.innerHTML = '<option value="">Loading employees…</option>';
+            inAssignee.disabled = true;
+            return fetch(U('/practice/api/instances/') + encodeURIComponent(instanceId) + '/employees', { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : []; })
+                .then(function (arr) {
+                    inAssignee.innerHTML = '';
+                    var placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = arr && arr.length ? '— select an employee —' : 'No active employees for this organization';
+                    inAssignee.appendChild(placeholder);
+                    (arr || []).forEach(function (emp) {
+                        var opt = document.createElement('option');
+                        opt.value = String(emp.employeeId);
+                        // Label: "Employee Name (Code)"  — email as tooltip if present
+                        var label = emp.employeeName || '';
+                        if (emp.employeeCode) label += ' (' + emp.employeeCode + ')';
+                        opt.textContent = label;
+                        if (emp.email) opt.title = emp.email;
+                        inAssignee.appendChild(opt);
+                    });
+                    if (keepValue) inAssignee.value = String(keepValue);
+                    inAssignee.disabled = false;
+                })
+                .catch(function () {
+                    inAssignee.innerHTML = '<option value="">Failed to load employees</option>';
+                    inAssignee.disabled = false;
+                });
+        }
+
+        window.__openAddImplTask = function (instanceId, code, name) {
+            setMsg(msg, null);
+            inHiddenId.value = instanceId;
+            inName.value = ''; inDesc.value = '';
+            inTarget.value = ''; inPriority.value = 'Medium'; inRemarks.value = '';
+            submitBtn.disabled = false;
+            ctxInst.textContent = (code ? code + ' — ' : '') + (name || '');
+            ctxPrac.textContent = 'Loading…'; ctxOrg.textContent = 'Loading…'; ctxStat.textContent = 'Loading…';
+            showDlg(dlg);
+            setTimeout(function () { inName.focus(); }, 40);
+
+            // Populate Assigned To dropdown scoped to the instance's org.
+            populateAssigneeOptions(instanceId);
+
+            fetch(U('/practice/api/instances/') + encodeURIComponent(instanceId) + '/context', { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (ctx) {
+                    if (ctx) {
+                        ctxInst.textContent = (ctx.instanceCode || code || '') + ' — ' + (ctx.instanceName || name || '');
+                        ctxPrac.textContent = ctx.practiceName ? (ctx.practiceCode ? ctx.practiceCode + ' — ' + ctx.practiceName : ctx.practiceName) : '—';
+                        ctxOrg.textContent  = ctx.organizationName || '—';
+                        ctxStat.textContent = ctx.implementationStatusName || ctx.implementationStatusCode || '—';
+                    } else {
+                        ctxPrac.textContent = '(context unavailable)'; ctxOrg.textContent = '(context unavailable)'; ctxStat.textContent = '(context unavailable)';
+                    }
+                });
+        };
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var id = (inHiddenId.value || '').trim();
+            if (!id) { setMsg(msg, 'Practice Instance is not set.', 'error'); return; }
+            if (!inName.value.trim()) { setMsg(msg, 'Task Name is required.', 'error'); return; }
+            if (!inAssignee.value)    { setMsg(msg, 'Assigned To is required — select an employee.', 'error'); return; }
+            submitBtn.disabled = true; setMsg(msg, 'Saving…');
+            var payload = {
+                subjectTitle:         inName.value.trim(),
+                subjectDescription:   inDesc.value.trim() || null,
+                assignedToEmployeeId: inAssignee.value ? Number(inAssignee.value) : null,
+                targetDate:           inTarget.value ? new Date(inTarget.value + 'T00:00:00Z').toISOString() : null,
+                priority:             inPriority.value,
+                remarks:              inRemarks.value.trim() || null
+            };
+            fetch(U('/practice/api/instances/') + encodeURIComponent(id) + '/open-implementation-task', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload)
+            })
+            .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (r) {
+                if (r.ok) {
+                    setMsg(msg, 'Task #' + (r.body.taskId || '?') + ' created. Refreshing…', 'ok');
+                    setTimeout(function () { closeDlg(dlg); var rb = document.getElementById('refresh'); if (rb) rb.click(); }, 900);
+                } else {
+                    setMsg(msg, (r.body.error || 'Request failed') + (r.body.reasonCode ? ' [' + r.body.reasonCode + ']' : ''), 'error');
+                    submitBtn.disabled = false;
+                }
+            })
+            .catch(function (err) { setMsg(msg, 'Network error: ' + err.message, 'error'); submitBtn.disabled = false; });
+        });
+    }
+
+    // ============================================================
+    // Dialog 2 — Update Implementation Status
+    // ============================================================
+    function wireStatusDialog(dlg) {
+        var form       = document.getElementById('implStatusForm');
+        var closeBtn   = document.getElementById('implStatusClose');
+        var cancelBtn  = document.getElementById('implStatusCancel');
+        var msg        = document.getElementById('implStatusMessage');
+        var inHiddenId = document.getElementById('implStatusInstanceId');
+        var ctxInst    = document.getElementById('implStatusCtxInstance');
+        var inCurrent  = document.getElementById('implStatusCurrent');
+        var selNew     = document.getElementById('implStatusNew');
+        var inEff      = document.getElementById('implStatusEffective');
+        var inRemarks  = document.getElementById('implStatusRemarks');
+        var submitBtn  = document.getElementById('implStatusSubmit');
+
+        closeBtn && closeBtn.addEventListener('click', function () { closeDlg(dlg); });
+        cancelBtn && cancelBtn.addEventListener('click', function () { closeDlg(dlg); });
+        backdropClose(dlg);
+
+        window.__openUpdateImplStatus = function (instanceId, code, name, currentStatusText) {
+            setMsg(msg, null);
+            inHiddenId.value = instanceId;
+            ctxInst.textContent = (code ? code + ' — ' : '') + (name || '');
+            inCurrent.value = currentStatusText || '';
+            inRemarks.value = '';
+            var today = new Date();
+            inEff.value = today.toISOString().slice(0, 10);
+            submitBtn.disabled = false;
+
+            // Populate dropdown from cached options, excluding the current status.
+            // Force a fresh fetch so the error diagnostic is current.
+            statusOptions = null;
+            fetchStatusOptions().then(function (opts) {
+                selNew.innerHTML = '<option value="">— select —</option>';
+                opts.forEach(function (o) {
+                    if (o.statusCode === currentStatusText) return;   // exclude current
+                    var opt = document.createElement('option');
+                    opt.value = o.statusCode;
+                    opt.textContent = o.statusName || o.statusCode;
+                    selNew.appendChild(opt);
+                });
+                if (opts.length === 0) {
+                    var detail = statusOptionsLastError || 'no diagnostic available; check DevTools console/network tab.';
+                    setMsg(msg, 'Could not load status options: ' + detail, 'error');
+                }
+            });
+
+            showDlg(dlg);
+            setTimeout(function () { selNew.focus(); }, 40);
+        };
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var id = (inHiddenId.value || '').trim();
+            var newCode = (selNew.value || '').trim();
+            if (!id)      { setMsg(msg, 'Practice Instance is not set.', 'error'); return; }
+            if (!newCode) { setMsg(msg, 'Select a new status.', 'error'); return; }
+            submitBtn.disabled = true; setMsg(msg, 'Saving…');
+            var payload = {
+                newStatusCode: newCode,
+                remarks:       inRemarks.value.trim() || null,
+                effectiveDate: inEff.value ? new Date(inEff.value + 'T00:00:00Z').toISOString() : null
+            };
+            fetch(U('/practice/api/instances/') + encodeURIComponent(id) + '/update-implementation-status', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload)
+            })
+            .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (r) {
+                if (r.ok) {
+                    setMsg(msg, 'Status updated to ' + (r.body.newStatusCode || newCode) + '. Refreshing…', 'ok');
+                    setTimeout(function () { closeDlg(dlg); var rb = document.getElementById('refresh'); if (rb) rb.click(); }, 900);
+                } else {
+                    setMsg(msg, (r.body.error || 'Request failed') + (r.body.reasonCode ? ' [' + r.body.reasonCode + ']' : ''), 'error');
+                    submitBtn.disabled = false;
+                }
+            })
+            .catch(function (err) { setMsg(msg, 'Network error: ' + err.message, 'error'); submitBtn.disabled = false; });
+        });
+    }
+
+    // ============================================================
+    // Row-menu injection — CONDITIONAL per current status
+    // ============================================================
+    function wireMenuInjection() {
+        function findImplStatusColIdx(headerRow) {
+            if (!headerRow) return -1;
+            var hs = headerRow.querySelectorAll('th');
+            for (var i = 0; i < hs.length; i++) {
+                var t = (hs[i].textContent || '').trim().toLowerCase().replace(/\s+/g, '');
+                if (t === 'implementationstatus') return i;
+            }
+            return -1;
+        }
+        function getInstanceId(tr) {
+            return tr.getAttribute('data-record-id') || tr.getAttribute('data-id') || null;
+        }
+
+        function inject(menu) {
+            try {
+                var trigger = document.querySelector('.pm-action-trigger[aria-expanded="true"]');
+                if (!trigger) return;
+                var tr = trigger.closest('tr');
+                if (!tr) return;
+                var table = tr.closest('table');
+                if (!table) return;
+                var headerRow = table.querySelector('thead tr');
+                var idx = findImplStatusColIdx(headerRow);
+                if (idx < 0) return;
+                var cells = tr.children;
+                if (cells.length <= idx) return;
+                var statusText = (cells[idx].textContent || '').trim();
+                var codeText = cells[0] ? (cells[0].textContent || '').trim() : '';
+                var nameText = cells[1] ? (cells[1].textContent || '').trim() : '';
+                var instanceId = getInstanceId(tr);
+                if (!instanceId) return;
+
+                // Always add "Update Implementation Status"
+                if (!menu.querySelector('button[data-action="updateImplementationStatus"]')) {
+                    var upd = document.createElement('button');
+                    upd.type = 'button';
+                    upd.setAttribute('role', 'menuitem');
+                    upd.setAttribute('data-action', 'updateImplementationStatus');
+                    upd.innerHTML = '<i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Update Implementation Status';
+                    upd.addEventListener('click', function (e) {
+                        e.preventDefault(); e.stopPropagation();
+                        if (trigger) trigger.click();
+                        window.__openUpdateImplStatus(instanceId, codeText, nameText, statusText);
+                    });
+                    menu.appendChild(upd);
+                }
+
+                // Add "Add Implementation Task" only when status is Not Implemented / Partially Implemented / Not Started (legacy)
+                var showAddTask = (statusText === 'Not Implemented' || statusText === 'Partially Implemented' || statusText === 'Not Started');
+                if (showAddTask && !menu.querySelector('button[data-action="addImplementationTask"]')) {
+                    var add = document.createElement('button');
+                    add.type = 'button';
+                    add.setAttribute('role', 'menuitem');
+                    add.setAttribute('data-action', 'addImplementationTask');
+                    add.innerHTML = '<i class="fa-solid fa-list-check" aria-hidden="true"></i> Add Implementation Task';
+                    add.addEventListener('click', function (e) {
+                        e.preventDefault(); e.stopPropagation();
+                        if (trigger) trigger.click();
+                        window.__openAddImplTask(instanceId, codeText, nameText);
+                    });
+                    menu.appendChild(add);
+                }
+            } catch (err) { try { console.warn('[impl-task v5] menu-inject failed', err); } catch (e) {} }
+        }
+
+        // MutationObserver is only wired for the Practice Instances screen.
+        // The caller (init()) already guards `wireMenuInjection` with
+        // `key === 'practice-instances'`, so no second gate is needed here.
+        // The previous `if (!_isPracticeInstances) return;` referenced an
+        // undeclared identifier and threw a ReferenceError that aborted
+        // init() -- the modal + row-menu injection silently died and the
+        // page only recovered after a second "Continue" load.
+        var observer = new MutationObserver(function (mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+                var m = mutations[i]; if (!m.addedNodes) continue;
+                for (var j = 0; j < m.addedNodes.length; j++) {
+                    var n = m.addedNodes[j];
+                    if (n.nodeType === 1 && n.classList && n.classList.contains('pm-action-menu')) inject(n);
+                }
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: false });
+    }
+})();
+</script>

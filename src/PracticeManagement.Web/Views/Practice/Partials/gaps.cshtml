@@ -1,0 +1,755 @@
+@*
+    Gap Center — split from Task Center as its own module.
+
+    Purpose:
+      "Gap Center identifies work that needs to be done."
+      "Task Center manages tasks created to address those gaps."
+
+    Tabs (Phase 1):
+      * Implementation Gaps — Practice Instances with implementation_status in
+        (Not Implemented, Partially Implemented). Backed by the existing
+        /practice/api/instances/gaps endpoint (unchanged).
+      * Assurance Gaps      — placeholder (future: unresolved assurance findings).
+      * Custom Gaps         — placeholder (future: manually-recorded gaps).
+
+    Screen key: `gaps`  ·  Registered in PracticeScreen.All (group = Oversight)
+    Feature flag: `screen.gaps` (seeded ON per-org by migration 050)
+    Menu row:     seeded by migration 050 (module_type = Oversight)
+
+    DOM patterns mirror Views/Practice/Partials/tasks.cshtml so styling
+    stays consistent: pm-tabs, pm-table-wrap, pm-pager, pm-action-trigger.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="gapCenterUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-flag-checkered pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="gapCenterUnavailableTitle">Gap Center is not yet enabled for this organization.</h2>
+        <p id="gapCenterUnavailableBody">Ask a GRAC Admin to turn on the <code>screen.gaps</code> feature flag in your organization settings.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="gapCenterRoot" hidden>
+
+    <div class="pm-tabs" role="tablist" aria-label="Gap Center tabs">
+        <button role="tab" data-tab="implementation" class="active" aria-selected="true">Implementation Gaps <span class="pm-badge" id="gapTabCountImpl">0</span></button>
+        <button role="tab" data-tab="assurance"                       aria-selected="false">Assurance Gaps <span class="pm-badge" id="gapTabCountAssurance">0</span></button>
+        <button role="tab" data-tab="custom"                          aria-selected="false">Custom Gaps <span class="pm-badge" id="gapTabCountCustom">0</span></button>
+    </div>
+
+    <div class="pm-toolbar">
+        <select id="gapFilterOrganization">
+            <option value="">All organizations</option>
+        </select>
+        <input id="gapCenterSearch" type="text" placeholder="Search practice instance / practice / gap..." />
+        <button class="pm-button icon" id="gapRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="gapAddBtn" type="button" title="Add Custom Gap">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Gap
+        </button>
+    </div>
+
+    <!-- Implementation Gaps tab -->
+    <div class="pm-tab-panel" data-panel="implementation">
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Practice Instance</th><th>Practice</th><th>Organization</th>
+                        <th>Implementation Status</th><th>Owner</th><th>Criticality</th>
+                        <th>Existing Tasks</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="gapBody-implementation"><tr><td colspan="8" class="pm-empty">Select an organization to load Implementation Gaps.</td></tr></tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="implementation">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
+    <!-- Assurance Gaps tab (placeholder) -->
+    <div class="pm-tab-panel" data-panel="assurance" hidden>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Finding</th><th>Assurance Activity</th><th>Practice Instance</th>
+                        <th>Severity</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="gapBody-assurance">
+                    <tr><td colspan="8" class="pm-empty">Assurance Gaps land in a later phase — they will surface unresolved findings from the assurance subsystem.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="assurance">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
+    <!-- Custom Gaps tab -->
+    <div class="pm-tab-panel" data-panel="custom" hidden>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th><th>Priority</th><th>Owner</th>
+                        <th>Due Date</th><th>Status</th><th>Raised On</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="gapBody-custom">
+                    <tr><td colspan="7" class="pm-empty">Select an organization to load Custom Gaps.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="custom">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
+</section>
+
+@* ---------- Add Custom Gap dialog ---------- *@
+<dialog id="newCustomGapDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="newCustomGapForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Add Custom Gap</h2>
+            <button type="button" id="newGapClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="newGapMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; margin-bottom:14px;">
+            <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div>
+            <div id="newGapOrgLabel" style="font-weight:600; color:#0f172a;">-</div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Gap Type
+                <input id="newGapType" type="text" value="Custom" readonly
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#f1f5f9;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Title <span style="color:#b91c1c;">*</span>
+                <input id="newGapTitle" type="text" maxlength="250" required
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
+                <textarea id="newGapDescription" rows="3" maxlength="4000"
+                          style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            </label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
+                    <select id="newGapPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="Low">Low</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
+                    <select id="newGapStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="Open" selected>Open</option>
+                        <option value="InProgress">In Progress</option>
+                        <option value="Closed">Closed</option>
+                        <option value="Cancelled">Cancelled</option>
+                    </select>
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Owner
+                    <select id="newGapOwner" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="">Loading employees...</option>
+                    </select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Due Date
+                    <input id="newGapDueDate" type="date"
+                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
+                <textarea id="newGapRemarks" rows="2" maxlength="1000"
+                          style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="newGapCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="newGapSubmit" class="pm-button primary">Create Gap</button>
+        </div>
+    </form>
+</dialog>
+
+@* Reuse the existing Add Implementation Task modal — exposes window.__openAddImplTask *@
+<partial name="Partials/_add-implementation-task-modal" model="Model" />
+
+@* NOTE — see the equivalent comment in tasks.cshtml. Razor @section blocks
+   are ignored inside partial views, so keep this script inline. *@
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    // Published deployments run under a PathBase (e.g. "/Practicemanagement"
+    // per appsettings.json). The layout exposes it as window.appBasePath;
+    // prepend it to every same-origin fetch so the URL becomes
+    // `${basePath}/practice/api/...` -- otherwise the request hits
+    // `/practice/api/...` at the origin root and returns 404 in production
+    // even though it works locally where PathBase is empty.
+    //
+    // IMPORTANT: this IIFE runs at script-parse time -- BEFORE the layout's
+    // trailing inline script that sets window.pmPathBase. If we captured
+    // APP_BASE eagerly here it would always be '' in published builds.
+    // Resolve lazily inside U() so the actual fetch URL is computed at call
+    // time (which happens on DOMContentLoaded / user interaction -- well
+    // after every inline layout script has run).
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    let selectedOrgId = null;
+    let activeTab     = 'implementation';
+    let pagesByTab    = { implementation: 1, assurance: 1, custom: 1 };
+    const PAGE_SIZE   = 25;
+    let searchDebounce = null;
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    async function init() {
+        const orgs = await loadOrgs();
+        const root    = document.getElementById('gapCenterRoot');
+        const unavail = document.getElementById('gapCenterUnavailable');
+        if (!orgs.length) {
+            unavail.hidden = false;
+            document.getElementById('gapCenterUnavailableTitle').textContent = 'No organizations are available for your account.';
+            document.getElementById('gapCenterUnavailableBody').textContent  = 'Ask a GRAC Admin to map your account to an organization.';
+            return;
+        }
+        root.hidden = false;
+        populateOrgSelect(orgs);
+        document.getElementById('gapFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('gapRefreshBtn').addEventListener('click', reloadCurrentTab);
+        document.getElementById('gapCenterSearch').addEventListener('input', function () {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(function () { pagesByTab[activeTab] = 1; reloadCurrentTab(); }, 300);
+        });
+        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (btn) {
+            btn.addEventListener('click', function () { switchTab(btn.getAttribute('data-tab')); });
+        });
+        wirePagers();
+        wireRowMenu();
+        wireAddGapDialog();
+
+        const addBtn = document.getElementById('gapAddBtn');
+        if (addBtn) addBtn.addEventListener('click', openAddGapDialog);
+
+        // Feature-flag probe for the chosen (or auto-selected) org.
+        await onOrgChange();
+    }
+
+    async function loadOrgs() {
+        try {
+            const r = await fetch(U('/practice/api/organizations/allowed'), { credentials: 'same-origin' });
+            if (!r.ok) return [];
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            return rows.map(function (row) {
+                return {
+                    value: String(row.organizationId || row.OrganizationId || ''),
+                    label: String(row.organizationName || row.OrganizationName || '')
+                };
+            }).filter(function (o) { return o.value; });
+        } catch (_) { return []; }
+    }
+    function populateOrgSelect(orgs) {
+        // Unified behavior (Gap Center + Task Center):
+        //   * No "Select organization" placeholder -- first permitted
+        //     org is auto-selected so records load on initial page.
+        //   * Single-org users: dropdown disabled (nothing to switch to).
+        //   * Multi-org users: dropdown enabled, change handler reloads.
+        //   * Empty list handled upstream in init() (unavailable banner).
+        const sel = document.getElementById('gapFilterOrganization');
+        sel.innerHTML = '';
+        for (const o of orgs) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            sel.appendChild(opt);
+        }
+        if (orgs.length > 0) sel.value = orgs[0].value;
+        sel.disabled = orgs.length <= 1;
+    }
+
+    async function checkFeatureFlagFor(orgId) {
+        try {
+            const resp = await fetch(
+                U('/practice/api/gaps/feature-status?organizationId=') + encodeURIComponent(orgId),
+                { credentials: 'same-origin' });
+            if (!resp.ok) return false; // fail-closed (mirrors Task Center)
+            const body = await resp.json();
+            return !!(body && (body.enabled === true || body.Enabled === true));
+        } catch (_) { return false; }
+    }
+
+    async function onOrgChange() {
+        closeRowMenu();
+        selectedOrgId = document.getElementById('gapFilterOrganization').value || null;
+        pagesByTab = { implementation: 1, assurance: 1, custom: 1 };
+        const root    = document.getElementById('gapCenterRoot');
+        const unavail = document.getElementById('gapCenterUnavailable');
+        if (!selectedOrgId) {
+            // Multi-org caller has not picked one yet — keep toolbar visible,
+            // clear grids, no feature-flag probe.
+            unavail.hidden = true;
+            setBody('implementation',
+                '<tr><td colspan="8" class="pm-empty">Select an organization to load Implementation Gaps.</td></tr>');
+            setCounts(null);
+            return;
+        }
+        const enabled = await checkFeatureFlagFor(selectedOrgId);
+        if (!enabled) {
+            unavail.hidden = false;
+            root.hidden    = true;
+            return;
+        }
+        unavail.hidden = true;
+        root.hidden    = false;
+        await refreshCounts();
+        await reloadCurrentTab();
+    }
+
+    // -----------------------------------------------------------------
+    // Counts — reuse the Task Center counts endpoint. `gapsCount` is
+    // exactly the Implementation Gaps count (the source-of-truth SP
+    // is what Task Center's Gaps tab was already reading), so it also
+    // powers our Implementation Gaps badge.
+    // -----------------------------------------------------------------
+    async function refreshCounts() {
+        if (!selectedOrgId) { setCounts(null, 0); return; }
+        // Kick off both count fetches in parallel; either failing is
+        // non-fatal (badge just shows 0 for that tab).
+        const results = await Promise.all([
+            fetch(U('/practice/api/tasks/counts?organizationId=') + encodeURIComponent(selectedOrgId),
+                  { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+            fetch(U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId) + '&pageSize=1',
+                  { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (b) { return (b && (b.totalCount || b.TotalCount)) || 0; })
+                .catch(function () { return 0; })
+        ]);
+        setCounts(results[0], results[1]);
+    }
+    function setCounts(taskCounts, customGapCount) {
+        document.getElementById('gapTabCountImpl').textContent      = taskCounts ? (taskCounts.gapsCount || 0) : 0;
+        // Assurance Gaps still a placeholder feed.
+        document.getElementById('gapTabCountAssurance').textContent = 0;
+        document.getElementById('gapTabCountCustom').textContent    = customGapCount || 0;
+    }
+
+    function switchTab(tab) {
+        closeRowMenu();
+        activeTab = tab;
+        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
+            const on = b.getAttribute('data-tab') === tab;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('.pm-tab-panel').forEach(function (p) {
+            p.hidden = p.getAttribute('data-panel') !== tab;
+        });
+        reloadCurrentTab();
+    }
+    async function reloadCurrentTab() {
+        closeRowMenu();
+        if (!selectedOrgId) return;
+        if (activeTab === 'implementation') return loadImplementationGaps();
+        if (activeTab === 'custom')         return loadCustomGaps();
+        // Assurance is a placeholder for this phase.
+    }
+
+    async function loadImplementationGaps() {
+        const q = document.getElementById('gapCenterSearch').value.trim();
+        const p = pagesByTab.implementation;
+        const url = U('/practice/api/instances/gaps?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&page=' + p + '&pageSize=' + PAGE_SIZE
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        setBody('implementation', '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderImplementationGaps(await r.json());
+        } catch (err) {
+            setBody('implementation', '<tr><td colspan="8" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
+        }
+    }
+    function renderImplementationGaps(payload) {
+        const body = document.getElementById('gapBody-implementation');
+        body.innerHTML = '';
+        const rows = (payload && payload.rows) || [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">No Implementation Gaps for this organization — every Practice Instance is Implemented.</td></tr>';
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                const r  = rows[i];
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-record-id',      String(r.practiceInstanceId));
+                tr.setAttribute('data-instance-id',    String(r.practiceInstanceId));
+                tr.setAttribute('data-instance-code',  r.instanceCode || '');
+                tr.setAttribute('data-instance-name',  r.instanceName || '');
+                tr.setAttribute('data-existing-count', String(r.existingTaskCount || 0));
+                tr.innerHTML = [
+                    '<td>' + escape(r.instanceCode) + ' &mdash; ' + escape(r.instanceName) + '</td>',
+                    '<td>' + escape((r.practiceCode || '') + (r.practiceName ? ' — ' + r.practiceName : '')) + '</td>',
+                    '<td>' + escape(r.organizationName || '') + '</td>',
+                    '<td>' + formatBadge(r.implementationStatus) + '</td>',
+                    '<td>' + escape(r.owner || '') + '</td>',
+                    '<td>' + escape(r.criticality || '') + '</td>',
+                    '<td>' + escape(String(r.existingTaskCount)) + '</td>',
+                    '<td>' + actionTrigger('implementation', i) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        }
+        updatePager('implementation', payload);
+    }
+
+    // -----------------------------------------------------------------
+    // Custom Gaps -- backed by /practice/api/gaps/custom.
+    // -----------------------------------------------------------------
+    async function loadCustomGaps() {
+        const q = document.getElementById('gapCenterSearch').value.trim();
+        const p = pagesByTab.custom;
+        const url = U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&page=' + p + '&pageSize=' + PAGE_SIZE
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        setBody('custom', '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderCustomGaps(await r.json());
+        } catch (err) {
+            setBody('custom', '<tr><td colspan="7" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
+        }
+    }
+    function renderCustomGaps(payload) {
+        const body = document.getElementById('gapBody-custom');
+        body.innerHTML = '';
+        const rows = (payload && payload.rows) || [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No Custom Gaps yet. Click Add Gap to create one.</td></tr>';
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                const r  = rows[i];
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-custom-gap-id', String(r.customGapId));
+                tr.setAttribute('data-gap-status',    r.status || '');
+                tr.innerHTML = [
+                    '<td>' + escape(r.title) + '</td>',
+                    '<td>' + escape(r.priority) + '</td>',
+                    '<td>' + escape(r.ownerEmployeeId != null ? String(r.ownerEmployeeId) : '') + '</td>',
+                    '<td>' + escape(r.dueDate ? String(r.dueDate).substring(0, 10) : '') + '</td>',
+                    '<td>' + formatBadge(r.status) + '</td>',
+                    '<td>' + escape(r.enteredDt ? String(r.enteredDt).substring(0, 10) : '') + '</td>',
+                    '<td>' + actionTrigger('custom', i) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        }
+        updatePager('custom', payload);
+    }
+
+    // -----------------------------------------------------------------
+    // Add Custom Gap dialog
+    // -----------------------------------------------------------------
+    function setGapMsg(text, kind) {
+        const el = document.getElementById('newGapMessage');
+        if (!el) return;
+        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+        el.style.display = 'block'; el.textContent = text;
+        if (kind === 'error') { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
+        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
+        else { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+    }
+    async function loadGapOwnerOptions(orgId) {
+        const sel = document.getElementById('newGapOwner');
+        sel.innerHTML = '<option value="">Loading employees...</option>';
+        sel.disabled  = true;
+        try {
+            const r = await fetch(U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees',
+                                  { credentials: 'same-origin' });
+            const arr = r.ok ? await r.json() : [];
+            sel.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = (arr && arr.length) ? '(no owner)' : 'No active employees for this organization';
+            sel.appendChild(placeholder);
+            (arr || []).forEach(function (emp) {
+                const opt = document.createElement('option');
+                opt.value = String(emp.employeeId);
+                let label = emp.employeeName || '';
+                if (emp.employeeCode) label += ' (' + emp.employeeCode + ')';
+                opt.textContent = label;
+                if (emp.email) opt.title = emp.email;
+                sel.appendChild(opt);
+            });
+        } catch (_) {
+            sel.innerHTML = '<option value="">Failed to load employees</option>';
+        } finally { sel.disabled = false; }
+    }
+    function openAddGapDialog() {
+        if (!selectedOrgId) { alert('Select an organization first.'); return; }
+        const dlg = document.getElementById('newCustomGapDialog');
+        if (!dlg) return;
+        setGapMsg(null);
+        ['newGapTitle','newGapDescription','newGapDueDate','newGapRemarks'].forEach(function (id) {
+            const el = document.getElementById(id); if (el) el.value = '';
+        });
+        const pr = document.getElementById('newGapPriority'); if (pr) pr.value = 'Medium';
+        const st = document.getElementById('newGapStatus');   if (st) st.value = 'Open';
+        const sub = document.getElementById('newGapSubmit');  if (sub) sub.disabled = false;
+        const orgSel = document.getElementById('gapFilterOrganization');
+        const lbl = document.getElementById('newGapOrgLabel');
+        if (lbl) lbl.textContent = (orgSel && orgSel.options[orgSel.selectedIndex]
+                                    && orgSel.options[orgSel.selectedIndex].textContent)
+                                   || ('Organization ' + selectedOrgId);
+        loadGapOwnerOptions(selectedOrgId);
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else { dlg.setAttribute('open','open'); dlg.style.display='block'; }
+        setTimeout(function () { const t = document.getElementById('newGapTitle'); if (t) t.focus(); }, 40);
+    }
+    function closeAddGapDialog() {
+        const dlg = document.getElementById('newCustomGapDialog');
+        if (!dlg) return;
+        if (typeof dlg.close === 'function') dlg.close();
+        else { dlg.removeAttribute('open'); dlg.style.display = 'none'; }
+    }
+    function wireAddGapDialog() {
+        const dlg = document.getElementById('newCustomGapDialog');
+        if (!dlg) return;
+        const closeB = document.getElementById('newGapClose');
+        const canB   = document.getElementById('newGapCancel');
+        const form   = document.getElementById('newCustomGapForm');
+        if (closeB) closeB.addEventListener('click', closeAddGapDialog);
+        if (canB)   canB.addEventListener('click',   closeAddGapDialog);
+        dlg.addEventListener('click', function (e) {
+            const r = dlg.getBoundingClientRect();
+            if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeAddGapDialog();
+        });
+        if (!form) return;
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const title = document.getElementById('newGapTitle').value.trim();
+            if (!title) { setGapMsg('Title is required.', 'error'); return; }
+            const submit = document.getElementById('newGapSubmit');
+            submit.disabled = true; setGapMsg('Saving...');
+            const owner = document.getElementById('newGapOwner').value;
+            const due   = document.getElementById('newGapDueDate').value;
+            const payload = {
+                organizationId:  Number(selectedOrgId),
+                gapTypeCode:     'Custom',
+                title:           title,
+                description:     document.getElementById('newGapDescription').value.trim() || null,
+                priority:        document.getElementById('newGapPriority').value,
+                ownerEmployeeId: owner ? Number(owner) : null,
+                dueDate:         due ? new Date(due + 'T00:00:00Z').toISOString() : null,
+                status:          document.getElementById('newGapStatus').value,
+                remarks:         document.getElementById('newGapRemarks').value.trim() || null
+            };
+            try {
+                const r = await fetch(U('/practice/api/gaps/custom'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) {
+                    setGapMsg('Custom Gap #' + (b.customGapId || '?') + ' created.', 'ok');
+                    setTimeout(function () {
+                        closeAddGapDialog();
+                        if (activeTab !== 'custom') switchTab('custom');
+                        else reloadCurrentTab();
+                    }, 700);
+                } else {
+                    setGapMsg((b.error || 'Request failed'), 'error');
+                    submit.disabled = false;
+                }
+            } catch (err) {
+                setGapMsg('Network error: ' + err.message, 'error');
+                submit.disabled = false;
+            }
+        });
+    }
+
+    function actionTrigger(tab, index) {
+        return '<button type="button" class="pm-action-trigger" data-tab-action="' + escape(tab) + '" data-row-index="' + index + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+    function formatBadge(v) { return v ? '<span class="pm-badge">' + escape(v) + '</span>' : ''; }
+    function setBody(tab, html) {
+        const el = document.getElementById('gapBody-' + tab);
+        if (el) el.innerHTML = html;
+    }
+    function wirePagers() {
+        document.querySelectorAll('.pm-pager').forEach(function (nav) {
+            const tab = nav.getAttribute('data-pager');
+            if (!tab) return;
+            const prevBtn = nav.querySelector('[data-pg="prev"]');
+            const nextBtn = nav.querySelector('[data-pg="next"]');
+            if (prevBtn) prevBtn.addEventListener('click', function () {
+                if (pagesByTab[tab] > 1) { pagesByTab[tab]--; reloadCurrentTab(); }
+            });
+            if (nextBtn) nextBtn.addEventListener('click', function () {
+                pagesByTab[tab]++; reloadCurrentTab();
+            });
+        });
+    }
+    function updatePager(tab, payload) {
+        const nav = document.querySelector('.pm-pager[data-pager="' + tab + '"]');
+        if (!nav) return;
+        nav.querySelector('[data-pg="label"]').textContent = 'Page ' + (payload && payload.pageNumber || 1);
+        nav.querySelector('[data-pg="total"]').textContent = (payload && payload.totalCount || 0) + ' total';
+    }
+    function escape(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Row 3-dot menu
+    //   Implementation Gaps →
+    //     * View Practice Instance
+    //     * Add Implementation Task
+    //     * View Existing Tasks   (only if at least one exists)
+    // -----------------------------------------------------------------
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trigger) {
+        if (!openMenuEl) return;
+        const r  = trigger.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top = top + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trigger, items) {
+        closeRowMenu();
+        openMenuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + escape(it.icon) + '" aria-hidden="true"></i> ' + escape(it.label);
+            if (it.disabled) { b.disabled = true; b.title = it.disabledReason || ''; }
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[gap-center] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trigger);
+    }
+    function buildRowMenu(tr) {
+        if (activeTab === 'custom') {
+            const gapId  = tr.getAttribute('data-custom-gap-id');
+            const status = tr.getAttribute('data-gap-status') || '';
+            const isClosed = (status === 'Closed' || status === 'Cancelled');
+            return [
+                { icon: 'fa-lock',
+                  label: 'Close Gap',
+                  disabled: isClosed, disabledReason: 'Gap is already ' + status.toLowerCase() + '.',
+                  action: async function () {
+                      if (!confirm('Close Custom Gap #' + gapId + '?')) return;
+                      try {
+                          const r = await fetch(U('/practice/api/gaps/custom/') + encodeURIComponent(gapId) + '/close', {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              credentials: 'same-origin',
+                              body: JSON.stringify({ remarks: 'Closed from Gap Center 3-dot menu.' })
+                          });
+                          if (r.ok) reloadCurrentTab();
+                          else {
+                              const b = await r.json().catch(function () { return {}; });
+                              alert(b.error || 'Close failed');
+                          }
+                      } catch (err) { alert('Network error: ' + err.message); }
+                  } }
+            ];
+        }
+        if (activeTab !== 'implementation') return [];
+        const id    = tr.getAttribute('data-instance-id');
+        const code  = tr.getAttribute('data-instance-code') || '';
+        const name  = tr.getAttribute('data-instance-name') || '';
+        const nOpen = Number(tr.getAttribute('data-existing-count') || 0);
+        const items = [
+            { icon: 'fa-eye',  label: 'View Practice Instance',
+                action: function () { window.location.href = '/Practice/Index/practice-instances'; } },
+            { icon: 'fa-plus', label: 'Add Implementation Task',
+                action: function () {
+                    if (window.__openAddImplTask) window.__openAddImplTask(id, code, name);
+                    else alert('Add Implementation Task dialog not loaded.');
+                } }
+        ];
+        if (nOpen > 0) items.push({
+            icon: 'fa-list',
+            label: 'View Existing Tasks (' + nOpen + ')',
+            action: function () {
+                // Deep-link into Task Center's Implementation tab pre-filtered
+                // by this instance's code/name (Task Center's search box reads
+                // the query param once, via #search=).
+                const q = encodeURIComponent(code || name || '');
+                window.location.href = '/Practice/Index/tasks#tab=implementation&search=' + q;
+            }
+        });
+        return items;
+    }
+    function wireRowMenu() {
+        const root = document.getElementById('gapCenterRoot');
+        if (root) {
+            root.addEventListener('click', function (e) {
+                const trigger = e.target.closest('.pm-action-trigger');
+                if (!trigger || !root.contains(trigger)) return;
+                e.preventDefault(); e.stopPropagation();
+                const tr = trigger.closest('tr');
+                if (!tr) return;
+                if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+                openRowMenu(trigger, buildRowMenu(tr));
+            });
+        }
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu')) return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+})();
+</script>

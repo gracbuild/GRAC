@@ -178,6 +178,12 @@ public sealed class PracticeMenuService(SecurePracticeClient client, ILogger<Pra
         if (group.Equals(PracticeScreen.OrganizationAccessAdministrationGroup, StringComparison.OrdinalIgnoreCase)) return "user-lock";
         if (group.Equals(PracticeScreen.DependencyWorkbenchGroup, StringComparison.OrdinalIgnoreCase)) return "network-wired";
         if (group.Equals(PracticeScreen.AssuranceManagementGroup, StringComparison.OrdinalIgnoreCase)) return "user-shield";
+        if (group.Equals(PracticeScreen.OversightGroup, StringComparison.OrdinalIgnoreCase)) return "binoculars";
+        // Migration 051 — new top-level groups.
+        if (group.Equals(PracticeScreen.GovernanceGroup, StringComparison.OrdinalIgnoreCase)) return "landmark";
+        if (group.Equals(PracticeScreen.OrganizationGroup, StringComparison.OrdinalIgnoreCase)) return "building";
+        if (group.Equals(PracticeScreen.OperationsGroup, StringComparison.OrdinalIgnoreCase)) return "gears";
+        if (group.Equals(PracticeScreen.AdministrationGroup, StringComparison.OrdinalIgnoreCase)) return "user-shield";
         return "clipboard-check";
     }
 

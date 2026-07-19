@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GRAC Workflow Layer — UI Wireframes</title>
+<style>
+:root{--fg:#0f172a;--muted:#475569;--line:#cbd5e1;--soft:#f1f5f9;--brand:#0a5cbf;--warn:#b45309;--bad:#b91c1c;--good:#166534;--bg:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--fg);background:#f8fafc}
+header{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:14px 20px;z-index:9}
+header h1{margin:0;font-size:18px}
+header .sub{color:var(--muted);font-size:12px;margin-top:2px}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+nav a{padding:4px 8px;border:1px solid var(--line);border-radius:4px;text-decoration:none;color:var(--fg);font-size:12px;background:#fff}
+nav a:hover{background:var(--soft)}
+main{max-width:1200px;margin:24px auto;padding:0 20px 80px}
+section.screen{background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:32px;overflow:hidden}
+section.screen > header{position:static;background:#0f172a;color:#fff;border:0;padding:14px 20px}
+section.screen > header h2{margin:0;font-size:16px}
+section.screen > header .k{background:#334155;color:#e2e8f0;padding:2px 8px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-left:8px}
+section.screen .body{padding:18px 20px}
+section.screen h3{margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+section.screen p{margin:4px 0}
+ul{margin:4px 0 8px 18px;padding:0}
+li{margin:2px 0}
+.wire{border:1.5px dashed var(--line);border-radius:6px;padding:10px;background:#fafafa;margin:6px 0 12px}
+.wire .toolbar{display:flex;align-items:center;gap:8px;border-bottom:1px dashed var(--line);padding-bottom:8px;margin-bottom:8px;flex-wrap:wrap}
+.wire .toolbar .title{font-weight:600}
+.chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted)}
+.chip.warn{border-color:#fbbf24;background:#fef3c7;color:var(--warn)}
+.chip.bad{border-color:#fca5a5;background:#fee2e2;color:var(--bad)}
+.chip.good{border-color:#86efac;background:#dcfce7;color:var(--good)}
+.chip.info{border-color:#93c5fd;background:#dbeafe;color:#1d4ed8}
+.btn{display:inline-block;font-size:12px;padding:4px 10px;border:1px solid var(--brand);color:var(--brand);border-radius:4px;background:#fff}
+.btn.primary{background:var(--brand);color:#fff}
+.btn.ghost{border-color:var(--line);color:var(--muted)}
+.btn.danger{border-color:var(--bad);color:var(--bad)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+table.grid-table{width:100%;border-collapse:collapse;font-size:12px;background:#fff}
+table.grid-table th,table.grid-table td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+table.grid-table th{background:var(--soft);font-weight:600}
+.tabs{display:flex;gap:2px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+.tabs .t{padding:6px 12px;border:1px solid var(--line);border-bottom:0;border-radius:6px 6px 0 0;background:var(--soft);color:var(--muted);font-size:12px}
+.tabs .t.active{background:#fff;color:var(--fg);font-weight:600}
+.form-row{display:flex;gap:10px;margin:4px 0;align-items:center;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:2px;min-width:180px}
+.field label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.field input,.field select,.field textarea{border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit;background:#fff}
+.req::after{content:" *";color:var(--bad)}
+.hint{font-size:11px;color:var(--muted);font-style:italic}
+.dot{position:relative;display:inline-block;padding-right:14px}
+.dot::after{content:"⋮";position:absolute;right:0;top:-2px;color:var(--muted)}
+.tree{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:4px;padding:10px}
+.tree .node{padding:2px 0}
+.tree .n1{padding-left:0}
+.tree .n2{padding-left:22px}
+.tree .n3{padding-left:44px}
+.tree .n4{padding-left:66px}
+.pill{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:#e2e8f0;color:#334155;margin-left:6px}
+.pill.g{background:#dcfce7;color:var(--good)}
+.pill.b{background:#fee2e2;color:var(--bad)}
+.pill.w{background:#fef3c7;color:var(--warn)}
+.pill.info{background:#dbeafe;color:#1d4ed8}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.kpi .card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:10px}
+.kpi .card .n{font-size:22px;font-weight:600}
+.kpi .card .l{font-size:11px;color:var(--muted);text-transform:uppercase}
+.popup{border:2px solid var(--brand);border-radius:8px;background:#fff;padding:14px;box-shadow:0 8px 30px rgba(15,23,42,.12);margin:6px 0}
+.popup h4{margin:0 0 8px;font-size:13px;color:var(--brand)}
+.callout{border-left:3px solid var(--brand);background:#eff6ff;padding:8px 12px;margin:8px 0;font-size:12px}
+.callout.warn{border-color:#f59e0b;background:#fffbeb;color:#78350f}
+.callout.bad{border-color:#dc2626;background:#fef2f2;color:#7f1d1d}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.legend{font-size:11px;color:var(--muted);margin-bottom:12px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:800px){.grid,.two-col,.kpi{grid-template-columns:1fr}}
+.section-tag{background:#0a5cbf;color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;margin-left:8px;font-family:ui-monospace,Menlo,monospace}
+.state-diagram{background:#fff;border:1px solid var(--line);border-radius:4px;padding:10px;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;overflow-x:auto;color:#1e293b}
+</style>
+</head>
+<body>
+<header>
+  <h1>GRAC Workflow Layer — UI Wireframes (Waves 1–5)</h1>
+  <div class="sub">Companion to <span class="mono">docs/TDD_GRAC_Workflow_Layer.md</span> · charter §12.1.1–§12.5.9 · DRAFT for review</div>
+  <div class="legend">All screens defaulted OFF via <span class="mono">feature_flag</span>. Every new key registered in <span class="mono">PracticeScreen.All</span>; partial at <span class="mono">Views/Practice/Partials/{key}.cshtml</span>. 3-dot menu (<span class="dot">⋮</span>) shown on every row where actions exist.</div>
+  <nav>
+    <a href="#tasks">tasks</a>
+    <a href="#waivers">waivers</a>
+    <a href="#applicability-decision">applicability-decision</a>
+    <a href="#ownership-tree">ownership-tree</a>
+    <a href="#my-assignments">my-assignments</a>
+    <a href="#gap-view">gap-view</a>
+    <a href="#handover">handover</a>
+    <a href="#auditor-workbench">auditor-workbench</a>
+    <a href="#risk-register">risk-register</a>
+    <a href="#kri-dashboard">kri-dashboard</a>
+    <a href="#adapter-bindings">adapter-bindings</a>
+    <a href="#practices-mod">practices (mod)</a>
+    <a href="#practice-instances-mod">practice-instances (mod)</a>
+    <a href="#organization-controls-mod">organization-controls (mod)</a>
+    <a href="#organization-requirements-mod">organization-requirements (mod)</a>
+    <a href="#assurance-execution-mod">assurance-execution (mod)</a>
+    <a href="#assurance-findings-mod">assurance-findings (mod)</a>
+    <a href="#assurance-signals-mod">assurance-signals (mod)</a>
+    <a href="#assurance-generation-mod">assurance-generation (mod)</a>
+    <a href="#audit-intelligence-mod">audit-intelligence (mod)</a>
+    <a href="#risk-intelligence-mod">risk-intelligence (mod)</a>
+    <a href="#repository-subscriptions-mod">repository-subscriptions (mod)</a>
+  </nav>
+</header>
+
+<main>
+
+<!-- =========== NEW SCREENS =========== -->
+
+<section id="tasks" class="screen">
+<header><h2>NEW · Task Center<span class="k">tasks</span><span class="section-tag">§12.1.3</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Single home for every work item generated by the engine — Implementation, Rectification, Change, Waiver, Reverification, AssignmentPending, AuditDriven, RiskDriven. Owner-scoped by default; filters expand scope.</p>
+
+<h3>Navigation flow</h3>
+<p>Menu → <b>Practice Management → Task Center</b>. Deep links: <span class="mono">/practice/tasks?type=Rectification&status=Open</span>. Row → Task detail drawer. Detail → linked entity (Ticket / Finding / Instance).</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Task Center</span>
+  <span class="chip">Assigned to me</span>
+  <span class="chip info">Type: All</span>
+  <span class="chip info">Status: Open + InProgress</span>
+  <span class="chip">SLA: Any</span>
+  <span style="flex:1"></span>
+  <button class="btn ghost">Saved filters ▾</button>
+  <button class="btn">Export</button>
+  <button class="btn primary">+ New Task</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>#</th><th>Type</th><th>Subject</th><th>Linked entity</th><th>Assignee</th><th>Status</th><th>Priority</th><th>SLA due</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>T-1042</td><td>Implementation</td><td>Configure Instance for A.5.1</td><td>Practice #34 / Instance #12</td><td>P.Owner</td><td><span class="pill info">InProgress</span></td><td>High</td><td>+3d</td><td class="dot">Open · Assign · Transition · Close</td></tr>
+<tr><td>T-1043</td><td>Rectification</td><td>Fail on Assurance Ticket #997</td><td>Ticket #997</td><td>I.Owner</td><td><span class="pill w">PendingReview</span></td><td>Critical</td><td>Overdue</td><td class="dot">Escalate · Reopen · Close</td></tr>
+<tr><td>T-1044</td><td>AssignmentPending</td><td>Accept ownership: Practice #56</td><td>Practice #56</td><td>Nominee</td><td><span class="pill">Assigned</span></td><td>Med</td><td>+7d</td><td class="dot">Accept · Decline · Delegate</td></tr>
+<tr><td>T-1045</td><td>Reverification</td><td>NA expiring on Control CTRL-104</td><td>Control CTRL-104</td><td>C.Owner</td><td><span class="pill">Open</span></td><td>Med</td><td>+22d</td><td class="dot">Assign · Snooze</td></tr>
+</tbody>
+</table>
+<div class="hint">Pagination: 25/page · sortable columns · sticky header · row click opens detail drawer.</div>
+</div>
+
+<h3>Sections</h3>
+<ul>
+  <li><b>Toolbar</b> — Assignee scope · Type · Status · SLA · Priority · Criticality · Origin · Search.</li>
+  <li><b>Grid</b> — 25/page, virtualized. Right-side drawer on click.</li>
+  <li><b>Detail drawer</b> — Subject, description, linked entity link, state machine timeline, transition buttons (filtered by <span class="mono">fn_can_mutate</span>), comments, attachments.</li>
+  <li><b>Bulk actions bar</b> — appears when ≥1 row selected: Assign, Escalate, Close (blocked when Implementation two-gate not green).</li>
+</ul>
+
+<h3>Fields (New Task form / drawer)</h3>
+<ul>
+  <li>Task Type <span class="chip warn">req</span> — select from <span class="mono">task_type_master</span>.</li>
+  <li>Subject entity type + id <span class="chip warn">req</span> — resolves via search picker.</li>
+  <li>Linked release / control / practice / instance — auto-derived from subject; editable.</li>
+  <li>Assignee <span class="chip warn">req</span> — filtered to human employees only (excludes <span class="mono">GRAC_SYSTEM</span>).</li>
+  <li>Priority, Criticality — required.</li>
+  <li>SLA due at — auto per <span class="mono">task_type_master.default_sla</span>; overridable.</li>
+  <li>Reason code (dropdown), Reason text.</li>
+</ul>
+
+<h3>Buttons</h3>
+<p>Row 3-dot menu: <b>Assign</b>, <b>Transition</b>, <b>Escalate</b>, <b>Close</b>, <b>Cancel</b>, <b>View linked entity</b>, <b>Copy link</b>, <b>Audit trail</b>. Toolbar: <b>+ New Task</b>, <b>Saved filters</b>, <b>Export CSV</b>.</p>
+
+<h3>Validation</h3>
+<ul>
+  <li>Cannot save without required fields.</li>
+  <li>Close blocked when Implementation task and either gate not green (banner: "Config gate: OPEN. Operational gate: OPEN. Cannot close.").</li>
+  <li>Illegal state transition → 409 Conflict → toast with <span class="mono">reason_code</span>.</li>
+  <li>Assignee must satisfy SoD (§12.4.5) — Warn/Block on submit.</li>
+</ul>
+
+<h3>Popup dialogs</h3>
+<div class="popup">
+  <h4>Transition Task</h4>
+  <div class="form-row">
+    <div class="field"><label class="req">Next state</label><select><option>InProgress</option><option>PendingReview</option></select></div>
+    <div class="field"><label class="req">Reason code</label><select><option>WORK_STARTED</option></select></div>
+    <div class="field" style="flex:1"><label>Reason text</label><textarea rows="2"></textarea></div>
+  </div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary">Transition</button></div>
+</div>
+
+<h3>User interactions</h3>
+<ul>
+  <li>Real-time badge in header when new Tasks land in inbox (SignalR later — for now, poll every 60s).</li>
+  <li>Sticky filters persisted per user in <span class="mono">localStorage</span> only (no server state).</li>
+  <li>Keyboard: <kbd>N</kbd> new task, <kbd>/</kbd> search, <kbd>Esc</kbd> close drawer.</li>
+</ul>
+
+<h3>State diagram</h3>
+<div class="state-diagram">Open ─▶ Assigned ─▶ InProgress ─▶ PendingReview ─▶ Closed
+                       │              │              │
+                       ▼              ▼              ▼
+                   Cancelled     Escalated       Reopened
+
+Implementation Task extension:
+InProgress ─▶ ConfigGatePassed ─▶ AwaitingFirstExecution ─▶ OperationalGatePassed ─▶ Closed</div>
+</div>
+</section>
+
+<section id="waivers" class="screen">
+<header><h2>NEW · Waivers &amp; Exceptions<span class="k">waivers</span><span class="section-tag">§12.1.5</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Single register for all deferrals — NA justifications, Risk-accepted controls, temporary exceptions. Enforces mandatory justification + approver + expiry (no perpetual waivers).</p>
+
+<h3>Navigation flow</h3>
+<p>Registers → Waivers. Deep link from NA modal ("Request as Waiver"), from Risk register ("Accept as Waiver"), and from Assurance Finding.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Waivers &amp; Exceptions</span>
+  <span class="chip info">Status: Active + Requested</span>
+  <span class="chip">Expiring: 30 days</span>
+  <span style="flex:1"></span>
+  <button class="btn ghost">Filter ▾</button>
+  <button class="btn primary">+ Request Waiver</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>#</th><th>Entity</th><th>Origin</th><th>Justification (excerpt)</th><th>Approver</th><th>Approved</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>W-2001</td><td>Control CTRL-104</td><td><span class="pill info">GRAC</span></td><td>Not applicable — offline environment…</td><td>V.Rao</td><td>2026-05-04</td><td>2026-11-04 <span class="pill w">28d</span></td><td><span class="pill g">Active</span></td><td class="dot">View · Withdraw · Extend request</td></tr>
+<tr><td>W-2002</td><td>Instance INS-889</td><td><span class="pill">Custom</span></td><td>Interim exception until vendor patch…</td><td>—</td><td>—</td><td>2026-08-30</td><td><span class="pill">Requested</span></td><td class="dot">Approve · Reject</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Sections</h3>
+<ul>
+  <li><b>List</b> — filters: Status, Entity type, Origin, Expiring window.</li>
+  <li><b>Detail drawer</b> — Justification (rich text), scope (entities affected), approval chain, evidence link, extension request history.</li>
+  <li><b>Sidebar counters</b> — Requested, Active, Expiring &lt; 30d, Expired.</li>
+</ul>
+
+<h3>Popup: Request Waiver — 4-step wizard</h3>
+<div class="popup">
+  <h4>Step 1: Justification</h4>
+  <div class="form-row"><div class="field" style="flex:1"><label class="req">Justification</label><textarea rows="4" placeholder="Business rationale…"></textarea></div></div>
+  <div class="form-row"><div class="field"><label>Reference URL</label><input placeholder="https://…"/></div></div>
+  <h4>Step 2: Scope</h4>
+  <div class="form-row"><div class="field"><label class="req">Entity type</label><select><option>Control</option><option>Practice</option><option>Instance</option></select></div><div class="field"><label class="req">Entity picker</label><input placeholder="Search…"/></div></div>
+  <h4>Step 3: Approver</h4>
+  <div class="form-row"><div class="field"><label class="req">Approver</label><input placeholder="Release Owner"/></div></div>
+  <h4>Step 4: Expiry</h4>
+  <div class="form-row"><div class="field"><label class="req">Expiry date</label><input type="date"/></div><span class="hint">≤ 12 months from today (org default).</span></div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn">Save Draft</button><button class="btn primary">Submit for approval</button></div>
+</div>
+
+<h3>Buttons / 3-dot menu</h3>
+<p>Approve, Reject, Withdraw, Extension request, View evidence, View linked entity, Audit trail.</p>
+
+<h3>Validation</h3>
+<ul>
+  <li>All four steps required. No perpetual waivers — expiry date is mandatory.</li>
+  <li>Expiry &gt; 12 months prompts "Requires GRAC Admin approval".</li>
+  <li>Approver must be different from requester and have appropriate scope (checked via <span class="mono">fn_can_mutate</span> with action <span class="mono">APPROVE_WAIVER</span>).</li>
+</ul>
+
+<h3>State diagram</h3>
+<div class="state-diagram">Draft ─▶ Requested ─▶ Approved ─▶ Active ─▶ Expired
+                        │                          │
+                        ▼                          ▼
+                    Withdrawn                  Withdrawn</div>
+</div>
+</section>
+
+<section id="applicability-decision" class="screen">
+<header><h2>NEW · Applicability &amp; NA Decisions<span class="k">applicability-decision</span><span class="section-tag">§12.2.5</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Guided workflow to mark a Control (or Practice adoption) as Applicable / Not Applicable with mandatory justification, approver, expiry, and reference URL. Reverification tasks open 30 days before expiry.</p>
+
+<h3>Navigation flow</h3>
+<p>Source Statements → row action "Decide applicability". Also embedded in <span class="mono">organization-controls</span> and <span class="mono">organization-requirements</span> partials.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Applicability Decisions</span>
+  <span class="chip info">Framework: ISO 27001:2022</span>
+  <span class="chip warn">Expiring &lt; 30d: 4</span>
+  <span style="flex:1"></span>
+  <button class="btn primary">Decide selected</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Control</th><th>Origin</th><th>Applicability</th><th>Justification</th><th>Approver</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>CTRL-101 · Access mgmt</td><td><span class="pill info">GRAC</span></td><td><span class="pill g">Applicable</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td class="dot">Change · History</td></tr>
+<tr><td>CTRL-104 · Physical mail</td><td><span class="pill info">GRAC</span></td><td><span class="pill">Not Applicable</span></td><td>Offline environment…</td><td>V.Rao</td><td>2026-11-04 <span class="pill w">28d</span></td><td><span class="pill g">Approved</span></td><td class="dot">Reverify · Extend · View waiver</td></tr>
+<tr><td>CTRL-109 · Trainings</td><td><span class="pill">Custom</span></td><td><span class="pill w">Pending approval</span></td><td>Legacy…</td><td>—</td><td>2027-01-15</td><td><span class="pill">Requested</span></td><td class="dot">Approve · Reject</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Popup: NA decision modal</h3>
+<div class="popup">
+  <h4>Mark Not Applicable — CTRL-104</h4>
+  <div class="form-row">
+    <div class="field" style="flex:1"><label class="req">Justification</label><textarea rows="4" placeholder="Why this control does not apply…"></textarea></div>
+  </div>
+  <div class="form-row">
+    <div class="field"><label class="req">Approver</label><input placeholder="Release Owner"/></div>
+    <div class="field"><label class="req">Expiry date</label><input type="date"/><span class="hint">Default 12 months</span></div>
+    <div class="field"><label>Reference URL</label><input placeholder="https://…"/></div>
+  </div>
+  <div class="callout warn">On submit: an approval Task opens for the Release Owner; a Waiver record is created linked to this decision.</div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary">Request approval</button></div>
+</div>
+
+<h3>Fields, validation, interactions</h3>
+<ul>
+  <li>Justification: min 20 chars, max 2000.</li>
+  <li>Approver: role scope must be RELEASE or higher.</li>
+  <li>Expiry: max 12 months default; org-configurable.</li>
+  <li>Reference URL: optional but validated as http/https.</li>
+  <li>Applicability change requires re-approval — auto opens a Task.</li>
+  <li>Reverification Task opens 30 days before expiry via <span class="mono">na-expiry-sweeper</span>.</li>
+</ul>
+
+<h3>3-dot menu</h3>
+<p>Change · Reverify · Extend · View waiver · View history · Copy link.</p>
+</div>
+</section>
+
+<section id="ownership-tree" class="screen">
+<header><h2>NEW · Ownership Tree<span class="k">ownership-tree</span><span class="section-tag">§12.4.1</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Hierarchical view Release → Control → Practice → Instance with owner and status per node. Fast triage of unassigned or overdue nodes.</p>
+
+<h3>Navigation flow</h3>
+<p>Practice Management → Ownership Tree. Node click → linked entity screen in new tab.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Ownership Tree</span>
+  <span class="chip">Filter: My owned</span>
+  <span class="chip warn">Show unassigned (12)</span>
+  <span class="chip">Criticality: High +</span>
+  <span style="flex:1"></span>
+  <button class="btn">Expand all</button>
+  <button class="btn">Export</button>
+</div>
+<div class="tree">
+<div class="node n1">▸ Release ISO/IEC 27001:2022 <span class="pill">R.Owner: A.Kumar</span> <span class="pill g">Active</span></div>
+<div class="node n2">▾ Control CTRL-101 — Access mgmt <span class="pill">C.Owner: V.Rao</span> <span class="pill g">Applicable</span></div>
+<div class="node n3">▾ Practice PR-034 — Provisioning SOP <span class="pill">P.Owner: S.Iyer</span> <span class="pill w">Declared: In-progress · Derived: Gap</span></div>
+<div class="node n4">Instance INS-102 — HQ Delhi <span class="pill">I.Owner: —</span> <span class="pill b">Unassigned</span> <span class="dot">Assign · View</span></div>
+<div class="node n4">Instance INS-103 — DC-East <span class="pill">I.Owner: J.Wu</span> <span class="pill g">Configured</span> <span class="dot">Reassign · View</span></div>
+<div class="node n2">▸ Control CTRL-104 — Physical mail <span class="pill">N/A · Waiver W-2001</span></div>
+</div>
+</div>
+
+<h3>Fields / columns</h3>
+<p>Node text · owner · status pill · counters (child count, unassigned count) · action affordances on hover.</p>
+
+<h3>User interactions</h3>
+<ul>
+  <li>Lazy-load per level via <span class="mono">/api/practice/ownership-tree?parent={id}</span>.</li>
+  <li>Right-click → context menu (Assign, Reassign, Open detail).</li>
+  <li>Toggle: Show unassigned only · Show mine · Group by criticality.</li>
+  <li>Export: CSV (flat) and JSON (tree).</li>
+</ul>
+
+<h3>Buttons / validations</h3>
+<p>Bulk Assign visible when leaf nodes selected; enforces SoD (§12.4.5); shows Allow/Warn/Block chip inline.</p>
+</div>
+</section>
+
+<section id="my-assignments" class="screen">
+<header><h2>NEW · My Assignments (Inbox)<span class="k">my-assignments</span><span class="section-tag">§12.4.2</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Personal inbox merging pending acceptances, open Tasks, assigned Findings, and upcoming assurance activities.</p>
+
+<h3>Navigation flow</h3>
+<p>Header bell / Dashboard → My Assignments. Header badge = count from same endpoint.</p>
+
+<div class="wire">
+<div class="tabs">
+  <div class="t active">All (18)</div>
+  <div class="t">Acceptances (3)</div>
+  <div class="t">Tasks (7)</div>
+  <div class="t">Findings (5)</div>
+  <div class="t">Upcoming (3)</div>
+</div>
+<table class="grid-table">
+<thead><tr><th>Kind</th><th>Subject</th><th>Linked</th><th>SLA / Due</th><th>Priority</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td><span class="pill w">Acceptance</span></td><td>Ownership of Practice PR-034</td><td>Practice</td><td>+5d</td><td>Med</td><td class="dot"><b>Accept</b> · Decline · Delegate · Snooze</td></tr>
+<tr><td><span class="pill">Task</span></td><td>Config Instance INS-102</td><td>Instance</td><td>+3d</td><td>High</td><td class="dot">Open · Assign · Close</td></tr>
+<tr><td><span class="pill b">Finding</span></td><td>Fail — Ticket #997</td><td>Ticket</td><td>Overdue</td><td>Critical</td><td class="dot">View · Rectify</td></tr>
+<tr><td><span class="pill info">Upcoming</span></td><td>Assurance due — INS-103</td><td>Instance</td><td>+2d</td><td>—</td><td class="dot">View</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Inline actions</h3>
+<p><b>Accept</b> (green primary), <b>Decline</b> (requires reason), <b>Delegate</b> (opens picker), <b>Snooze</b> (24h / 3d / 7d — capped by org policy).</p>
+
+<h3>Popup: Delegate</h3>
+<div class="popup">
+  <h4>Delegate acceptance</h4>
+  <div class="form-row">
+    <div class="field"><label class="req">Delegate to</label><input placeholder="Employee search"/></div>
+    <div class="field"><label class="req">Reason</label><textarea rows="2"></textarea></div>
+  </div>
+  <div class="callout warn">A new Acceptance is created for the delegate; original is marked Delegated.</div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary">Delegate</button></div>
+</div>
+
+<h3>Interactions</h3>
+<ul>
+  <li>Row click → detail drawer preserving tab context.</li>
+  <li>Keyboard: <kbd>A</kbd> accept selected acceptance, <kbd>D</kbd> decline, <kbd>?</kbd> shortcuts.</li>
+  <li>Empty state: "You are all caught up. 🎉" (or use icon; brand-neutral).</li>
+</ul>
+</div>
+</section>
+
+<section id="gap-view" class="screen">
+<header><h2>NEW · Gap View<span class="k">gap-view</span><span class="section-tag">§12.4.3</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Saved-filter register showing common gap classes for rapid triage.</p>
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Gap View</span>
+  <button class="btn ghost">Controls without Owner (7)</button>
+  <button class="btn ghost">Applicable Controls without Practice Owner (12)</button>
+  <button class="btn ghost">Practices without any Instance (5)</button>
+  <button class="btn ghost">Instances without evidence config (18)</button>
+  <span style="flex:1"></span>
+  <button class="btn">Export</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Entity</th><th>Framework</th><th>Owner</th><th>Missing</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>Control CTRL-115</td><td>ISO 27001</td><td>—</td><td>Owner</td><td class="dot">Assign · Open Task</td></tr>
+<tr><td>Practice PR-041</td><td>ISO 27001</td><td>S.Iyer</td><td>Instance</td><td class="dot">Create Instance</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>3-dot menu</h3>
+<p>Assign · Open Task · Waive · Copy list.</p>
+
+<h3>Interactions</h3>
+<p>Saved filter names hard-coded in first release (charter §12.4.3). "Bulk fix": creates one Task per row through <span class="mono">sp_gaps_detect_and_open_tasks</span> idempotently.</p>
+</div>
+</section>
+
+<section id="handover" class="screen">
+<header><h2>NEW · Handover / Bulk Reassign<span class="k">handover</span><span class="section-tag">§12.4.4</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Move ownership from one employee to another (leaver / role change) with a full preview and audit-per-row.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Handover</span>
+  <span style="flex:1"></span>
+</div>
+<div class="form-row">
+  <div class="field"><label class="req">From</label><input placeholder="Employee search"/></div>
+  <div class="field"><label class="req">To</label><input placeholder="Employee search"/></div>
+  <div class="field"><label>Scope</label><select><option>All ownerships</option><option>Instance only</option><option>Practice only</option><option>Control only</option><option>Release only</option></select></div>
+  <button class="btn">Preview impact</button>
+</div>
+<h3>Preview modal</h3>
+<div class="popup">
+  <h4>Preview: A.Sharma → B.Nair</h4>
+  <table class="grid-table">
+    <thead><tr><th>Entity</th><th>Count</th></tr></thead>
+    <tbody>
+      <tr><td>Release Owner</td><td>2</td></tr>
+      <tr><td>Control Owner</td><td>14</td></tr>
+      <tr><td>Practice Owner</td><td>29</td></tr>
+      <tr><td>Instance Owner</td><td>103</td></tr>
+      <tr><td><b>Total assignments</b></td><td><b>148</b></td></tr>
+    </tbody>
+  </table>
+  <div class="callout bad">This action is irreversible via UI. Each moved assignment creates a state transition row. Rollback via GRAC Admin only.</div>
+  <div class="form-row">
+    <div class="field" style="flex:1"><label class="req">Reason</label><textarea rows="2"></textarea></div>
+  </div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary danger">Commit handover</button></div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="auditor-workbench" class="screen">
+<header><h2>NEW · Auditor Workbench<span class="k">auditor-workbench</span><span class="section-tag">§12.5.3</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Auditor-facing filter grid over Assurance Tickets. Statistical + judgmental sample selection.  Every row drills into an immutable Ticket snapshot.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Auditor Workbench</span>
+  <span class="chip info">Period: 2026 Q1</span>
+  <span class="chip">Framework: ISO 27001</span>
+  <span class="chip">Result: Fail + Deviation</span>
+  <span style="flex:1"></span>
+  <button class="btn ghost">Sample statistically…</button>
+  <button class="btn ghost">Sample by judgment…</button>
+  <button class="btn primary">Generate Auditor Finding</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Ticket</th><th>Instance</th><th>Control</th><th>Period</th><th>Execution</th><th>Result</th><th>Evidence</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>#997</td><td>INS-102</td><td>CTRL-101</td><td>2026-01</td><td><span class="pill g">On-time</span></td><td><span class="pill b">Fail</span></td><td>3 files</td><td class="dot">Open · Sample · Finding</td></tr>
+<tr><td>#998</td><td>INS-103</td><td>CTRL-101</td><td>2026-01</td><td><span class="pill w">Late</span></td><td><span class="pill g">Pass</span></td><td>1 file</td><td class="dot">Open · Sample</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Popup: Statistical sample</h3>
+<div class="popup">
+  <h4>Statistical sample selector</h4>
+  <div class="form-row">
+    <div class="field"><label class="req">Population</label><input value="248" readonly/></div>
+    <div class="field"><label class="req">Confidence</label><select><option>90%</option><option>95%</option></select></div>
+    <div class="field"><label class="req">Precision</label><select><option>5%</option><option>10%</option></select></div>
+    <div class="field"><label>Seed</label><input value="auto"/></div>
+  </div>
+  <div class="hint">Computed sample size: 42 tickets. Deterministic given seed.</div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary">Select sample</button></div>
+</div>
+
+<h3>Ticket snapshot drawer</h3>
+<p>Read-only view of <span class="mono">assurance_ticket_snapshot.criteria_json</span>, <span class="mono">evidence_template_json</span>, <span class="mono">adapter_config_json</span>, <span class="mono">owner_snapshot_json</span>. All immutable. Audit trail alongside.</p>
+
+<h3>3-dot menu</h3>
+<p>Open ticket · Add to sample · Draft Auditor Finding · Export snapshot (PDF) · Copy link.</p>
+</div>
+</section>
+
+<section id="risk-register" class="screen">
+<header><h2>NEW · Risk Register<span class="k">risk-register</span><span class="section-tag">§12.5.5</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Manage risks, map them to Controls, and see residual score updates as assurance signals arrive.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Risk Register</span>
+  <span class="chip">Category: Any</span>
+  <span class="chip warn">Above appetite: 4</span>
+  <span style="flex:1"></span>
+  <button class="btn primary">+ New Risk</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>#</th><th>Name</th><th>Category</th><th>Inherent</th><th>Residual</th><th>Appetite</th><th>Owner</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>R-005</td><td>Unauthorized access</td><td>Cyber</td><td>16</td><td>9 <span class="pill w">↑</span></td><td>12</td><td>A.Kumar</td><td class="dot">Open · Map · Accept</td></tr>
+<tr><td>R-006</td><td>Vendor SLA breach</td><td>Ops</td><td>12</td><td>6</td><td>10</td><td>V.Rao</td><td class="dot">Open · Map</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Detail drawer sections</h3>
+<ul>
+  <li><b>Overview</b> — code, name, category, description, appetite.</li>
+  <li><b>Mapping</b> — Risk-to-Control mapping with mitigation weight (0–100%).</li>
+  <li><b>Scoring history</b> — inherent, residual over time. Sparkline.</li>
+  <li><b>Signal feed</b> — subscriber view of pubs where entity = this risk.</li>
+  <li><b>Actions</b> — Accept (creates Waiver), Escalate criticality (opens Reverification Task on mapped Controls).</li>
+</ul>
+
+<h3>Popup: Accept risk</h3>
+<div class="popup">
+  <h4>Accept residual risk R-005</h4>
+  <div class="callout warn">Accepting creates a <b>Waiver</b> for review at next assurance cycle.</div>
+  <div class="form-row">
+    <div class="field" style="flex:1"><label class="req">Justification</label><textarea rows="3"></textarea></div>
+  </div>
+  <div class="form-row">
+    <div class="field"><label class="req">Approver</label><input/></div>
+    <div class="field"><label class="req">Expiry</label><input type="date"/></div>
+  </div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary">Create waiver</button></div>
+</div>
+</div>
+</section>
+
+<section id="kri-dashboard" class="screen">
+<header><h2>NEW · KRI Dashboard<span class="k">kri-dashboard</span><span class="section-tag">§12.5.6</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Live KRIs with threshold breach → auto-open RiskDriven Task.</p>
+
+<div class="wire">
+<div class="kpi">
+  <div class="card"><div class="l">Failed tickets / month</div><div class="n">14 <span class="pill b">↑12%</span></div><div class="hint">Threshold: 10 (Above)</div></div>
+  <div class="card"><div class="l">Overdue rectifications</div><div class="n">7 <span class="pill w">↔</span></div><div class="hint">Threshold: 5</div></div>
+  <div class="card"><div class="l">Adapter error rate</div><div class="n">2.1%</div><div class="hint">Threshold: 5%</div></div>
+  <div class="card"><div class="l">Waiver coverage</div><div class="n">3.4%</div><div class="hint">Threshold: 8%</div></div>
+</div>
+<div style="margin-top:14px">
+<table class="grid-table">
+<thead><tr><th>Indicator</th><th>Current</th><th>Threshold</th><th>Direction</th><th>State</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>Failed tickets / month</td><td>14</td><td>10</td><td>Higher-worse</td><td><span class="pill b">Breach</span></td><td class="dot">Definition · Task</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<h3>Add KRI popup</h3>
+<div class="popup">
+  <h4>Add KRI</h4>
+  <div class="form-row">
+    <div class="field"><label class="req">Indicator</label><input/></div>
+    <div class="field"><label class="req">Formula ref</label><select><option>metric_view.failed_tickets_month</option></select></div>
+    <div class="field"><label class="req">Threshold</label><input type="number"/></div>
+    <div class="field"><label class="req">Direction</label><select><option>Higher is worse</option><option>Lower is worse</option></select></div>
+  </div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn primary">Save</button></div>
+</div>
+
+<h3>Interactions</h3>
+<ul>
+  <li>Breach opens <span class="mono">RiskDriven</span> Task automatically; opening it here is a shortcut.</li>
+  <li>Re-eval every 4h via <span class="mono">kri-evaluator</span> Hangfire job.</li>
+</ul>
+</div>
+</section>
+
+<section id="adapter-bindings" class="screen">
+<header><h2>NEW · Assurance Adapter Bindings<span class="k">adapter-bindings</span><span class="section-tag">§12.3.3</span></h2></header>
+<div class="body">
+<h3>Screen purpose</h3>
+<p>Configure per-Instance adapter bindings (Filesystem, REST Pull, etc.). Secrets managed only by <span class="mono">ISecretProvider</span>.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Adapter Bindings</span>
+  <span class="chip info">Adapter: Any</span>
+  <span class="chip warn">Errors: 3</span>
+  <span style="flex:1"></span>
+  <button class="btn primary">+ New Binding</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Instance</th><th>Adapter</th><th>Last run</th><th>Outcome</th><th>Health</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>INS-102</td><td>FilesystemExistence</td><td>2h ago</td><td><span class="pill g">Ok</span></td><td><span class="pill g">Healthy</span></td><td class="dot">Test · Edit · Disable</td></tr>
+<tr><td>INS-103</td><td>RestPull</td><td>1h ago</td><td><span class="pill b">AdapterError</span></td><td><span class="pill b">Unhealthy · 3 retries</span></td><td class="dot">Test · Edit · View Integration Finding</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Popup: New / Edit Binding (adapter-schema driven)</h3>
+<div class="popup">
+  <h4>Edit binding — INS-103 · RestPull</h4>
+  <div class="form-row">
+    <div class="field"><label class="req">Endpoint URL</label><input value="https://api.example.com/status"/></div>
+    <div class="field"><label>Headers (JSON)</label><input placeholder='{"Accept":"application/json"}'/></div>
+  </div>
+  <div class="form-row">
+    <div class="field"><label>Auth secret ref</label><input value="vault://grac/rest/INS-103" readonly/><span class="hint">Managed by ISecretProvider — value never displayed.</span></div>
+    <div class="field"><label class="req">JSONPath</label><input value="$.status"/></div>
+    <div class="field"><label class="req">Expected value</label><input value="green"/></div>
+  </div>
+  <div class="form-row"><button class="btn ghost">Cancel</button><button class="btn">Test connection</button><button class="btn primary">Save</button></div>
+</div>
+
+<h3>Validation</h3>
+<ul>
+  <li>URL must be http/https; DNS lookup is skipped for air-gapped environments.</li>
+  <li>Secret must resolve via provider before Save allowed.</li>
+  <li>JSONPath validated syntactically.</li>
+  <li>Save writes a snapshot into next Ticket's <span class="mono">adapter_config_json</span>.</li>
+</ul>
+</div>
+</section>
+
+<!-- =========== MODIFIED SCREENS =========== -->
+
+<section id="practices-mod" class="screen">
+<header><h2>MODIFIED · Practice Management<span class="k">practices</span><span class="section-tag">§12.2.4</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Split view: <b>Template</b> (immutable when GRAC-origin, locked banner) + <b>Adoption</b> (org-editable overlay). Origin badge on every row. Retire action only for Custom (§12.2.6).</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Practice Management</span>
+  <span class="chip info">Origin: All</span>
+  <span class="chip">Applicability: Any</span>
+  <span style="flex:1"></span>
+  <button class="btn primary">+ Custom Practice</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Code</th><th>Name</th><th>Origin</th><th>Applicability</th><th>Practice Owner</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>PR-034</td><td>Provisioning SOP</td><td><span class="pill info">GRAC</span></td><td><span class="pill g">Applicable</span></td><td>S.Iyer</td><td><span class="pill g">Active</span></td><td class="dot">View template · Edit adoption · Assign · Waive</td></tr>
+<tr><td>PR-C01</td><td>Vendor onboarding — org</td><td><span class="pill">Custom</span></td><td><span class="pill g">Applicable</span></td><td>V.Rao</td><td><span class="pill">Draft</span></td><td class="dot">Edit · Activate · Deprecate</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Detail drawer — side-by-side</h3>
+<div class="two-col">
+  <div class="wire">
+    <b>Template (immutable)</b>
+    <div class="callout">GRAC-origin. Fields are read-only. Origin: ISO/IEC 27001:2022 · Template #T-034.</div>
+    <div class="form-row"><div class="field"><label>Code</label><input value="PR-034" readonly/></div><div class="field" style="flex:1"><label>Name</label><input value="Provisioning SOP" readonly/></div></div>
+    <div class="form-row"><div class="field" style="flex:1"><label>SOP text</label><textarea rows="4" readonly>Standard SOP for user provisioning…</textarea></div></div>
+  </div>
+  <div class="wire">
+    <b>Adoption (org overlay)</b>
+    <div class="form-row"><div class="field" style="flex:1"><label>SOP override</label><textarea rows="4" placeholder="Optional org-specific SOP…"></textarea></div></div>
+    <div class="form-row">
+      <div class="field"><label>Frequency override</label><select><option>—</option><option>Weekly</option><option>Monthly</option></select></div>
+      <div class="field"><label>Evidence override</label><select><option>—</option></select></div>
+      <div class="field"><label>Owner</label><input placeholder="Practice Owner"/></div>
+    </div>
+    <div class="form-row"><button class="btn ghost">Revert overrides</button><button class="btn primary">Save adoption</button></div>
+  </div>
+</div>
+
+<h3>3-dot menu (row)</h3>
+<p>View template · Edit adoption · Assign owner · Mark N/A · Waive · Create Instance · Retire (Custom only) · Audit trail.</p>
+
+<h3>Validation</h3>
+<ul>
+  <li>Any attempt to save a Template edit returns 403 with message "GRAC-origin — edit the Adoption overlay instead."</li>
+  <li>Retire on GRAC-origin returns 403.</li>
+  <li>Custom retire requires all Instances closed/migrated first (§12.2.6).</li>
+</ul>
+</div>
+</section>
+
+<section id="practice-instances-mod" class="screen">
+<header><h2>MODIFIED · Practice Instances<span class="k">practice-instances</span><span class="section-tag">§12.2.3, §12.3</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Instance detail gains Assurance Mode (Manual / Automatic / Hybrid), Assurance Frequency, Two-gate closure banner, and Adapter binding link (when Automatic). Header pill shows <span class="mono">independently_verified_at</span> when set.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Practice Instances — INS-102</span>
+  <span class="chip info">Adoption: PR-034</span>
+  <span class="chip g">Config Gate: Passed</span>
+  <span class="chip w">Operational Gate: Awaiting first execution</span>
+</div>
+<div class="tabs">
+  <div class="t active">Overview</div><div class="t">Assurance</div><div class="t">Evidence</div><div class="t">Dependencies</div><div class="t">Findings</div><div class="t">Audit trail</div>
+</div>
+<div class="form-row">
+  <div class="field"><label>Primary Owner</label><input value="J.Wu"/></div>
+  <div class="field"><label>Department</label><input value="IT Ops"/></div>
+  <div class="field"><label>Execution Frequency</label><select><option>Monthly</option></select></div>
+  <div class="field"><label>Assurance Mode</label><select><option>Manual</option><option>Automatic</option><option>Hybrid</option></select></div>
+  <div class="field"><label>Assurance Frequency</label><select><option>Monthly</option></select></div>
+  <div class="field"><label>Criticality</label><select><option>High</option></select></div>
+</div>
+<div class="callout warn">Two-gate closure: Implementation Task cannot close until <b>Config Gate</b> AND <b>Operational Gate</b> are green.</div>
+</div>
+
+<h3>Buttons</h3>
+<p>Save · Assign Instance Owner · Bind Adapter (visible only when mode = Automatic / Hybrid) · Generate first Ticket (dev-time) · Retire (Custom only).</p>
+
+<h3>Validation</h3>
+<ul>
+  <li>Assurance Mode = Automatic requires an active <span class="mono">assurance_adapter_binding</span>.</li>
+  <li>SoD check on Assurance Owner ≠ Instance Owner when critical.</li>
+  <li>Retire blocked for GRAC-origin Adoption.</li>
+</ul>
+</div>
+</section>
+
+<section id="organization-controls-mod" class="screen">
+<header><h2>MODIFIED · Source Statements (Controls)<span class="k">organization-controls</span><span class="section-tag">§12.2.1, §12.2.5</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Adds dual-status pills (Declared × Derived) and inline "Decide applicability" launcher into the NA modal.</p>
+
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Source Statements</span>
+  <span class="chip info">Framework: ISO 27001</span>
+  <span class="chip w">Mismatch: Declared vs Derived (3)</span>
+  <span style="flex:1"></span>
+  <button class="btn ghost">Filter</button>
+  <button class="btn primary">Decide applicability</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Code</th><th>Name</th><th>Origin</th><th>Applicability</th><th>Declared</th><th>Derived</th><th>Owner</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>CTRL-101</td><td>Access mgmt</td><td><span class="pill info">GRAC</span></td><td><span class="pill g">Applicable</span></td><td><span class="pill g">Implemented</span></td><td><span class="pill w">Partial</span></td><td>V.Rao</td><td class="dot">Decide · Assign · Waive · View mismatch task</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Interactions</h3>
+<ul>
+  <li>Mismatch (Declared ≠ Derived) auto-opens a Rectification Task (<span class="mono">DECLARED_VS_DERIVED_MISMATCH</span>).</li>
+  <li>NA action opens the modal wireframed in <a href="#applicability-decision">applicability-decision</a>.</li>
+</ul>
+</div>
+</section>
+
+<section id="organization-requirements-mod" class="screen">
+<header><h2>MODIFIED · Organization Practices<span class="k">organization-requirements</span><span class="section-tag">§12.2.4</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Row expands to show Adoption overlay data and Instances underneath. NA/waiver banner and expiry countdown.</p>
+
+<div class="wire">
+<table class="grid-table">
+<thead><tr><th>Code</th><th>Name</th><th>Applicability</th><th>Practice Owner</th><th>Instance count</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>PR-034</td><td>Provisioning SOP</td><td><span class="pill g">Applicable</span></td><td>S.Iyer</td><td>2</td><td class="dot">Expand · Edit adoption · Mark N/A</td></tr>
+<tr><td colspan="6" style="background:#f8fafc"><b>Adoption overlay:</b> Frequency = Monthly (default) · Evidence type = File · Owner = S.Iyer<br><b>Instances:</b> INS-102 (HQ) · INS-103 (DC-East)</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+
+<section id="assurance-execution-mod" class="screen">
+<header><h2>MODIFIED · Assurance Execution<span class="k">assurance-execution</span><span class="section-tag">§12.3.2, §12.3.6</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Filter tab <b>Manual / Automatic</b>. Adapter status widget. Two-status pills (Execution × Result).</p>
+<div class="wire">
+<div class="tabs">
+  <div class="t active">Manual (I own)</div>
+  <div class="t">Automatic (GRAC_SYSTEM)</div>
+  <div class="t">Escalated to me</div>
+</div>
+<table class="grid-table">
+<thead><tr><th>Ticket</th><th>Instance</th><th>Period</th><th>Execution</th><th>Result</th><th>Adapter status</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>#997</td><td>INS-102</td><td>2026-01</td><td><span class="pill g">On-time</span></td><td><span class="pill b">Fail</span></td><td>—</td><td class="dot">Open · Attach evidence · Review</td></tr>
+<tr><td>#1002</td><td>INS-103</td><td>2026-01</td><td><span class="pill w">Late</span></td><td><span class="pill">SignalUnavailable</span></td><td><span class="pill b">AdapterError · retries 2/3</span></td><td class="dot">View · Retry now</td></tr>
+</tbody>
+</table>
+</div>
+<h3>Interactions</h3>
+<ul>
+  <li>Attach evidence → advances Manual state to <span class="mono">EvidenceAttached</span> → <span class="mono">Reviewed</span> after reviewer confirms.</li>
+  <li>Retry now → re-invokes adapter through <span class="mono">SignalEvaluator</span>; opens <span class="mono">IntegrationHealthFinding</span> when retries exhausted.</li>
+</ul>
+</div>
+</section>
+
+<section id="assurance-findings-mod" class="screen">
+<header><h2>MODIFIED · Findings<span class="k">assurance-findings</span><span class="section-tag">§12.3.7, §12.5.4</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Split view: <b>Assurance Findings</b> (from ticket Fail) and <b>Auditor Findings</b> (workflow-driven). Each finding links its Rectification Task and blocks closure until Task done + next cycle passes.</p>
+
+<div class="wire">
+<div class="tabs">
+  <div class="t active">Assurance Findings</div>
+  <div class="t">Auditor Findings</div>
+</div>
+<table class="grid-table">
+<thead><tr><th>#</th><th>Source</th><th>Severity</th><th>Owner</th><th>Rectification Task</th><th>Next cycle</th><th>State</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>F-501</td><td>Ticket #997 · Fail</td><td>High</td><td>J.Wu</td><td>T-1043</td><td>Awaiting</td><td><span class="pill w">Open</span></td><td class="dot">Assign · Close (blocked)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Interactions / validation</h3>
+<ul>
+  <li>Close is disabled unless linked Rectification Task <span class="mono">Closed</span> AND next assurance cycle <span class="mono">Pass</span>.</li>
+  <li>Auditor Findings screen additionally allows: Draft, Communicated, InRemediation, RemediationVerified, Closed.</li>
+</ul>
+</div>
+</section>
+
+<section id="assurance-signals-mod" class="screen">
+<header><h2>MODIFIED · Assurance Signals<span class="k">assurance-signals</span><span class="section-tag">§12.5.1, §12.5.2</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Now sourced from <span class="mono">assurance_signal_publication</span> with subscriber columns and materiality tag.</p>
+<div class="wire">
+<table class="grid-table">
+<thead><tr><th>Signal type</th><th>Entity</th><th>Severity</th><th>Materiality</th><th>Published</th><th>Subscribers</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>TICKET_FAIL</td><td>Ticket #997</td><td>High</td><td><span class="pill b">Immediate</span></td><td>2h ago</td><td>Audit, Risk</td><td class="dot">Open · View subscribers</td></tr>
+<tr><td>ADAPTER_ERROR</td><td>Binding B-42</td><td>Med</td><td><span class="pill w">Digest</span></td><td>3h ago</td><td>Ops</td><td class="dot">Open</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+
+<section id="assurance-generation-mod" class="screen">
+<header><h2>MODIFIED · Assurance Activity Generation<span class="k">assurance-generation</span><span class="section-tag">§12.3.1</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Now backed by <span class="mono">sp_assurance_generate_due_tickets</span>. Displays next Hangfire run and idempotency indicator; "Generate now" is a one-off nudge (safe to re-run).</p>
+<div class="wire">
+<div class="toolbar">
+  <span class="title">Assurance Ticket Generation</span>
+  <span class="chip info">Next run: :05 hourly</span>
+  <span class="chip g">Idempotency guarded</span>
+  <span style="flex:1"></span>
+  <button class="btn ghost">View Hangfire dashboard</button>
+  <button class="btn primary">Generate now (all eligible)</button>
+</div>
+<table class="grid-table">
+<thead><tr><th>Instance</th><th>Assurance Frequency</th><th>Mode</th><th>Next due</th><th>Ticket status</th><th>Actions</th></tr></thead>
+<tbody>
+<tr><td>INS-102</td><td>Monthly</td><td>Manual</td><td>2026-08-01</td><td>Not generated</td><td class="dot">Generate</td></tr>
+<tr><td>INS-103</td><td>Weekly</td><td>Automatic</td><td>2026-07-15</td><td>Generated (Ticket #1042)</td><td class="dot">View ticket</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+
+<section id="audit-intelligence-mod" class="screen">
+<header><h2>MODIFIED · Audit Intelligence<span class="k">audit-intelligence</span><span class="section-tag">§12.5.1</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Now a subscriber view of <span class="mono">assurance_signal_publication</span>. Adds "Signal received at" column and "Suppress by materiality" toggle.</p>
+</div>
+</section>
+
+<section id="risk-intelligence-mod" class="screen">
+<header><h2>MODIFIED · Risk Intelligence<span class="k">risk-intelligence</span><span class="section-tag">§12.5.1, §12.5.5</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>Now driven by residual score deltas from <span class="mono">sp_risk_score_recompute</span>; adds link to Risk Register row and to owning KRI.</p>
+</div>
+</section>
+
+<section id="repository-subscriptions-mod" class="screen">
+<header><h2>MODIFIED · Repository Subscriptions<span class="k">repository-subscriptions</span><span class="section-tag">§12.1.6</span></h2></header>
+<div class="body">
+<h3>Change summary</h3>
+<p>New <b>Origin</b> column and filter (GRAC / Custom). Owner cell shows <i>denormalised cache</i> hint; authoritative row lives in <span class="mono">ownership_assignment</span>.</p>
+</div>
+</section>
+
+<section class="screen">
+<header><h2>Design tokens &amp; conventions</h2></header>
+<div class="body">
+<ul>
+  <li>State pill palette — <span class="pill g">green</span> good/passed, <span class="pill w">amber</span> warning/late, <span class="pill b">red</span> fail/breach, <span class="pill info">blue</span> info/GRAC, <span class="pill">grey</span> neutral/custom.</li>
+  <li>Origin badges: <span class="pill info">GRAC</span> and <span class="pill">Custom</span>.</li>
+  <li>Every grid row supports a 3-dot menu (<span class="dot">⋮</span>) for row actions, driven by <span class="mono">/api/practice/permissions/probe</span>. Disabled actions still render but with a lock icon and hover tooltip stating the reason (Deny / RequiresApproval).</li>
+  <li>Popup modals use brand-primary border, right-aligned action row (Cancel · Primary).</li>
+  <li>All new screens feature-flagged; header banner ("This feature is in preview.") appears when <span class="mono">feature_flag.preview</span> is on.</li>
+  <li>All datetimes rendered in the user's timezone; server always stores UTC.</li>
+</ul>
+</div>
+</section>
+
+<section class="screen">
+<header><h2>Screen-to-charter traceability</h2></header>
+<div class="body">
+<table class="grid-table">
+<thead><tr><th>Screen</th><th>Charter §</th><th>Type</th></tr></thead>
+<tbody>
+<tr><td>tasks</td><td>§12.1.3</td><td>New</td></tr>
+<tr><td>waivers</td><td>§12.1.5</td><td>New</td></tr>
+<tr><td>applicability-decision</td><td>§12.2.5</td><td>New</td></tr>
+<tr><td>ownership-tree</td><td>§12.4.1</td><td>New</td></tr>
+<tr><td>my-assignments</td><td>§12.4.2</td><td>New</td></tr>
+<tr><td>gap-view</td><td>§12.4.3</td><td>New</td></tr>
+<tr><td>handover</td><td>§12.4.4</td><td>New</td></tr>
+<tr><td>auditor-workbench</td><td>§12.5.3</td><td>New</td></tr>
+<tr><td>risk-register</td><td>§12.5.5</td><td>New</td></tr>
+<tr><td>kri-dashboard</td><td>§12.5.6</td><td>New</td></tr>
+<tr><td>adapter-bindings</td><td>§12.3.3</td><td>New (implicit)</td></tr>
+<tr><td>practices</td><td>§12.2.4</td><td>Modified</td></tr>
+<tr><td>practice-instances</td><td>§12.2.3, §12.3.*</td><td>Modified</td></tr>
+<tr><td>organization-controls</td><td>§12.2.1, §12.2.5</td><td>Modified</td></tr>
+<tr><td>organization-requirements</td><td>§12.2.4</td><td>Modified</td></tr>
+<tr><td>assurance-execution</td><td>§12.3.2, §12.3.6</td><td>Modified</td></tr>
+<tr><td>assurance-findings</td><td>§12.3.7, §12.5.4</td><td>Modified</td></tr>
+<tr><td>assurance-signals</td><td>§12.5.1, §12.5.2</td><td>Modified</td></tr>
+<tr><td>assurance-generation</td><td>§12.3.1</td><td>Modified</td></tr>
+<tr><td>audit-intelligence</td><td>§12.5.1</td><td>Modified</td></tr>
+<tr><td>risk-intelligence</td><td>§12.5.1, §12.5.5</td><td>Modified</td></tr>
+<tr><td>repository-subscriptions</td><td>§12.1.6</td><td>Modified</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+</main>
+</body>
+</html>

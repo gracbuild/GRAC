@@ -89,15 +89,18 @@
         <div class="pm-form-grid">
             <label class="pm-field"><span>Practice Instance</span><input id="editPracticeInstance" type="text" readonly /></label>
             <label class="pm-field"><span>Current Date</span><input id="editCurrentDate" type="date" readonly /></label>
-            <label class="pm-field"><span>Action</span>
+            <label class="pm-field" id="editActionField"><span>Action</span>
                 <select id="editAction">
-                    <option value="Move">Move to a different date</option>
+                    <option value="Move" id="editActionMoveOption">Move to a different date</option>
                     <option value="Skip">Skip this occurrence</option>
                 </select>
             </label>
             <label class="pm-field" id="editNewDateField"><span>New Date</span><input id="editNewDate" type="date" /></label>
-            <label class="pm-field"><span>Reason</span><textarea id="editReason" rows="2" placeholder="Reason for change..."></textarea></label>
-            <label class="pm-field pm-field-checkbox"><input id="editApplyFuture" type="checkbox" /> <span>Apply to this and all future occurrences</span></label>
+            @* Reason takes its own full-width row so the textarea can breathe.
+               The apply-future checkbox drops onto a dedicated row below it so
+               its label never has to fight the textarea for row height. *@
+            <label class="pm-field full"><span>Reason</span><textarea id="editReason" rows="2" placeholder="Reason for change..."></textarea></label>
+            <label class="pm-field full pm-field-checkbox" id="editApplyFutureField"><input id="editApplyFuture" type="checkbox" /> <span>Apply to this and all future occurrences</span></label>
         </div>
         <div class="pm-dialog-actions">
             <button type="button" class="pm-button" id="calEditCancel">Cancel</button>

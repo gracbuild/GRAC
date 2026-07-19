@@ -17,6 +17,55 @@
 .cal-toolbar-left,
 .cal-toolbar-right { display: flex; align-items: center; gap: 8px; }
 .cal-toolbar-center { display: flex; align-items: center; gap: 8px; }
+
+/* Match the Organization filter (and any future toolbar inputs) to the
+   standard .pm-toolbar select styling used by every other Practice
+   Management page. Without this rule the native <select> reverts to
+   browser defaults and looks visibly taller / different from the
+   toolbar dropdowns on the Practice Instances / Requirements grids. */
+.cal-toolbar select,
+.cal-toolbar input {
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    color: var(--grac-ink, #172033);
+    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    height: 34px;
+    padding: 7px 9px;
+    background: #fff;
+}
+.cal-toolbar select#calOrganizationFilter {
+    /* Same min-width the practice grids' Organization filter uses so the
+       longest legit org label doesn't get clipped. */
+    min-width: 220px;
+}
+
+/* === Edit Schedule dialog polish ===
+   The apply-future checkbox previously shared a grid row with the Reason
+   textarea (min-height 76px) which made the tick + label render huge.
+   Now that the label sits on its own full-width row, we override the
+   inherited .pm-form-grid rules so the row hugs the checkbox height and
+   the tick renders at a normal ~16px size. */
+#calEditDialog .pm-field.pm-field-checkbox {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 2px;
+}
+#calEditDialog .pm-field.pm-field-checkbox input[type="checkbox"] {
+    accent-color: var(--grac-blue, #2465ca);
+    cursor: pointer;
+    flex: 0 0 auto;
+    height: 16px;
+    margin: 0;
+    width: 16px;
+}
+#calEditDialog .pm-field.pm-field-checkbox span {
+    color: #536077;
+    line-height: 1.35;
+}
 .cal-title {
     color: var(--grac-ink, #172033);
     font-size: 18px;
@@ -35,11 +84,27 @@
     color: #fff;
 }
 
-/* === Calendar Container === */
+/* === Calendar Container ===
+   Full-width panel -- toolbar (org filter, Generate Schedule button, view
+   toggle) spans the whole screen the way it did before. Only .cal-grid
+   below gets a narrower max-width so day cells don't stretch on wide
+   monitors; the grid itself is centered within this container. */
 .pm-calendar-container { position: relative; }
 
-/* === Month Grid === */
-.cal-grid { border: 1px solid var(--grac-line, #e2e7f0); border-radius: 6px; overflow: hidden; }
+/* === Month Grid ===
+   Cap the grid width so day cells stay a comfortable ~120px square and
+   6 weeks fit inside a typical laptop viewport without scrolling
+   (header row + 6 rows ~ 720px + panel chrome fits within ~900px). Grid
+   is centered horizontally inside the full-width toolbar container. */
+.cal-grid {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    max-width: 900px;
+    margin: 0 auto;
+}
 .cal-month-view .cal-header-row,
 .cal-month-view .cal-week-row { display: grid; grid-template-columns: repeat(7, 1fr); }
 .cal-header-row {
@@ -59,30 +124,53 @@
     background: #fff;
     border-right: 1px solid var(--grac-line, #e2e7f0);
     border-bottom: 1px solid var(--grac-line, #e2e7f0);
-    min-height: 100px;
-    padding: 4px;
+    /* Grid is capped at 900px above, so 900 / 7 ~= 128px per column.
+       aspect-ratio 1:1 keeps cells square without letting them balloon.
+       6 weeks * ~128px + header row + panel chrome fits comfortably
+       inside a laptop viewport, so no vertical scrolling in the common
+       case. min-height guards very narrow screens. */
+    aspect-ratio: 1 / 1;
+    min-height: 76px;
+    padding: 5px 5px 3px;
     position: relative;
     cursor: default;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: background .15s ease;
 }
 .cal-day-cell:nth-child(7n) { border-right: 0; }
 .cal-day-cell.outside-month { background: var(--grac-bg-dim, #f6f8fb); }
 .cal-day-cell.today { background: #eef5ff; }
 .cal-day-cell:hover { background: #f0f5fb; }
 
+/* Trim the last row's bottom border -- the outer .cal-grid rounded corner
+   handles it visually. Removes the double-line look at the bottom edge. */
+.cal-month-view .cal-week-row:last-child .cal-day-cell {
+    border-bottom: 0;
+}
+
 .cal-day-number {
     color: var(--grac-ink, #172033);
-    display: inline-block;
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
     font-weight: 600;
-    min-width: 24px;
-    padding: 2px 4px;
-    text-align: center;
+    height: 20px;
+    min-width: 20px;
+    padding: 0 4px;
+    align-self: flex-start;
 }
-.cal-day-cell.outside-month .cal-day-number { color: var(--grac-muted, #758095); opacity: .5; }
+.cal-day-cell.outside-month .cal-day-number { color: var(--grac-muted, #758095); opacity: .55; }
 .cal-day-cell.today .cal-day-number {
     background: var(--grac-blue, #2465ca);
     border-radius: 50%;
     color: #fff;
+    height: 22px;
+    min-width: 22px;
+    padding: 0;
+    font-weight: 700;
 }
 
 /* === Event Badges === */
@@ -117,6 +205,51 @@
     padding: 1px 4px;
 }
 .cal-event-more:hover { text-decoration: underline; }
+
+/* === Chip variant (assurance events shown as first-letter badges) ===
+   Container is a flex-wrap row inside each date cell, so multiple chips
+   line up neatly and wrap to a second row once the cell is full. The
+   full task label lives in the native `title` tooltip (and aria-label
+   for a11y) — no visible text beyond the initial. */
+.cal-event-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 4px;
+    align-content: flex-start;
+    overflow: hidden;
+}
+.cal-event.cal-event-chip {
+    /* Circular pill sized so a full row fits several chips inside a
+       month cell without wrapping. All text styles are overridden --
+       we only render the first letter, centered. */
+    align-items: center;
+    background: var(--grac-blue, #2465ca);
+    border-radius: 50%;
+    color: #fff;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 9.5px;
+    font-weight: 700;
+    height: 16px;
+    justify-content: center;
+    line-height: 1;
+    margin: 0;
+    min-width: 16px;
+    padding: 0;
+    text-overflow: clip;
+    text-transform: uppercase;
+    width: 16px;
+    /* Keep hover behaviour predictable -- no ellipsis, no wrap. */
+    white-space: nowrap;
+    box-shadow: 0 1px 1px rgba(15, 23, 42, .08);
+}
+.cal-event.cal-event-chip:hover {
+    filter: brightness(1.08);
+    box-shadow: 0 0 0 2px rgba(36,101,202,.15);
+    transform: translateY(-1px);
+    transition: transform .12s ease, box-shadow .12s ease;
+}
 
 /* === Week View === */
 .cal-week-view .cal-header-row { display: grid; grid-template-columns: 60px repeat(7, 1fr); }

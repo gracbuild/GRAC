@@ -112,6 +112,37 @@
     }
   }
 
+  // Reuse the shared `${api}/lookups` endpoint that every other Practice
+  // Management screen already relies on for its Organization dropdown, so
+  // the calendar filter shows exactly the same list that the practice
+  // grids show (and no duplicate endpoint has to be maintained). The
+  // shared payload returns rows like { LookupKey: 'organizations',
+  // Value: '<org-id>', Label: 'CODE - Name' } -- filter to the
+  // organizations key and rehydrate the module-local `organizations`
+  // array in the shape populateOrganizationDropdowns() expects.
+  async function loadOrganizationsFromLookups() {
+    try {
+      const result = await fetchJson(`${api}/lookups`);
+      const items = result.data ?? result.Data ?? [];
+      const rows = Array.isArray(items[0]) ? items[0] : items;
+      const orgs = (Array.isArray(rows) ? rows : []).filter(row => {
+        const key = row.LookupKey ?? row.lookupKey;
+        return key === "organizations";
+      }).map(row => ({
+        Id:   row.Value ?? row.value,
+        Name: row.Label ?? row.label
+      }));
+      if (orgs.length) {
+        organizations = orgs;
+        populateOrganizationDropdowns();
+      }
+    } catch (e) {
+      // Non-fatal -- the loadCalendarEvents fallback (4th result set)
+      // still gets a chance to fill the dropdown after the first refresh.
+      console.warn("Calendar organizations lookup:", e.message);
+    }
+  }
+
   async function saveScheduleRule(payload) {
     return fetchJson(`${api}/assurance-schedule-rules`, {
       method: "POST",
@@ -175,7 +206,6 @@
         const isToday = sameDay(cellDate, today);
         const key = toDateKey(cellDate);
         const dayEvents = eventMap[key] || [];
-        const maxShow = 3;
 
         let cls = "cal-day-cell";
         if (isOutside) cls += " outside-month";
@@ -184,14 +214,26 @@
         html += `<div class="${cls}" data-date="${key}">`;
         html += `<span class="cal-day-number">${cellDate.getDate()}</span>`;
 
-        dayEvents.slice(0, maxShow).forEach((ev, idx) => {
-          const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
-          const status = (ev.Status || ev.status || "upcoming").toLowerCase();
-          const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
-          html += `<div class="cal-event criticality-${crit} status-${status}" data-event-idx="${idx}" data-date="${key}" title="${label} — ${ev.FrequencyName || ev.frequencyName || ""}">${label}</div>`;
-        });
-        if (dayEvents.length > maxShow) {
-          html += `<div class="cal-event-more" data-date="${key}">+${dayEvents.length - maxShow} more</div>`;
+        // Chip-based rendering: only the first letter is shown, the full
+        // task label lives in the native `title` tooltip. Small circular
+        // chips let us fit far more items per day than the old text
+        // pills, so we lift maxShow accordingly.
+        if (dayEvents.length) {
+          html += '<div class="cal-event-chips">';
+          const chipMax = 6;
+          dayEvents.slice(0, chipMax).forEach((ev, idx) => {
+            const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
+            const status = (ev.Status || ev.status || "upcoming").toLowerCase();
+            const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
+            const freq = ev.FrequencyName || ev.frequencyName || "";
+            const initial = chipInitial(label);
+            const tooltip = freq ? `${label} — ${freq}` : label;
+            html += `<div class="cal-event cal-event-chip criticality-${crit} status-${status}" data-event-idx="${idx}" data-date="${key}" title="${escapeAttr(tooltip)}" aria-label="${escapeAttr(tooltip)}">${escapeHtml(initial)}</div>`;
+          });
+          if (dayEvents.length > chipMax) {
+            html += `<div class="cal-event-more" data-date="${key}">+${dayEvents.length - chipMax}</div>`;
+          }
+          html += '</div>';
         }
         html += '</div>';
         dayCounter++;
@@ -202,6 +244,23 @@
     grid.className = "cal-grid cal-month-view";
     grid.innerHTML = html;
     attachEventListeners();
+  }
+
+  // ── small helpers for chip rendering ─────────────────────────────────
+  function chipInitial(label) {
+    if (!label) return "?";
+    // Prefer the first alphanumeric character of the label; fall back to
+    // the raw first char if nothing matches.
+    const match = String(label).match(/[A-Za-z0-9]/);
+    return (match ? match[0] : String(label).trim().charAt(0) || "?").toUpperCase();
+  }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s);
   }
 
   /* ── Rendering: Week View ── */
@@ -242,12 +301,19 @@
       const isToday = sameDay(d, today);
       const dayEvents = eventMap[key] || [];
       html += `<div class="cal-week-day${isToday ? " today" : ""}" data-date="${key}">`;
-      dayEvents.forEach((ev, idx) => {
-        const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
-        const status = (ev.Status || ev.status || "upcoming").toLowerCase();
-        const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
-        html += `<div class="cal-event criticality-${crit} status-${status}" data-event-idx="${idx}" data-date="${key}" title="${label}">${label}</div>`;
-      });
+      if (dayEvents.length) {
+        html += '<div class="cal-event-chips">';
+        dayEvents.forEach((ev, idx) => {
+          const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
+          const status = (ev.Status || ev.status || "upcoming").toLowerCase();
+          const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
+          const freq = ev.FrequencyName || ev.frequencyName || "";
+          const initial = chipInitial(label);
+          const tooltip = freq ? `${label} — ${freq}` : label;
+          html += `<div class="cal-event cal-event-chip criticality-${crit} status-${status}" data-event-idx="${idx}" data-date="${key}" title="${escapeAttr(tooltip)}" aria-label="${escapeAttr(tooltip)}">${escapeHtml(initial)}</div>`;
+        });
+        html += '</div>';
+      }
       html += '</div>';
     }
     html += '</div>';
@@ -369,17 +435,99 @@
     sidePanel.hidden = true;
   }
 
+  // Compute the valid reschedule window for a task given its current
+  // occurrence date and its recurrence frequency. The window is always
+  // the frequency's own period so a rescheduled slot never spills into
+  // the next occurrence's period.
+  //
+  //   Weekly       -> Sun..Sat of the current occurrence's week
+  //   Monthly      -> 1st..last day of the current occurrence's month
+  //   Quarterly    -> 1st day of quarter month .. last day of quarter's
+  //                    last month (Q1=Jan-Mar, Q2=Apr-Jun, etc.)
+  //   Half yearly  -> H1 = Jan 1 .. Jun 30, H2 = Jul 1 .. Dec 31
+  //   Annual/Year  -> Jan 1 .. Dec 31 of the same year
+  //   Daily        -> null (caller hides the picker altogether)
+  //   Unknown      -> null (no min/max constraint)
+  function reschedulePeriodBounds(currentDate, freqRaw) {
+    if (!currentDate) return null;
+    const f = String(freqRaw || "").trim().toLowerCase();
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    const d = currentDate.getDate();
+    const mk = (yy, mm, dd) => new Date(yy, mm, dd);
+
+    if (/^(weekly|week)$/.test(f)) {
+      // Sunday-first week to match the calendar grid header (DAYS array).
+      const start = new Date(currentDate);
+      start.setDate(d - start.getDay());
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return { start, end };
+    }
+    if (/^(monthly|month)$/.test(f)) {
+      return { start: mk(y, m, 1), end: mk(y, m + 1, 0) };
+    }
+    if (/^(quarterly|quarter)$/.test(f)) {
+      const qStartMonth = Math.floor(m / 3) * 3;
+      return { start: mk(y, qStartMonth, 1), end: mk(y, qStartMonth + 3, 0) };
+    }
+    if (/^(half\s*[- ]?yearly|semi\s*[- ]?annual(?:ly)?|bi\s*[- ]?annual(?:ly)?)$/.test(f)) {
+      // H1: Jan 1 - Jun 30, H2: Jul 1 - Dec 31.
+      const startMonth = m < 6 ? 0 : 6;
+      const endMonth   = m < 6 ? 5 : 11;
+      return { start: mk(y, startMonth, 1), end: mk(y, endMonth + 1, 0) };
+    }
+    if (/^(yearly|year|annual(?:ly)?)$/.test(f)) {
+      return { start: mk(y, 0, 1), end: mk(y, 11, 31) };
+    }
+    return null;
+  }
+
   /* ── Edit Dialog ── */
   function openEditDialog(ev) {
     closeSidePanel();
     const dialog = document.getElementById("calEditDialog");
+    const currentDateObj = parseDate(ev.Date || ev.date);
     document.getElementById("editPracticeInstance").value = ev.PracticeInstance || ev.practiceInstance || "";
-    document.getElementById("editCurrentDate").value = toDateKey(parseDate(ev.Date || ev.date));
-    document.getElementById("editNewDate").value = "";
+    document.getElementById("editCurrentDate").value = toDateKey(currentDateObj);
+    const newDateInput = document.getElementById("editNewDate");
+    newDateInput.value = "";
     document.getElementById("editReason").value = "";
     document.getElementById("editApplyFuture").checked = false;
-    document.getElementById("editAction").value = "Move";
-    document.getElementById("editNewDateField").hidden = false;
+
+    // Rescheduling ("Move to a different date") does not make sense for
+    // a daily task -- tomorrow already has its own daily occurrence, so
+    // moving today's slot forward would just collide. For daily tasks we
+    // hide the Move option, force the Action to Skip, and hide the New
+    // Date field. Non-daily tasks keep the previous default of Move.
+    const freqRaw = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
+    const isDaily = /^\s*(daily|day)\s*$/i.test(String(freqRaw));
+    const actionSelect = document.getElementById("editAction");
+    const moveOption   = document.getElementById("editActionMoveOption");
+    if (moveOption) moveOption.hidden = isDaily;
+    if (moveOption) moveOption.disabled = isDaily;
+    if (isDaily) {
+      actionSelect.value = "Skip";
+      document.getElementById("editNewDateField").hidden = true;
+    } else {
+      actionSelect.value = "Move";
+      document.getElementById("editNewDateField").hidden = false;
+    }
+
+    // Constrain the New Date picker to the current occurrence's own
+    // frequency period. The <input type="date"> min/max attributes tell
+    // the native picker to grey out / block anything outside the window
+    // so users cannot pick, for example, next month's date when moving
+    // a Monthly task.
+    const bounds = reschedulePeriodBounds(currentDateObj, freqRaw);
+    if (bounds) {
+      newDateInput.min = toDateKey(bounds.start);
+      newDateInput.max = toDateKey(bounds.end);
+    } else {
+      newDateInput.removeAttribute("min");
+      newDateInput.removeAttribute("max");
+    }
+
     dialog._eventData = ev;
     dialog.showModal();
   }
@@ -471,6 +619,23 @@
     const msgEl = document.getElementById("calEditMessage");
 
     if (action === "Move" && !newDate) { showMsg(msgEl, "Please select a new date."); return; }
+
+    // Belt-and-braces guard: some browsers do not fully enforce the
+    // <input type="date"> min / max attributes when a user *types* a
+    // value (as opposed to picking one from the calendar popup). Re-check
+    // the chosen date against the same reschedulePeriodBounds() window
+    // used to configure the picker.
+    if (action === "Move") {
+      const freqRaw = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
+      const bounds = reschedulePeriodBounds(parseDate(ev.Date || ev.date), freqRaw);
+      if (bounds) {
+        const picked = parseDate(newDate);
+        if (!picked || picked < bounds.start || picked > bounds.end) {
+          showMsg(msgEl, `New Date must be within the current ${String(freqRaw).toLowerCase() || "occurrence"} period (${toDateKey(bounds.start)} - ${toDateKey(bounds.end)}).`);
+          return;
+        }
+      }
+    }
 
     try {
       await saveScheduleOverride({
@@ -576,9 +741,23 @@
 
   /* ── Init ── */
   (async () => {
-    // First load fetches events AND organizations (4th result set).
-    // If user has one org, auto-select triggers a second load scoped to that org.
+    // Step 1: populate the Organization filter + Generate Schedule modal
+    // dropdown from the shared `${api}/lookups` endpoint -- same API the
+    // rest of Practice Management uses, so the calendar sees exactly the
+    // set of orgs the user is entitled to. If lookups auto-selects a
+    // single org, selectedOrgId is already set before the first calendar
+    // fetch, so we don't need a second round-trip.
+    await loadOrganizationsFromLookups();
+
+    // Step 2: fetch events. loadCalendarEvents still checks the response
+    // for an embedded organizations result set (legacy path) and will
+    // populate the dropdowns from there if lookups came back empty.
     await refresh();
-    if (selectedOrgId) await refresh(); // re-fetch scoped to auto-selected org
+    if (selectedOrgId && organizations.length !== 1) {
+      // Only re-fetch when the org was set by the events-response
+      // fallback (not by lookups' single-org auto-select, which already
+      // filtered the first fetch).
+      await refresh();
+    }
   })();
 })();

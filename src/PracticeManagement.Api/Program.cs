@@ -1,5 +1,6 @@
 using ControlManagement.Security;
 using Microsoft.AspNetCore.HttpOverrides;
+using PracticeManagement.Api.Infrastructure;
 using PracticeManagement.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +20,14 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPracticeRepositoryService, PracticeRepositoryService>();
+
+// Workflow layer (Q13/Q14/Q15 / §12.1.3 / §12.1.6). Charter §5 file — one-time wire-up.
+builder.Services.AddPracticePermissionService();
+builder.Services.AddPracticeTaskService();
+builder.Services.AddPracticeCustomGapService();
+builder.Services.AddPracticeFeatureFlagService();
+builder.Services.AddPracticeOrganizationAccessService();
+builder.Services.AddPracticeInstanceWorkflow();
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
 builder.Services.AddSingleton<EnvelopeCrypto>();
 builder.Services.AddSingleton<SignedAccessTokenService>();

@@ -1,0 +1,30 @@
+@model string
+@{
+    // Model is the tab key: "impl" | "assurance" | "custom"
+    var key = Model ?? "impl";
+}
+<div class="pm-grid-wrap">
+    <table class="pm-grid">
+        <thead>
+            <tr>
+                <th>Task #</th>
+                <th>Task Name</th>
+                <th>Linked</th>
+                <th>Practice</th>
+                <th>Assigned To</th>
+                <th>Priority</th>
+                <th>Target Date</th>
+                <th>Workflow</th>
+                <th>Current Stage</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="taskBody-@key"><tr><td colspan="10" class="pm-empty">Select an organization to load tasks.</td></tr></tbody>
+    </table>
+</div>
+<nav class="pm-pager" data-pager="@key" style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+    <button class="pm-button" data-pg="prev" type="button">Prev</button>
+    <span data-pg="label">Page 1</span>
+    <button class="pm-button" data-pg="next" type="button">Next</button>
+    <span data-pg="total" style="color:#64748b; font-size:12px;">0 total</span>
+</nav>

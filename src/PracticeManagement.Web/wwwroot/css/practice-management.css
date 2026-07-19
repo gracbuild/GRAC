@@ -443,6 +443,50 @@
     width: 58px;
 }
 
+/* organization-controls (Repository Subscriptions Level 1) + source-statements
+ * (Level 2 drill-down) grids carry long control and statement names. The
+ * default .pm-table-wrap td rule sets white-space:nowrap which forces
+ * horizontal scrolling. Cap the name/title/text columns at a readable width
+ * and wrap the text instead of scrolling.
+ *  - Level 1 (organization-controls URL) columns:
+ *      Code, Name, OriginType, SourceFrameworkRelease, ApplicabilityStatus,
+ *      ApplicablePracticeCount, PrimaryOwner, Criticality, Actions.
+ *      Long field = Name (nth-child(2)).
+ *  - Level 2 (source-statements URL OR drilled-in from Level 1) columns
+ *    rendered by renderStatementRows:
+ *      Hierarchy, StatementReference, StatementTitle, StatementText,
+ *      ApplicabilityStatus, PracticeCount, Actions.
+ *      Long fields = StatementTitle (nth-child(3)),
+ *                    StatementText  (nth-child(4)).
+ *   Level 2 drill-down still lives under the organization-controls URL, so
+ *   we target both screen keys.
+ */
+.pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(2),
+.pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(2),
+.pm-table-wrap[data-screen-key="source-statements"] td:nth-child(2),
+.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(2) {
+    max-width: 320px;
+    min-width: 220px;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(3),
+.pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(3),
+.pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(4),
+.pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(4),
+.pm-table-wrap[data-screen-key="source-statements"] td:nth-child(3),
+.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(3),
+.pm-table-wrap[data-screen-key="source-statements"] td:nth-child(4),
+.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(4) {
+    max-width: 360px;
+    min-width: 220px;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
 .pm-empty {
     color: var(--grac-muted, #758095);
     padding: 20px 10px;
@@ -1217,6 +1261,22 @@
 .pm-subscription-tree .pm-tree-row.release:has(input[type="checkbox"]:checked) {
     background: #eaf2ff;
     border-color: #b7c7dc;
+}
+
+/* Read-only variant used by Organization Administration -> Subscribed
+   Releases panel. No hover highlight or pointer cursor -- rows are
+   informational only, no click / edit affordance. */
+.pm-subscription-tree.pm-subscription-readonly .pm-tree-row.release {
+    cursor: default;
+}
+
+.pm-subscription-tree.pm-subscription-readonly .pm-tree-row:hover {
+    background: inherit;
+    border-color: transparent;
+}
+
+.pm-subscription-tree.pm-subscription-readonly .pm-tree-row.release:hover {
+    background: #fff;
 }
 
 .pm-subscription-tree .pm-tree-row .pm-tree-icon {

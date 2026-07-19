@@ -133,7 +133,14 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
         if (screen is null) return NotFound();
         var allowedGroup = screen.Group.Equals(PracticeScreen.PracticeManagementGroup, StringComparison.OrdinalIgnoreCase)
             || screen.Group.Equals(PracticeScreen.DependencyWorkbenchGroup, StringComparison.OrdinalIgnoreCase)
-            || screen.Group.Equals(PracticeScreen.AssuranceManagementGroup, StringComparison.OrdinalIgnoreCase);
+            || screen.Group.Equals(PracticeScreen.AssuranceManagementGroup, StringComparison.OrdinalIgnoreCase)
+            || screen.Group.Equals(PracticeScreen.OversightGroup, StringComparison.OrdinalIgnoreCase)
+            // Sidebar reorganisation (migration 051) — new top-level groups.
+            // Keep the older groups above for direct-URL back-compat.
+            || screen.Group.Equals(PracticeScreen.GovernanceGroup, StringComparison.OrdinalIgnoreCase)
+            || screen.Group.Equals(PracticeScreen.OrganizationGroup, StringComparison.OrdinalIgnoreCase)
+            || screen.Group.Equals(PracticeScreen.OperationsGroup, StringComparison.OrdinalIgnoreCase)
+            || screen.Group.Equals(PracticeScreen.AdministrationGroup, StringComparison.OrdinalIgnoreCase);
         if (!allowedGroup) return NotFound();
         if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return Forbid();
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))

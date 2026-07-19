@@ -91,6 +91,15 @@ public sealed class LoginController(
         HttpContext.Session.SetString(PracticeSessionIdentity.UserKey, model.LoginId);
         HttpContext.Session.SetString(PracticeSessionIdentity.RolesKey, string.Join(',', roles));
         HttpContext.Session.SetString(PracticeSessionIdentity.TokenKey, tokenService.Issue(model.LoginId, roles));
+        // ReviewLogin path is treated as GRAC Admin (data_scope=GLOBAL) so the
+        // Organization filter used by Task Center and other organization-scoped
+        // screens lists every active organization for this admin. Note: we do
+        // NOT set OrganizationIdKey here — GRAC Admin picks the target org
+        // via the dropdown, and the server validates the choice against the
+        // user's allowed organizations on every request.
+        HttpContext.Session.SetString(PracticeSessionIdentity.DataScopeKey, "GLOBAL");
+        HttpContext.Session.SetString(PracticeSessionIdentity.RoleNameKey,
+            configuration["ReviewLogin:DisplayRole"] ?? "GRAC Admin");
         logger.LogInformation("PracticeManagement sign-in succeeded for {User} from {RemoteAddress}", model.LoginId, HttpContext.Connection.RemoteIpAddress);
 
         if (Url.IsLocalUrl(model.ReturnUrl)) return LocalRedirect(model.ReturnUrl!);

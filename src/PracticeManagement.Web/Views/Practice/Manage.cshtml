@@ -2,6 +2,35 @@
 @{
     ViewData["Title"] = Model.Title;
     var permissions = ViewBag.Permissions as string[] ?? [];
+
+    // === Workflow-layer dispatch (charter §12.1.3+) ===
+    // Screens registered in the workflow layer render through their own
+    // partial under Views/Practice/Partials/{key}.cshtml. If the key
+    // matches, render the partial and skip the generic Manage layout.
+    // Every workflow-layer screen is feature-flagged OFF at the DB via
+    // grac_practice.feature_flag (§7). The partial performs its own
+    // feature-flag check via /api/practice/feature-flags at page load.
+    var workflowScreens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "tasks", "gaps", "waivers", "applicability-decision", "ownership-tree",
+        "my-assignments", "gap-view", "handover", "auditor-workbench",
+        "risk-register", "kri-dashboard", "adapter-bindings"
+    };
+    if (workflowScreens.Contains(Model.Key))
+    {
+        <partial name="Partials/@Model.Key" model="Model" />
+        return;
+    }
+
+    // Per-screen add-on partials — additive only. Rendered AT THE END of
+    // the generic Manage layout so the modal / script sit alongside the
+    // existing grid without disturbing it. Kept keyed by screen so future
+    // add-ons follow the same pattern.
+    var perScreenAddOns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["practice-instances"] = "_add-implementation-task-modal"
+    };
+
     var isOrganizationOnboarding = Model.Key == "organization-setup";
     var isOrganizationAdministration = Model.Key == "organization-administration";
     var isOrganizationDependencies = Model.Key == "organization-dependencies";
@@ -51,6 +80,8 @@
         {
             <button class="pm-button primary" id="addRecord" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> @(Model.Key == "organization-controls" ? "Add Release" : Model.Key == "organization-requirements" || Model.Key == "practices" ? "Add Practice" : Model.Key == "practice-instances" ? "Add New Instance" : Model.Key == "assurance-generation" ? "Generate Activity" : Model.Key == "assurance-activities" ? "Add Activity" : "Add Record")</button>
         }
+        @* Q13/Q14/Q15 v2 — the "Add Implementation Task" action now lives in the row-level 3-dot menu.
+             Row-level injection happens in _add-implementation-task-modal.cshtml when ImplementationStatus = "Not Implemented". *@
     </div>
 </div>
 
@@ -115,6 +146,20 @@
                 <span id="recommendationSummary">Recommendations are user-confirmed before save.</span>
             </div>
             <div class="pm-subscription-tree" id="subscriptionTree">Loading repository tree...</div>
+        </aside>
+        }
+        else if (isOrganizationAdministration)
+        {
+        @* Organization Administration is read-only: instead of the interactive
+           subscription tree, show a plain Subscribed Releases list so the
+           user can see which Authority / Artifact / Release each org is
+           subscribed to without leaving the Organization Details tab. *@
+        <aside class="pm-setup-card pm-subscription-card">
+            <div class="pm-section-heading">
+                <h2>Subscribed Releases</h2>
+                <p>Framework releases the selected organization is currently subscribed to.</p>
+            </div>
+            <div id="subscribedReleasesList" class="pm-subscription-tree pm-subscription-readonly">Select an organization to view subscribed releases.</div>
         </aside>
         }
     </div>
@@ -207,7 +252,7 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
                 <span id="workbenchHint">Showing Practice Instances assigned to you.</span>
             </div>
             }
-            <div class="pm-table-wrap">
+            <div class="pm-table-wrap" data-screen-key="@Model.Key">
                 <table>
                     <thead id="practiceGridHead"><tr>@foreach (var column in Model.Columns) { <th>@column</th> }<th>Actions</th></tr></thead>
                     <tbody id="practiceRows"><tr><td colspan="@(Model.Columns.Length + 1)" class="pm-empty">Loading...</td></tr></tbody>
@@ -242,6 +287,11 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         </div>
     </form>
 </dialog>
+
+@if (perScreenAddOns.TryGetValue(Model.Key, out var addOnPartial))
+{
+    <partial name="Partials/@addOnPartial" model="Model" />
+}
 }
 
 @section Scripts {

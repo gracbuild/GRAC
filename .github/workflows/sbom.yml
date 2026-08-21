@@ -1,0 +1,65 @@
+name: Generate SBOM
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  sbom:
+    name: Generate CycloneDX SBOM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GRAC
+        uses: actions/checkout@v4
+
+      - name: Checkout GRAC-ADMIN
+        uses: actions/checkout@v4
+        with:
+          repository: gracbuild/GRAC-ADMIN
+          path: ControlManagement
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore Practice Management API
+        run: dotnet restore src/PracticeManagement.Api/PracticeManagement.Api.csproj
+
+      - name: Restore Practice Management Web
+        run: dotnet restore src/PracticeManagement.Web/PracticeManagement.Web.csproj
+
+      - name: Restore Control Management API
+        run: dotnet restore ControlManagement/src/ControlManagement.Api/ControlManagement.Api.csproj
+
+      - name: Restore Control Management Web
+        run: dotnet restore ControlManagement/src/ControlManagement.Web/ControlManagement.Web.csproj
+
+      - name: Install CycloneDX
+        run: dotnet tool install --global CycloneDX --version 1.7.5
+
+      - name: Generate Practice Management API SBOM
+        run: dotnet-CycloneDX src/PracticeManagement.Api/PracticeManagement.Api.csproj -o sbom/practice-management-api -j -t -f
+
+      - name: Generate Practice Management Web SBOM
+        run: dotnet-CycloneDX src/PracticeManagement.Web/PracticeManagement.Web.csproj -o sbom/practice-management-web -j -t -f
+
+      - name: Generate Control Management API SBOM
+        run: dotnet-CycloneDX ControlManagement/src/ControlManagement.Api/ControlManagement.Api.csproj -o sbom/control-management-api -j -t -f
+
+      - name: Generate Control Management Web SBOM
+        run: dotnet-CycloneDX ControlManagement/src/ControlManagement.Web/ControlManagement.Web.csproj -o sbom/control-management-web -j -t -f
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: grac-cyclonedx-sbom-${{ github.sha }}
+          path: sbom/**/*.json
+          if-no-files-found: error
+          retention-days: 90

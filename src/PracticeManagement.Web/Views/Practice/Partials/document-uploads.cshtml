@@ -1,0 +1,353 @@
+@*
+    Document Uploads -- list, upload, workflow (Phase 1)
+    Follows the PM Practice/Partials convention: rendered from
+    Manage.cshtml when Model.Key == "document-uploads".
+
+    Three views inside the same partial, swapped by JS (no page reload):
+      1. List view   -- register + filters + New button
+      2. Save view   -- full-page Add/Edit form with Back-to-list
+      3. Workflow    -- split pane: decision form on the left,
+                        PDF viewer on the right (matches the
+                        legacy GRAC Plus review/approve screens)
+
+    NOT in scope for this partial (arrives in Phase 2):
+      * Acknowledgement creation and user-side acknowledgement screens.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact" id="docHeading">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="docHeadingTitle">@Model.Title</h1>
+        <p id="docHeadingSubtitle">Register controlled documents, distribute them, and route them through review and approval.</p>
+    </div>
+</div>
+
+@* =============================================================
+   VIEW 1 -- List
+   ============================================================= *@
+<section class="pm-panel" id="docListView" hidden>
+
+    <div class="pm-toolbar">
+        <select id="docFilterOrganization"><option value="">Select organization</option></select>
+        <select id="docFilterType"><option value="-1">All types</option></select>
+        <select id="docFilterStage"><option value="-1">All stages</option></select>
+        <select id="docFilterStatus"><option value="-1">All statuses</option></select>
+        <input id="docSearch" type="text" placeholder="Search code / name / tag..." />
+        <button class="pm-button icon" id="docRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+        <button class="pm-button primary" id="docNewBtn" type="button">
+            <i class="fa-solid fa-plus"></i> New Document
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="docTable">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Version</th>
+                    <th>Stage</th>
+                    <th>Status</th>
+                    <th>Next Review</th>
+                    <th>Last Activity</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="docTableBody">
+                <tr><td colspan="9" class="pm-empty-row">Select an organization to load documents.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pm-pager" id="docPager" hidden>
+        <button class="pm-button" id="docPrev" type="button">&laquo; Prev</button>
+        <span id="docPageInfo"></span>
+        <button class="pm-button" id="docNext" type="button">Next &raquo;</button>
+    </div>
+
+</section>
+
+@* =============================================================
+   VIEW 2 -- Save (New / Edit) as a full page
+   ============================================================= *@
+<section class="pm-panel" id="docSaveView" hidden>
+
+    <div class="pm-toolbar">
+        <button type="button" class="pm-button" data-doc-back>
+            <i class="fa-solid fa-arrow-left"></i> Back to list
+        </button>
+        <h2 id="docSaveTitle" style="margin: 0 0 0 8px; font-size: 18px;">New Document</h2>
+    </div>
+
+    <form id="docSaveForm" enctype="multipart/form-data" novalidate>
+        <input type="hidden" name="DocumentId" id="docSaveDocumentId" />
+        <input type="hidden" name="OrganizationId" id="docSaveOrganizationId" />
+
+        <div class="pm-form-grid">
+            <label>
+                <span>Document Name<span class="pm-required">*</span></span>
+                <input type="text" name="DocumentName" id="docSaveName" required maxlength="500" />
+            </label>
+            <label>
+                <span>Internal Code</span>
+                <input type="text" name="CompanyDocumentCode" id="docSaveCompanyCode" maxlength="100" />
+            </label>
+            <label>
+                <span>Type<span class="pm-required">*</span></span>
+                <select name="DocumentTypeId" id="docSaveTypeId" required></select>
+            </label>
+            @* Source is always "Uploaded" for documents added through this
+               screen -- the server defaults source_type_id when it is
+               omitted, so no hidden input needed. *@
+            <label>
+                <span>Version<span class="pm-required">*</span></span>
+                <input type="text" name="VersionNumber" id="docSaveVersion" required maxlength="30" />
+            </label>
+            <label>
+                <span>Effective Date</span>
+                <input type="date" name="EffectiveDate" id="docSaveEffective" />
+            </label>
+            <label>
+                <span>Next Review Date</span>
+                <input type="date" name="NextReviewDate" id="docSaveNextReview" />
+            </label>
+            <label>
+                <span>Distribution</span>
+                <select name="DistributionTypeCode" id="docSaveDistType">
+                    <option value="">--</option>
+                </select>
+            </label>
+            <label id="docSaveDistDeptWrap" hidden>
+                <span>Departments</span>
+                <div class="pm-multiselect" id="docSaveDistDepts"
+                     data-placeholder="Type to search departments..."></div>
+            </label>
+            <label id="docSaveDistEmpWrap" hidden>
+                <span>Employees</span>
+                <div class="pm-multiselect" id="docSaveDistEmps"
+                     data-placeholder="Type to search employees..."></div>
+            </label>
+            <label>
+                <span>Owner</span>
+                <select name="OwnerId" id="docSaveOwnerId"><option value="">--</option></select>
+            </label>
+            <label>
+                <span>Reviewer</span>
+                <select name="ReviewerId" id="docSaveReviewerId"><option value="">--</option></select>
+            </label>
+            <label>
+                <span>Approver</span>
+                <select name="ApproverId" id="docSaveApproverId"><option value="">--</option></select>
+            </label>
+            <label class="pm-form-grid-full">
+                <span>Change Summary</span>
+                <textarea name="ChangeSummary" id="docSaveChangeSummary" rows="2" maxlength="5000"></textarea>
+            </label>
+            <label class="pm-form-grid-full">
+                <span>Keywords / Tags</span>
+                <input type="text" name="KeywordsTag" id="docSaveKeywords" maxlength="1000" />
+            </label>
+            <label class="pm-form-grid-full">
+                <input type="checkbox" name="AcknowledgementRequired" id="docSaveAckRequired" value="true" />
+                Acknowledgement required
+            </label>
+            <label class="pm-form-grid-full">
+                <span>File <span id="docSaveFileHint" class="pm-hint">(required on new, optional on edit)</span></span>
+                <input type="file" name="File" id="docSaveFile" />
+            </label>
+        </div>
+
+        <p class="pm-form-message" id="docSaveMessage" role="status" aria-live="polite"></p>
+
+        <div class="pm-toolbar" style="justify-content: flex-end;">
+            <button type="button" class="pm-button" data-doc-back>Cancel</button>
+            <button type="submit" class="pm-button primary" id="docSaveSubmit">Save</button>
+        </div>
+    </form>
+</section>
+
+@* =============================================================
+   VIEW 3 -- Workflow (Review / Approve) as split pane
+   Left: decision form. Right: PDF viewer of the current file.
+   Matches the legacy GRAC Plus review/approve screen layout.
+   ============================================================= *@
+<section class="pm-panel" id="docWorkflowView" hidden>
+
+    <div class="pm-toolbar">
+        <button type="button" class="pm-button" data-doc-back>
+            <i class="fa-solid fa-arrow-left"></i> Back to list
+        </button>
+        <h2 id="docWorkflowTitle" style="margin: 0 0 0 8px; font-size: 18px;">Workflow</h2>
+    </div>
+
+    <div class="doc-workflow-split">
+        <aside class="doc-workflow-form">
+            <dl class="doc-workflow-meta" id="docWorkflowMeta">
+                @* Populated by JS: code, name, type, version, current stage, owner *@
+            </dl>
+
+            <form id="docWorkflowForm">
+                <input type="hidden" id="docWorkflowDocumentId" />
+                <input type="hidden" id="docWorkflowTransition" />
+
+                <label>
+                    <span>Decision</span>
+                    <select id="docWorkflowDecision">
+                        <option value="Approve">Approve</option>
+                        <option value="Reject">Reject</option>
+                    </select>
+                </label>
+
+                <label>
+                    <span>Remark</span>
+                    <textarea id="docWorkflowRemark" rows="6" maxlength="5000"
+                              placeholder="Explain the decision..."></textarea>
+                </label>
+
+                <p class="pm-form-message" id="docWorkflowMessage" role="status" aria-live="polite"></p>
+
+                <div class="pm-toolbar" style="justify-content: flex-end;">
+                    <button type="button" class="pm-button" data-doc-back>Cancel</button>
+                    <button type="submit" class="pm-button primary">Submit</button>
+                </div>
+            </form>
+        </aside>
+
+        <div class="doc-workflow-viewer">
+            @* iframe is more reliably PDF-rendered across Chrome/Edge/Firefox
+               than <object>, and cookies flow through for auth on the file
+               endpoint. Empty state (no doc loaded / non-PDF file) is shown
+               via the sibling div that JS toggles. *@
+            <iframe id="docWorkflowPdf" title="Document preview" src="about:blank"></iframe>
+            <div id="docWorkflowPdfEmpty" class="doc-workflow-pdf-fallback" hidden>
+                <p id="docWorkflowPdfMessage">Loading document preview...</p>
+                <a id="docWorkflowPdfLink" class="pm-button primary" href="#" target="_blank"
+                   rel="noopener">Open in new tab</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* Inline styles for the module. Scoped by module prefix so no other
+   feature is affected. Kept inline (rather than in site.css) so the
+   partial is self-contained. *@
+<style>
+    /* --- pm-multiselect (searchable combobox) --------------------- */
+    .pm-multiselect { position: relative; }
+    .pm-multiselect-input {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+        min-height: 32px; padding: 4px 8px;
+        border: 1px solid var(--pm-border-color, #cbd5e0);
+        border-radius: 4px; background: #fff; cursor: text;
+    }
+    .pm-multiselect-input:focus-within { border-color: var(--pm-primary, #3498db); }
+    .pm-multiselect-chip {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 2px 8px; border-radius: 999px;
+        background: #edf2f7; font-size: 12px; line-height: 18px;
+    }
+    .pm-multiselect-chip button {
+        border: 0; background: transparent; cursor: pointer;
+        font-size: 14px; padding: 0; color: #718096;
+    }
+    .pm-multiselect-chip button:hover { color: #e53e3e; }
+    .pm-multiselect-search {
+        flex: 1 1 120px; min-width: 100px;
+        border: 0; outline: none; background: transparent;
+        font-size: 13px; padding: 2px 0;
+    }
+    .pm-multiselect-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0; z-index: 1050;
+        max-height: 220px; overflow-y: auto;
+        background: #fff; border: 1px solid var(--pm-border-color, #cbd5e0);
+        border-top: 0; border-radius: 0 0 4px 4px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .pm-multiselect-option {
+        display: flex; align-items: center; gap: 8px;
+        padding: 6px 10px; cursor: pointer; font-size: 13px;
+    }
+    .pm-multiselect-option:hover,
+    .pm-multiselect-option.pm-hi { background: #edf2f7; }
+    .pm-multiselect-option input[type="checkbox"] { pointer-events: none; }
+    .pm-multiselect-empty {
+        padding: 10px; color: #718096; font-size: 12px; font-style: italic;
+    }
+
+    /* --- Workflow split pane ------------------------------------- */
+    .doc-workflow-split {
+        display: grid;
+        grid-template-columns: minmax(340px, 400px) 1fr;
+        gap: 16px;
+        height: calc(100vh - 240px);
+        min-height: 520px;
+    }
+    @@media (max-width: 900px) {
+        .doc-workflow-split { grid-template-columns: 1fr; height: auto; }
+    }
+    /* Left column: single scrollable panel with meta on top, form below. */
+    .doc-workflow-form {
+        display: flex; flex-direction: column;
+        padding: 16px; background: #fff;
+        border: 1px solid var(--pm-border-color, #e2e8f0);
+        border-radius: 6px;
+        overflow-y: auto;
+    }
+    .doc-workflow-form form { display: flex; flex-direction: column; gap: 14px; }
+    .doc-workflow-form label {
+        display: flex; flex-direction: column; gap: 6px;
+        font-size: 13px; font-weight: 600; color: #4a5568;
+    }
+    .doc-workflow-form select,
+    .doc-workflow-form textarea {
+        font-weight: normal; color: #2d3748;
+        border: 1px solid var(--pm-border-color, #cbd5e0);
+        border-radius: 4px; padding: 8px 10px;
+        font-family: inherit; font-size: 13px;
+        width: 100%; box-sizing: border-box;
+    }
+    .doc-workflow-form textarea { resize: vertical; }
+    .doc-workflow-form .pm-toolbar {
+        justify-content: flex-end;
+        margin-top: 4px;
+    }
+    /* Meta panel: two-column key/value grid so labels and values line up. */
+    .doc-workflow-meta {
+        margin: 0 0 16px 0; padding: 12px 14px;
+        background: #f7fafc; border-radius: 6px;
+        font-size: 13px;
+        display: grid;
+        grid-template-columns: 100px 1fr;
+        row-gap: 6px; column-gap: 12px;
+    }
+    .doc-workflow-meta dt {
+        color: #718096; font-weight: 600; margin: 0;
+        text-transform: uppercase; font-size: 11px; letter-spacing: 0.02em;
+        align-self: center;
+    }
+    .doc-workflow-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+    /* Right column: PDF viewer fills the height. */
+    .doc-workflow-viewer {
+        position: relative;
+        border: 1px solid var(--pm-border-color, #e2e8f0);
+        border-radius: 6px; overflow: hidden; background: #fafafa;
+        min-height: 400px;
+    }
+    .doc-workflow-viewer iframe {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%; border: 0;
+        background: #fff;
+    }
+    .doc-workflow-pdf-fallback {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 12px;
+        padding: 24px; text-align: center; color: #718096; background: #fafafa;
+    }
+</style>
+
+<script src="~/js/DocumentUpload/document-uploads.js" asp-append-version="true"></script>

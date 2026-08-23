@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using PracticeManagement.Api.Models;
 using PracticeManagement.Api.Services;
+using PracticeManagement.Web.Security; // PermissionAreaMap — linked source file, shared with the Web tier
 
 namespace PracticeManagement.Api.Controllers;
 
@@ -12,6 +13,7 @@ namespace PracticeManagement.Api.Controllers;
 [Route("api/practice-management")]
 public sealed class PracticeRepositoryController(
     IPracticeRepositoryService service,
+    IPracticeAuthenticationService authenticationService,
     SignedAccessTokenService tokenService,
     EnvelopeCrypto crypto,
     PermissionPolicy permissionPolicy,
@@ -30,13 +32,17 @@ public sealed class PracticeRepositoryController(
         "control-applicability", "requirement-applicability", "practices", "practice-instances", "practice-operationalization", "practice-dependency-resolutions",
         "resolve",
         "workbench-all", "workbench-applications", "workbench-tools", "workbench-vendors", "workbench-assets", "workbench-teams", "workbench-committees", "workbench-processes", "workbench-locations",
-        "dependencies", "dependency-options", "evidence-configurations", "evidence-obligations", "evidence-alignments", "assurance-attributes", "vendor-attributes",
+        "dependencies", "dependency-options", "evidence-configurations", "evidence-obligations", "evidence-obligations-typed", "evidence-alignments", "assurance-attributes", "vendor-attributes",
         "risk-attributes", "audit-attributes", "task-attributes", "resilience-attributes",
         "future-triggers", "repository-subscription-tree", "subscribed-frameworks", "dashboard-summary", "applicability-recommendations", "lookups", "audit-trace",
         "assurance-dashboard", "assurance-generation", "assurance-activities", "assurance-execution", "evidence-assurance", "dependency-assurance",
         "assurance-results", "assurance-findings", "assurance-signals", "assurance-trends", "practice-health", "audit-intelligence", "risk-intelligence",
         "assurance-schedule-rules", "assurance-schedule-overrides", "assurance-calendar-config", "assurance-calendar-events",
-        "menu-master"
+        "menu-master",
+        // Pre-session auth. Reached with a short-lived PM_LOGIN bootstrap token
+        // that carries NO entity permissions, so it is inert on every data path
+        // above (Manage/Query enforce IsAllowed, which is false for PM_LOGIN).
+        "authenticate", "set-password"
     };
 
     [HttpGet]
@@ -104,6 +110,66 @@ public sealed class PracticeRepositoryController(
             }, cancellationToken);
         });
 
+    // =================================================================
+    // Pre-session authentication. Sign-in used to run inside the Web tier
+    // against a direct SQL connection; the database is now reached only
+    // through the API, so the Web tier calls these two endpoints instead.
+    //
+    // Both reuse ExecuteAsync, so they inherit its token validation, envelope
+    // decryption, freshness and nonce-replay checks unchanged. requiredAction
+    // is null — authenticating is the step BEFORE any entity permission
+    // exists — but the caller still needs a validly-signed token, which the
+    // Web tier mints with the locked-down PM_LOGIN role. The credentials ride
+    // in the encrypted request Data, never in the URL or a log.
+    // =================================================================
+    [HttpPost("secure/authenticate")]
+    public Task<IActionResult> Authenticate([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var loginId = JsonString(request.Data, "loginId");
+            var password = JsonString(request.Data, "password");
+            if (string.IsNullOrWhiteSpace(loginId) || string.IsNullOrWhiteSpace(password))
+                return new PracticeRepositoryResult(false, "User ID/email and password are required.");
+
+            var user = await authenticationService.AuthenticateAsync(loginId, password, cancellationToken);
+            // Uniform message on failure — the specific reason is logged inside
+            // the service, not returned, to avoid a user-enumeration oracle.
+            return user is null
+                ? new PracticeRepositoryResult(false, "Invalid user ID/email or password.")
+                : new PracticeRepositoryResult(true, "Authenticated.", user);
+        });
+
+    [HttpPost("secure/set-password")]
+    public Task<IActionResult> SetPassword([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var employeeId = JsonLong(request.Data, "employeeId");
+            var newPassword = JsonString(request.Data, "newPassword");
+            if (employeeId is null or <= 0 || string.IsNullOrWhiteSpace(newPassword))
+                return new PracticeRepositoryResult(false, "An employee and a new password are required.");
+
+            var changed = await authenticationService.SetPasswordAsync(employeeId.Value, newPassword, cancellationToken);
+            return changed
+                ? new PracticeRepositoryResult(true, "Password changed.")
+                : new PracticeRepositoryResult(false, "The password could not be changed.");
+        });
+
+    private static string? JsonString(JsonElement data, string property) =>
+        data.ValueKind == JsonValueKind.Object && data.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static long? JsonLong(JsonElement data, string property)
+    {
+        if (data.ValueKind != JsonValueKind.Object || !data.TryGetProperty(property, out var value)) return null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt64(out var number) => number,
+            JsonValueKind.String when long.TryParse(value.GetString(), out var number) => number,
+            _ => null
+        };
+    }
+
     private async Task<IActionResult> ExecuteAsync(EncryptedRequest envelope, string? requiredAction,
         Func<SecureRepositoryRequest, AccessPrincipal, Task<PracticeRepositoryResult>> execute)
     {
@@ -129,9 +195,24 @@ public sealed class PracticeRepositoryController(
                     request.EntityType, request.TimestampUtc, DateTimeOffset.UtcNow, request.Nonce?[..Math.Min(request.Nonce?.Length ?? 0, 16)], IsFresh(request), correlationId);
                 return BadRequest(crypto.EncryptResponse("FAIL", JsonSerializer.Serialize(new PracticeRepositoryResult(false, "The request is invalid or has expired.")), token));
             }
-            if (requiredAction is not null && !permissionPolicy.IsAllowed(principal.Roles, request.EntityType, requiredAction))
+            // The area, not the raw entity type. A helper entity type such
+            // as release-statements or custom-release has no menu_master row
+            // and therefore no permission any role can hold; it is governed
+            // by the screen it renders inside. PermissionAreaMap is the same
+            // source file the Web gateway uses (linked in the csproj), so the
+            // two tiers cannot drift — testing the raw entity type here is
+            // what produced "HTTP 403 ... for entity [release-statements]"
+            // against callers who held organization-controls:VIEW.
+            var permissionArea = PermissionAreaMap.For(request.EntityType);
+            if (requiredAction is not null && !permissionPolicy.IsAllowed(principal.Roles, permissionArea, requiredAction))
+            {
+                logger.LogWarning(
+                    "PracticeManagement 403: entity [{EntityType}] resolved to area [{Area}], action {Action}, not held by roles [{Roles}] {CorrelationId}",
+                    request.EntityType, permissionArea, requiredAction, string.Join(',', principal.Roles), correlationId);
                 return StatusCode(StatusCodes.Status403Forbidden,
-                    crypto.EncryptResponse("FAIL", JsonSerializer.Serialize(new PracticeRepositoryResult(false, "You do not have permission to access this area.")), token));
+                    crypto.EncryptResponse("FAIL", JsonSerializer.Serialize(new PracticeRepositoryResult(false,
+                        $"You do not have permission to {requiredAction.ToLowerInvariant()} {permissionArea}.")), token));
+            }
 
             var result = await execute(request, principal);
             return Ok(crypto.EncryptResponse(result.Success ? "SUCCESS" : "FAIL", JsonSerializer.Serialize(result), token));
@@ -202,19 +283,12 @@ public sealed class PracticeRepositoryController(
         return JsonSerializer.SerializeToElement(values);
     }
 
-    // Mirror of the gateway's PermissionArea — release / statement /
-    // subscription-owner actions all resolve to organization-controls
-    // so they share the Source Statements permission line.
-    private static string ApiPermissionArea(string entityType) =>
-        entityType.Equals("release-statements", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-release-statements", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase)
-            ? "organization-controls"
-            : entityType;
+    // Was a hand-copied mirror of the gateway's PermissionArea, and it
+    // had already fallen behind — assurance-calendar-events was never
+    // added to it, and secure/query did not call it at all. Both tiers
+    // now resolve through the one linked source file so a new mapping is
+    // added in a single place.
+    private static string ApiPermissionArea(string entityType) => PermissionAreaMap.For(entityType);
 
     private static long? ToInt64(object? value) => value switch
     {

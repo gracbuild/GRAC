@@ -1,0 +1,945 @@
+@*
+    Assurance Workflow Config (BRD Part 2 Sec 6) -- Phase 2 Stage 2.
+
+    Screen key : `org-assurance-workflow-config`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Workflow Config (migration 085)
+    Feature    : screen.org-assurance-workflow-config
+    Backend    :
+        GET  /practice/api/org-assurance/admin-workflow-templates
+        GET  /practice/api/org-assurance/workflow-stage-types
+        GET  /practice/api/org-assurance/organization-roles?organizationId=
+        GET  /practice/api/org-assurance/definitions/{id}?organizationId=
+        GET  /practice/api/org-assurance/definitions?organizationId=&search=&page=&pageSize=
+        GET  /practice/api/org-assurance/definitions/{id}/workflow-config?organizationId=
+        POST /practice/api/org-assurance/definitions/{id}/workflow-config
+
+    UX (same picker + header + summary-table + dialog pattern used by
+    Evidence Config):
+      * Org + Definition picker at the top; URL ?definitionId=X preselects.
+      * Header form: Workflow Template (Admin, optional), Workflow Name,
+        Total SLA (days), Description.
+      * Summary table of stages with row 3-dot menu (Edit / Remove).
+      * Add / Edit Stage dialog with all stage fields including role +
+        employee assignment + escalation.
+      * Editable only when the current version is Draft.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaWfHeading">@Model.Title</h1>
+        <p id="oaWfSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaWfBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Definitions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaWfUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-sitemap pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaWfUnavailableTitle">Workflow Config is not available.</h2>
+        <p id="oaWfUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaWfRoot" hidden>
+    @* Picker toolbar *@
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaWfPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+            <span>Assurance Definition</span>
+            <select id="oaWfPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">Select an organization first</option>
+            </select>
+        </label>
+    </div>
+
+    <div id="oaWfBanner" hidden class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <span style="font-weight:600;" id="oaWfDefName">Definition</span>
+            <span class="pm-badge" id="oaWfDefStatus">Status</span>
+            <span style="color:#64748b;" id="oaWfDefVersion">Version</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="oaWfReloadBtn" type="button">Reload</button>
+            <button class="pm-button primary" id="oaWfSaveBtn" type="button" disabled>Save Workflow</button>
+        </div>
+    </div>
+
+    <div id="oaWfReadonlyBanner" hidden
+         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+        This version is not a Draft, so the workflow is shown read-only.
+    </div>
+
+    <div id="oaWfMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    @* Header form *@
+    <div id="oaWfHeaderForm" hidden
+         style="margin-top:12px; padding:12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Workflow Template (Admin published, optional)</span>
+                <select id="oaWfHeaderTemplate" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                    <option value="">-- none --</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Workflow Name</span>
+                <input id="oaWfHeaderName" type="text" maxlength="200"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Total SLA (days)</span>
+                <input id="oaWfHeaderTotalSla" type="number" min="0" step="1"
+                       placeholder="Overall workflow SLA"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <div></div>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Description</span>
+            <textarea id="oaWfHeaderDescription" rows="2" maxlength="4000"
+                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+    </div>
+
+    @* Stages table *@
+    <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <h2 style="font-size:15px; margin:0; color:#0f172a;">Stages</h2>
+        <button class="pm-button primary" id="oaWfAddStageBtn" type="button" disabled>
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Stage
+        </button>
+    </div>
+    <div class="pm-table-wrap" style="margin-top:8px;">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:70px;">Order</th>
+                    <th>Stage</th>
+                    <th>Type</th>
+                    <th>Assigned Role</th>
+                    <th>Assigned Employee</th>
+                    <th style="width:80px;">SLA (days)</th>
+                    <th>Escalation</th>
+                    <th style="width:70px;"></th>
+                </tr>
+            </thead>
+            <tbody id="oaWfStageBody">
+                <tr><td colspan="8" class="pm-empty">Pick a definition to configure workflow.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ---------- Add / Edit Stage dialog ---------- *@
+<dialog id="oaWfStageDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaWfStageForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaWfStageDialogTitle" style="margin:0; font-size:18px;">Add Stage</h2>
+            <button type="button" id="oaWfStageClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaWfStageMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        @* Identity *@
+        <div style="display:grid; grid-template-columns:1fr 100px 140px; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Stage Name <span style="color:#b91c1c;">*</span></span>
+                <input id="oaWfStageName" type="text" maxlength="200" required
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Order</span>
+                <input id="oaWfStageOrder" type="number" min="1" step="1"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Stage Type</span>
+                <select id="oaWfStageType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+        </div>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Stage Code</span>
+            <input id="oaWfStageCode" type="text" maxlength="60"
+                   placeholder="Short code (auto-generated if blank)"
+                   style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+
+        @* Assignment *@
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Assigned Role</span>
+                <select id="oaWfStageRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Assigned Employee (optional)</span>
+                <select id="oaWfStageEmployee" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+        </div>
+
+        @* SLA + Escalation *@
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Stage SLA (days)</span>
+                <input id="oaWfStageSla" type="number" min="0" step="1"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Escalate to (role)</span>
+                <select id="oaWfStageEscRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Escalate after (days)</span>
+                <input id="oaWfStageEscDays" type="number" min="0" step="1"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+
+        @* Instructions *@
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Instructions</span>
+            <textarea id="oaWfStageInstructions" rows="3" maxlength="4000"
+                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaWfStageCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaWfStageSubmit" class="pm-button primary">Save Stage</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        definitionId  : null,
+        orgId         : null,
+        allOrgs       : [],
+        definitionsById : {},
+        header        : null,      // flattened from GET workflow-config
+        definition    : null,
+        templates     : [],
+        stageTypes    : [],
+        roles         : [],
+        employees     : [],
+        headerForm    : null,      // { workflowTemplateId, ..., totalSlaDays }
+        stages        : [],
+        editingIndex  : -1
+    };
+
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readDefinitionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('definitionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-definitions';
+    }
+
+    async function boot() {
+        document.getElementById('oaWfBackBtn').setAttribute('href', backHref());
+        document.getElementById('oaWfRoot').hidden = false;
+
+        try {
+            await Promise.all([loadTemplates(), loadStageTypes()]);
+        } catch (err) { setMessage('error', 'Failed to load lookups: ' + (err.message || err)); }
+
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaWfPickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            setMessage('error', 'Your account is not linked to any organizations.');
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        state.definitionId = readDefinitionIdFromUrl();
+
+        orgSel.addEventListener('change', async function () {
+            state.orgId        = orgSel.value || null;
+            state.definitionId = null;
+            state.definition   = null;
+            state.header       = null;
+            state.stages       = [];
+            state.headerForm   = null;
+            renderBanner();
+            renderReadonlyBannerIfNeeded();
+            renderStages();
+            document.getElementById('oaWfSaveBtn').disabled     = true;
+            document.getElementById('oaWfAddStageBtn').disabled = true;
+            document.getElementById('oaWfBanner').hidden        = true;
+            document.getElementById('oaWfHeaderForm').hidden    = true;
+            await Promise.all([loadOrgRoles(state.orgId), loadEmployees(state.orgId)]);
+            populateDefinitionPicker();
+        });
+
+        document.getElementById('oaWfPickDef').addEventListener('change', function (e) {
+            const id = e.target.value ? Number(e.target.value) : null;
+            if (id) selectDefinition(id);
+        });
+
+        wireStaticButtons();
+
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+        await Promise.all([loadOrgRoles(state.orgId), loadEmployees(state.orgId)]);
+        await populateDefinitionPicker();
+
+        if (state.definitionId) await selectDefinition(state.definitionId);
+    }
+
+    // -----------------------------------------------------------------
+    // Lookups
+    // -----------------------------------------------------------------
+    async function loadTemplates() {
+        const r = await fetch(U(API + '/admin-workflow-templates'), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b = await r.json();
+        state.templates = (b && (b.data || b.Data)) || [];
+        renderTemplateOptions();
+    }
+    async function loadStageTypes() {
+        const r = await fetch(U(API + '/workflow-stage-types'), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b = await r.json();
+        state.stageTypes = (b && (b.data || b.Data)) || [];
+    }
+    async function loadOrgRoles(orgId) {
+        if (!orgId) { state.roles = []; return; }
+        try {
+            const r = await fetch(U(API + '/organization-roles?organizationId=' + encodeURIComponent(orgId)), { credentials: 'same-origin' });
+            if (!r.ok) { state.roles = []; return; }
+            const b = await r.json();
+            state.roles = (b && (b.data || b.Data)) || [];
+        } catch (_) { state.roles = []; }
+    }
+    async function loadEmployees(orgId) {
+        if (!orgId) { state.employees = []; return; }
+        try {
+            const url = U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees';
+            const r   = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { state.employees = []; return; }
+            const arr = await r.json();
+            state.employees = Array.isArray(arr) ? arr : [];
+        } catch (_) { state.employees = []; }
+    }
+
+    function renderTemplateOptions() {
+        const sel = document.getElementById('oaWfHeaderTemplate');
+        sel.innerHTML = '';
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = state.templates.length ? '-- none --' : '(no templates published by Admin)';
+        sel.appendChild(ph);
+        state.templates.forEach(function (t) {
+            const id   = t.id   ?? t.Id;
+            const code = t.code ?? t.Code ?? '';
+            const name = t.name ?? t.Name ?? '';
+            const opt  = document.createElement('option');
+            opt.value  = String(id != null ? id : '');
+            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            opt.setAttribute('data-code', code);
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Picker + org resolve
+    // -----------------------------------------------------------------
+    async function populateDefinitionPicker() {
+        const defSel = document.getElementById('oaWfPickDef');
+        defSel.innerHTML = '<option value="">Loading definitions...</option>';
+        defSel.disabled = true;
+        if (!state.orgId) {
+            defSel.innerHTML = '<option value="">Select an organization first</option>';
+            return;
+        }
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows    = payload.rows || payload.Rows || [];
+            defSel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = rows.length ? '-- select a definition --' : 'No definitions in this organization.';
+            defSel.appendChild(ph);
+            rows.forEach(function (row) {
+                const id   = row.definitionId  || row.DefinitionId;
+                const code = row.definitionCode|| row.DefinitionCode || '';
+                const name = row.definitionName|| row.DefinitionName || '';
+                const st   = row.currentStatusName || row.CurrentStatusName || '';
+                if (id != null) state.definitionsById[String(id)] = row;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '') + (st ? '  –  ' + st : '');
+                defSel.appendChild(opt);
+            });
+            if (state.definitionId) defSel.value = String(state.definitionId);
+        } catch (err) {
+            defSel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        } finally { defSel.disabled = false; }
+    }
+
+    async function selectDefinition(definitionId) {
+        state.definitionId = definitionId;
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.set('definitionId', String(definitionId));
+            window.history.replaceState(null, '', u.toString());
+        } catch (_) {}
+
+        try { await resolveOrgForDefinition(definitionId); }
+        catch (err) { setMessage('error', 'Could not load definition #' + definitionId + ': ' + (err.message || err)); return; }
+
+        try { await loadWorkflow(); }
+        catch (err) { setMessage('error', 'Failed to load workflow: ' + (err.message || err)); return; }
+
+        document.getElementById('oaWfBanner').hidden     = false;
+        document.getElementById('oaWfHeaderForm').hidden = false;
+        renderBanner();
+        renderReadonlyBannerIfNeeded();
+        renderHeaderForm();
+        renderStages();
+        document.getElementById('oaWfSaveBtn').disabled     = !state.header.isEditable;
+        document.getElementById('oaWfAddStageBtn').disabled = !state.header.isEditable;
+    }
+
+    async function resolveOrgForDefinition(definitionId) {
+        const cached = state.definitionsById[String(definitionId)];
+        const cachedOrg = cached && String(cached.organizationId || cached.OrganizationId || '');
+        const seen = new Set(); const orgsToTry = [];
+        function push(v) { if (v && !seen.has(v)) { seen.add(v); orgsToTry.push(v); } }
+        push(cachedOrg); push(state.orgId);
+        (state.allOrgs || []).forEach(function (o) { push(o.value); });
+
+        let lastStatus = null;
+        for (const oid of orgsToTry) {
+            const url = U(API + '/definitions/' + definitionId + '?organizationId=' + encodeURIComponent(oid));
+            let r;
+            try { r = await fetch(url, { credentials: 'same-origin' }); } catch (_) { continue; }
+            if (r.ok) {
+                const b = await r.json().catch(function () { return null; });
+                const d = (b && (b.data || b.Data)) || null;
+                if (d) {
+                    if (state.orgId !== String(oid)) {
+                        state.orgId = String(oid);
+                        const orgSel = document.getElementById('oaWfPickOrg');
+                        if (orgSel && orgSel.value !== state.orgId) {
+                            orgSel.value = state.orgId;
+                            await Promise.all([loadOrgRoles(state.orgId), loadEmployees(state.orgId)]);
+                            await populateDefinitionPicker();
+                            const defSel = document.getElementById('oaWfPickDef');
+                            if (defSel) defSel.value = String(definitionId);
+                        }
+                    }
+                    state.definition = d;
+                    return;
+                }
+            } else { lastStatus = r.status; }
+        }
+        throw new Error(lastStatus
+            ? ('HTTP ' + lastStatus + ' -- definition not found in any accessible organization.')
+            : 'Definition not found in any accessible organization.');
+    }
+
+    async function loadWorkflow() {
+        if (!state.orgId || !state.definitionId) return;
+        const url = U(API + '/definitions/' + state.definitionId + '/workflow-config?organizationId=' + encodeURIComponent(state.orgId));
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' loading workflow');
+        const json = await r.json();
+        const hdr  = (json && (json.header || json.Header)) || {};
+        state.header = {
+            definitionId      : hdr.definitionId      || hdr.DefinitionId,
+            versionId         : hdr.versionId         || hdr.VersionId,
+            currentVersionId  : hdr.currentVersionId  || hdr.CurrentVersionId,
+            currentStatusCode : hdr.currentStatusCode || hdr.CurrentStatusCode,
+            isEditable        : !!(hdr.isEditable    ?? hdr.IsEditable)
+        };
+        const cfg = (json && (json.config || json.Config)) || null;
+        state.headerForm = {
+            workflowTemplateId   : cfg ? (cfg.workflowTemplateId   ?? cfg.WorkflowTemplateId   ?? null) : null,
+            workflowTemplateCode : cfg ? (cfg.workflowTemplateCode ?? cfg.WorkflowTemplateCode ?? null) : null,
+            workflowTemplateName : cfg ? (cfg.workflowTemplateName ?? cfg.WorkflowTemplateName ?? null) : null,
+            workflowName         : cfg ? (cfg.workflowName         ?? cfg.WorkflowName         ?? '')   : '',
+            description          : cfg ? (cfg.description          ?? cfg.Description          ?? '')   : '',
+            totalSlaDays         : cfg ? (cfg.totalSlaDays         ?? cfg.TotalSlaDays         ?? null) : null
+        };
+        const stages = (json && (json.stages || json.Stages)) || [];
+        state.stages = stages.map(function (s) {
+            return {
+                stageOrder            : s.stageOrder            ?? s.StageOrder ?? 0,
+                stageCode             : s.stageCode             ?? s.StageCode ?? '',
+                stageName             : s.stageName             ?? s.StageName ?? '',
+                stageType             : s.stageType             ?? s.StageType ?? 'CUSTOM',
+                assignedRoleId        : s.assignedRoleId        ?? s.AssignedRoleId ?? null,
+                assignedRoleName      : s.assignedRoleName      ?? s.AssignedRoleName ?? null,
+                assignedEmployeeId    : s.assignedEmployeeId    ?? s.AssignedEmployeeId ?? null,
+                assignedEmployeeName  : s.assignedEmployeeName  ?? s.AssignedEmployeeName ?? null,
+                slaDays               : s.slaDays               ?? s.SlaDays ?? null,
+                escalationRoleId      : s.escalationRoleId      ?? s.EscalationRoleId ?? null,
+                escalationRoleName    : s.escalationRoleName    ?? s.EscalationRoleName ?? null,
+                escalationAfterDays   : s.escalationAfterDays   ?? s.EscalationAfterDays ?? null,
+                instructions          : s.instructions          ?? s.Instructions ?? ''
+            };
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Render
+    // -----------------------------------------------------------------
+    function renderBanner() {
+        const d = state.definition; const h = state.header;
+        if (!d || !h) {
+            document.getElementById('oaWfDefName').textContent    = '';
+            document.getElementById('oaWfDefStatus').textContent  = '';
+            document.getElementById('oaWfDefVersion').textContent = '';
+            document.getElementById('oaWfHeading').textContent    = 'Workflow Config';
+            document.getElementById('oaWfSubtitle').textContent   =
+                'Pick an organization and an assurance definition to configure workflow.';
+            return;
+        }
+        document.getElementById('oaWfDefName').textContent =
+            (d.definitionName || d.DefinitionName || '(no name)') +
+            '  (' + (d.definitionCode || d.DefinitionCode || '') + ')';
+        document.getElementById('oaWfDefStatus').textContent  = d.currentStatusName || d.CurrentStatusName || '';
+        document.getElementById('oaWfDefVersion').textContent = 'v' +
+            (d.currentVersionNumber || d.CurrentVersionNumber || h.versionId || '?');
+        document.getElementById('oaWfHeading').textContent = 'Workflow: ' + (d.definitionName || d.DefinitionName || '');
+        document.getElementById('oaWfSubtitle').textContent =
+            'Customize the workflow for this definition -- start from an Admin template if available, then define stages, assignments, SLA and escalation.';
+    }
+    function renderReadonlyBannerIfNeeded() {
+        document.getElementById('oaWfReadonlyBanner').hidden = state.header ? !!state.header.isEditable : true;
+    }
+
+    function renderHeaderForm() {
+        renderTemplateOptions();
+        const h = state.headerForm || {};
+        document.getElementById('oaWfHeaderTemplate').value    = h.workflowTemplateId != null ? String(h.workflowTemplateId) : '';
+        document.getElementById('oaWfHeaderName').value        = h.workflowName || '';
+        document.getElementById('oaWfHeaderTotalSla').value    = h.totalSlaDays == null ? '' : String(h.totalSlaDays);
+        document.getElementById('oaWfHeaderDescription').value = h.description || '';
+
+        const disabled = !state.header.isEditable;
+        ['oaWfHeaderTemplate','oaWfHeaderName','oaWfHeaderTotalSla','oaWfHeaderDescription']
+            .forEach(function (id) { document.getElementById(id).disabled = disabled; });
+
+        function pull() {
+            const sel = document.getElementById('oaWfHeaderTemplate');
+            const opt = sel.options[sel.selectedIndex] || null;
+            state.headerForm = {
+                workflowTemplateId   : sel.value ? Number(sel.value) : null,
+                workflowTemplateCode : opt && sel.value ? (opt.getAttribute('data-code') || null) : null,
+                workflowTemplateName : opt && sel.value ? (opt.getAttribute('data-name') || null) : null,
+                workflowName         : document.getElementById('oaWfHeaderName').value.trim(),
+                description          : document.getElementById('oaWfHeaderDescription').value,
+                totalSlaDays         : document.getElementById('oaWfHeaderTotalSla').value === ''
+                                        ? null : Number(document.getElementById('oaWfHeaderTotalSla').value)
+            };
+        }
+        document.getElementById('oaWfHeaderTemplate').onchange    = pull;
+        document.getElementById('oaWfHeaderName').oninput         = pull;
+        document.getElementById('oaWfHeaderTotalSla').oninput     = pull;
+        document.getElementById('oaWfHeaderDescription').oninput  = pull;
+    }
+
+    function renderStages() {
+        const body = document.getElementById('oaWfStageBody');
+        if (!state.definitionId || !state.header) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Pick a definition to configure workflow.</td></tr>';
+            return;
+        }
+        if (!state.stages.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">' +
+                (state.header.isEditable
+                    ? 'No stages yet. Click "Add Stage" to start.'
+                    : 'No workflow stages configured for this version.') + '</td></tr>';
+            return;
+        }
+        body.innerHTML = state.stages.map(function (s, idx) {
+            const type = stageTypeName(s.stageType);
+            const role = s.assignedRoleName || '';
+            const emp  = s.assignedEmployeeName || '';
+            const sla  = s.slaDays == null ? '' : String(s.slaDays);
+            const esc  = (s.escalationRoleName || '') + (s.escalationAfterDays != null ? ' (' + s.escalationAfterDays + 'd)' : '');
+            return '<tr data-idx="' + idx + '">'
+                + '<td>' + wf.escape(String(s.stageOrder ?? '')) + '</td>'
+                + '<td>' + wf.escape(s.stageName || '') + '</td>'
+                + '<td>' + wf.escape(type) + '</td>'
+                + '<td>' + wf.escape(role) + '</td>'
+                + '<td>' + wf.escape(emp) + '</td>'
+                + '<td>' + wf.escape(sla) + '</td>'
+                + '<td>' + wf.escape(esc) + '</td>'
+                + '<td>' + rowTrigger(idx) + '</td>'
+                + '</tr>';
+        }).join('');
+        wireRowMenu();
+        if (!state.header.isEditable) {
+            body.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
+        }
+    }
+
+    function stageTypeName(code) {
+        if (!code) return '';
+        const t = state.stageTypes.find(function (x) { return (x.stageTypeCode || x.StageTypeCode) === code; });
+        return t ? (t.stageTypeName || t.StageTypeName) : code;
+    }
+
+    // -----------------------------------------------------------------
+    // Row 3-dot menu
+    // -----------------------------------------------------------------
+    function rowTrigger(idx) {
+        return '<button type="button" class="pm-action-trigger" data-idx="' + idx + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+    function closeRowMenu() {
+        if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trg) {
+        if (!openMenuEl) return;
+        const r  = trg.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trg, items) {
+        closeRowMenu();
+        openMenuTrigger = trg;
+        trg.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[workflow-config] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trg);
+    }
+    function wireRowMenu() {
+        const body = document.getElementById('oaWfStageBody');
+        if (!body) return;
+        body.addEventListener('click', function (e) {
+            const trg = e.target.closest('.pm-action-trigger');
+            if (!trg || !body.contains(trg)) return;
+            e.preventDefault(); e.stopPropagation();
+            if (openMenuTrigger === trg) { closeRowMenu(); return; }
+            const idx = Number(trg.getAttribute('data-idx'));
+            openRowMenu(trg, [
+                { icon: 'fa-pen',   label: 'Edit',   action: function () { openStageDialog(idx); } },
+                { icon: 'fa-trash', label: 'Remove', action: function () {
+                    if (!confirm('Remove this stage?')) return;
+                    state.stages.splice(idx, 1); renderStages();
+                } }
+            ]);
+        }, { once: false });
+    }
+    document.addEventListener('click', function (e) {
+        if (!openMenuEl) return;
+        if (e.target.closest('.pm-action-menu'))    return;
+        if (e.target.closest('.pm-action-trigger')) return;
+        closeRowMenu();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+    window.addEventListener('resize', closeRowMenu);
+    window.addEventListener('scroll',  closeRowMenu, true);
+
+    // -----------------------------------------------------------------
+    // Stage dialog
+    // -----------------------------------------------------------------
+    function openStageDialog(idx) {
+        state.editingIndex = (idx == null || idx < 0) ? -1 : idx;
+        clearStageMessage();
+
+        fillStageTypeSelect();
+        fillRoleSelect('oaWfStageRole');
+        fillRoleSelect('oaWfStageEscRole');
+        fillEmployeeSelect('oaWfStageEmployee');
+
+        const isEdit = state.editingIndex >= 0;
+        const s = isEdit ? state.stages[state.editingIndex] : blankStage();
+        document.getElementById('oaWfStageDialogTitle').textContent = isEdit ? 'Edit Stage' : 'Add Stage';
+
+        document.getElementById('oaWfStageName').value    = s.stageName || '';
+        document.getElementById('oaWfStageOrder').value   = String(s.stageOrder ?? (state.stages.length + 1));
+        document.getElementById('oaWfStageType').value    = s.stageType || 'CUSTOM';
+        document.getElementById('oaWfStageCode').value    = s.stageCode || '';
+        document.getElementById('oaWfStageRole').value    = s.assignedRoleId     != null ? String(s.assignedRoleId)     : '';
+        document.getElementById('oaWfStageEmployee').value= s.assignedEmployeeId != null ? String(s.assignedEmployeeId) : '';
+        document.getElementById('oaWfStageSla').value     = s.slaDays == null ? '' : String(s.slaDays);
+        document.getElementById('oaWfStageEscRole').value = s.escalationRoleId   != null ? String(s.escalationRoleId)   : '';
+        document.getElementById('oaWfStageEscDays').value = s.escalationAfterDays == null ? '' : String(s.escalationAfterDays);
+        document.getElementById('oaWfStageInstructions').value = s.instructions || '';
+
+        document.getElementById('oaWfStageDialog').showModal();
+    }
+
+    function blankStage() {
+        return {
+            stageOrder            : state.stages.length + 1,
+            stageCode             : '',
+            stageName             : '',
+            stageType             : 'CUSTOM',
+            assignedRoleId        : null, assignedRoleName    : null,
+            assignedEmployeeId    : null, assignedEmployeeName: null,
+            slaDays               : null,
+            escalationRoleId      : null, escalationRoleName  : null,
+            escalationAfterDays   : null,
+            instructions          : ''
+        };
+    }
+
+    function fillStageTypeSelect() {
+        const sel = document.getElementById('oaWfStageType');
+        sel.innerHTML = '';
+        state.stageTypes.forEach(function (t) {
+            const opt = document.createElement('option');
+            opt.value = t.stageTypeCode || t.StageTypeCode;
+            opt.textContent = t.stageTypeName || t.StageTypeName;
+            sel.appendChild(opt);
+        });
+    }
+    function fillRoleSelect(id) {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = state.roles.length ? '-- select --' : '(no roles for this organization)';
+        sel.appendChild(ph);
+        state.roles.forEach(function (r) {
+            const rid = r.roleId ?? r.RoleId;
+            const name = r.roleName ?? r.RoleName ?? '';
+            const opt = document.createElement('option');
+            opt.value = String(rid != null ? rid : '');
+            opt.textContent = name;
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        });
+    }
+    function fillEmployeeSelect(id) {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = state.employees.length ? '-- none --' : '(no active employees)';
+        sel.appendChild(ph);
+        state.employees.forEach(function (e) {
+            const eid  = e.employeeId ?? e.EmployeeId;
+            const name = e.employeeName ?? e.EmployeeName ?? '';
+            const code = e.employeeCode ?? e.EmployeeCode ?? '';
+            const opt = document.createElement('option');
+            opt.value = String(eid != null ? eid : '');
+            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        });
+    }
+
+    function saveStageFromDialog() {
+        const name = document.getElementById('oaWfStageName').value.trim();
+        if (!name) { showStageMessage('error', 'Stage name is required.'); return; }
+
+        function pullSelect(id) {
+            const sel = document.getElementById(id);
+            const opt = sel.options[sel.selectedIndex] || null;
+            const v   = sel.value ? Number(sel.value) : null;
+            return { id: v, name: opt && v != null ? (opt.getAttribute('data-name') || null) : null };
+        }
+        const role  = pullSelect('oaWfStageRole');
+        const emp   = pullSelect('oaWfStageEmployee');
+        const esc   = pullSelect('oaWfStageEscRole');
+        const slaR  = document.getElementById('oaWfStageSla').value;
+        const escDR = document.getElementById('oaWfStageEscDays').value;
+
+        const updated = {
+            stageOrder            : Number(document.getElementById('oaWfStageOrder').value || (state.stages.length + 1)),
+            stageCode             : document.getElementById('oaWfStageCode').value.trim(),
+            stageName             : name,
+            stageType             : document.getElementById('oaWfStageType').value || 'CUSTOM',
+            assignedRoleId        : role.id, assignedRoleName    : role.name,
+            assignedEmployeeId    : emp.id,  assignedEmployeeName: emp.name,
+            slaDays               : slaR === '' ? null : Number(slaR),
+            escalationRoleId      : esc.id,  escalationRoleName  : esc.name,
+            escalationAfterDays   : escDR === '' ? null : Number(escDR),
+            instructions          : document.getElementById('oaWfStageInstructions').value || ''
+        };
+        if (state.editingIndex >= 0) state.stages[state.editingIndex] = updated;
+        else                          state.stages.push(updated);
+        state.stages.sort(function (a, b) { return (a.stageOrder || 0) - (b.stageOrder || 0); });
+        renderStages();
+        closeStageDialog();
+    }
+
+    function closeStageDialog() { document.getElementById('oaWfStageDialog').close(); }
+    function showStageMessage(kind, text) {
+        const el = document.getElementById('oaWfStageMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent      = text;
+    }
+    function clearStageMessage() {
+        const el = document.getElementById('oaWfStageMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+
+    // -----------------------------------------------------------------
+    // Static wiring
+    // -----------------------------------------------------------------
+    function wireStaticButtons() {
+        document.getElementById('oaWfAddStageBtn').addEventListener('click', function () {
+            if (!state.definitionId || !state.header) { setMessage('error', 'Pick a definition first.'); return; }
+            if (!state.header.isEditable) { setMessage('error', 'This version is not a Draft.'); return; }
+            openStageDialog(-1);
+        });
+
+        document.getElementById('oaWfStageClose').addEventListener('click', closeStageDialog);
+        document.getElementById('oaWfStageCancel').addEventListener('click', closeStageDialog);
+        document.getElementById('oaWfStageForm').addEventListener('submit', function (e) {
+            e.preventDefault(); saveStageFromDialog();
+        });
+
+        document.getElementById('oaWfReloadBtn').addEventListener('click', async function () {
+            if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick an organization and definition first.'); return; }
+            try {
+                await loadWorkflow();
+                renderBanner(); renderReadonlyBannerIfNeeded();
+                renderHeaderForm(); renderStages();
+                document.getElementById('oaWfSaveBtn').disabled     = !state.header.isEditable;
+                document.getElementById('oaWfAddStageBtn').disabled = !state.header.isEditable;
+                setMessage('ok', 'Reloaded.');
+            } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); }
+        });
+
+        document.getElementById('oaWfSaveBtn').addEventListener('click', saveWorkflow);
+    }
+
+    async function saveWorkflow() {
+        if (!state.header || !state.header.isEditable) return;
+
+        // Pull the header values one more time so pending edits are captured.
+        const sel = document.getElementById('oaWfHeaderTemplate');
+        const opt = sel.options[sel.selectedIndex] || null;
+        state.headerForm = {
+            workflowTemplateId   : sel.value ? Number(sel.value) : null,
+            workflowTemplateCode : opt && sel.value ? (opt.getAttribute('data-code') || null) : null,
+            workflowTemplateName : opt && sel.value ? (opt.getAttribute('data-name') || null) : null,
+            workflowName         : document.getElementById('oaWfHeaderName').value.trim() || null,
+            description          : document.getElementById('oaWfHeaderDescription').value || null,
+            totalSlaDays         : document.getElementById('oaWfHeaderTotalSla').value === ''
+                                    ? null : Number(document.getElementById('oaWfHeaderTotalSla').value)
+        };
+
+        const body = {
+            organizationId : Number(state.orgId),
+            definitionId   : Number(state.definitionId),
+            actor          : null,
+            header         : state.headerForm,
+            stages         : state.stages.map(function (s, idx) {
+                return {
+                    stageOrder          : s.stageOrder ?? (idx + 1),
+                    stageCode           : s.stageCode || null,
+                    stageName           : s.stageName,
+                    stageType           : s.stageType || 'CUSTOM',
+                    assignedRoleId      : s.assignedRoleId,     assignedRoleName    : s.assignedRoleName,
+                    assignedEmployeeId  : s.assignedEmployeeId, assignedEmployeeName: s.assignedEmployeeName,
+                    slaDays             : s.slaDays,
+                    escalationRoleId    : s.escalationRoleId,   escalationRoleName  : s.escalationRoleName,
+                    escalationAfterDays : s.escalationAfterDays,
+                    instructions        : s.instructions || null
+                };
+            })
+        };
+
+        try {
+            const url = U(API + '/definitions/' + state.definitionId + '/workflow-config');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Workflow config saved.');
+        } catch (err) { setMessage('error', 'Save failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaWfMessage');
+        el.hidden = false;
+        el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

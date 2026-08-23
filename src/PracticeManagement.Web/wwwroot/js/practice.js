@@ -1,6 +1,11 @@
 (() => {
   "use strict";
 
+  // Build marker. Type window.pmBuildMarker in the console: if it is
+  // undefined, the browser is running a cached copy of this file and no
+  // change here can possibly be visible yet.
+  window.pmBuildMarker = "practice-view-full-page";
+
   const screen = window.pmScreen || {};
   const appBasePath = () => (window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "");
   const buildAppUrl = path => {
@@ -87,9 +92,18 @@
   const isSourceStatementDetail = screen.Key === "source-statements";
   const isSourceStatements = screen.Key === "organization-controls" || isSourceStatementDetail;
   const sourceStatementState = { level: "releases", release: null, releases: [], rows: [], collapsedNodes: new Set(), isCustomRelease: false };
-  const releaseSummaryColumns = ["Framework / Release", "Authority", "Artifact", "Version", "Owner", "Total Statements", "Applicable Statements", "Not Updated Statements", "Not Applicable Statements", "Actions"];
-  const statementTreeColumns = ["Source Node / Hierarchy", "Statement Reference", "Statement Title", "Statement Text", "Applicability Status", "Practice Count", "Actions"];
-  const customStatementFlatColumns = ["Hierarchy", "Source Structure Node", "Statement Reference", "Statement Title", "Statement Text", "Applicability Status", "Practice Count", "Actions"];
+  // Authority / Artifact / Version are deliberately absent: FrameworkRelease
+  // already reads as "<artifact_code> <version_no>" (see
+  // PracticeRepositoryService.QuerySubscribedFrameworksAsync), so three more
+  // columns only repeat what the first one says. The underlying fields are
+  // still returned by the API and are still used for search and sort.
+  const releaseSummaryColumns = ["Framework / Release", "Owner", "Total Statements", "Applicable Statements", "Implemented Statements", "Not Updated Statements", "Not Applicable Statements", "Actions"];
+  // Statement Text is deliberately absent from both grids: the full text is
+  // long enough that it had to be truncated to 80 characters anyway, so the
+  // column carried no information the row didn't already give. The complete
+  // text stays available in the statement view / edit form.
+  const statementTreeColumns = ["Source Node / Hierarchy", "Statement Reference", "Statement Title", "Applicability Status", "Practice Count", "Actions"];
+  const customStatementFlatColumns = ["Hierarchy", "Source Structure Node", "Statement Reference", "Statement Title", "Applicability Status", "Practice Count", "Actions"];
   // Source Structure state for custom releases
   const sourceStructureState = { nodes: [], active: false };
   const sourceFilter = document.getElementById("sourceFilter");
@@ -103,11 +117,16 @@
     "locations": { title: "Location", columns: ["Name", "LocationType", "LocationHead", "Region", "Status"] },
     "departments": { title: "Department", columns: ["Code", "Name", "HeadUser", "Status"] },
     "business-functions": { title: "Business Function", columns: ["Code", "Name", "OwnerName", "Criticality", "Status"] },
-    "teams": { title: "Teams", columns: ["Name", "TeamManager", "ParentDepartment", "Status"] },
+    // TeamTypeLabel / Vendor come from sp_org_team_list (migration 133).
+    "teams": { title: "Teams", columns: ["Name", "TeamTypeLabel", "Vendor", "TeamManager", "ParentDepartment", "Status"] },
     "committees": { title: "Committees", columns: ["Name", "Chairperson", "Secretary", "ReviewFrequency", "Status"] },
     "roles": { title: "Role Master", columns: ["Organization", "RoleName", "Description", "Status"] },
     "role-menu-permissions": { title: "Role Menu Permission", columns: ["Organization", "RoleName", "MenuName", "CanView", "CanAdd", "CanEdit", "CanDelete", "CanApprove", "Status"] },
-    "users": { title: "Users / Employees", columns: ["EmployeeCode", "EmployeeName", "Email", "RoleName", "Designation", "Location", "BusinessFunction", "ReportingOfficer", "Status"] },
+    // PersonnelType / Provider come from sp_org_user_list (migration 133).
+    // PersonnelType sits third so the employee-versus-external split reads
+    // at a glance -- that distinction is the first thing an access review
+    // asks for, and burying it at the far right defeats the point.
+    "users": { title: "Users / Employees", columns: ["EmployeeCode", "EmployeeName", "PersonnelType", "Email", "RoleName", "Provider", "Designation", "Location", "BusinessFunction", "ReportingOfficer", "CredentialStatus", "Status"] },
     "dependency-applications": { title: "Application", columns: ["Name", "BusinessOwner", "TechnicalOwner", "Vendor", "HostingType", "Criticality", "Status"] },
     "dependency-tools": { title: "Tool", columns: ["Name", "BusinessOwner", "Vendor", "LicenseType", "Criticality", "Status"] },
     "dependency-vendors": { title: "Vendor", columns: ["Name", "ServiceCategory", "RelationshipOwner", "Criticality", "Status"] },
@@ -179,15 +198,18 @@
       state.activeWorkbenchLabel = displayRegisterLabel(categories[0]);
       return renderWorkbenchCategories();
     }
-    if (workbenchHeading) workbenchHeading.textContent = selected === "evidence" ? "Evidence" : (state.activeWorkbenchLabel || "Resolve");
+    if (workbenchHeading) workbenchHeading.textContent = selected === "evidence" ? "Evidence" : (state.activeWorkbenchLabel || "Operationalize");
     if (workbenchHint) workbenchHint.textContent = selected === "evidence"
       ? "Showing Practice Instances configured with evidence."
       : `Showing Practice Instances configured with ${state.activeWorkbenchLabel || "selected"} dependency.`;
   }
 
   const text = (name, label, required = false, extra = {}) => ({ name, label, type: "text", required, ...extra });
-  const password = (name, label, required = false, extra = {}) => ({ name, label, type: "password", required, ...extra });
-  const area = (name, label, required = false, extra = {}) => ({ name, label, type: "textarea", required, full: true, ...extra });
+  // No password() helper: nobody types another person's password into a form.
+  // Users are provisioned with the configured default password by the Web
+  // gateway (UserProvisioning:DefaultPassword) and must replace it at first
+  // sign-in. See database/208_default_password_provisioning.sql.
+  const area =(name, label, required = false, extra = {}) => ({ name, label, type: "textarea", required, full: true, ...extra });
   const select = (name, label, lookup, required = false, extra = {}) => ({ name, label, type: "select", lookup, required, ...extra });
   const number = (name, label, required = false, extra = {}) => ({ name, label, type: "number", required, ...extra });
   const date = (name, label, required = false) => ({ name, label, type: "date", required });
@@ -214,7 +236,20 @@
     "assurance-types": [{ value: "1", label: "Manual" }, { value: "2", label: "Automated" }],
     "organization-roles": [{ value: "Owner", label: "Owner" }, { value: "Reviewer", label: "Reviewer" }, { value: "Approver", label: "Approver" }, { value: "Practice Owner", label: "Practice Owner" }, { value: "Evidence Owner", label: "Evidence Owner" }],
     "owner-roles": [{ value: "Primary Owner", label: "Primary Owner" }, { value: "Secondary Owner", label: "Secondary Owner" }, { value: "Practice Owner", label: "Practice Owner" }, { value: "Evidence Owner", label: "Evidence Owner" }, { value: "Location Head", label: "Location Head" }, { value: "Department Head", label: "Department Head" }],
-    "evidence-alignment-status": [{ value: "1", label: "Inherited" }, { value: "2", label: "Enhanced" }, { value: "3", label: "Partially Aligned" }, { value: "4", label: "Organization Defined" }]
+    "evidence-alignment-status": [{ value: "1", label: "Inherited" }, { value: "2", label: "Enhanced" }, { value: "3", label: "Partially Aligned" }, { value: "4", label: "Organization Defined" }],
+    // Migration 133. These four labels must stay identical to
+    // grac_practice.sp_org_personnel_type_list / sp_org_team_type_list --
+    // that procedure is the single source, and the CHECK constraints accept
+    // only these codes. Changing a label here and not there leaves the grid
+    // and the form disagreeing about the same row.
+    "personnel-types": [
+      { value: "Employee",   label: "Employee" },
+      { value: "ThirdParty", label: "Third-party personnel" }
+    ],
+    "team-types": [
+      { value: "InHouse", label: "In-house" },
+      { value: "Vendor",  label: "Vendor-managed" }
+    ]
   };
   /* Fallback dependency types — IDs are approximate and may not match actual DB IDENTITY values.
      These are superseded by state.lookups["dependency-types"] once the API lookups load. */
@@ -228,11 +263,20 @@
     "locations": [select("organizationId", "Organization", "organizations", true), text("name", "Location Name", true), select("locationTypeId", "Location Type", "location-types", true), select("locationHeadId", "Location Head", "users-id"), text("region", "Region"), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
     "departments": [select("organizationId", "Organization", "organizations", true), text("code", "Department Code", true), text("name", "Department Name", true), select("headUserId", "Department Head", "users-id"), area("description", "Description"), select("status", "Status", "status-active", true)],
     "business-functions": [select("organizationId", "Organization", "organizations", true), text("code", "Function Code", true), text("name", "Function Name", true), select("ownerName", "Owner", "users"), select("criticality", "Criticality", "criticality", true), select("status", "Status", "status-active", true)],
-    "teams": [select("organizationId", "Organization", "organizations", true), text("name", "Team Name", true), select("teamManagerId", "Team Manager", "users-id"), select("parentDepartmentId", "Parent Department", "departments"), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
+    // Team Type sits immediately after the name because it decides whether
+    // Vendor has to be filled in. Team Manager is unchanged and stays the
+    // accountable owner for both types -- a vendor-managed team is still
+    // your team, delivered by someone else.
+    "teams": [select("organizationId", "Organization", "organizations", true), text("name", "Team Name", true), select("teamType", "Team Type", "team-types", true), select("vendorId", "Vendor", "dependency-vendors"), select("teamManagerId", "Team Manager", "users-id"), select("parentDepartmentId", "Parent Department", "departments"), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
     "committees": [select("organizationId", "Organization", "organizations", true), text("name", "Committee Name", true), select("chairpersonId", "Chairperson", "users-id"), select("secretaryId", "Secretary", "users-id"), select("reviewFrequencyId", "Review Frequency", "frequency-master"), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
     "roles": [select("organizationId", "Organization", "organizations", true), text("roleCode", "Role Code"), text("roleName", "Role Name", true), area("description", "Description")],
     "role-menu-permissions": [select("organizationId", "Organization", "organizations", true), select("roleId", "Role", "roles", true), select("menuId", "Menu", "menus", true), { name: "canView", label: "View", type: "checkbox" }, { name: "canAdd", label: "Add", type: "checkbox" }, { name: "canEdit", label: "Edit", type: "checkbox" }, { name: "canDelete", label: "Delete", type: "checkbox" }, { name: "canApprove", label: "Approve", type: "checkbox" }, select("statusId", "Status", "record-status", true)],
-    "users": [select("organizationId", "Organization", "organizations", true), text("employeeCode", "Employee Code / User ID", true), text("employeeName", "Employee Name", true), text("email", "Email ID", true), password("password", "Password"), select("roleId", "Role", "roles", true), text("designation", "Designation"), select("locationId", "Location", "locations"), select("businessFunctionId", "Business Function", "business-functions"), select("reportingOfficerId", "Reporting Officer", "users-id"), select("status", "Status", "status-active", true)],
+    // Personnel Type comes second because it changes what the rest of the
+    // form means: a third-party person must name the Provider that supplies
+    // them, and their access should not outlive the engagement end date.
+    // Provider and the engagement dates are driven by it -- see
+    // conditionalFields -- so their labels stay plain.
+    "users": [select("organizationId", "Organization", "organizations", true), select("partyType", "Personnel Type", "personnel-types", true), text("employeeCode", "Employee Code / User ID", true), text("employeeName", "Employee Name", true), text("email", "Email ID", true), select("roleId", "Role", "roles", true), text("designation", "Designation"), select("providerVendorId", "Provider", "dependency-vendors"), date("engagementStartDate", "Engagement Start Date"), date("engagementEndDate", "Engagement End Date"), select("locationId", "Location", "locations"), select("businessFunctionId", "Business Function", "business-functions"), select("reportingOfficerId", "Reporting Officer", "users-id"), select("status", "Status", "status-active", true)],
     "dependency-applications": [select("organizationId", "Organization", "organizations", true), text("name", "Application Name", true), area("description", "Description"), select("businessOwnerId", "Business Owner", "users-id"), select("technicalOwnerId", "Technical Owner", "users-id"), select("vendorId", "Vendor", "dependency-vendors"), text("version", "Version"), select("hostingTypeId", "Hosting Type", "hosting-types"), date("supportExpiryDate", "Support Expiry Date"), date("endOfLifeDate", "End of Life Date"), select("criticalityId", "Criticality", "criticality-master", true), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
     "dependency-tools": [select("organizationId", "Organization", "organizations", true), text("name", "Tool Name", true), area("description", "Description"), select("businessOwnerId", "Business Owner", "users-id"), select("vendorId", "Vendor", "dependency-vendors"), select("licenseTypeId", "License Type", "license-types"), date("licenseExpiryDate", "License Expiry Date"), date("supportExpiryDate", "Support Expiry Date"), select("criticalityId", "Criticality", "criticality-master", true), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
     "dependency-vendors": [select("organizationId", "Organization", "organizations", true), text("name", "Vendor Name", true), select("serviceCategoryId", "Service Category", "service-categories", true), select("relationshipOwnerId", "Relationship Owner", "users-id"), date("contractStartDate", "Contract Start Date"), date("contractEndDate", "Contract End Date"), date("renewalDate", "Renewal Date"), { name: "slaApplicable", label: "SLA Applicable", type: "checkbox" }, select("criticalityId", "Criticality", "criticality-master", true), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
@@ -248,6 +292,36 @@
     "dependencies": [select("practiceInstanceId", "Practice Instance", "practice-instances", true), select("dependencyTypeId", "Dependency Type", "dependency-types", true), text("name", "Dependency Name", true), text("reference", "Reference"), text("ownerName", "Owner"), select("criticalityId", "Criticality", "criticality-master", true), select("statusId", "Status", "record-status", true)],
     "evidence-configurations": [select("practiceInstanceId", "Practice Instance", "practice-instances", true), select("evidenceTypeId", "Evidence Type", "evidence-types", true), select("assuranceTypeId", "Assurance Type", "assurance-types", true), text("retentionPeriod", "Retention Period"), select("collectionMethodId", "Collection Method", "collection-methods", true), select("collectionFrequencyId", "Collection Frequency", "frequency-master"), select("evidenceOwner", "Evidence Owner", "users"), select("statusId", "Status", "record-status", true)]
   };
+  // Organization Administration screens where Status is not worth asking for on
+  // create: a record someone is adding right now is always Active, and making
+  // them pick it is a required field that can only be answered one way.
+  //
+  // The field is dropped from the Add form only. It stays on Edit because
+  // "Inactive/Delete" is a one-way row action -- the Edit dropdown is the only
+  // way to bring a retired row back to Active.
+  //
+  // Safe to omit from the payload: every one of these branches in
+  // pm_manage_practice_repository already defaults an INSERT to Active --
+  // COALESCE(@payload_record_status_id, @active_record_status_id) for the
+  // statusId-based entities, COALESCE(JSON_VALUE(...'$.status'),'Active') for
+  // the status-text ones. collectForm still sends status='Active' explicitly so
+  // the intent is visible in the payload rather than implied by the SP.
+  const statusHiddenOnAddScreens = new Set([
+    "locations", "departments", "business-functions", "teams", "committees", "users"
+  ]);
+
+  // Single source for "which fields does this entity's form show". Both entry
+  // points render the same schemas -- openForm/schemaFor for the standalone
+  // screens, openSetupChildForm for the Organization Setup tabs -- so the
+  // Add-time Status removal has to live in one place or the two drift.
+  function entitySchema(entityKey, mode) {
+    const fields = schemas[entityKey] || [];
+    if (mode !== "add" || !statusHiddenOnAddScreens.has(entityKey)) return fields;
+    // Both spellings appear across these schemas: statusId (record-status
+    // lookup, value = record_status_id) and status (status-active lookup,
+    // value = status_code). Drop whichever this entity uses.
+    return fields.filter(field => field.name !== "status" && field.name !== "statusId");
+  }
   const setupBasicSchema = [
     text("code", "Organization Code", true),
     text("name", "Organization Name", true),
@@ -296,11 +370,23 @@
     "repository-subscriptions": ["view", "subscribe", "edit", "inactive"],
     "repository-import": ["view", "map", "manage"],
     "organization-controls": ["view", "markApplicability", "updateApplicability", "practices", "edit", "inactive"],
-    "organization-requirements": ["viewObligations", "instances", "view"],
+    // "viewObligations" was retired here: the full-page View
+    // (practice-view.cshtml) renders the obligations panel itself, so the
+    // 3-dot menu offered a second route to something View already shows.
+    // The dialog it opened is still reachable from the Practice Instance
+    // evidence section (#viewEvidenceObligations).
+    "organization-requirements": ["instances", "view"],
     "control-applicability": ["view", "edit"],
     "requirement-applicability": ["view", "edit", "accept", "reject", "practice"],
     "practices": ["view"],
-    "practice-instances": ["view", "edit", "configure", "evidence", "dependencies", "inactive"],
+    // "configure", "evidence", "dependencies" removed per PR feedback --
+    // these were standalone landing pages that duplicated fields already
+    // available inside the main Edit form (Configure Frequencies /
+    // Dependencies combo-checks / Evidence Types combo-checks) and the
+    // inline obligations reference panel. Kept the router branches for
+    // those action names in handleAction() so any deep-link URL still
+    // works, but the row menu no longer surfaces them.
+    "practice-instances": ["view", "edit", "inactive"],
     "resolve": ["resolveDependencies", "viewOperationalization"],
     "practice-operationalization": ["resolveDependencies", "viewOperationalization"],
     "workbench-applications": ["resolveDependencies", "modifyDependencies", "viewOperationalization"],
@@ -322,6 +408,12 @@
     "future-triggers": ["view", "accept", "reject", "configure"],
     "audit-trace": ["view"]
   };
+  // The dedicated Source Statements screen renders the SAME statement grid as
+  // the organization-controls drill-down (renderStatementTree /
+  // statementTreeColumns) and handleAction already routes both through the
+  // isSourceStatements branch. Alias rather than copy the list so the two
+  // screens cannot drift apart.
+  actionDefinitions["source-statements"] = actionDefinitions["organization-controls"];
   const actionLabels = {
     view: "View",
     edit: "Edit",
@@ -343,7 +435,6 @@
     reject: "Reject",
     practices: "Practices",
     manageRoles: "Manage Roles",
-    viewObligations: "View Obligations",
     viewOperationalization: "View Resolve Details",
     resolveDependencies: "Resolve",
     modifyDependencies: "Modify Dependencies",
@@ -372,7 +463,6 @@
     reject: "fa-xmark",
     practices: "fa-list-check",
     manageRoles: "fa-user-gear",
-    viewObligations: "fa-list-check",
     viewOperationalization: "fa-eye",
     resolveDependencies: "fa-link",
     modifyDependencies: "fa-pen-to-square",
@@ -472,15 +562,52 @@
     }
     let result;
     try { result = await response.json(); }
-    catch { throw new Error("The practice service returned an invalid response."); }
+    catch {
+      // A non-JSON body from a JSON endpoint is a server-side crash, not a
+      // business failure -- the status code is the only thing left to go
+      // on, so name it. This used to swallow every permission denial:
+      // the gateway answered ControllerBase.Forbid(), which throws on this
+      // app (no authentication scheme is registered), and the HTML error
+      // page that came back landed here as "invalid response". The gateway
+      // now returns JSON for those, so reaching this line means something
+      // genuinely unexpected happened.
+      throw new Error(`The practice service returned an invalid response (HTTP ${response.status}). Check the Practice Management Web log for this request.`);
+    }
     if (response.status === 401) {
       window.location.assign(`${window.location.origin}${buildAppUrl("Login")}?returnUrl=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       throw new Error(result.message || result.Message || "Session expired. Please sign in again.");
     }
-    if (response.status === 403) throw new Error("You do not have permission to perform this action.");
+    // The server's own message names the missing grant (which menu, which
+    // action) or the organization that is out of scope. The generic
+    // sentence is only the fallback for a body that carries neither.
+    if (response.status === 403) throw new Error(result.message || result.Message || "You do not have permission to perform this action.");
     if (response.status === 400) throw new Error(result.message || result.Message || "The request is invalid or has expired.");
-    if (!(result.success ?? result.Success)) throw new Error(result.message || result.Message || "Request failed.");
+    if (!(result.success ?? result.Success)) {
+      const error = new Error(result.message || result.Message || "Request failed.");
+      // Set by the API when a stored-procedure validation THROW is
+      // attributable to one payload key (PracticeRepositoryResult.Field).
+      // The save handler marks that input instead of only printing the
+      // message above the form.
+      error.field = result.field || result.Field || "";
+      throw error;
+    }
     return result;
+  }
+
+  // Puts a server-side validation failure on the input it is about. Falls back
+  // to the form-level message when the failure names no field, or names one
+  // this form does not render.
+  function showFormError(error) {
+    fieldsHost?.querySelectorAll(".field-error").forEach(input => input.classList.remove("field-error"));
+    const input = error.field ? fieldsHost?.querySelector(`[name="${error.field}"]`) : null;
+    if (input) {
+      input.classList.add("field-error");
+      input.focus();
+      const wrapper = input.closest("[data-field-name]");
+      if (wrapper) wrapper.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    formMessage.textContent = error.message;
+    formMessage.hidden = false;
   }
 
   async function createNavigationCode(payload) {
@@ -940,9 +1067,10 @@
                 organizationName: String(organization.name || organization.code || "")
               })
             });
-            provisioningNote = provisionResp?.credentialsEmailed
+            provisioningNote = (provisionResp?.credentialsEmailed
               ? " Admin credentials were emailed."
-              : " Admin was provisioned; credential email failed — use Resend from the Users tab.";
+              : " Admin was provisioned; credential email failed — use Resend from the Users tab.")
+              + describeAccessProvisioning(provisionResp);
           } catch (provisionError) {
             provisioningNote = ` Admin provisioning failed: ${provisionError.message}`;
           }
@@ -964,6 +1092,22 @@
       setupMessage.textContent = error.message;
       setupMessage.hidden = false;
     }
+  }
+
+  // Migration 217 — pm_create_organization_admin now grants the Admin
+  // role every active menu and switches on every `screen.*` feature flag
+  // the organization has no row for. Report it so the operator knows the
+  // new org can open Gap Center / Task Center / Exception Centre without
+  // a manual trip to Role Menu Permission. Counts of 0 mean "nothing was
+  // missing", so stay quiet in that case.
+  function describeAccessProvisioning(provisionResp) {
+    const menus = Number(provisionResp?.menusGranted || 0);
+    const flags = Number(provisionResp?.flagsEnabled || 0);
+    if (menus <= 0 && flags <= 0) return "";
+    const parts = [];
+    if (menus > 0) parts.push(`${menus} menu permission${menus === 1 ? "" : "s"}`);
+    if (flags > 0) parts.push(`${flags} screen feature flag${flags === 1 ? "" : "s"}`);
+    return ` Default access granted: ${parts.join(" and ")}.`;
   }
 
   function extractNewOrganizationId(saveResult) {
@@ -1242,7 +1386,23 @@
     if (formMessage) formMessage.hidden = true;
     const title = document.querySelector("#dialogTitle");
     if (title) title.textContent = `${mode === "add" ? "Add" : mode === "edit" ? "Edit" : "View"} ${setupConfig.title}`;
-    fieldsHost.innerHTML = (schemas[entity] || []).map(field => fieldMarkup(field, valueOf(selectedRecord, field.name), readonly)).join("");
+    fieldsHost.innerHTML = entitySchema(entity, mode).map(field => fieldMarkup(field, valueOf(selectedRecord, field.name), readonly)).join("");
+    applyConditionalFields();
+
+    // Role Master is reachable from here as well as from its own screen, and
+    // both dialogs share this host. Hooking only one would leave the checklist
+    // section missing depending on how the user navigated -- the sort of
+    // inconsistency that reads as a bug.
+    if (entity === "roles") {
+      renderScopeChecklistSection(fieldsHost, {
+        organizationId: valueOf(selectedRecord, "organizationId") || setupState.organizationId,
+        scopeDimension: "ORG_ROLE",
+        scopeValueId:   state.id,
+        title:          "Event Checklists for this Role",
+        subtitle:       "What has to be done when somebody joins this role, and when they leave it."
+      });
+    }
+
     saveButton.hidden = readonly;
     dialog.showModal();
   }
@@ -1545,12 +1705,10 @@
           : `<span class="pm-empty compact" style="color:#94a3b8">Unassigned</span>`;
         return `<tr class="pm-release-source-row" data-release-index="${index}" style="cursor:pointer" title="View Source Statements for this release">
         <td><i class="fa-solid fa-chevron-right" aria-hidden="true"></i> <strong>${escapeHtml(valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion"))}</strong></td>
-        <td>${escapeHtml(valueOf(release, "Authority") || valueOf(release, "AuthorityCode"))}</td>
-        <td>${escapeHtml(valueOf(release, "ArtifactName") || valueOf(release, "ArtifactCode"))}</td>
-        <td>${escapeHtml(valueOf(release, "ReleaseVersion"))}</td>
         <td>${ownerCell}</td>
         <td>${escapeHtml(valueOf(release, "TotalStatementsCount") ?? valueOf(release, "TotalRequirementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "ApplicableStatementsCount") ?? valueOf(release, "ApplicableMarkedRequirementsCount") ?? 0)}</td>
+        <td>${escapeHtml(valueOf(release, "ImplementedStatementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "NotUpdatedStatementsCount") ?? valueOf(release, "NotUpdatedRequirementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "NotApplicableStatementsCount") ?? valueOf(release, "NotApplicableDeferredRequirementsCount") ?? 0)}</td>
         <td class="pm-actions-cell" data-stop-row-click>${releaseActionsMarkup(index, release)}</td>
@@ -1661,12 +1819,10 @@
 
     const htmlRows = statements.map((s, i) => {
       const hierarchy = nodePath(String(valueOf(s, "SourceStructureNodeId")));
-      const stmtText = String(valueOf(s, "StatementText") || "");
       return `<tr>
         <td title="${escapeHtml(hierarchy)}">${escapeHtml(hierarchy)}</td>
         <td>${escapeHtml(valueOf(s, "StatementReference"))}</td>
         <td>${escapeHtml(valueOf(s, "StatementTitle"))}</td>
-        <td title="${escapeHtml(stmtText)}">${escapeHtml(stmtText.length > 80 ? stmtText.substring(0, 80) + "..." : stmtText)}</td>
         <td>${formatCell(valueOf(s, "ApplicabilityStatus") || "Not Updated")}</td>
         <td>${escapeHtml(valueOf(s, "PracticeCount") || 0)}</td>
         <td>${actions(i)}</td>
@@ -1792,9 +1948,10 @@
           organizationName: (organizationFilter?.selectedOptions?.[0]?.textContent || "").trim()
         })
       });
-      alert(resp?.credentialsEmailed
+      alert((resp?.credentialsEmailed
         ? "Credentials email sent successfully."
-        : `Credentials were re-generated but the email could not be delivered. Reason: ${resp?.emailFailureReason || "unknown"}.`);
+        : `Credentials were re-generated but the email could not be delivered. Reason: ${resp?.emailFailureReason || "unknown"}.`)
+        + describeAccessProvisioning(resp));
     } catch (error) {
       alert(error.message || "Unable to resend credentials.");
     }
@@ -1883,7 +2040,6 @@
         <td>${structNode}</td>
         <td>${escapeHtml(valueOf(s, "StatementReference"))}</td>
         <td>${escapeHtml(valueOf(s, "StatementTitle"))}</td>
-        <td title="${escapeHtml(valueOf(s, "StatementText"))}">${escapeHtml(String(valueOf(s, "StatementText") || "").substring(0, 80))}${String(valueOf(s, "StatementText") || "").length > 80 ? "..." : ""}</td>
         <td>${formatCell(valueOf(s, "ApplicabilityStatus") || "Not Updated")}</td>
         <td>${escapeHtml(valueOf(s, "PracticeCount") || 0)}</td>
         <td>${actions(i)}</td>
@@ -2411,7 +2567,7 @@
 
   function formatCell(value) {
     if (value === true || value === false) return value ? "Yes" : "No";
-    if (String(value || "").match(/^(Active|Inactive|Applicable|Not Updated|Implemented|Critical|High|Medium|Low|Deferred|Accepted Risk|Not Applicable|Configured|Partially Operationalized|Operationalized|Retired|Pending|Resolved)$/i)) return `<span class="pm-badge">${escapeHtml(value)}</span>`;
+    if (String(value || "").match(/^(Active|Inactive|Applicable|Not Updated|Implemented|Critical|High|Medium|Low|Deferred|Accepted Risk|Not Applicable|Configured|Partially Operationalized|Operationalized|Retired|Pending|Resolved|Default password|Password set)$/i)) return `<span class="pm-badge">${escapeHtml(value)}</span>`;
     return escapeHtml(value);
   }
 
@@ -2473,11 +2629,16 @@
       const text = String(valueOf(row, "ApplicabilityStatus") || "Not Updated").trim().toLowerCase();
       return text;
     };
-    if (screen.Key === "organization-controls" && sourceStatementState.isCustomRelease && sourceStatementState.level === "statements") {
+    // isSourceStatements, not screen.Key === "organization-controls": the
+    // dedicated Source Statements screen renders the identical statement grid
+    // and handleAction already dispatches it through the same branch. Keying
+    // the menu on one screen key alone left source-statements falling back to
+    // the default view/edit/inactive set.
+    if (isSourceStatements && sourceStatementState.isCustomRelease && sourceStatementState.level === "statements") {
       // Rule 4 — employees can only mark applicability on custom statements,
       // not edit / inactive them.
       actions = isEmployeeScope ? ["view", "markApplicability"] : ["view", "edit", "inactive"];
-    } else if (screen.Key === "organization-controls" && record) {
+    } else if (isSourceStatements && sourceStatementState.level === "statements" && record) {
       const applicability = applicabilityStatus(record);
       const manuallyAdded = valueOf(record, "IsManuallyAdded") === true || String(valueOf(record, "IsManuallyAdded")).toLowerCase() === "true" || String(valueOf(record, "IsManuallyAdded")) === "1";
       // Rule 4 — employees never get edit/inactive on statements; only
@@ -2490,9 +2651,11 @@
     }
     if (screen.Key === "organization-requirements" && record) {
       const applicability = applicabilityStatus(record);
-      if (applicability === "applicable") actions = ["viewObligations", "view", "instances"];
-      else if (applicability === "not updated") actions = ["viewObligations", "view", "markApplicability"];
-      else actions = ["viewObligations", "view", "updateApplicability"];
+      // See actionDefinitions: View Obligations is gone from this menu because
+      // the View page shows the same panel.
+      if (applicability === "applicable") actions = ["view", "instances"];
+      else if (applicability === "not updated") actions = ["view", "markApplicability"];
+      else actions = ["view", "updateApplicability"];
     }
     if (screen.Key === "practices") {
       const applicability = record ? applicabilityStatus(record) : "not updated";
@@ -2502,7 +2665,7 @@
     }
     return actions.filter(action => {
       if (action === "view") return permissions.has("VIEW");
-      if (action === "viewObligations" || action === "viewOperationalization" || action === "dependencyIntelligence") return permissions.has("VIEW");
+      if (action === "viewOperationalization" || action === "dependencyIntelligence") return permissions.has("VIEW");
       if (action === "edit" || action === "configure" || action === "manage" || action === "map" || action === "subscribe" || action === "markApplicability" || action === "updateApplicability" || action === "resolveDependencies" || action === "modifyDependencies" || action === "bulkResolution" || action === "manageRoles" || action === "resendCredentials") return permissions.has("EDIT") || permissions.has("ADD");
       if (action === "inactive") return permissions.has("DELETE");
       if (action === "accept" || action === "reject") return permissions.has("APPROVE") || permissions.has("EDIT");
@@ -2559,6 +2722,60 @@
   function placeholderAction(action) {
     const label = actionLabels[action] || action;
     alert(`${label} will open its dedicated workspace in the next PracticeManagement phase.`);
+  }
+
+  // ==================================================================
+  // Conditional fields (migrations 133/134).
+  //
+  // fieldMarkup already stamps every wrapper with data-field-name, so
+  // showing and hiding by driver value needs no change to the renderer.
+  //
+  // Hidden fields are CLEARED, not just hidden: collectForm() gathers every
+  // [name] in the host, so a Provider left over from a moment when
+  // Personnel Type read ThirdParty would still be submitted for an
+  // Employee -- and ck_pm_employee_provider_required would reject the save
+  // with a constraint error instead of a readable message.
+  // ==================================================================
+  const conditionalFields = {
+    providerVendorId:    { driver: "partyType", showWhen: ["ThirdParty"], required: true },
+    engagementStartDate: { driver: "partyType", showWhen: ["ThirdParty"] },
+    engagementEndDate:   { driver: "partyType", showWhen: ["ThirdParty"] },
+    vendorId:            { driver: "teamType",  showWhen: ["Vendor"],     required: true }
+  };
+
+  function applyConditionalFields() {
+    if (!fieldsHost) return;
+    const drivers = new Set();
+
+    Object.entries(conditionalFields).forEach(([name, rule]) => {
+      const wrapper = fieldsHost.querySelector(`[data-field-name="${name}"]`);
+      const driver = fieldsHost.querySelector(`[name="${rule.driver}"]`);
+      // vendorId also exists on dependency-applications / dependency-tools,
+      // where there is no teamType driver at all. No driver on this form
+      // means the field is not conditional here -- leave it alone.
+      if (!wrapper || !driver) return;
+      drivers.add(rule.driver);
+
+      const show = rule.showWhen.includes(String(driver.value || ""));
+      wrapper.hidden = !show;
+      const input = wrapper.querySelector("[name]");
+      if (!input) return;
+      if (show) {
+        if (rule.required) input.required = true;
+      } else {
+        input.required = false;
+        if (input.tagName === "SELECT") input.value = "";
+        else input.value = "";
+        input.classList.remove("field-error");
+      }
+    });
+
+    drivers.forEach(driverName => {
+      const driver = fieldsHost.querySelector(`[name="${driverName}"]`);
+      if (!driver || driver.dataset.conditionalWired === "1") return;
+      driver.dataset.conditionalWired = "1";
+      driver.addEventListener("change", applyConditionalFields);
+    });
   }
 
   function fieldMarkup(field, value, readonly) {
@@ -2912,7 +3129,13 @@
       ];
     }
     if (screen.Key === "organization-requirements" && mode === "applicability") {
+      // hidden("organizationId") is required -- sp_manage_organization_requirement
+      // throws 51035 "Organization is required." when the POST body has no
+      // organizationId field. valueOf(record, "organizationId") reads
+      // record.OrganizationId (PascalCase from the /query API) via the
+      // fallback in valueOf(), so no extra plumbing needed.
       return [
+        hidden("organizationId"),
         text("code", "Practice Code", false, { readonly: true }),
         text("name", "Practice Name", false, { readonly: true }),
         select("applicabilityStatus", "Applicability Status", "applicability-status", true),
@@ -2921,7 +3144,12 @@
       ];
     }
     if (screen.Key === "practices" && mode === "applicability") {
+      // Same reason as organization-requirements above -- sp_manage_practice
+      // throws 51028 "Organization is required." without organizationId in the
+      // POST body. This was reported by users on the 3-dot menu > Mark
+      // Applicability save.
       return [
+        hidden("organizationId"),
         text("code", "Practice Code", false, { readonly: true }),
         text("name", "Practice Name", false, { readonly: true }),
         select("applicabilityStatus", "Applicability Status", "applicability-status", true),
@@ -2945,7 +3173,7 @@
         area("remarks", "Remarks")
       ];
     }
-    return schemas[screen.Key] || [];
+    return entitySchema(screen.Key, mode);
   }
 
   async function openForm(mode, id = 0) {
@@ -3060,7 +3288,33 @@
       ? `${schema.map(field => fieldMarkup(field, valueOf(record, field.name), readonly)).join("")}`
       : `<p class="pm-empty">This screen is planned for the next implementation phase.</p>`;
     updateFrequencyFields();
+    applyConditionalFields();
+
+    // Role Master owns the People side of event checklist mapping: the role
+    // is the thing being scoped, so the mapping belongs on its own form
+    // rather than on a screen the user has to know to visit separately.
+    //
+    // Deliberately not awaited, matching renderInlineObligationsSection
+    // below: the section makes two HTTP calls per event, and the dialog must
+    // not sit blank waiting for them. It fills in once loaded.
+    if (screen.Key === "roles") {
+      renderScopeChecklistSection(fieldsHost, {
+        organizationId: valueOf(record, "organizationId")
+                        || fieldsHost.querySelector("[name='organizationId']")?.value,
+        scopeDimension: "ORG_ROLE",
+        scopeValueId:   valueOf(record, "id") || valueOf(record, "roleId"),
+        title:          "Event Checklists for this Role",
+        subtitle:       "What has to be done when somebody joins this role, and when they leave it."
+      });
+    }
+
     if (screen.Key === "practice-instances") await updateOwnerDepartment();
+    // Practice Instance view/edit/add flows show a read-only reference
+    // panel with the parent Practice's framework obligations. Async load,
+    // silent-fail -- the panel never blocks the form.
+    if (screen.Key === "practice-instances") {
+      renderInlineObligationsSection(record);
+    }
     saveButton.hidden = readonly || !schema.length;
     dialog.showModal();
   }
@@ -3084,6 +3338,16 @@
       }
     });
     if (!valid) throw new Error("Please complete the required fields.");
+    // Status is not on the Add form for these screens (see
+    // statusHiddenOnAddScreens). Send it explicitly rather than leaning on the
+    // stored procedure's default. 'Active' works for both field spellings:
+    // pm_manage_practice_repository resolves $.status against
+    // record_status_master by status_code OR status_name, so the statusId-based
+    // entities land on the right record_status_id too.
+    // state.formEntity, not screen.Key: on the Organization Setup page screen.Key
+    // is "organization-setup" while the dialog is editing a child entity.
+    // saveForm() resolves the POST target the same way.
+    if (state.mode === "add" && statusHiddenOnAddScreens.has(state.formEntity || screen.Key)) data.status ||= "Active";
     if (screen.Key === "organization-controls" && state.mode === "add") {
       data.applicabilityStatus = "Not Updated";
       data.originType = "Organization";
@@ -3362,6 +3626,143 @@
     return valueOf(row, name) || "";
   }
 
+  // ------------------------------------------------------------------
+  // Obligation taxonomy (Phase 2F) helpers.
+  //
+  // The API now serves obligations via /evidence-obligations-typed/query
+  // (backed by dbo.sp_pm_view_obligations_typed).  That SP returns ONE
+  // row per obligation with typed detail as JSON arrays -- fewer rows,
+  // richer per-row shape.  The existing modal and inline-panel renderers
+  // group by (FrameworkRelease, ObligationId) and expect one row per
+  // obligation-evidence pair, so we expand the typed shape back into
+  // "flat" rows here and carry the typed metadata columns forward on
+  // each row.  Downstream card renderers get an extra TypeCode/TypeName
+  // + per-type detail arrays without any grouping changes.
+  // ------------------------------------------------------------------
+  function safeParseJsonArray(text) {
+    if (Array.isArray(text)) return text;
+    if (!text || typeof text !== "string") return [];
+    try { const value = JSON.parse(text); return Array.isArray(value) ? value : []; }
+    catch { return []; }
+  }
+
+  function expandTypedObligationRows(typedRows) {
+    if (!Array.isArray(typedRows)) return [];
+    const expanded = [];
+    typedRows.forEach(t => {
+      const evidences = safeParseJsonArray(t.EvidenceJson || t.evidenceJson);
+      const baseColumns = {
+        // Preserve keys used by the existing grouping/search logic.
+        FrameworkReleaseId: t.FrameworkReleaseId,
+        FrameworkRelease: t.FrameworkRelease,
+        ObligationId: t.ObligationId,
+        ObligationName: t.ObligationName,
+        ExecutionFrequency: t.ExecutionFrequency,
+        ObligationRetention: t.ObligationRetention,
+        ApprovalAuthority: t.ApprovalAuthority,
+        Responsibility: t.Responsibility,
+        // New taxonomy-typed columns, carried on every expanded row.
+        ObligationTypeId: t.ObligationTypeId,
+        TypeCode: t.TypeCode,
+        TypeName: t.TypeName,
+        StateRulesJson: t.StateRulesJson,
+        ExecutionSpecsJson: t.ExecutionSpecsJson,
+        AssuranceSpecsJson: t.AssuranceSpecsJson,
+        EventResponsesJson: t.EventResponsesJson,
+        ConstraintRulesJson: t.ConstraintRulesJson,
+        RetentionSpecsJson: t.RetentionSpecsJson,
+        EvidenceJson: t.EvidenceJson
+      };
+      if (!evidences.length) {
+        // Obligation with no evidence -- keep a bare row so it still
+        // renders as a card in the modal / inline panel.
+        expanded.push(baseColumns);
+        return;
+      }
+      evidences.forEach(ev => {
+        expanded.push({
+          ...baseColumns,
+          ObligationEvidenceId: ev.ObligationEvidenceId,
+          EvidenceTypeId: ev.EvidenceTypeId,
+          EvidenceType: ev.EvidenceType,
+          FrequencyId: ev.FrequencyId,
+          Frequency: ev.Frequency,
+          RetentionRequirement: ev.RetentionRequirement,
+          Remarks: ev.Remarks,
+          EvidenceSource: ev.Source,       // 'Direct' | 'Link'
+          EvidenceLinkTypeCode: ev.LinkTypeCode
+        });
+      });
+    });
+    return expanded;
+  }
+
+  // Returns HTML for a Type badge + per-type detail block for one
+  // obligation card.  Reads TypeCode from the row and parses the
+  // matching *Json column.  Returns "" when the obligation is
+  // un-typed (pre-taxonomy) so the card degrades cleanly.
+  function renderTypedObligationDetail(row) {
+    const typeCode = obligationValue(row, "TypeCode");
+    if (!typeCode) return "";
+    const typeName = obligationValue(row, "TypeName") || typeCode;
+    const badgeClass = `pm-obligation-type-badge pm-obligation-type-${typeCode.toLowerCase()}`;
+    let detailHtml = "";
+    if (typeCode === "State") {
+      const rules = safeParseJsonArray(row.StateRulesJson);
+      detailHtml = rules.map(r => `<div class="pm-typed-detail-row">
+          <strong>${escapeHtml(r.attribute || "")}</strong>
+          <span class="pm-typed-op">${escapeHtml(r.operator || "")}</span>
+          <span class="pm-typed-value">${escapeHtml(r.value || "")}${r.unit ? " " + escapeHtml(r.unit) : ""}</span>
+          ${r.tolerance ? `<em title="Tolerance">&plusmn;${escapeHtml(r.tolerance)}</em>` : ""}
+        </div>`).join("");
+    } else if (typeCode === "Execution") {
+      const specs = safeParseJsonArray(row.ExecutionSpecsJson);
+      detailHtml = specs.map(s => `<div class="pm-typed-detail-row">
+          <strong>${escapeHtml(s.action || "")}</strong>
+          ${s.ExecutionFrequency ? `<span>${escapeHtml(s.ExecutionFrequency)}</span>` : ""}
+          ${s.responsible_party ? `<em>${escapeHtml(s.responsible_party)}</em>` : ""}
+          ${s.due_within ? `<span>Due: ${escapeHtml(s.due_within)}</span>` : ""}
+        </div>`).join("");
+    } else if (typeCode === "Assurance") {
+      const specs = safeParseJsonArray(row.AssuranceSpecsJson);
+      detailHtml = specs.map(s => `<div class="pm-typed-detail-row">
+          <strong>${escapeHtml(s.verification_method || "")}</strong>
+          ${s.scope ? `<span>${escapeHtml(s.scope)}</span>` : ""}
+          ${s.AssuranceFrequency ? `<span>${escapeHtml(s.AssuranceFrequency)}</span>` : ""}
+          ${s.assurance_party ? `<em>${escapeHtml(s.assurance_party)}</em>` : ""}
+        </div>`).join("");
+    } else if (typeCode === "EventResponse") {
+      const specs = safeParseJsonArray(row.EventResponsesJson);
+      detailHtml = specs.map(s => `<div class="pm-typed-detail-row">
+          <strong>If:</strong> ${escapeHtml(s.trigger_event || "")}
+          <strong>Then:</strong> ${escapeHtml(s.response_action || "")}
+          ${s.SlaValue ? `<span>within ${escapeHtml(String(s.SlaValue))} ${escapeHtml(s.SlaUnit || "")}</span>` : ""}
+          ${s.escalation_path ? `<em>Escalate: ${escapeHtml(s.escalation_path)}</em>` : ""}
+        </div>`).join("");
+    } else if (typeCode === "Constraint") {
+      const rules = safeParseJsonArray(row.ConstraintRulesJson);
+      detailHtml = rules.map(r => `<div class="pm-typed-detail-row">
+          <strong>MUST NOT:</strong> ${escapeHtml(r.prohibited_condition || "")}
+          ${r.scope ? `<span>Scope: ${escapeHtml(r.scope)}</span>` : ""}
+          ${r.exception_policy ? `<em>Exception: ${escapeHtml(r.exception_policy)}</em>` : ""}
+        </div>`).join("");
+    } else if (typeCode === "Retention") {
+      const specs = safeParseJsonArray(row.RetentionSpecsJson);
+      detailHtml = specs.map(s => `<div class="pm-typed-detail-row">
+          <strong>${escapeHtml(s.retained_object || "")}</strong>
+          ${s.MinRetentionValue ? `<span>min ${escapeHtml(String(s.MinRetentionValue))} ${escapeHtml(s.MinRetentionUnit || "")}</span>` : ""}
+          ${s.MaxRetentionValue ? `<span>max ${escapeHtml(String(s.MaxRetentionValue))} ${escapeHtml(s.MaxRetentionUnit || "")}</span>` : ""}
+          ${s.disposal_policy ? `<em>Disposal: ${escapeHtml(s.disposal_policy)}</em>` : ""}
+        </div>`).join("");
+    }
+    // Evidence-type obligations use the standard evidence subgrid --
+    // no separate typed-detail section needed.  Just show the badge.
+    return `<div class="pm-typed-detail">
+        <span class="${badgeClass}">${escapeHtml(typeName)}</span>
+        ${detailHtml ? `<div class="pm-typed-detail-body">${detailHtml}</div>` : ""}
+      </div>`;
+  }
+
   function filteredObligationRows() {
     const filters = state.obligationFilters || {};
     const term = String(filters.search || "").trim().toLowerCase();
@@ -3398,6 +3799,7 @@
         retention: obligationValue(row, "ObligationRetention") || obligationValue(row, "RetentionRequirement"),
         approvalAuthority: obligationValue(row, "ApprovalAuthority"),
         responsibility: obligationValue(row, "Responsibility"),
+        typedRow: row,                         // full typed row for renderTypedObligationDetail
         evidence: []
       });
       const evidenceType = obligationValue(row, "EvidenceType");
@@ -3405,7 +3807,9 @@
         type: evidenceType,
         frequency: obligationValue(row, "Frequency"),
         retention: obligationValue(row, "RetentionRequirement"),
-        remarks: obligationValue(row, "Remarks")
+        remarks: obligationValue(row, "Remarks"),
+        source: obligationValue(row, "EvidenceSource"),      // 'Direct' | 'Link'
+        linkTypeCode: obligationValue(row, "EvidenceLinkTypeCode")
       });
     });
     const metaChip = (label, value) => value
@@ -3415,6 +3819,7 @@
       const collapsed = state.obligationCollapsed.has(release);
       const cards = [...obligations.values()].map(ob => `<article class="pm-obligation-card">
           <h4>${escapeHtml(ob.name || "Obligation")}</h4>
+          ${renderTypedObligationDetail(ob.typedRow || {})}
           <div class="pm-obligation-meta">
             ${metaChip("Execution Frequency", ob.executionFrequency)}
             ${metaChip("Assurance / Evidence Frequency", ob.evidence.map(ev => ev.frequency).filter(Boolean).filter((v, i, all) => all.indexOf(v) === i).join(", "))}
@@ -3428,6 +3833,7 @@
               <strong>${escapeHtml(ev.type || "-")}</strong>
               <span title="Frequency">${escapeHtml(ev.frequency || "-")}</span>
               <span title="Retention">${escapeHtml(ev.retention || "-")}</span>
+              ${ev.source === "Link" && ev.linkTypeCode ? `<span class="pm-typed-src" title="Attached via ${escapeHtml(ev.linkTypeCode)} link table">via ${escapeHtml(ev.linkTypeCode)}</span>` : ""}
               ${ev.remarks ? `<em title="${escapeHtml(ev.remarks)}">${escapeHtml(ev.remarks)}</em>` : ""}
             </div>`).join("")}
           </div>` : ""}
@@ -3544,12 +3950,16 @@
     if (!data.practiceInstanceId && !data.practiceId && !data.organizationRequirementId) {
       throw new Error("Requirement context is required to view obligation recommendations.");
     }
-    const result = await fetchJson(`${api}/evidence-obligations/query`, {
+    const result = await fetchJson(`${api}/evidence-obligations-typed/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
       body: JSON.stringify({ data })
     });
-    const obligationRows = apiData(result);
+    // Typed endpoint returns one row per obligation with EvidenceJson;
+    // expand back to the flat "one row per obligation-evidence" shape
+    // the modal renderer already knows how to group.  Extra TypeCode
+    // + *Json columns ride along on each expanded row.
+    const obligationRows = expandTypedObligationRows(apiData(result));
     /* Build practice list for the filter dropdown from the current grid rows */
     const practiceList = (state.records || [])
       .filter(r => valueOf(r, "Id") || valueOf(r, "PracticeId"))
@@ -3567,6 +3977,205 @@
       contextRecord: record
     };
     openObligationModal(obligationRows, context);
+  }
+
+  // ------------------------------------------------------------------
+  // Inline "Parent Practice Obligations" reference panel.
+  // Rendered directly inside the Practice Instance view/edit/add form,
+  // right below the schema fields. Reuses the /evidence-obligations/query
+  // endpoint (which already accepts practiceInstanceId + practiceId +
+  // organizationRequirementId as scoping keys) and the pm-obligation-*
+  // CSS classes from the modal so we don't fork the visual language.
+  //
+  // Read-only by design -- the user asked for "just show, for reference
+  // only". Any error (missing context, empty result set, network fail)
+  // degrades to a short muted message instead of a red banner so it
+  // never blocks the actual form.
+  // ------------------------------------------------------------------
+  // ==================================================================
+  // Scope checklist editor -- implementation lives in
+  // wwwroot/js/scope-checklist-editor.js.
+  //
+  // It is a separate file because Manage.cshtml renders workflow-layer
+  // screens through their own partial and RETURNS before this file's script
+  // tag. The Asset Category Assurance screen is one of those, so an editor
+  // defined in here would be unreachable from it. These wrappers keep the
+  // call sites below unchanged and fail quietly if the module is absent --
+  // a missing editor must not take the whole form down.
+  // ==================================================================
+  async function renderScopeChecklistSection(host, opts) {
+    if (!window.__scopeChecklistEditor) {
+      console.warn("scope-checklist-editor.js is not loaded; the event checklist section is unavailable.");
+      return;
+    }
+    return window.__scopeChecklistEditor.render(host, opts);
+  }
+
+  async function flushPendingScopeChecklists(scopeValueId) {
+    if (!window.__scopeChecklistEditor) return { saved: 0, failed: 0 };
+    return window.__scopeChecklistEditor.flushPending(scopeValueId);
+  }
+
+  function scopeMsg(container, text, kind) {
+    const el = container?.querySelector("[data-scope-message]");
+    if (!el) return;
+    if (!text) { el.style.display = "none"; el.textContent = ""; return; }
+    el.style.display = "block"; el.textContent = text;
+    if (kind === "error")   { el.style.background = "#fee2e2"; el.style.color = "#7f1d1d"; }
+    else if (kind === "ok") { el.style.background = "#dcfce7"; el.style.color = "#166534"; }
+    else                    { el.style.background = "#dbeafe"; el.style.color = "#1e40af"; }
+  }
+
+  async function renderInlineObligationsSection(record) {
+    if (!fieldsHost) return;
+    // Nuke any previous inline section so re-opens don't stack.
+    fieldsHost.querySelector("[data-inline-obligations]")?.remove();
+
+    const container = document.createElement("section");
+    container.className = "pm-inline-obligations";
+    container.setAttribute("data-inline-obligations", "1");
+    container.innerHTML = `
+      <div class="pm-inline-obligations-header">
+        <div>
+          <h3>Parent Practice Obligations</h3>
+          <p>Framework recommendations for the practice this instance belongs to. Reference only.</p>
+        </div>
+        <span data-inline-obligations-count class="pm-obligation-count"></span>
+      </div>
+      <div data-inline-obligations-body class="pm-inline-obligations-body">
+        <div class="pm-obligation-empty">Loading obligations...</div>
+      </div>`;
+    fieldsHost.appendChild(container);
+
+    const body = container.querySelector("[data-inline-obligations-body]");
+    const countEl = container.querySelector("[data-inline-obligations-count]");
+
+    // Resolve the three scoping keys the same way showEvidenceObligations
+    // does. Prefer the concrete record (from /practice-instances/query)
+    // over the loose form/nav context because on Edit the record has the
+    // authoritative practiceId + organizationId.
+    const navigation = state.navigationContext || {};
+    const formPracticeId = fieldsHost.querySelector("[name='practiceId']")?.value || "";
+    const formOrgId = fieldsHost.querySelector("[name='organizationId']")?.value || "";
+    const formOrgReqId = fieldsHost.querySelector("[name='organizationRequirementId']")?.value || "";
+    const practiceInstanceId = screen.Key === "practice-instances" && state.id ? state.id : undefined;
+    const practiceId = valueOf(record, "practiceId")
+      || valueOf(record, "PracticeId")
+      || formPracticeId
+      || (navigation.filterType === "Practice" ? navigation.filterId : "")
+      || "";
+    const organizationRequirementId = valueOf(record, "organizationRequirementId")
+      || valueOf(record, "OrganizationRequirementId")
+      || formOrgReqId
+      || (navigation.filterType === "OrganizationRequirement" ? navigation.filterId : "")
+      || navigation.organizationRequirementId
+      || "";
+    const organizationId = valueOf(record, "organizationId")
+      || valueOf(record, "OrganizationId")
+      || formOrgId
+      || navigation.organizationId
+      || organizationFilter?.value
+      || "";
+
+    // If we don't yet know which practice this instance belongs to (e.g.
+    // Add flow with no navigation context), quietly hide the section
+    // rather than throwing -- the user hasn't chosen a parent yet.
+    if (!practiceInstanceId && !practiceId && !organizationRequirementId) {
+      container.hidden = true;
+      return;
+    }
+
+    try {
+      const result = await fetchJson(`${api}/evidence-obligations-typed/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({
+          data: {
+            organizationId: organizationId || undefined,
+            practiceInstanceId: practiceInstanceId || undefined,
+            practiceId: practiceId || undefined,
+            organizationRequirementId: organizationRequirementId || undefined,
+            pageNumber: 1,
+            pageSize: 200
+          }
+        })
+      });
+      // Expand typed rows into per-evidence rows so the same grouping
+      // logic used by the modal works here.
+      const rowsForInline = expandTypedObligationRows(apiData(result));
+      if (!rowsForInline.length) {
+        body.innerHTML = `<div class="pm-obligation-empty">No obligation recommendations configured for this practice.</div>`;
+        if (countEl) countEl.textContent = "0";
+        return;
+      }
+      if (countEl) countEl.textContent = `${rowsForInline.length} record${rowsForInline.length === 1 ? "" : "s"}`;
+
+      // Group by framework release, then by obligation -- same shape the
+      // modal uses (see renderObligationModalRows) so the compact card
+      // reads the same way in both places.
+      const groups = new Map();
+      rowsForInline.forEach(row => {
+        const release = obligationValue(row, "FrameworkRelease") || "Framework Release";
+        if (!groups.has(release)) groups.set(release, new Map());
+        const obligations = groups.get(release);
+        const key = String(obligationValue(row, "ObligationId") || obligationValue(row, "ObligationName") || obligationValue(row, "EvidenceType"));
+        if (!obligations.has(key)) obligations.set(key, {
+          name: obligationValue(row, "ObligationName"),
+          executionFrequency: obligationValue(row, "ExecutionFrequency"),
+          retention: obligationValue(row, "ObligationRetention") || obligationValue(row, "RetentionRequirement"),
+          approvalAuthority: obligationValue(row, "ApprovalAuthority"),
+          responsibility: obligationValue(row, "Responsibility"),
+          typedRow: row,                     // for renderTypedObligationDetail
+          evidence: []
+        });
+        const evidenceType = obligationValue(row, "EvidenceType");
+        if (evidenceType) obligations.get(key).evidence.push({
+          type: evidenceType,
+          frequency: obligationValue(row, "Frequency"),
+          retention: obligationValue(row, "RetentionRequirement"),
+          remarks: obligationValue(row, "Remarks"),
+          source: obligationValue(row, "EvidenceSource"),
+          linkTypeCode: obligationValue(row, "EvidenceLinkTypeCode")
+        });
+      });
+
+      const chip = (label, value) => value
+        ? `<span class="pm-obligation-chip"><em>${escapeHtml(label)}</em>${escapeHtml(value)}</span>`
+        : "";
+      body.innerHTML = [...groups.entries()].map(([release, obligations]) => {
+        const cards = [...obligations.values()].map(ob => `<article class="pm-obligation-card">
+          <header class="pm-obligation-card-header"><h4>${escapeHtml(ob.name || "Obligation")}</h4></header>
+          ${renderTypedObligationDetail(ob.typedRow || {})}
+          <div class="pm-obligation-meta">
+            ${chip("Execution", ob.executionFrequency)}
+            ${chip("Retention", ob.retention)}
+            ${chip("Approval", ob.approvalAuthority)}
+            ${chip("Responsibility", ob.responsibility)}
+          </div>
+          ${ob.evidence.length ? `<div class="pm-obligation-evidence">
+            <span class="pm-obligation-evidence-title">Evidence</span>
+            ${ob.evidence.map(ev => `<div class="pm-obligation-evidence-row">
+              <strong>${escapeHtml(ev.type)}</strong>
+              ${chip("Freq", ev.frequency)}
+              ${chip("Retention", ev.retention)}
+              ${ev.source === "Link" && ev.linkTypeCode ? `<span class="pm-typed-src" title="Attached via ${escapeHtml(ev.linkTypeCode)} link table">via ${escapeHtml(ev.linkTypeCode)}</span>` : ""}
+              ${ev.remarks ? `<span class="pm-obligation-remarks">${escapeHtml(ev.remarks)}</span>` : ""}
+            </div>`).join("")}
+          </div>` : ""}
+        </article>`).join("");
+        return `<section class="pm-obligation-group">
+          <header class="pm-obligation-group-header">
+            <strong>${escapeHtml(release)}</strong>
+            <em>${obligations.size} obligation${obligations.size === 1 ? "" : "s"}</em>
+          </header>
+          <div class="pm-obligation-cards">${cards}</div>
+        </section>`;
+      }).join("");
+    } catch (error) {
+      // Soft-fail: don't block the form. Reference panel is optional.
+      body.innerHTML = `<div class="pm-obligation-empty">Obligations reference unavailable: ${escapeHtml(error.message || error)}</div>`;
+      if (countEl) countEl.textContent = "";
+    }
   }
 
   async function showEvidenceAlignmentSummary(practiceInstanceId, showEmpty = true) {
@@ -3940,6 +4549,60 @@
         window.alert(saveMessage);
         return;
       }
+      // Role Master, Add: the event checklist section needs a role id, and a
+      // brand-new role has none until this point. Closing here would force
+      // the user to find the role again and reopen it just to configure the
+      // checklists they came to configure. Instead the dialog stays open,
+      // adopts the new id -- so the next Save updates rather than inserts --
+      // and the section comes alive in place.
+      // Keyed on the entity actually written, not on screen.Key: Role Master
+      // opens both from its own screen and from the Organization Setup
+      // workspace, and only targetEntity is right in both cases.
+      if (targetEntity === "roles" && !state.id) {
+        const savedRole = apiData(saveResult)[0] || {};
+        const newRoleId = Number(valueOf(savedRole, "Id") || 0);
+        if (newRoleId) {
+          state.id = newRoleId;
+          state.mode = "edit";
+          const title = document.querySelector("#dialogTitle");
+          if (title) title.textContent = (title.textContent || "").replace(/^Add\b/, "Edit");
+
+          await loadLookups();
+          if (isOrganizationWorkspace) {
+            populateSetupOrganizationSelector();
+            if (setupState.organizationId) setupOrganization.value = setupState.organizationId;
+            await loadSetupChildRows(state.formEntity || setupState.activeTab);
+          } else {
+            await loadRows();
+          }
+
+          // Write whatever was ticked or typed while the role had no id.
+          const flushed = await flushPendingScopeChecklists(newRoleId);
+
+          await renderScopeChecklistSection(fieldsHost, {
+            organizationId: data.organizationId,
+            scopeDimension: "ORG_ROLE",
+            scopeValueId:   newRoleId,
+            title:          "Event Checklists for this Role",
+            subtitle:       "What has to be done when somebody joins this role, and when they leave it."
+          });
+          const section = fieldsHost.querySelector("[data-scope-checklist]");
+          if (section) {
+            // A partial flush must not read as success -- the user would
+            // leave believing checklists were configured that were not.
+            scopeMsg(section,
+              flushed.failed
+                ? `Role saved, but ${flushed.failed} checklist setting(s) could not be written. Set them again below.`
+                : flushed.saved
+                  ? `Role saved with ${flushed.saved} checklist setting(s).`
+                  : "Role saved. You can now set its onboarding and offboarding checklists.",
+              flushed.failed ? "error" : "ok");
+            section.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+          return;
+        }
+      }
+
       dialog.close();
       await loadLookups();
       if (isOrganizationWorkspace) {
@@ -3952,8 +4615,7 @@
       const saveMessage = saveResult.message || saveResult.Message || "";
       if (saveMessage && saveMessage !== "Saved successfully.") window.alert(saveMessage);
     } catch (error) {
-      formMessage.textContent = error.message;
-      formMessage.hidden = false;
+      showFormError(error);
     }
   }
 
@@ -4035,6 +4697,44 @@
     }
     const id = valueOf(record, "Id");
     if (action === "resendCredentials" && screen.Key === "users") return resendUserCredentials(record);
+    // Practice View is a full page, not a modal: it carries the practice
+    // header, its obligations and the Configure panel, and a modal would put
+    // all three inside a scrolling box within a scrolling page.
+    //
+    // Two screens show practices. The one in the menu ("Organization
+    // Practices") is screen.Key "organization-requirements" -- titled
+    // "Practices", one row per requirement, carrying the practice fields and
+    // a PracticeId. "practices" is the older standalone grid. Both route
+    // here; only the id differs, because on the requirement screen the row
+    // Id is the organization_requirement_id, not the practice.
+    if (action === "view" && (screen.Key === "practices" || screen.Key === "organization-requirements")) {
+      // valueOf only tries the given name and its first-letter-uppercased
+      // form, so "PracticeId" misses a camelCase "practiceId" payload.
+      const practiceId = screen.Key === "practices"
+        ? id
+        : (valueOf(record, "practiceId") || valueOf(record, "PracticeId"));
+
+      // The Organization Practices grid is one row per organization_requirement
+      // and does not reliably carry a practice id, so navigate on whichever
+      // identifier this row actually has. sp_practice_detail_get resolves the
+      // practice from either. Making the page depend on a single column is
+      // what left View silently opening the old modal.
+      const filterType = practiceId ? "Practice" : "OrganizationRequirement";
+      const filterId   = practiceId || id;
+
+      if (filterId) {
+        return navigateWithContext("practice-view", filterType, filterId,
+          valueOf(record, "Code"), valueOf(record, "Name"),
+          valueOf(record, "OrganizationId"),
+          state.navigationContext?.organizationControlId || null,
+          valueOf(record, "ApplicabilityStatus"),
+          screen.Key === "organization-requirements" ? id : valueOf(record, "OrganizationRequirementId"))
+          .catch(error => alert(error.message));
+      }
+
+      console.warn("[practice-view] Row has neither a practice id nor an id; opening the modal.",
+        Object.keys(record || {}));
+    }
     if (action === "view" || action === "edit") openForm(action, id);
     else if (action === "markApplicability" || action === "updateApplicability") openForm("applicability", id);
     else if (action === "inactive") retire(id);
@@ -4042,7 +4742,6 @@
     else if (action === "instances" && screen.Key === "organization-requirements") navigateWithContext("practice-instances", "OrganizationRequirement", id, valueOf(record, "Code"), valueOf(record, "Name"), valueOf(record, "OrganizationId"), valueOf(record, "OrganizationControlId"), valueOf(record, "ApplicabilityStatus"), id).catch(error => alert(error.message));
     else if (action === "instances" && screen.Key === "practices") navigateWithContext("practice-instances", "Practice", id, valueOf(record, "Code"), valueOf(record, "Name"), valueOf(record, "OrganizationId"), state.navigationContext?.organizationControlId || null, valueOf(record, "ApplicabilityStatus"), valueOf(record, "OrganizationRequirementId")).catch(error => alert(error.message));
     else if (action === "practices" && screen.Key === "organization-controls") navigateWithContext("organization-requirements", "OrganizationControl", id, valueOf(record, "Code"), valueOf(record, "Name"), valueOf(record, "OrganizationId"), id, valueOf(record, "ApplicabilityStatus")).catch(error => alert(error.message));
-    else if (action === "viewObligations" && screen.Key === "organization-requirements") showEvidenceObligations(record).catch(error => alert(error.message));
     else if (action === "evidence" && screen.Key === "practice-instances") openForm("edit", id);
     else if (action === "dependencies" && screen.Key === "practice-instances") navigateWithContext("dependencies", "PracticeInstance", id, valueOf(record, "Code"), valueOf(record, "Name")).catch(error => alert(error.message));
     else if (action === "viewOperationalization" && (screen.Key === "practice-operationalization" || screen.Key === "resolve")) openOperationalization(record, true).catch(error => alert(error.message));
@@ -4064,6 +4763,12 @@
   }
 
   if ((isRolePermissionMatrix || screen.Key === "user-role-assignments") && addButton) addButton.hidden = true;
+
+  // Practice Instances are no longer created here. Configure, on the practice
+  // page, creates one per team with a derived code, name and owner -- typing
+  // those three by hand was both work and a source of drift. View and Edit
+  // stay: owner, frequencies, criticality and department are still set here.
+  if (screen.Key === "practice-instances" && addButton) addButton.hidden = true;
   rows.addEventListener("change", event => {
     if (!isRolePermissionMatrix) return;
     const roleSelect = event.target.closest("[data-permission-role]");

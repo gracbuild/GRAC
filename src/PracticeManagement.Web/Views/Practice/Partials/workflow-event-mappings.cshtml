@@ -1,0 +1,183 @@
+@*
+    Event-Checklist Mappings (BRD Sec 10)
+    Screen key: `workflow-event-mappings`
+    Feature flag: `screen.workflow-event-mappings`
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="mpUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-link pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="mpUnavailableTitle">Event-Checklist Mappings is not yet enabled for this organization.</h2>
+        <p id="mpUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-event-mappings</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="mpRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="mpFilterOrganization"><option value="">All organizations</option></select>
+        <button class="pm-button icon" id="mpRefreshBtn" type="button"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="mpAddBtn" type="button"><i class="fa-solid fa-plus"></i> Add Mapping</button>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Entity Type</th><th>Event</th><th>Checklist</th><th>Default Owner Role</th><th>Default Due Days</th><th>Status</th></tr></thead>
+            <tbody id="mpBody"><tr><td colspan="6" class="pm-empty">Select an organization to load mappings.</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<dialog id="mpDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="mpForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Add Event-Checklist Mapping</h2>
+            <button type="button" id="mpClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="mpMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Entity Type *
+            <select id="mpEntityType" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Event *
+            <select id="mpEvent" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Checklist *
+            <select id="mpChecklist" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Default Owner Role
+                <input id="mpOwnerRole" type="text" maxlength="100" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Default Due (days)
+                <input id="mpDueDays" type="number" min="0" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="mpCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="mpSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-event-mappings';
+    let orgId = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('mpUnavailable','mpUnavailableTitle','mpUnavailableBody','No organizations available.','');
+        document.getElementById('mpRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('mpFilterOrganization', orgs);
+        document.getElementById('mpFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('mpRefreshBtn').addEventListener('click', reload);
+        document.getElementById('mpAddBtn').addEventListener('click', openDialog);
+        wireDialog();
+        await onOrgChange();
+    }
+    async function onOrgChange() {
+        orgId = document.getElementById('mpFilterOrganization').value || null;
+        if (!orgId) { setBody('<tr><td colspan="6" class="pm-empty">Select an organization to load mappings.</td></tr>'); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('mpRoot').hidden = true; document.getElementById('mpUnavailable').hidden = false; return; }
+        await reload();
+    }
+    async function reload() {
+        if (!orgId) return;
+        setBody('<tr><td colspan="6" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(U('/practice/api/workflow/event-checklist-mappings?organizationId=') + encodeURIComponent(orgId), { credentials: 'same-origin' });
+            const payload = await r.json();
+            const rows = (payload && payload.rows) || [];
+            const body = document.getElementById('mpBody'); body.innerHTML = '';
+            if (!rows.length) { setBody('<tr><td colspan="6" class="pm-empty">No mappings yet.</td></tr>'); return; }
+            for (const m of rows) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = [
+                    '<td>' + window.__wfCommon.escape(m.entityTypeName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(m.eventCode + ' - ' + m.eventName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(m.checklistName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(m.defaultOwnerRole || '') + '</td>',
+                    '<td>' + window.__wfCommon.escape(m.defaultDuePeriodDays != null ? String(m.defaultDuePeriodDays) : '') + '</td>',
+                    '<td>' + window.__wfCommon.badge(m.status) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        } catch (err) { setBody('<tr><td colspan="6" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
+    }
+    function setBody(html) { document.getElementById('mpBody').innerHTML = html; }
+
+    async function loadPickers() {
+        async function fetchList(url) { try { const r = await fetch(url, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
+        async function fillSelect(id, url, keyId, keyLabel, isPaged) {
+            const sel = document.getElementById(id); sel.innerHTML = '<option value="">Loading...</option>';
+            const res = await fetchList(url);
+            const rows = isPaged ? (res && res.rows) || [] : (res || []);
+            sel.innerHTML = '<option value="">(select)</option>';
+            for (const r of rows) {
+                const opt = document.createElement('option'); opt.value = String(r[keyId]);
+                opt.textContent = keyLabel(r); sel.appendChild(opt);
+            }
+        }
+        await Promise.all([
+            fillSelect('mpEntityType',  U('/practice/api/workflow/entity-types?organizationId=') + encodeURIComponent(orgId),  'entityTypeId', function (r) { return (r.entityCategory ? r.entityCategory + ' - ' : '') + r.entityTypeName; }, false),
+            fillSelect('mpEvent',       U('/practice/api/workflow/events?organizationId=') + encodeURIComponent(orgId) + '&pageSize=200', 'eventDefinitionId', function (r) { return r.eventCode + ' - ' + r.eventName; }, true),
+            fillSelect('mpChecklist',   U('/practice/api/workflow/checklists?organizationId=') + encodeURIComponent(orgId) + '&pageSize=200', 'checklistId', function (r) { return r.checklistCode + ' - ' + r.checklistName; }, true)
+        ]);
+    }
+    async function openDialog() {
+        const dlg = document.getElementById('mpDialog'); if (!dlg) return;
+        window.__wfCommon.setMessage('mpMessage', null);
+        document.getElementById('mpOwnerRole').value = '';
+        document.getElementById('mpDueDays').value = '';
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+        await loadPickers();
+    }
+    function closeDialog() { const d = document.getElementById('mpDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireDialog() {
+        document.getElementById('mpClose').addEventListener('click', closeDialog);
+        document.getElementById('mpCancel').addEventListener('click', closeDialog);
+        document.getElementById('mpForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submit = document.getElementById('mpSubmit'); submit.disabled = true;
+            const entityId = document.getElementById('mpEntityType').value;
+            const eventId  = document.getElementById('mpEvent').value;
+            const chkId    = document.getElementById('mpChecklist').value;
+            if (!entityId || !eventId || !chkId) { window.__wfCommon.setMessage('mpMessage', 'Entity, Event and Checklist are all required.', 'error'); submit.disabled = false; return; }
+            const dueRaw = document.getElementById('mpDueDays').value;
+            const payload = {
+                mappingId:              null,
+                organizationId:         Number(orgId),
+                entityTypeId:           Number(entityId),
+                eventDefinitionId:      Number(eventId),
+                checklistId:            Number(chkId),
+                defaultOwnerRole:       document.getElementById('mpOwnerRole').value.trim() || null,
+                defaultDuePeriodDays:   dueRaw === '' ? null : Number(dueRaw),
+                status:                 'Active'
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/event-checklist-mappings'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('mpMessage', 'Saved.', 'ok'); setTimeout(function () { closeDialog(); reload(); }, 400); }
+                else     { window.__wfCommon.setMessage('mpMessage', b.error || 'Save failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('mpMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+})();
+</script>

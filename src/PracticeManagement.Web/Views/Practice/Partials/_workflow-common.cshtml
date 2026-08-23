@@ -1,0 +1,308 @@
+@*
+    Shared helpers for every Workflow-module partial (BRD v1.0).
+    Rendered once per screen -- attaches window.__wfCommon.
+
+    Deliberately tiny: escape, badge, org loader, feature-flag probe,
+    pager wiring. Each screen keeps its own reload / render / dialog
+    logic so the pattern reads exactly like gaps.cshtml / tasks.cshtml.
+*@
+<script>
+(function () {
+    'use strict';
+    if (window.__wfCommon) return;
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    function escape(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function badge(v) { return v ? '<span class="pm-badge">' + escape(v) + '</span>' : ''; }
+
+    async function loadOrgs() {
+        try {
+            const r = await fetch(U('/practice/api/organizations/allowed'), { credentials: 'same-origin' });
+            if (!r.ok) return [];
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            return rows.map(function (row) {
+                return {
+                    value: String(row.organizationId || row.OrganizationId || ''),
+                    label: String(row.organizationName || row.OrganizationName || '')
+                };
+            }).filter(function (o) { return o.value; });
+        } catch (_) { return []; }
+    }
+
+    function populateOrgSelect(selectId, orgs) {
+        const sel = document.getElementById(selectId); if (!sel) return;
+        sel.innerHTML = '';
+        for (const o of orgs) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            sel.appendChild(opt);
+        }
+        if (orgs.length > 0) sel.value = orgs[0].value;
+        sel.disabled = orgs.length <= 1;
+    }
+
+    async function checkFeature(featureCode, orgId) {
+        try {
+            const url = U('/practice/api/workflow-feature/status')
+                + '?featureCode=' + encodeURIComponent(featureCode)
+                + '&organizationId=' + encodeURIComponent(orgId);
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) return false;
+            const b = await r.json();
+            return !!(b && (b.enabled === true || b.Enabled === true));
+        } catch (_) { return false; }
+    }
+
+    function unavailable(rootId, titleId, bodyId, title, body) {
+        const root = document.getElementById(rootId);
+        if (root) root.hidden = false;
+        const t = document.getElementById(titleId); if (t && title) t.textContent = title;
+        const b = document.getElementById(bodyId);  if (b && body)  b.textContent = body;
+    }
+
+    function wirePager(key, onDelta) {
+        const nav = document.querySelector('.pm-pager[data-pager="' + key + '"]');
+        if (!nav) return;
+        const prev = nav.querySelector('[data-pg="prev"]');
+        const next = nav.querySelector('[data-pg="next"]');
+        if (prev) prev.addEventListener('click', function () { onDelta(-1); });
+        if (next) next.addEventListener('click', function () { onDelta(1); });
+    }
+    function updatePager(key, payload) {
+        const nav = document.querySelector('.pm-pager[data-pager="' + key + '"]');
+        if (!nav) return;
+        nav.querySelector('[data-pg="label"]').textContent = 'Page ' + (payload && payload.pageNumber || 1);
+        nav.querySelector('[data-pg="total"]').textContent = (payload && payload.totalCount || 0) + ' total';
+    }
+
+    function setMessage(id, text, kind) {
+        const el = document.getElementById(id); if (!el) return;
+        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+        el.style.display = 'block'; el.textContent = text;
+        if (kind === 'error')      { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
+        else if (kind === 'ok')    { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
+        else                        { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+    }
+
+    window.__wfCommon = {
+        escape: escape, badge: badge, loadOrgs: loadOrgs, populateOrgSelect: populateOrgSelect,
+        checkFeature: checkFeature, unavailable: unavailable, wirePager: wirePager,
+        updatePager: updatePager, setMessage: setMessage
+    };
+
+    // ==================================================================
+    // Role -> Employee two-step picker (hybrid ownership, 116a/116b).
+    //
+    // Attach: __roleHolderPicker.attach({
+    //   organizationId, roleSelectId, employeeSelectId,
+    //   initialRoleId (optional), initialEmployeeId (optional),
+    //   initialRoleName (optional -- for label fallback),
+    //   initialEmployeeName (optional),
+    //   allowEmpty: true       // "-- unassigned --" row
+    // });
+    //
+    // Behaviour:
+    //   * Loads roles for the org into the Role dropdown.
+    //   * When a Role is picked, fetches the role's current holders
+    //     and populates the Employee dropdown; auto-selects the
+    //     "primary" (first) holder to match SP-side auto-snapshot.
+    //   * User can override employee within the loaded holder set.
+    //   * "unassigned" -> both role and employee cleared.
+    //   * Read the final picked values via getState(roleSelectId).
+    //
+    // NOTE: this block reuses the IIFE-scoped `U(path)` helper defined
+    // near the top of this file. Do NOT re-declare `const U` here --
+    // that caused a SyntaxError that swallowed the entire IIFE and
+    // wiped out window.__wfCommon.
+    // ==================================================================
+    const rolesCacheByOrg = Object.create(null);   // orgId -> Promise<roles[]>
+    const holdersCacheKey = Object.create(null);   // orgId + '/' + roleId -> Promise<holders[]>
+
+    async function loadRolesForOrg(orgId) {
+        if (!orgId) return [];
+        const key = String(orgId);
+        if (rolesCacheByOrg[key]) return rolesCacheByOrg[key];
+        rolesCacheByOrg[key] = (async () => {
+            try {
+                const r = await fetch(U('/practice/api/org-roles?organizationId=' + encodeURIComponent(orgId)),
+                                      { credentials: 'same-origin' });
+                if (!r.ok) return [];
+                const j = await r.json();
+                return j.data || j.Data || [];
+            } catch (_) { return []; }
+        })();
+        return rolesCacheByOrg[key];
+    }
+
+    async function loadHoldersForRole(orgId, roleId) {
+        if (!orgId || !roleId) return [];
+        const key = orgId + '/' + roleId;
+        if (holdersCacheKey[key]) return holdersCacheKey[key];
+        holdersCacheKey[key] = (async () => {
+            try {
+                const r = await fetch(
+                    U('/practice/api/org-roles/' + encodeURIComponent(roleId) + '/holders?organizationId=' + encodeURIComponent(orgId)),
+                    { credentials: 'same-origin' });
+                if (!r.ok) return [];
+                const j = await r.json();
+                return j.data || j.Data || [];
+            } catch (_) { return []; }
+        })();
+        return holdersCacheKey[key];
+    }
+
+    function invalidateRoleCaches(orgId) {
+        const key = String(orgId);
+        delete rolesCacheByOrg[key];
+        // Also drop any holder caches under this org.
+        Object.keys(holdersCacheKey).forEach(function (k) {
+            if (k.indexOf(key + '/') === 0) delete holdersCacheKey[k];
+        });
+    }
+
+    async function attachRoleHolderPicker(opts) {
+        opts = opts || {};
+        const orgId = opts.organizationId;
+        const roleSel = document.getElementById(opts.roleSelectId);
+        const empSel  = document.getElementById(opts.employeeSelectId);
+        if (!roleSel || !empSel) {
+            console.warn('roleHolderPicker: role or employee select missing', opts);
+            return;
+        }
+        const allowEmpty = opts.allowEmpty !== false;
+        const initialRoleId     = opts.initialRoleId     || null;
+        const initialEmployeeId = opts.initialEmployeeId || null;
+
+        // ---------- fill role dropdown ----------
+        roleSel.innerHTML = '<option value="">Loading roles...</option>';
+        empSel.innerHTML  = '<option value="">Pick role first</option>';
+        const roles = await loadRolesForOrg(orgId);
+        roleSel.innerHTML = '';
+        if (allowEmpty) {
+            const opt = document.createElement('option');
+            opt.value = ''; opt.textContent = '-- unassigned --';
+            roleSel.appendChild(opt);
+        }
+        roles.forEach(function (r) {
+            const opt = document.createElement('option');
+            opt.value = String(r.roleId || r.RoleId);
+            opt.textContent = r.roleName || r.RoleName || '';
+            roleSel.appendChild(opt);
+        });
+
+        // Restore initial role selection (or show read-only label if not in list).
+        if (initialRoleId) {
+            const found = [...roleSel.options].some(function (o) {
+                return o.value === String(initialRoleId);
+            });
+            if (found) roleSel.value = String(initialRoleId);
+            else if (opts.initialRoleName) {
+                const opt = document.createElement('option');
+                opt.value = String(initialRoleId);
+                opt.textContent = opts.initialRoleName + '  (retired)';
+                roleSel.insertBefore(opt, roleSel.firstChild.nextSibling);
+                roleSel.value = String(initialRoleId);
+            }
+        }
+
+        // ---------- when role changes, refresh employee list ----------
+        roleSel.addEventListener('change', async function () {
+            const rid = roleSel.value ? Number(roleSel.value) : null;
+            await refreshHolders(rid, /*preserveEmployee*/ null);
+        });
+
+        async function refreshHolders(rid, preserveEmployeeId) {
+            empSel.innerHTML = '<option value="">Loading...</option>';
+            if (!rid) {
+                empSel.innerHTML = allowEmpty
+                    ? '<option value="">-- unassigned --</option>'
+                    : '<option value="">Pick role first</option>';
+                return;
+            }
+            const holders = await loadHoldersForRole(orgId, rid);
+            empSel.innerHTML = '';
+            if (allowEmpty) {
+                const opt = document.createElement('option');
+                opt.value = ''; opt.textContent = '-- role only, no specific person --';
+                empSel.appendChild(opt);
+            }
+            if (!holders.length) {
+                const opt = document.createElement('option');
+                opt.value = ''; opt.textContent = '(no active holders for this role)';
+                empSel.appendChild(opt);
+                return;
+            }
+            holders.forEach(function (h) {
+                const opt = document.createElement('option');
+                opt.value = String(h.employeeId || h.EmployeeId);
+                opt.textContent = (h.employeeName || h.EmployeeName || '') +
+                    ((h.designation || h.Designation) ? '  --  ' + (h.designation || h.Designation) : '');
+                empSel.appendChild(opt);
+            });
+
+            // Pick behavior: user-preserve wins, else first holder (matches SP auto-snapshot).
+            if (preserveEmployeeId != null &&
+                [...empSel.options].some(function (o) { return o.value === String(preserveEmployeeId); })) {
+                empSel.value = String(preserveEmployeeId);
+            } else {
+                // Skip the leading empty option if allowEmpty.
+                const first = holders[0];
+                if (first) empSel.value = String(first.employeeId || first.EmployeeId);
+            }
+        }
+
+        // ---------- Initial holder load (respect initialEmployeeId) ----------
+        if (roleSel.value) {
+            await refreshHolders(Number(roleSel.value), initialEmployeeId);
+        } else if (initialEmployeeId) {
+            // Employee-only initial (no role snapshot). Render a lightweight
+            // option so the value survives and the user can pick a role
+            // to see alternates.
+            empSel.innerHTML = '';
+            if (allowEmpty) {
+                const opt = document.createElement('option');
+                opt.value = ''; opt.textContent = '-- unassigned --';
+                empSel.appendChild(opt);
+            }
+            const opt = document.createElement('option');
+            opt.value = String(initialEmployeeId);
+            opt.textContent = opts.initialEmployeeName || ('Employee #' + initialEmployeeId);
+            opt.selected = true;
+            empSel.appendChild(opt);
+        }
+    }
+
+    // Read final picked (role_id, role_name, employee_id, employee_name)
+    // from a pair of selects. Used at Save time.
+    function readRoleHolderState(roleSelectId, employeeSelectId) {
+        const roleSel = document.getElementById(roleSelectId);
+        const empSel  = document.getElementById(employeeSelectId);
+        const rid = roleSel && roleSel.value ? Number(roleSel.value) : null;
+        const eid = empSel  && empSel.value  ? Number(empSel.value)  : null;
+        const rname = roleSel && roleSel.selectedOptions[0]
+                        ? (roleSel.selectedOptions[0].textContent || '').split('  (retired)')[0]
+                        : null;
+        const ename = empSel && empSel.selectedOptions[0]
+                        ? (empSel.selectedOptions[0].textContent || '').split('  --  ')[0]
+                        : null;
+        return {
+            roleId       : rid,
+            roleName     : (rid && rname && rname !== '-- unassigned --') ? rname : null,
+            employeeId   : eid,
+            employeeName : (eid && ename && ename.indexOf('--') !== 0)    ? ename : null
+        };
+    }
+
+    window.__roleHolderPicker = {
+        attach       : attachRoleHolderPicker,
+        readState    : readRoleHolderState,
+        invalidateCaches: invalidateRoleCaches
+    };
+})();
+</script>

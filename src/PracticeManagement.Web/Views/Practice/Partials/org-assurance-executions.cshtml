@@ -1,0 +1,1235 @@
+@*
+    Assurance Executions (BRD Part 2 Sec 9-10) -- Phase 2 Stage 3.
+
+    Screen key : `org-assurance-executions`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Executions (migration 100)
+    Feature    : screen.org-assurance-executions
+    Backend    :
+        GET  /practice/api/org-assurance/executions?organizationId=&definitionId=&statusCode=&originType=&search=&page=&pageSize=
+        GET  /practice/api/org-assurance/executions/{id}?organizationId=
+        POST /practice/api/org-assurance/executions/materialize
+        POST /practice/api/org-assurance/executions/{id}/start|submit|review|approve|close|cancel
+        DELETE /practice/api/org-assurance/executions/{id}
+        GET  /practice/api/org-assurance/executions/{id}/entities?organizationId=&dimensionCode=&statusCode=&search=&page=&pageSize=
+        + supporting reads for materialize form:
+        GET  /practice/api/org-assurance/definitions?organizationId=
+        GET  /practice/api/org-assurance/definitions/{id}/scope-resolutions?organizationId=
+
+    UX:
+      * Org + optional Definition picker at top.
+      * Materialize dialog (definition + version + resolution).
+      * List with 3-dots menu -- Details / lifecycle transitions
+        contextual by status / Delete (Planned or Cancelled only).
+      * Details panel: header + config-snapshot tabs (Definition /
+        Questions / Evidence / Workflow / Scoring) + paginated
+        entity drilldown.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaExHeading">@Model.Title</h1>
+        <p id="oaExSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaExBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Definitions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaExUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-play-circle pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaExUnavailableTitle">Executions is not available.</h2>
+        <p id="oaExUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaExRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaExPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:280px;">
+            <span>Filter by Definition (optional)</span>
+            <select id="oaExPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">All definitions</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Status</span>
+            <select id="oaExFilterStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">All</option>
+            </select>
+        </label>
+        <input id="oaExSearch" type="text" placeholder="Search execution / definition..." />
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button primary" id="oaExMaterializeBtn" type="button">
+                <i class="fa-solid fa-play" aria-hidden="true"></i> Materialize Execution
+            </button>
+        </div>
+    </div>
+
+    <div id="oaExMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div style="display:grid; grid-template-columns:minmax(420px, 560px) 1fr; gap:12px; margin-top:12px;">
+        @* LEFT: executions list *@
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <h2 style="font-size:15px; margin:0; color:#0f172a;">Executions</h2>
+                <button class="pm-button icon" id="oaExRefreshBtn" type="button" title="Refresh">
+                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Execution</th>
+                            <th>Definition</th>
+                            <th>Status</th>
+                            <th style="text-align:right;">Progress</th>
+                            <th style="width:44px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaExListBody">
+                        <tr><td colspan="5" class="pm-empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pm-pager" data-pager="oa-ex-list">
+                <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                <span data-pg="label">Page 1</span>
+                <button class="pm-button" data-pg="next" type="button">Next</button>
+                <span data-pg="total" class="pm-pager-total">0 total</span>
+            </div>
+        </div>
+
+        @* RIGHT: selected execution detail *@
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <h2 style="font-size:15px; margin:0; color:#0f172a;" id="oaExDetailTitle">Execution Details</h2>
+                    <p style="font-size:12px; color:#64748b; margin:4px 0 0;" id="oaExDetailSubtitle">Select a row to view execution details, immutable config snapshots and entity progress.</p>
+                </div>
+            </div>
+
+            @* Detail header tiles *@
+            <div id="oaExDetailTiles" hidden style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
+
+            @* Snapshot tabs *@
+            <div id="oaExTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid #e2e8f0; margin-bottom:8px;">
+                <button class="pm-tab active" data-tab="entities" type="button">Entities</button>
+                <button class="pm-tab"        data-tab="definition" type="button">Definition Snapshot</button>
+                <button class="pm-tab"        data-tab="workflow" type="button">Workflow</button>
+                <button class="pm-tab"        data-tab="evidence" type="button">Evidence</button>
+                <button class="pm-tab"        data-tab="scoring" type="button">Scoring</button>
+                <button class="pm-tab"        data-tab="questions" type="button">Questions</button>
+            </div>
+
+            @* Entities tab *@
+            <div id="oaExTabEntities" hidden>
+                <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+                    <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                        <span>Filter by Dimension</span>
+                        <select id="oaExEntityDim" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; min-width:200px;">
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                        <span>Entity Status</span>
+                        <select id="oaExEntityStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                            <option value="">All</option>
+                            <option value="NotStarted">Not Started</option>
+                            <option value="InProgress">In Progress</option>
+                            <option value="Done">Done</option>
+                            <option value="Skipped">Skipped</option>
+                        </select>
+                    </label>
+                    <input id="oaExEntitySearch" type="text" placeholder="Search entity name / code..." />
+                </div>
+                <div class="pm-table-wrap" style="margin-top:8px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Dimension</th>
+                                <th>Entity</th>
+                                <th>Code</th>
+                                <th>Status</th>
+                                <th>Source</th>
+                                <th>Auditor</th>
+                                <th style="width:1%;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="oaExEntityBody">
+                            <tr><td colspan="7" class="pm-empty">No entities loaded.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pm-pager" data-pager="oa-ex-entities">
+                    <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                    <span data-pg="label">Page 1</span>
+                    <button class="pm-button" data-pg="next" type="button">Next</button>
+                    <span data-pg="total" class="pm-pager-total">0 total</span>
+                </div>
+            </div>
+
+            @* Snapshot tabs -- all render pre-formatted JSON so the auditor
+               can see EXACTLY what was in force at materialize time. *@
+            <div id="oaExTabDefinition" hidden><pre id="oaExDefinitionPre" style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabWorkflow"   hidden><pre id="oaExWorkflowPre"   style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabEvidence"   hidden><pre id="oaExEvidencePre"   style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabScoring"    hidden><pre id="oaExScoringPre"    style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabQuestions"  hidden><pre id="oaExQuestionsPre"  style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
+        </div>
+    </div>
+</section>
+
+@* Materialize dialog *@
+@* 120 -- Per-entity Auditor assign dialog. Same lightweight overlay style
+   as the Materialize dialog so the pattern stays consistent. *@
+<div id="oaExAuditorDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
+    <div style="background:#fff; width:460px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h2 style="margin:0; font-size:16px;">Assign Auditor</h2>
+            <button class="pm-button icon" id="oaExAudClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <p id="oaExAudEntityLabel" style="font-size:12px; color:#64748b; margin:0 0 12px;"></p>
+
+        <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <span>Auditor</span>
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                <select id="oaExAudRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Role">
+                    <option value="">Loading roles...</option>
+                </select>
+                <select id="oaExAudEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Employee (current holder)">
+                    <option value="">-- pick a role first --</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="oaExAudMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+        <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+            <button class="pm-button" id="oaExAudCancel" type="button">Cancel</button>
+            <button class="pm-button primary" id="oaExAudSave" type="button">Assign</button>
+        </div>
+    </div>
+</div>
+
+<div id="oaExMatDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
+    <div style="background:#fff; width:520px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h2 style="margin:0; font-size:16px;">Materialize Execution</h2>
+            <button class="pm-button icon" id="oaExMatClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <p style="font-size:12px; color:#64748b; margin:0 0 12px;">Creates an immutable execution record from a definition + resolved scope. The active version's Definition, Questions, Evidence, Workflow and Scoring configuration is snapshotted onto the execution.</p>
+
+        <div style="display:grid; gap:8px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Definition <span style="color:#dc2626;">*</span></span>
+                <select id="oaExMatDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="">Loading...</option>
+                </select>
+                <span id="oaExMatHint" hidden
+                      style="font-size:11px; color:#b45309; background:#fef3c7; border:1px solid #fde68a; border-radius:4px; padding:6px 8px; margin-top:6px;"></span>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Scope Resolution Snapshot <span style="color:#dc2626;">*</span></span>
+                <select id="oaExMatScope" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="">Pick a definition first</option>
+                </select>
+                <span style="font-size:11px; color:#94a3b8; margin-top:2px;">Only snapshots that belong to an Approved/Active version can be materialized.</span>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Execution Name</span>
+                <input id="oaExMatName" type="text" placeholder="(auto)" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Execution Code</span>
+                <input id="oaExMatCode" type="text" placeholder="(auto)" />
+            </label>
+            <div style="display:flex; gap:8px;">
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Planned Start</span>
+                    <input id="oaExMatStart" type="date" />
+                </label>
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Planned End</span>
+                    <input id="oaExMatEnd" type="date" />
+                </label>
+            </div>
+            @* 120 hybrid role+employee Owner picker.
+               minmax(0,1fr) + min-width:0 so long option text can't push a
+               column wider than its slot. SP auto-resolves the missing side. *@
+            <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Owner</span>
+                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                    <select id="oaExMatOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                        <option value="">Loading roles...</option>
+                    </select>
+                    <select id="oaExMatOwnerEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                        <option value="">-- pick a role first --</option>
+                    </select>
+                </div>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Assigned Team</span>
+                <input id="oaExMatTeam" type="text" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Notes</span>
+                <textarea id="oaExMatNotes" rows="2"></textarea>
+            </label>
+        </div>
+
+        <div id="oaExMatMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+        <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+            <button class="pm-button" id="oaExMatCancel" type="button">Cancel</button>
+            <button class="pm-button primary" id="oaExMatSave" type="button">Materialize</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .pm-tab {
+        border:none; background:transparent; padding:6px 10px; font-size:13px;
+        color:#64748b; cursor:pointer; border-bottom:2px solid transparent;
+    }
+    .pm-tab.active { color:#0f172a; border-bottom-color:#0f172a; font-weight:600; }
+</style>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId              : null,
+        allOrgs            : [],
+        filterDefinitionId : null,
+        filterStatus       : '',
+        search             : '',
+        definitionsById    : {},
+
+        list               : { page: 1, pageSize: 25, total: 0, rows: [] },
+
+        selectedExecId     : null,
+        detail             : null,     // full execution row
+        detailTab          : 'entities',
+        entities           : { page: 1, pageSize: 100, total: 0, rows: [], dim: '', status: '', search: '' },
+
+        matDefId           : null,
+        matScopeId         : null,
+        matDefinitions     : [],
+        matScopes          : []
+    };
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readDefinitionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('definitionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-definitions';
+    }
+
+    async function boot() {
+        document.getElementById('oaExBackBtn').setAttribute('href', backHref());
+        document.getElementById('oaExRoot').hidden = false;
+
+        wf.wirePager('oa-ex-list', function (delta) {
+            const next = state.list.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.list.total / state.list.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.list.page = next; reloadList();
+        });
+        wf.wirePager('oa-ex-entities', function (delta) {
+            const next = state.entities.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.entities.total / state.entities.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.entities.page = next; reloadEntities();
+        });
+
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaExPickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        state.filterDefinitionId = readDefinitionIdFromUrl();
+
+        orgSel.addEventListener('change', function () {
+            state.orgId = orgSel.value || null;
+            state.filterDefinitionId = null;
+            document.getElementById('oaExPickDef').innerHTML = '<option value="">All definitions</option>';
+            state.list = { page: 1, pageSize: 25, total: 0, rows: [] };
+            resetDetail();
+            populateDefinitionFilter().then(loadStatuses).then(reloadList);
+        });
+        document.getElementById('oaExPickDef').addEventListener('change', function (e) {
+            state.filterDefinitionId = e.target.value ? Number(e.target.value) : null;
+            state.list.page = 1;
+            reloadList();
+        });
+        document.getElementById('oaExFilterStatus').addEventListener('change', function (e) {
+            state.filterStatus = e.target.value || '';
+            state.list.page = 1;
+            reloadList();
+        });
+        document.getElementById('oaExSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.list.page = 1;
+            clearTimeout(window.__oaExSearchTimer);
+            window.__oaExSearchTimer = setTimeout(reloadList, 250);
+        });
+
+        wireStaticButtons();
+        wireDetailTabs();
+        wireMaterializeDialog();
+        wireAuditorDialog();  // 120 -- per-entity auditor
+
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+
+        await Promise.all([populateDefinitionFilter(), loadStatuses()]);
+        if (state.filterDefinitionId) {
+            const sel = document.getElementById('oaExPickDef');
+            if (sel && [...sel.options].some(function (o) { return o.value === String(state.filterDefinitionId); })) {
+                sel.value = String(state.filterDefinitionId);
+            }
+        }
+        await reloadList();
+    }
+
+    function wireStaticButtons() {
+        document.getElementById('oaExRefreshBtn').addEventListener('click', function () {
+            reloadList();
+            if (state.selectedExecId) reloadEntities();
+        });
+        document.getElementById('oaExMaterializeBtn').addEventListener('click', openMaterialize);
+        document.getElementById('oaExEntityDim').addEventListener('change', function (e) {
+            state.entities.dim = e.target.value || '';
+            state.entities.page = 1; reloadEntities();
+        });
+        document.getElementById('oaExEntityStatus').addEventListener('change', function (e) {
+            state.entities.status = e.target.value || '';
+            state.entities.page = 1; reloadEntities();
+        });
+        document.getElementById('oaExEntitySearch').addEventListener('input', function (e) {
+            state.entities.search = e.target.value || '';
+            state.entities.page = 1;
+            clearTimeout(window.__oaExEntSearchTimer);
+            window.__oaExEntSearchTimer = setTimeout(reloadEntities, 250);
+        });
+    }
+
+    function wireDetailTabs() {
+        document.querySelectorAll('.pm-tab').forEach(function (t) {
+            t.addEventListener('click', function () { switchTab(t.getAttribute('data-tab')); });
+        });
+    }
+
+    function switchTab(tab) {
+        state.detailTab = tab;
+        document.querySelectorAll('.pm-tab').forEach(function (el) {
+            el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+        });
+        ['entities','definition','workflow','evidence','scoring','questions'].forEach(function (t) {
+            const el = document.getElementById('oaExTab' + t.charAt(0).toUpperCase() + t.slice(1));
+            if (el) el.hidden = (t !== tab);
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Filter dropdowns
+    // -----------------------------------------------------------------
+    async function populateDefinitionFilter() {
+        const defSel = document.getElementById('oaExPickDef');
+        defSel.innerHTML = '<option value="">All definitions</option>';
+        if (!state.orgId) return;
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const payload = await r.json();
+            const rows = payload.rows || payload.Rows || [];
+            rows.forEach(function (row) {
+                const id = row.definitionId || row.DefinitionId;
+                const code = row.definitionCode || row.DefinitionCode || '';
+                const name = row.definitionName || row.DefinitionName || '';
+                if (id != null) state.definitionsById[String(id)] = row;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '');
+                defSel.appendChild(opt);
+            });
+        } catch (_) { /* ignore */ }
+    }
+
+    async function loadStatuses() {
+        const statusSel = document.getElementById('oaExFilterStatus');
+        statusSel.innerHTML = '<option value="">All</option>';
+        try {
+            const r = await fetch(U(API + '/execution-statuses'), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const payload = await r.json();
+            const rows = (payload.data || payload.Data || []);
+            rows.forEach(function (s) {
+                const opt = document.createElement('option');
+                opt.value = s.statusCode || s.StatusCode;
+                opt.textContent = s.statusName || s.StatusName;
+                statusSel.appendChild(opt);
+            });
+        } catch (_) { /* ignore */ }
+    }
+
+    // -----------------------------------------------------------------
+    // List
+    // -----------------------------------------------------------------
+    async function reloadList() {
+        const body = document.getElementById('oaExListBody');
+        if (!state.orgId) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">Pick an organization to load executions.</td></tr>';
+            wf.updatePager('oa-ex-list', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="5" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.filterDefinitionId) qs.set('definitionId', String(state.filterDefinitionId));
+            if (state.filterStatus)       qs.set('statusCode',   state.filterStatus);
+            if (state.search)             qs.set('search',       state.search);
+            qs.set('page',     String(state.list.page));
+            qs.set('pageSize', String(state.list.pageSize));
+            const r = await fetch(U(API + '/executions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="5" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.list.total = Number(payload.totalCount || payload.TotalCount || 0);
+            state.list.rows  = payload.rows || payload.Rows || [];
+            renderList();
+            wf.updatePager('oa-ex-list', {
+                pageNumber : state.list.page,
+                totalCount : state.list.total,
+                pageSize   : state.list.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderList() {
+        const body = document.getElementById('oaExListBody');
+        if (!state.list.rows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">No executions. Use "Materialize Execution" to create one.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.list.rows.map(function (row) {
+            const id       = row.executionId          || row.ExecutionId;
+            const code     = row.executionCode        || row.ExecutionCode || '';
+            const name     = row.executionName        || row.ExecutionName || '';
+            const defName  = row.definitionName       || row.DefinitionName || '';
+            const defCode  = row.definitionCode       || row.DefinitionCode || '';
+            const ver      = row.versionNumber        || row.VersionNumber || '';
+            const status   = row.statusCode           || row.StatusCode || '';
+            const done     = Number(row.completedEntityCount || row.CompletedEntityCount || 0);
+            const total    = Number(row.totalEntityCount     || row.TotalEntityCount     || 0);
+            const isSel    = state.selectedExecId && String(state.selectedExecId) === String(id);
+            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '') + '>'
+                 + '<td><div style="font-weight:600;">' + wf.escape(name) + '</div>'
+                 + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div></td>'
+                 + '<td>' + wf.escape(defName) + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(defCode) + (ver ? ' &middot; v' + ver : '') + '</div></td>'
+                 + '<td>' + wf.badge(status) + '</td>'
+                 + '<td style="text-align:right;">' + done + ' / ' + total + '</td>'
+                 + '<td><button class="pm-action-trigger" data-id="' + id + '" aria-label="Row actions">'
+                 + '<i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button></td>'
+                 + '</tr>';
+        }).join('');
+
+        // Select on click (excluding action button)
+        body.querySelectorAll('tr[data-id]').forEach(function (tr) {
+            tr.addEventListener('click', function (ev) {
+                if (ev.target.closest('.pm-action-trigger')) return;
+                const id = tr.getAttribute('data-id');
+                if (id) selectExecution(Number(id));
+            });
+        });
+
+        // 3-dots menus
+        body.querySelectorAll('.pm-action-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                const id = Number(btn.getAttribute('data-id'));
+                const row = state.list.rows.find(function (r) {
+                    return String(r.executionId || r.ExecutionId) === String(id);
+                });
+                openRowMenu(btn, id, row);
+            });
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Row action menu (mirrors tasks / definitions pattern)
+    // -----------------------------------------------------------------
+    let openMenuEl = null, openMenuTrigger = null;
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    document.addEventListener('click', function (ev) {
+        if (openMenuEl && !openMenuEl.contains(ev.target) && ev.target !== openMenuTrigger) closeRowMenu();
+    });
+
+    function openRowMenu(trigger, id, row) {
+        closeRowMenu();
+        const status = row && (row.statusCode || row.StatusCode) || '';
+        const items = [
+            { icon: 'fa-eye',        label: 'View Details',
+                action: function () { selectExecution(id); } },
+            { icon: 'fa-triangle-exclamation', label: 'Observations',
+                action: function () {
+                    const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+                    window.location.href = base + '/Practice/org-assurance-observations?executionId=' + encodeURIComponent(id);
+                } }
+        ];
+        if (status === 'Planned') {
+            items.push({ icon: 'fa-play',      label: 'Start',    action: function () { doTransition(id, 'start'); } });
+            items.push({ icon: 'fa-ban',       label: 'Cancel',   action: function () { doTransition(id, 'cancel'); } });
+            items.push({ icon: 'fa-trash',     label: 'Delete',   action: function () { doDelete(id); } });
+        } else if (status === 'InProgress') {
+            items.push({ icon: 'fa-paper-plane', label: 'Submit', action: function () { doTransition(id, 'submit'); } });
+            items.push({ icon: 'fa-ban',         label: 'Cancel', action: function () { doTransition(id, 'cancel'); } });
+        } else if (status === 'Submitted') {
+            items.push({ icon: 'fa-magnifying-glass', label: 'Mark Reviewed', action: function () { doTransition(id, 'review'); } });
+            items.push({ icon: 'fa-check',            label: 'Approve',       action: function () { doTransition(id, 'approve'); } });
+            items.push({ icon: 'fa-ban',              label: 'Cancel',        action: function () { doTransition(id, 'cancel'); } });
+        } else if (status === 'Reviewed') {
+            items.push({ icon: 'fa-check',    label: 'Approve', action: function () { doTransition(id, 'approve'); } });
+            items.push({ icon: 'fa-ban',      label: 'Cancel',  action: function () { doTransition(id, 'cancel'); } });
+        } else if (status === 'Approved') {
+            items.push({ icon: 'fa-box-archive', label: 'Close', action: function () { doTransition(id, 'close'); } });
+        } else if (status === 'Cancelled') {
+            items.push({ icon: 'fa-trash', label: 'Delete', action: function () { doDelete(id); } });
+        }
+
+        const menu = document.createElement('div');
+        menu.className = 'pm-action-menu';
+        menu.innerHTML = items.map(function (it, i) {
+            return '<button type="button" data-i="' + i + '"><i class="fa-solid ' + it.icon + '"></i> ' + wf.escape(it.label) + '</button>';
+        }).join('');
+        document.body.appendChild(menu);
+
+        const rect = trigger.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top  = (rect.bottom + 4) + 'px';
+        menu.style.left = Math.max(4, rect.right - menu.offsetWidth) + 'px';
+        menu.querySelectorAll('button').forEach(function (b) {
+            b.addEventListener('click', function () {
+                const idx = Number(b.getAttribute('data-i'));
+                closeRowMenu();
+                if (items[idx] && items[idx].action) items[idx].action();
+            });
+        });
+        openMenuEl = menu;
+        openMenuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+    }
+
+    async function doTransition(id, action) {
+        try {
+            const url  = U(API + '/executions/' + id + '/' + action);
+            const body = { organizationId: Number(state.orgId), executionId: Number(id) };
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Execution "' + action + '" complete.');
+            await reloadList();
+            if (state.selectedExecId === Number(id)) await loadDetail(Number(id));
+        } catch (err) {
+            setMessage('error', 'Transition failed: ' + (err.message || err));
+        }
+    }
+
+    async function doDelete(id) {
+        if (!window.confirm('Delete this execution? This cannot be undone.')) return;
+        try {
+            const qs = new URLSearchParams({ organizationId: String(state.orgId) });
+            const url = U(API + '/executions/' + id + '?' + qs.toString());
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Execution deleted.');
+            if (state.selectedExecId === Number(id)) resetDetail();
+            await reloadList();
+        } catch (err) {
+            setMessage('error', 'Delete failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Detail
+    // -----------------------------------------------------------------
+    async function selectExecution(id) {
+        state.selectedExecId = id;
+        document.querySelectorAll('#oaExListBody tr').forEach(function (tr) {
+            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? '#eff6ff' : '';
+        });
+        state.entities = { page: 1, pageSize: 100, total: 0, rows: [], dim: '', status: '', search: '' };
+        document.getElementById('oaExEntityDim').value = '';
+        document.getElementById('oaExEntityStatus').value = '';
+        document.getElementById('oaExEntitySearch').value = '';
+        await loadDetail(id);
+        await reloadEntities();
+    }
+
+    function resetDetail() {
+        state.selectedExecId = null;
+        state.detail = null;
+        document.getElementById('oaExDetailTitle').textContent = 'Execution Details';
+        document.getElementById('oaExDetailSubtitle').textContent =
+            'Select a row to view execution details, immutable config snapshots and entity progress.';
+        document.getElementById('oaExDetailTiles').hidden = true;
+        document.getElementById('oaExDetailTiles').innerHTML = '';
+        document.getElementById('oaExTabs').hidden = true;
+        ['entities','definition','workflow','evidence','scoring','questions'].forEach(function (t) {
+            const el = document.getElementById('oaExTab' + t.charAt(0).toUpperCase() + t.slice(1));
+            if (el) el.hidden = true;
+        });
+    }
+
+    async function loadDetail(id) {
+        try {
+            const url = U(API + '/executions/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            state.detail = (payload && (payload.data || payload.Data)) || null;
+            renderDetail();
+        } catch (err) {
+            setMessage('error', 'Failed to load execution: ' + (err.message || err));
+        }
+    }
+
+    function renderDetail() {
+        const d = state.detail;
+        if (!d) { resetDetail(); return; }
+        document.getElementById('oaExDetailTitle').textContent =
+            (d.executionName || d.ExecutionName || '') + '  (' + (d.executionCode || d.ExecutionCode || '') + ')';
+        document.getElementById('oaExDetailSubtitle').textContent =
+            (d.definitionName || d.DefinitionName || '') +
+            '  v' + (d.versionNumber || d.VersionNumber || '?') +
+            '  --  ' + (d.originType || d.OriginType || 'MANUAL');
+
+        const tiles = document.getElementById('oaExDetailTiles');
+        tiles.hidden = false;
+        tiles.innerHTML = tile('Status', d.statusName || d.StatusName || '')
+                        + tile('Total Entities', String(d.totalEntityCount || d.TotalEntityCount || 0))
+                        + tile('Completed',       String(d.completedEntityCount || d.CompletedEntityCount || 0))
+                        + tile('Owner', (function () {
+                            // 120 hybrid role+employee -- compose "Role (Employee)"; fall back gracefully.
+                            const rn = d.ownerRoleName    || d.OwnerRoleName    || '';
+                            const en = d.ownerDisplayName || d.OwnerDisplayName || '';
+                            if (rn && en) return rn + ' (' + en + ')';
+                            if (rn)       return rn + ' (role only)';
+                            if (en)       return en;
+                            return '(unassigned)';
+                          })())
+                        + tile('Planned Start',   formatDate(d.plannedStartDt || d.PlannedStartDt))
+                        + tile('Planned End',     formatDate(d.plannedEndDt   || d.PlannedEndDt));
+
+        document.getElementById('oaExTabs').hidden = false;
+        switchTab(state.detailTab || 'entities');
+
+        // JSON snapshots -- render pretty
+        setPre('oaExDefinitionPre', d.definitionSnapshotJson || d.DefinitionSnapshotJson);
+        setPre('oaExWorkflowPre',   d.workflowSnapshotJson   || d.WorkflowSnapshotJson);
+        setPre('oaExEvidencePre',   d.evidenceSnapshotJson   || d.EvidenceSnapshotJson);
+        setPre('oaExScoringPre',    d.scoringSnapshotJson    || d.ScoringSnapshotJson);
+        setPre('oaExQuestionsPre',  d.questionsSnapshotJson  || d.QuestionsSnapshotJson);
+    }
+
+    function tile(label, value) {
+        return '<div style="border:1px solid #e2e8f0; border-radius:6px; padding:6px 10px; background:#f8fafc; min-width:120px;">'
+             + '<div style="font-size:11px; color:#64748b;">' + wf.escape(label) + '</div>'
+             + '<div style="font-size:14px; font-weight:600; color:#0f172a;">' + wf.escape(value || '') + '</div>'
+             + '</div>';
+    }
+    function setPre(id, json) {
+        const el = document.getElementById(id);
+        if (!json) { el.textContent = '(empty)'; return; }
+        try { el.textContent = JSON.stringify(JSON.parse(json), null, 2); }
+        catch (_) { el.textContent = String(json); }
+    }
+
+    // -----------------------------------------------------------------
+    // Entities
+    // -----------------------------------------------------------------
+    async function reloadEntities() {
+        const body = document.getElementById('oaExEntityBody');
+        if (!state.selectedExecId) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No execution selected.</td></tr>';
+            wf.updatePager('oa-ex-entities', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.entities.dim)    qs.set('dimensionCode', state.entities.dim);
+            if (state.entities.status) qs.set('statusCode',    state.entities.status);
+            if (state.entities.search) qs.set('search',        state.entities.search);
+            qs.set('page',     String(state.entities.page));
+            qs.set('pageSize', String(state.entities.pageSize));
+            const url = U(API + '/executions/' + state.selectedExecId + '/entities?' + qs.toString());
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.entities.total = Number(payload.totalCount || payload.TotalCount || 0);
+            state.entities.rows  = payload.rows || payload.Rows || [];
+            populateDimFilter();
+            renderEntities();
+            wf.updatePager('oa-ex-entities', {
+                pageNumber : state.entities.page,
+                totalCount : state.entities.total,
+                pageSize   : state.entities.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function populateDimFilter() {
+        const sel = document.getElementById('oaExEntityDim');
+        if (sel.dataset.filled === '1') return;
+        const seen = new Set();
+        state.entities.rows.forEach(function (row) {
+            const code = row.dimensionCode || row.DimensionCode;
+            const name = row.dimensionName || row.DimensionName || code;
+            if (code && !seen.has(code)) {
+                seen.add(code);
+                const opt = document.createElement('option');
+                opt.value = code; opt.textContent = name || code;
+                sel.appendChild(opt);
+            }
+        });
+        if (seen.size) sel.dataset.filled = '1';
+    }
+
+    function renderEntities() {
+        const body = document.getElementById('oaExEntityBody');
+        if (!state.entities.rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No entities in this execution.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.entities.rows.map(function (row) {
+            const eid  = row.executionEntityId || row.ExecutionEntityId;
+            const dim  = row.dimensionName || row.DimensionName || row.dimensionCode || row.DimensionCode || '';
+            const name = row.entityName    || row.EntityName    || '';
+            const code = row.entityCode    || row.EntityCode    || '';
+            const st   = row.entityStatusCode || row.EntityStatusCode || '';
+            const grp  = row.sourceGroupOrder     ?? row.SourceGroupOrder ?? '';
+            const con  = row.sourceConditionOrder ?? row.SourceConditionOrder ?? '';
+            const src  = (grp !== '' || con !== '') ? ('G' + grp + '/C' + con) : '';
+            // 120 hybrid role+employee auditor -- composite label with graceful fallback.
+            const auRole = row.assignedAuditorRoleName || row.AssignedAuditorRoleName || '';
+            const auEmp  = row.assignedAuditorName     || row.AssignedAuditorName     || '';
+            const auditor = (auRole && auEmp) ? (auRole + ' (' + auEmp + ')')
+                          : (auRole ? auRole + ' (role only)'
+                          : (auEmp  ? auEmp
+                          : '<span style="color:#94a3b8;">(unassigned)</span>'));
+            return '<tr data-entity-id="' + eid + '">'
+                 + '<td>' + wf.escape(dim) + '</td>'
+                 + '<td>' + wf.escape(name) + '</td>'
+                 + '<td>' + wf.escape(code) + '</td>'
+                 + '<td>' + wf.badge(st) + '</td>'
+                 + '<td>' + wf.escape(src) + '</td>'
+                 + '<td>' + auditor + '</td>'
+                 + '<td><button type="button" class="pm-button" data-oa-ex-assign-auditor="' + eid + '">Assign</button></td>'
+                 + '</tr>';
+        }).join('');
+        // Bind Assign Auditor buttons (rebound on every render -- innerHTML wipes listeners).
+        body.querySelectorAll('button[data-oa-ex-assign-auditor]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const eid = Number(btn.getAttribute('data-oa-ex-assign-auditor'));
+                if (!Number.isNaN(eid)) openAuditorDialog(eid);
+            });
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // 120 -- per-entity Auditor Assign dialog
+    // -----------------------------------------------------------------
+    function wireAuditorDialog() {
+        document.getElementById('oaExAudClose') .addEventListener('click', closeAuditorDialog);
+        document.getElementById('oaExAudCancel').addEventListener('click', closeAuditorDialog);
+        document.getElementById('oaExAudSave')  .addEventListener('click', submitAuditor);
+    }
+
+    function closeAuditorDialog() { document.getElementById('oaExAuditorDialog').hidden = true; }
+
+    function showAudMsg(kind, text) {
+        const el = document.getElementById('oaExAudMsg');
+        el.hidden = false;
+        el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.border     = '1px solid ' + (kind === 'error' ? '#fecaca' : '#bbf7d0');
+    }
+
+    async function openAuditorDialog(entityId) {
+        if (!state.orgId || !state.selectedExecId) return;
+        state.audEntityId = entityId;
+        document.getElementById('oaExAudMsg').hidden = true;
+
+        // Show which entity row is being edited so the user has context.
+        const row = state.entities.rows.find(function (r) {
+            const rid = r.executionEntityId || r.ExecutionEntityId;
+            return String(rid) === String(entityId);
+        });
+        const label = row
+            ? ((row.entityName || row.EntityName || '') + '  (' + (row.entityCode || row.EntityCode || '') + ')')
+            : 'Entity #' + entityId;
+        document.getElementById('oaExAudEntityLabel').textContent = label;
+
+        // Seed the picker with the row's current auditor snapshot so
+        // reassignment starts from the current state instead of blank.
+        try {
+            await window.__roleHolderPicker.attach({
+                organizationId    : Number(state.orgId),
+                roleSelectId      : 'oaExAudRole',
+                employeeSelectId  : 'oaExAudEmp',
+                initialRoleId     : row && (row.assignedAuditorRoleId     || row.AssignedAuditorRoleId),
+                initialRoleName   : row && (row.assignedAuditorRoleName   || row.AssignedAuditorRoleName),
+                initialEmployeeId : row && (row.assignedAuditorEmployeeId || row.AssignedAuditorEmployeeId),
+                initialEmployeeName: row && (row.assignedAuditorName      || row.AssignedAuditorName),
+                allowEmpty        : true
+            });
+        } catch (_) { /* soft-fail -- dropdowns stay empty */ }
+
+        document.getElementById('oaExAuditorDialog').hidden = false;
+    }
+
+    async function submitAuditor() {
+        if (!state.audEntityId) return;
+        const s = window.__roleHolderPicker.readState('oaExAudRole', 'oaExAudEmp');
+        if (!s.roleId && !s.employeeId) {
+            showAudMsg('error', 'Pick a role or an employee.');
+            return;
+        }
+
+        const body = {
+            organizationId     : Number(state.orgId),
+            executionId        : Number(state.selectedExecId),
+            executionEntityId  : Number(state.audEntityId),
+            auditorRoleId      : s.roleId       || null,
+            auditorRoleName    : s.roleName     || null,
+            auditorEmployeeId  : s.employeeId   || null,
+            auditorDisplayName : s.employeeName || null,
+            actor              : null
+        };
+        try {
+            const url = U(API + '/executions/' + state.selectedExecId + '/entities/' + state.audEntityId + '/auditor');
+            const r = await fetch(url, {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify(body)
+            });
+            const j = await r.json().catch(function () { return null; });
+            if (!r.ok || (j && j.success === false)) {
+                showAudMsg('error', (j && (j.error || j.Error)) || ('HTTP ' + r.status));
+                return;
+            }
+            closeAuditorDialog();
+            reloadEntities();
+        } catch (err) {
+            showAudMsg('error', 'Failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Materialize dialog
+    // -----------------------------------------------------------------
+    function wireMaterializeDialog() {
+        document.getElementById('oaExMatClose').addEventListener('click', closeMaterialize);
+        document.getElementById('oaExMatCancel').addEventListener('click', closeMaterialize);
+        document.getElementById('oaExMatSave').addEventListener('click', submitMaterialize);
+        document.getElementById('oaExMatDef').addEventListener('change', function (e) {
+            state.matDefId = e.target.value ? Number(e.target.value) : null;
+            state.matScopeId = null;
+            populateMatScopes();
+        });
+        document.getElementById('oaExMatScope').addEventListener('change', function (e) {
+            state.matScopeId = e.target.value ? Number(e.target.value) : null;
+        });
+    }
+
+    async function openMaterialize() {
+        if (!state.orgId) { setMessage('error', 'Pick an organization first.'); return; }
+        state.matDefId = state.filterDefinitionId;
+        state.matScopeId = null;
+        document.getElementById('oaExMatMsg').hidden = true;
+        document.getElementById('oaExMatName').value  = '';
+        document.getElementById('oaExMatCode').value  = '';
+        document.getElementById('oaExMatStart').value = '';
+        document.getElementById('oaExMatEnd').value   = '';
+        // 120 hybrid Owner picker -- reset dropdowns via attach with no initial values.
+        if (state.orgId && window.__roleHolderPicker) {
+            try {
+                await window.__roleHolderPicker.attach({
+                    organizationId  : Number(state.orgId),
+                    roleSelectId    : 'oaExMatOwnerRole',
+                    employeeSelectId: 'oaExMatOwnerEmp',
+                    allowEmpty      : true
+                });
+            } catch (_) { /* soft-fail -- dropdowns stay empty */ }
+        }
+        document.getElementById('oaExMatTeam').value  = '';
+        document.getElementById('oaExMatNotes').value = '';
+
+        document.getElementById('oaExMatDialog').hidden = false;
+        await populateMatDefinitions();
+        if (state.matDefId) {
+            const sel = document.getElementById('oaExMatDef');
+            if (sel && [...sel.options].some(function (o) { return o.value === String(state.matDefId); })) {
+                sel.value = String(state.matDefId);
+                await populateMatScopes();
+            } else {
+                // Preselected definition isn't Approved / Active -- keep the
+                // dialog usable but call it out so the user isn't guessing.
+                const preset = state.matDefinitions.find(function (row) {
+                    const id = row.definitionId || row.DefinitionId;
+                    return String(id) === String(state.matDefId);
+                });
+                const st = preset && (preset.currentStatusName || preset.CurrentStatusName) || '(unknown)';
+                showMatMsg('error',
+                    'The selected definition is in "' + st + '" status. '
+                  + 'Only Approved or Active versions can be materialized. '
+                  + 'Pick another definition, or Submit + Approve the version first.');
+                state.matDefId = null;
+            }
+        }
+    }
+
+    function closeMaterialize() {
+        document.getElementById('oaExMatDialog').hidden = true;
+    }
+
+    async function populateMatDefinitions() {
+        const sel = document.getElementById('oaExMatDef');
+        sel.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows = payload.rows || payload.Rows || [];
+            state.matDefinitions = rows;
+            // BRD guard: only Approved / Active versions can be materialized.
+            // Filter the picker so users can never pick a Draft / UnderReview /
+            // Retired definition and hit VERSION_NOT_MATERIALIZABLE at submit.
+            const materializable = rows.filter(function (row) {
+                const st = row.currentStatusCode || row.CurrentStatusCode || '';
+                return st === 'Approved' || st === 'Active';
+            });
+            sel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = materializable.length
+                ? '-- pick a definition --'
+                : (rows.length
+                    ? 'No Approved / Active definitions available (see hint below).'
+                    : 'No definitions in this org.');
+            sel.appendChild(ph);
+            materializable.forEach(function (row) {
+                const id  = row.definitionId || row.DefinitionId;
+                const nm  = row.definitionName || row.DefinitionName || '';
+                const cd  = row.definitionCode || row.DefinitionCode || '';
+                const st  = row.currentStatusName || row.CurrentStatusName || '';
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = nm + (cd ? ' (' + cd + ')' : '') + (st ? '  --  ' + st : '');
+                sel.appendChild(opt);
+            });
+            // Explain the guard when we filtered anything out.
+            const filteredOut = rows.length - materializable.length;
+            const hint = document.getElementById('oaExMatHint');
+            if (filteredOut > 0 && hint) {
+                hint.hidden = false;
+                hint.textContent =
+                    filteredOut + ' definition(s) hidden because the current version is not Approved / Active. '
+                  + 'Submit the version for review and approve it to make it eligible.';
+            } else if (hint) {
+                hint.hidden = true;
+            }
+        } catch (err) {
+            sel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        }
+    }
+
+    async function populateMatScopes() {
+        const sel = document.getElementById('oaExMatScope');
+        if (!state.matDefId) {
+            sel.innerHTML = '<option value="">Pick a definition first</option>';
+            return;
+        }
+        sel.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '50');
+            const r = await fetch(U(API + '/definitions/' + state.matDefId + '/scope-resolutions?' + qs.toString()),
+                                 { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows = payload.rows || payload.Rows || [];
+            state.matScopes = rows;
+            sel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = ''; ph.textContent = rows.length ? '-- pick a snapshot --' : 'No snapshots. Run Scope Resolution first.';
+            sel.appendChild(ph);
+            rows.forEach(function (row) {
+                const id     = row.resolutionId       || row.ResolutionId;
+                const when   = formatDateTime(row.resolvedAt || row.ResolvedAt);
+                const purpose= row.resolutionPurpose  || row.ResolutionPurpose || '';
+                const total  = row.totalEntityCount   || row.TotalEntityCount || 0;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = '#' + id + '  --  ' + when + '  (' + purpose + ')  --  ' + total + ' entities';
+                sel.appendChild(opt);
+            });
+        } catch (err) {
+            sel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        }
+    }
+
+    async function submitMaterialize() {
+        const msg = document.getElementById('oaExMatMsg');
+        msg.hidden = true;
+        if (!state.matDefId)   { showMatMsg('error', 'Pick a definition.'); return; }
+        if (!state.matScopeId) { showMatMsg('error', 'Pick a scope resolution snapshot.'); return; }
+        // 120 hybrid Owner -- read picker state; SP auto-resolves the missing side.
+        const ownerState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaExMatOwnerRole', 'oaExMatOwnerEmp')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+
+        const body = {
+            organizationId    : Number(state.orgId),
+            definitionId      : state.matDefId,
+            versionId         : null,
+            scopeResolutionId : state.matScopeId,
+            executionCode     : val('oaExMatCode') || null,
+            executionName     : val('oaExMatName') || null,
+            originType        : 'MANUAL',
+            plannedStartDt    : val('oaExMatStart') || null,
+            plannedEndDt      : val('oaExMatEnd')   || null,
+            ownerRoleId       : ownerState.roleId       || null,
+            ownerRoleName     : ownerState.roleName     || null,
+            ownerEmployeeId   : ownerState.employeeId   || null,
+            ownerDisplayName  : ownerState.employeeName || null,
+            assignedTeamName  : val('oaExMatTeam')  || null,
+            notes             : val('oaExMatNotes') || null,
+            actor             : null
+        };
+        try {
+            const url = U(API + '/executions/materialize');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                showMatMsg('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            const newId = j && (j.executionId || j.ExecutionId);
+            closeMaterialize();
+            setMessage('ok', 'Execution materialized -- ' + (j.executionCode || j.ExecutionCode || '') +
+                        ' (' + (j.totalEntityCount || j.TotalEntityCount || 0) + ' entities).');
+            await reloadList();
+            if (newId) await selectExecution(Number(newId));
+        } catch (err) {
+            showMatMsg('error', 'Materialize failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function val(id) { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; }
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaExMessage');
+        el.hidden = false; el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    function showMatMsg(kind, text) {
+        const el = document.getElementById('oaExMatMsg');
+        el.hidden = false; el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    function formatDate(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return String(v);
+        return d.toISOString().slice(0, 10);
+    }
+    function formatDateTime(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return String(v);
+        return d.toISOString().replace('T', ' ').slice(0, 19);
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

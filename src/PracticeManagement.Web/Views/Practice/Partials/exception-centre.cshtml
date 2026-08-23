@@ -1,0 +1,264 @@
+@*
+    Exception Centre (migrations 161-163).
+    Rendered from Manage.cshtml when Model.Key == "exception-centre".
+
+    Admin lands on a list of Pending / Approved / Rejected requests
+    (org-scoped), can Approve (effective-until + note + optional
+    attachment) or Reject (reason). Auto-populated from gap analysis
+    when analyst ticks "Recommend an exception".
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>Requests raised from gap analyses. Approve with an effective-until date + note, or reject with a reason.</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="excListView" hidden>
+    @* Tabs (migration 184). The row-level requestType decides which
+       approve endpoint fires on the 3-dot menu, but the tab itself
+       filters the fetch so the grid only ever shows one bucket. *@
+    <div class="pm-tabs" role="tablist" aria-label="Exception Centre tabs"
+         style="border-bottom:1px solid #e2e8f0; display:flex; gap:4px; margin-bottom:12px;">
+        <button role="tab" class="pm-tab active" data-req-type="GAP_CANDIDATE" aria-selected="true"
+                style="border:none; background:transparent; padding:8px 14px; font-size:13px; cursor:pointer; border-bottom:2px solid transparent;">
+            Gap Candidate
+        </button>
+        <button role="tab" class="pm-tab" data-req-type="SLA_CANDIDATE" aria-selected="false"
+                style="border:none; background:transparent; padding:8px 14px; font-size:13px; cursor:pointer; border-bottom:2px solid transparent;">
+            SLA Candidate
+        </button>
+    </div>
+
+    <div class="pm-toolbar">
+        <select id="excFilterOrganization"><option value="">Select organization</option></select>
+        <select id="excFilterStatus">
+            <option value="">All statuses</option>
+            <option value="Pending" selected>Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Withdrawn">Withdrawn</option>
+            <option value="Expired">Expired</option>
+        </select>
+        <button class="pm-button" id="excExpireDueBtn" type="button" title="Sweep and expire Approved rows past their Valid Until date">
+            <i class="fa-solid fa-hourglass-end"></i> Expire due
+        </button>
+        <button class="pm-button icon" id="excRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="excTable">
+            <thead>
+                <tr>
+                    <th>Request</th>
+                    <th>Type</th>
+                    <th>Gap</th>
+                    <th>Requested</th>
+                    <th>Status</th>
+                    <th>Effective</th>
+                    <th>Approved by</th>
+                    <th>Att</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="excTableBody">
+                <tr><td colspan="9" class="pm-empty-row">Select an organization to load requests.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* Approve modal *@
+<div class="pm-modal" id="excApproveModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Approve exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-approve aria-label="Close">&times;</button>
+        </header>
+        <form id="excApproveForm" enctype="multipart/form-data">
+            <input type="hidden" id="excApproveId" />
+            <dl class="exc-meta" id="excApproveMeta"></dl>
+
+            @* Request-level fields (sir's spec). Fillable at approve time
+               if analyst did not capture them earlier. *@
+            <h3 style="margin: 12px 0 8px; font-size: 13px; color: #4a5568; text-transform: uppercase;">Request details</h3>
+            <div class="pm-form-grid">
+                <label>
+                    <span>Exception type</span>
+                    <select id="excApproveType">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Exception owner</span>
+                    <select id="excApproveOwner">
+                        <option value="">-- unassigned --</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Justification</span>
+                    <textarea id="excApproveJustification" rows="2" maxlength="5000"
+                              placeholder="Formal reason the exception is being requested..."></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Risk / Impact</span>
+                    <textarea id="excApproveRiskImpact" rows="2" maxlength="5000"
+                              placeholder="What business/regulatory exposure does this exception carry?"></textarea>
+                </label>
+                <label>
+                    <span>Linked practice</span>
+                    <select id="excApproveLinkedPracticeId">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Linked requirement ref</span>
+                    <input type="text" id="excApproveLinkedRequirementRef" maxlength="200"
+                           placeholder="e.g. ISO27001-A.9.2.3" />
+                </label>
+            </div>
+
+            <h3 style="margin: 16px 0 8px; font-size: 13px; color: #4a5568; text-transform: uppercase;">Approval</h3>
+            <div class="pm-form-grid">
+                <label>
+                    <span>Effective from</span>
+                    <input type="date" id="excApproveEffectiveFrom" />
+                </label>
+                <label>
+                    <span>Effective until (Valid Until)<span class="pm-required">*</span></span>
+                    <input type="date" id="excApproveEffectiveUntil" required />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Approval note<span class="pm-required">*</span></span>
+                    <textarea id="excApproveNote" rows="4" maxlength="5000" required
+                              placeholder="Rationale for approval, conditions, monitoring plan..."></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Compensating control <span class="pm-hint">(if applicable)</span></span>
+                    <textarea id="excApproveCompensatingControl" rows="2" maxlength="5000"
+                              placeholder="What alternate control mitigates the underlying risk while the primary is not met?"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Review frequency <span class="pm-hint">(if applicable)</span></span>
+                    <select id="excApproveReviewFrequency">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                @* Evidence-style capture -- same vocabulary as
+                   practice_instance_evidence. Attachment optional; if
+                   supplied, pick a method and provide the matching
+                   fields. Manual -> file; Automated -> location + locator. *@
+                <label class="pm-form-grid-full">
+                    <span>Approval evidence <span class="pm-hint">(optional)</span></span>
+                    <select id="excApproveMethod">
+                        <option value="">-- none --</option>
+                        <option value="Manual">Manual (upload a file)</option>
+                        <option value="Automated">Automated (link an external record)</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="excApproveEvidenceTypeWrap" hidden>
+                    <span>Evidence type</span>
+                    <select id="excApproveEvidenceType">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="excApproveFileWrap" hidden>
+                    <span>Approval note file<span class="pm-required">*</span></span>
+                    <input type="file" id="excApproveFile" />
+                </label>
+                <label id="excApproveLocationWrap" hidden>
+                    <span>Location<span class="pm-required">*</span></span>
+                    <input type="text" id="excApproveLocation" maxlength="500"
+                           placeholder="e.g. SharePoint / ServiceNow / DocuSign" />
+                </label>
+                <label id="excApproveLocatorWrap" hidden>
+                    <span>Locator<span class="pm-required">*</span></span>
+                    <input type="text" id="excApproveLocator" maxlength="500"
+                           placeholder="e.g. https://... or record id" />
+                </label>
+            </div>
+            <p class="pm-form-message" id="excApproveMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-approve>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Approve</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* Reject modal *@
+<div class="pm-modal" id="excRejectModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Reject exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-reject aria-label="Close">&times;</button>
+        </header>
+        <form id="excRejectForm">
+            <input type="hidden" id="excRejectId" />
+            <dl class="exc-meta" id="excRejectMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Rejection reason<span class="pm-required">*</span></span>
+                    <textarea id="excRejectReason" rows="4" maxlength="5000" required
+                              placeholder="Why this exception cannot be granted..."></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="excRejectMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-reject>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-ban"></i> Reject</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .exc-status-chip { display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .exc-pending   { background: #fefcbf; color: #744210; }
+    .exc-approved  { background: #c6f6d5; color: #22543d; }
+    .exc-rejected  { background: #fed7d7; color: #742a2a; }
+    .exc-withdrawn { background: #edf2f7; color: #4a5568; }
+
+    .exc-meta {
+        display: grid; grid-template-columns: 120px 1fr; row-gap: 6px; column-gap: 12px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+    }
+    .exc-meta dt { color: #718096; font-weight: 600; margin: 0;
+                   text-transform: uppercase; font-size: 11px; align-self: center; }
+    .exc-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+
+    /* Modal overlay (same defensive CSS as gap-detail so pm-modal
+       renders as a proper popup regardless of global stylesheet). */
+    .pm-modal {
+        position: fixed; inset: 0; z-index: 1100;
+        display: flex; align-items: flex-start; justify-content: center;
+        background: rgba(15, 23, 42, 0.55); padding: 40px 20px; overflow-y: auto;
+    }
+    .pm-modal[hidden] { display: none !important; }
+    .pm-modal-panel {
+        background: #fff; border-radius: 8px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+        padding: 20px; width: 100%; max-width: 560px;
+        max-height: calc(100vh - 80px); overflow-y: auto;
+    }
+    /* Wider variant for the Approve modal (12+ fields fit comfortably). */
+    .pm-modal-panel.pm-modal-wide { max-width: 900px; }
+    .pm-modal-panel > header {
+        display: flex; justify-content: space-between; align-items: center;
+        border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;
+    }
+    .pm-modal-panel > header h2 { margin: 0; font-size: 18px; color: #2d3748; }
+    .pm-modal-close { background: transparent; border: 0; padding: 0;
+        font-size: 26px; line-height: 1; cursor: pointer; color: #718096; }
+    .pm-modal-close:hover { color: #e53e3e; }
+    .pm-modal-footer { display: flex; justify-content: flex-end; gap: 8px;
+        margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+</style>
+
+<script src="~/js/ExceptionCentre/exception-centre.js" asp-append-version="true"></script>

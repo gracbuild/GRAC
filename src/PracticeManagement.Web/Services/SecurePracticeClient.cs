@@ -16,6 +16,15 @@ public sealed class SecurePracticeClient(HttpClient httpClient, IConfiguration c
     public Task<string> ManageAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
         SendAsync("secure/manage", token, request, cancellationToken);
 
+    // Pre-session sign-in. Called with a short-lived PM_LOGIN bootstrap token
+    // rather than a user session token — the session does not exist yet. Same
+    // envelope + freshness + nonce machinery as every other call.
+    public Task<string> AuthenticateAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/authenticate", token, request, cancellationToken);
+
+    public Task<string> SetPasswordAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/set-password", token, request, cancellationToken);
+
     private async Task<string> SendAsync(string path, string token, SecureRepositoryRequest request, CancellationToken cancellationToken)
     {
         request.TimestampUtc = DateTimeOffset.UtcNow;

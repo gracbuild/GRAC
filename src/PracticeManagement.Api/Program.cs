@@ -20,14 +20,58 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IPracticeRepositoryService, PracticeRepositoryService>();
+// Sign-in moved out of the Web tier so the database is reached only through
+// the API (secure/authenticate + secure/set-password). PasswordHasher is the
+// linked Web source file — see the .csproj.
+builder.Services.AddSingleton<PracticeManagement.Web.Security.PasswordHasher>();
+builder.Services.AddScoped<IPracticeAuthenticationService, PracticeAuthenticationService>();
 
 // Workflow layer (Q13/Q14/Q15 / §12.1.3 / §12.1.6). Charter §5 file — one-time wire-up.
 builder.Services.AddPracticePermissionService();
 builder.Services.AddPracticeTaskService();
 builder.Services.AddPracticeCustomGapService();
+builder.Services.AddPracticeWorkflowService();
+// Role / asset-category scoped event assurance (migrations 123/124).
+builder.Services.AddPracticeEventScopeService();
+// Practice view page + Configure (one instance per team) -- migration 139.
+builder.Services.AddPracticeConfigureService();
+// Resolve workspace: owner-scoped list + obligations/dependencies -- 140/141.
+builder.Services.AddPracticeResolveWorkspace();
 builder.Services.AddPracticeFeatureFlagService();
 builder.Services.AddPracticeOrganizationAccessService();
 builder.Services.AddPracticeInstanceWorkflow();
+// Document Upload + Acknowledgement module (migrations 146-152 / charter §5).
+// Two INDEPENDENT services: uploads (register + workflow) and
+// acknowledgements (admin batches for user-acknowledgement tracking).
+builder.Services.AddPracticeDocumentUploadService();
+builder.Services.AddPracticeDocumentAcknowledgementService();
+// Gap Centre v1.0 (migrations 156-158 / AES) -- lifecycle engine +
+// analysis + downstream link surface. Additive; existing CustomGap
+// service and controller remain untouched.
+builder.Services.AddPracticeGapLifecycleService();
+// Exception Centre (migrations 161-163) -- time-boxed acceptance of
+// gaps. Independent module; auto-triggered from gap analysis when
+// recommend_exception=1 and via manual requests later.
+builder.Services.AddPracticeExceptionCentreService();
+// Risk Centre (migrations 169-172) -- placeholder module for triaging
+// risk candidates raised from gap analysis when business_risk_present='Y'.
+// Full Risk Management module to follow.
+builder.Services.AddPracticeRiskCentreService();
+// Phase 2 Assurance Management -- Organization Portal (BRD Part 2).
+// New, INDEPENDENT module. Does not touch existing assurance/workflow/task engines.
+builder.Services.AddOrgAssuranceDefinitionService();
+builder.Services.AddOrgAssuranceQuestionService();
+builder.Services.AddOrgAssurancePlanService();
+builder.Services.AddOrgAssuranceExecutionService();
+builder.Services.AddOrgAssuranceObservationService();
+// Organization SLA Config (migrations 178/179/180). Independent module
+// that adopts Control Management SLA masters into per-org configs with
+// warning/escalation thresholds, notify roles, and process bindings.
+builder.Services.AddOrgSlaConfigService();
+// Gap Center is served by the pre-existing CustomGapService -- the
+// parallel OrgAssuranceGapService was retired in migration 113 in
+// favour of the unified custom_gap table. See
+// AddPracticeCustomGapService() above (already registered).
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
 builder.Services.AddSingleton<EnvelopeCrypto>();
 builder.Services.AddSingleton<SignedAccessTokenService>();

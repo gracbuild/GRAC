@@ -1,0 +1,1253 @@
+@*
+    Assurance Scope Builder (BRD Part 2 Sec 2) -- Phase 2 Stage 2.
+
+    Screen key : `org-assurance-scope-builder`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Scope Builder (migration 075)
+    Feature    : screen.org-assurance-scope-builder
+    Backend    :
+        GET  /practice/api/org-assurance/scope-dimensions
+        GET  /practice/api/org-assurance/scope-dimensions/{code}/values
+        GET  /practice/api/org-assurance/definitions/{id}?organizationId=
+        GET  /practice/api/org-assurance/definitions/{id}/scope?organizationId=
+        POST /practice/api/org-assurance/definitions/{id}/scope
+
+    UX:
+      * Expects ?definitionId=<long> in the URL. Without it, prompts the
+        user to open a definition from the Assurance Definitions screen.
+      * Loads the definition header + current scope tree.
+      * If the current version is Draft => edit mode.
+        Otherwise => read-only mode with a message.
+      * Groups combined by AND / OR (first group's operator is ignored).
+      * Each group holds one or more conditions. Conditions combined by
+        AND / OR (first condition in a group is ignored). Each condition
+        picks a dimension, optionally NOT, and either "include all" or
+        an explicit set of values (multi-select).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaScopeHeading">@Model.Title</h1>
+        <p id="oaScopeSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaScopeBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Definitions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaScopeUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-diagram-project pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaScopeUnavailableTitle">Scope Builder is not available.</h2>
+        <p id="oaScopeUnavailableBody">Open an Assurance Definition and click the Scope button.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaScopeRoot" hidden>
+    @* In-page picker. Lets the user open the Scope Builder directly
+       from the sidebar menu (no ?definitionId= required) and switch
+       between definitions without going back to the Definitions
+       screen. When the URL carries ?definitionId=X, that value is
+       preselected here on load. *@
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaScopePickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+            <span>Assurance Definition</span>
+            <select id="oaScopePickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">Select an organization first</option>
+            </select>
+        </label>
+    </div>
+
+    <div id="oaScopeBanner" hidden class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <span style="font-weight:600;" id="oaScopeDefName">Definition</span>
+            <span class="pm-badge" id="oaScopeDefStatus">Status</span>
+            <span style="color:#64748b;" id="oaScopeDefVersion">Version</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="oaScopeReloadBtn" type="button">Reload</button>
+            <button class="pm-button primary" id="oaScopeSaveBtn" type="button" disabled>Save Scope</button>
+        </div>
+    </div>
+
+    <div id="oaScopeReadonlyBanner" hidden
+         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+        This version is not a Draft, so the scope is shown read-only. Edit
+        the definition to create a new Draft version before changing scope.
+    </div>
+
+    <div id="oaScopeMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    @* ===================================================================
+       Mode toggle. Simple is the default; Advanced unlocks groups /
+       AND / OR / NOT / labels / non-pickable dimensions.
+       =================================================================== *@
+    <div id="oaScopeModeToggle" hidden style="margin:12px 0; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div style="font-size:13px; color:#475569;">
+            <strong style="color:#0f172a;">Mode:</strong>
+            <span id="oaScopeModeSimpleLabel" style="margin-left:8px;">Simple</span>
+            <span style="color:#94a3b8;">&middot;</span>
+            <span id="oaScopeModeAdvancedLabel">Advanced</span>
+            <span id="oaScopeModeHint" style="margin-left:12px; color:#64748b; font-style:italic;">
+                Simple mode is easiest for most cases. Switch to Advanced if you need AND / OR / NOT rules.
+            </span>
+        </div>
+        <div role="group" aria-label="Mode" style="display:inline-flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden;">
+            <button type="button" id="oaScopeModeSimpleBtn"   class="pm-button"
+                    style="border:none; border-radius:0; padding:4px 12px;" aria-pressed="true">Simple</button>
+            <button type="button" id="oaScopeModeAdvancedBtn" class="pm-button"
+                    style="border:none; border-radius:0; padding:4px 12px;" aria-pressed="false">Advanced</button>
+        </div>
+    </div>
+
+    @* ===================================================================
+       Simple Mode -- Filter cards
+       =================================================================== *@
+    <div id="oaScopeSimpleMode" hidden style="margin-top:12px;">
+        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:13px; color:#1e40af;">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            <strong>How to use this page:</strong>
+            Pick values under any of the filters below. The assurance will apply to items that match
+            <em>every filter you fill in</em>. Leave a filter empty to skip it.
+        </div>
+        <div id="oaScopeSimpleFilters" style="display:grid; grid-template-columns:1fr; gap:10px;"></div>
+    </div>
+
+    @* ===================================================================
+       Advanced Mode -- existing groups / conditions / operators UI
+       =================================================================== *@
+    <div id="oaScopeAdvancedMode" hidden>
+        <div id="oaScopeGroupsHost" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;"></div>
+
+        <div style="margin-top:12px;">
+            <button class="pm-button" id="oaScopeAddGroupBtn" type="button">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Group
+            </button>
+        </div>
+    </div>
+</section>
+
+@* Simple Mode filter card template *@
+<template id="oaScopeSimpleFilterTemplate">
+    <div class="oa-simple-filter" data-dim-code=""
+         style="border:1px solid #cbd5e1; border-radius:8px; background:#fff;">
+        <div class="oa-simple-filter-header"
+             style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; cursor:pointer;">
+            <div style="min-width:0; flex:1;">
+                <div data-role="dim-name" style="font-weight:600; color:#0f172a; font-size:14px;">Filter Name</div>
+                <div data-role="dim-summary" style="color:#64748b; font-size:12px; margin-top:2px;">Not filtered</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+                <span data-role="count-badge" class="pm-badge" hidden></span>
+                <i data-role="chevron" class="fa-solid fa-chevron-down" aria-hidden="true" style="color:#94a3b8;"></i>
+            </div>
+        </div>
+        <div class="oa-simple-filter-body" hidden
+             style="border-top:1px solid #e2e8f0; padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input data-role="search" type="text" placeholder="Search..."
+                       style="flex:1; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px;" />
+                <button data-role="select-all" type="button" class="pm-button">Select all</button>
+                <button data-role="clear"      type="button" class="pm-button">Clear</button>
+            </div>
+            <div data-role="list"
+                 style="max-height:220px; overflow:auto; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
+                <!-- Checkboxes rendered by JS. -->
+            </div>
+            <div data-role="status" style="font-size:12px; color:#64748b;"></div>
+        </div>
+    </div>
+</template>
+
+<template id="oaScopeGroupTemplate">
+    <div class="oa-scope-group" data-group-index=""
+         style="border:1px solid #cbd5e1; border-radius:8px; padding:12px; background:#f8fafc;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#475569;">
+                Combine with previous group:
+                <select data-role="group-operator"
+                        style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px;">
+                    <option value="AND">AND (both groups apply)</option>
+                    <option value="OR">OR (either group applies)</option>
+                </select>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#475569; flex:1; min-width:220px;">
+                Label:
+                <input data-role="group-label" type="text" maxlength="200" placeholder="Optional label for this group"
+                       style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; flex:1;" />
+            </label>
+            <button data-role="remove-group" type="button" class="pm-button"
+                    style="color:#b91c1c;" title="Remove this group">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div data-role="conditions-host" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div style="margin-top:8px;">
+            <button data-role="add-condition" class="pm-button" type="button">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Condition
+            </button>
+        </div>
+    </div>
+</template>
+
+<template id="oaScopeConditionTemplate">
+    <div class="oa-scope-condition"
+         style="border:1px solid #e2e8f0; border-radius:6px; padding:10px; background:#fff;">
+        <div style="display:grid; grid-template-columns:150px 1fr 140px 140px auto; gap:8px; align-items:center;">
+            <label style="font-size:12px; color:#475569;">
+                Match:
+                <select data-role="condition-operator"
+                        style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="AND">AND (all conditions)</option>
+                    <option value="OR">OR (any condition)</option>
+                </select>
+            </label>
+            <label style="font-size:12px; color:#475569;">
+                Filter By:
+                <select data-role="dimension"
+                        style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                </select>
+            </label>
+            <label style="font-size:12px; color:#475569; display:flex; align-items:center; gap:6px;">
+                <input data-role="is-not" type="checkbox" />
+                <span>Exclude selected</span>
+            </label>
+            <label style="font-size:12px; color:#475569; display:flex; align-items:center; gap:6px;">
+                <input data-role="include-all" type="checkbox" />
+                <span>Include all values</span>
+            </label>
+            <button data-role="remove-condition" type="button" class="pm-button"
+                    style="color:#b91c1c;" title="Remove this condition">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div data-role="values-host" style="margin-top:8px;">
+            <label style="font-size:12px; color:#475569;">Values:</label>
+            <select data-role="values" multiple size="5"
+                    style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; margin-top:4px;">
+            </select>
+            <div data-role="values-hint" style="font-size:11px; color:#64748b; margin-top:4px;"></div>
+        </div>
+    </div>
+</template>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        definitionId : null,
+        orgId        : null,          // resolved from the loaded definition
+        allOrgs      : [],            // caller's accessible orgs (from wf.loadOrgs)
+        definitionsById : {},         // cache of picker rows -> row (has organizationId)
+        header       : null,          // OrgAssuranceScopeHeader
+        definition   : null,          // Assurance Definition detail
+        dimensions   : [],            // 17 rows
+        valueCache   : {},            // dimensionCode -> [ {id, code, name} ]
+        model        : { groups: [] },// in-memory Advanced edit model
+
+        // ----- Simple Mode state -----
+        // 'simple' | 'advanced'. Set on load based on compatibility of
+        // the loaded scope; user can toggle.
+        mode         : 'simple',
+        // dimensionCode -> [ {entityId, entityCode, entityName} ]
+        simpleSelections : {},
+        // Free-text search input per dimension (survives collapse).
+        simpleSearches   : {}
+    };
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readDefinitionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('definitionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-definitions';
+    }
+
+    async function boot() {
+        document.getElementById('oaScopeBackBtn').setAttribute('href', backHref());
+
+        // Show the panel + picker unconditionally. The banner + editor
+        // stay hidden until a definition is selected.
+        document.getElementById('oaScopeRoot').hidden = false;
+
+        // 17 dimensions are session-wide, load once.
+        try {
+            await loadDimensions();
+        } catch (err) {
+            setMessage('error', 'Failed to load dimensions: ' + (err.message || err));
+        }
+
+        // Populate the org picker from the caller's accessible orgs.
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaScopePickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            setMessage('error', 'Your account is not linked to any organizations.');
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        // Optional pre-selection from ?definitionId=X.
+        state.definitionId = readDefinitionIdFromUrl();
+
+        orgSel.addEventListener('change', function () {
+            state.orgId        = orgSel.value || null;
+            state.definitionId = null;
+            state.definition   = null;
+            state.header       = null;
+            renderBanner();
+            renderReadonlyBannerIfNeeded();
+            document.getElementById('oaScopeGroupsHost').innerHTML = '';
+            document.getElementById('oaScopeSaveBtn').disabled = true;
+            document.getElementById('oaScopeBanner').hidden = true;
+            populateDefinitionPicker();
+        });
+
+        document.getElementById('oaScopePickDef').addEventListener('change', function (e) {
+            const id = e.target.value ? Number(e.target.value) : null;
+            if (id) selectDefinition(id);
+        });
+
+        wireStaticButtons();
+
+        // Kick things off with the first org.
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+        await populateDefinitionPicker();
+
+        // If a definitionId was in the URL, try to select it across the
+        // accessible orgs (it might not belong to the first org).
+        if (state.definitionId) {
+            await preselectFromUrl(orgs);
+        }
+    }
+
+    async function populateDefinitionPicker() {
+        const defSel = document.getElementById('oaScopePickDef');
+        defSel.innerHTML = '<option value="">Loading definitions...</option>';
+        defSel.disabled = true;
+
+        if (!state.orgId) {
+            defSel.innerHTML = '<option value="">Select an organization first</option>';
+            return;
+        }
+
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page',     '1');
+            qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows    = payload.rows || payload.Rows || [];
+            defSel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = rows.length ? '-- select a definition --' : 'No definitions in this organization.';
+            defSel.appendChild(ph);
+            rows.forEach(function (row) {
+                const id     = row.definitionId  || row.DefinitionId;
+                const code   = row.definitionCode|| row.DefinitionCode || '';
+                const name   = row.definitionName|| row.DefinitionName || '';
+                const status = row.currentStatusName || row.CurrentStatusName || '';
+                if (id != null) {
+                    // Cache the whole row so selectDefinition can pull the
+                    // authoritative organizationId without a round-trip.
+                    state.definitionsById[String(id)] = row;
+                }
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '') + (status ? '  –  ' + status : '');
+                defSel.appendChild(opt);
+            });
+            // If we already have a chosen definition, keep it selected.
+            if (state.definitionId) defSel.value = String(state.definitionId);
+        } catch (err) {
+            defSel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        } finally {
+            defSel.disabled = false;
+        }
+    }
+
+    async function preselectFromUrl(/*orgs*/) {
+        // selectDefinition is self-healing (walks accessible orgs when
+        // state.orgId is wrong), so just delegate. This also keeps the
+        // resolution logic in one place.
+        if (!state.definitionId) return;
+        await selectDefinition(state.definitionId);
+    }
+
+    async function selectDefinition(definitionId) {
+        state.definitionId = definitionId;
+        // Reflect selection in the URL so refresh keeps the choice.
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.set('definitionId', String(definitionId));
+            window.history.replaceState(null, '', u.toString());
+        } catch (_) { /* ignore */ }
+
+        // Resolve the correct organization for this definition. Cheap
+        // path: pull it from the picker row cache. Fallback path:
+        // walk accessible orgs (matches preselectFromUrl).
+        try {
+            await resolveOrgForDefinition(definitionId);
+        } catch (err) {
+            setMessage('error', 'Could not load definition #' + definitionId + ': ' + (err.message || err));
+            return;
+        }
+
+        try {
+            await loadScope();
+        } catch (err) {
+            setMessage('error', 'Failed to load scope: ' + (err.message || err));
+            return;
+        }
+
+        document.getElementById('oaScopeBanner').hidden = false;
+        renderBanner();
+        renderReadonlyBannerIfNeeded();
+        buildModelFromServer();
+        state.valueCache = {};   // avoid stale picks across definitions
+
+        // Pick the default mode based on the loaded scope. Empty and
+        // simple-compatible scopes default to Simple; anything using
+        // Advanced-only features (OR, NOT, multiple groups, include_all,
+        // non-pickable dimensions, duplicate dimensions in one group)
+        // starts in Advanced.
+        state.mode = isSimpleCompatible(state.model) ? 'simple' : 'advanced';
+        loadSimpleFromModel();
+        document.getElementById('oaScopeModeToggle').hidden = false;
+        applyMode();
+
+        document.getElementById('oaScopeSaveBtn').disabled = !state.header.isEditable;
+    }
+
+    // Resolves state.orgId and state.definition for the given
+    // definitionId. Tolerant of a state.orgId mismatch (which can
+    // happen when the user comes in with ?definitionId= from another
+    // org, or when the picker cache misses).
+    async function resolveOrgForDefinition(definitionId) {
+        const cached = state.definitionsById[String(definitionId)];
+        const cachedOrg = cached && String(
+            cached.organizationId || cached.OrganizationId || '');
+
+        // Build the search order: cached org (if any) -> current
+        // state.orgId -> every other accessible org.
+        const seen = new Set();
+        const orgsToTry = [];
+        function push(v) { if (v && !seen.has(v)) { seen.add(v); orgsToTry.push(v); } }
+        push(cachedOrg);
+        push(state.orgId);
+        (state.allOrgs || []).forEach(function (o) { push(o.value); });
+
+        let lastStatus = null;
+        for (const oid of orgsToTry) {
+            const url = U(API + '/definitions/' + definitionId + '?organizationId=' + encodeURIComponent(oid));
+            let r;
+            try { r = await fetch(url, { credentials: 'same-origin' }); }
+            catch (_) { continue; }
+            if (r.ok) {
+                const b = await r.json().catch(function () { return null; });
+                const d = (b && (b.data || b.Data)) || null;
+                if (d) {
+                    // Success -- sync the UI to the correct org.
+                    if (state.orgId !== String(oid)) {
+                        state.orgId = String(oid);
+                        const orgSel = document.getElementById('oaScopePickOrg');
+                        if (orgSel && orgSel.value !== state.orgId) {
+                            orgSel.value = state.orgId;
+                            // Rebuild the definitions picker for the newly
+                            // resolved org so subsequent selections work.
+                            await populateDefinitionPicker();
+                            const defSel = document.getElementById('oaScopePickDef');
+                            if (defSel) defSel.value = String(definitionId);
+                        }
+                    }
+                    state.definition = d;
+                    return;
+                }
+            } else {
+                lastStatus = r.status;
+            }
+        }
+        throw new Error(lastStatus
+            ? ('HTTP ' + lastStatus + ' -- definition not found in any accessible organization.')
+            : 'Definition not found in any accessible organization.');
+    }
+
+    // Preserved for external callers (Reload button).
+    async function loadDefinitionById(definitionId) {
+        await resolveOrgForDefinition(definitionId);
+    }
+
+    async function loadDimensions() {
+        const r = await fetch(U(API + '/scope-dimensions'), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' loading dimensions');
+        const b = await r.json();
+        state.dimensions = (b && (b.data || b.Data)) || [];
+    }
+
+    async function loadScope() {
+        if (!state.orgId || !state.definitionId) return; // selectDefinition guards this
+        const url = U(API + '/definitions/' + state.definitionId + '/scope?organizationId=' + encodeURIComponent(state.orgId));
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' loading scope');
+        const json = await r.json();
+
+        // The API returns { header: {..., isEditable, versionId, currentStatusCode},
+        // groups: [...], conditions: [...], values: [...] }.
+        // Flatten header fields onto state.header so existing callers
+        // (renderBanner / renderReadonlyBannerIfNeeded / renderGroups /
+        // buildModelFromServer / save button gating) keep working.
+        const hdr = (json && (json.header || json.Header)) || {};
+        state.header = {
+            // Header fields
+            definitionId      : hdr.definitionId      || hdr.DefinitionId,
+            versionId         : hdr.versionId         || hdr.VersionId,
+            currentVersionId  : hdr.currentVersionId  || hdr.CurrentVersionId,
+            currentStatusCode : hdr.currentStatusCode || hdr.CurrentStatusCode,
+            isEditable        : !!(hdr.isEditable    ?? hdr.IsEditable),
+            // Top-level arrays -- surfaced under the same object so
+            // buildModelFromServer can walk them uniformly.
+            groups     : (json && (json.groups     || json.Groups))     || [],
+            conditions : (json && (json.conditions || json.Conditions)) || [],
+            values     : (json && (json.values     || json.Values))     || []
+        };
+    }
+
+    function renderBanner() {
+        const d = state.definition;
+        const h = state.header;
+        if (!d || !h) {
+            document.getElementById('oaScopeDefName').textContent    = '';
+            document.getElementById('oaScopeDefStatus').textContent  = '';
+            document.getElementById('oaScopeDefVersion').textContent = '';
+            document.getElementById('oaScopeHeading').textContent    = 'Scope Builder';
+            document.getElementById('oaScopeSubtitle').textContent   =
+                'Pick an organization and an assurance definition to configure its scope.';
+            return;
+        }
+        document.getElementById('oaScopeDefName').textContent =
+            (d.definitionName || d.DefinitionName || '(no name)') +
+            '  (' + (d.definitionCode || d.DefinitionCode || '') + ')';
+        document.getElementById('oaScopeDefStatus').textContent = d.currentStatusName || d.CurrentStatusName || '';
+        document.getElementById('oaScopeDefVersion').textContent =
+            'v' + (d.currentVersionNumber || d.CurrentVersionNumber || h.versionId || '?');
+        document.getElementById('oaScopeHeading').textContent = 'Scope: ' + (d.definitionName || d.DefinitionName || '');
+        document.getElementById('oaScopeSubtitle').textContent =
+            'Configure the assurance scope using groups + conditions across 17 dimensions with AND / OR / NOT operators.';
+    }
+
+    function renderReadonlyBannerIfNeeded() {
+        const banner = document.getElementById('oaScopeReadonlyBanner');
+        if (!state.header) { banner.hidden = true; return; }
+        banner.hidden = !!state.header.isEditable;
+    }
+
+    // -----------------------------------------------------------------
+    // Server-tree -> edit model
+    // -----------------------------------------------------------------
+    function buildModelFromServer() {
+        const h        = state.header || {};
+        const groups   = Array.isArray(h.groups) ? h.groups : [];
+        const conds    = Array.isArray(h.conditions) ? h.conditions : [];
+        const vals     = Array.isArray(h.values) ? h.values : [];
+
+        state.model.groups = groups.map(function (g) {
+            const gid  = g.scopeGroupId;
+            const gCds = conds.filter(function (c) { return c.scopeGroupId === gid; })
+                             .sort(function (a, b) { return (a.conditionOrder||0) - (b.conditionOrder||0); });
+            return {
+                groupOperator : g.groupOperator || 'AND',
+                groupOrder    : g.groupOrder,
+                groupLabel    : g.groupLabel || '',
+                conditions    : gCds.map(function (c) {
+                    const cvs = vals.filter(function (v) { return v.scopeConditionId === c.scopeConditionId; });
+                    return {
+                        dimensionCode     : c.dimensionCode,
+                        isNot             : !!c.isNot,
+                        conditionOperator : c.conditionOperator || 'AND',
+                        conditionOrder    : c.conditionOrder,
+                        includeAll        : !!c.includeAll,
+                        values            : cvs.map(function (v) {
+                            return {
+                                entityId   : v.dimensionEntityId,
+                                entityCode : v.dimensionEntityCode,
+                                entityName : v.dimensionEntityName
+                            };
+                        })
+                    };
+                })
+            };
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Render
+    // -----------------------------------------------------------------
+    function renderGroups() {
+        const host = document.getElementById('oaScopeGroupsHost');
+        host.innerHTML = '';
+        state.model.groups.forEach(function (g, gi) {
+            host.appendChild(renderGroup(g, gi));
+        });
+        if (state.model.groups.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'pm-empty';
+            empty.style.padding = '16px';
+            empty.textContent = state.header.isEditable
+                ? 'No scope defined yet. Click "Add Group" to start.'
+                : 'No scope has been configured for this version.';
+            host.appendChild(empty);
+        }
+        // Read-only lock down.
+        if (!state.header.isEditable) {
+            document.querySelectorAll('.oa-scope-group input, .oa-scope-group select, .oa-scope-group button')
+                    .forEach(function (el) { el.disabled = true; });
+            document.getElementById('oaScopeAddGroupBtn').disabled = true;
+        }
+    }
+
+    function renderGroup(g, gi) {
+        const tpl  = document.getElementById('oaScopeGroupTemplate').content.cloneNode(true);
+        const root = tpl.querySelector('.oa-scope-group');
+        root.setAttribute('data-group-index', String(gi));
+
+        const opSel = root.querySelector('[data-role="group-operator"]');
+        opSel.value = g.groupOperator || 'AND';
+        if (gi === 0) { opSel.disabled = true; opSel.title = 'First group has no previous group to combine with.'; }
+        opSel.addEventListener('change', function () { g.groupOperator = opSel.value; });
+
+        const lbl = root.querySelector('[data-role="group-label"]');
+        lbl.value = g.groupLabel || '';
+        lbl.addEventListener('input', function () { g.groupLabel = lbl.value; });
+
+        root.querySelector('[data-role="remove-group"]').addEventListener('click', function () {
+            if (!confirm('Remove this group and its conditions?')) return;
+            state.model.groups.splice(gi, 1);
+            renderGroups();
+        });
+
+        const condHost = root.querySelector('[data-role="conditions-host"]');
+        g.conditions.forEach(function (c, ci) {
+            condHost.appendChild(renderCondition(g, gi, c, ci));
+        });
+
+        root.querySelector('[data-role="add-condition"]').addEventListener('click', function () {
+            g.conditions.push({
+                dimensionCode     : state.dimensions.length ? state.dimensions[0].dimensionCode : '',
+                isNot             : false,
+                conditionOperator : 'AND',
+                conditionOrder    : g.conditions.length + 1,
+                includeAll        : false,
+                values            : []
+            });
+            renderGroups();
+        });
+
+        return root;
+    }
+
+    function renderCondition(g, gi, c, ci) {
+        const tpl  = document.getElementById('oaScopeConditionTemplate').content.cloneNode(true);
+        const root = tpl.querySelector('.oa-scope-condition');
+
+        // Combine operator.
+        const opSel = root.querySelector('[data-role="condition-operator"]');
+        opSel.value = c.conditionOperator || 'AND';
+        if (ci === 0) { opSel.disabled = true; opSel.title = 'First condition in a group has no previous condition.'; }
+        opSel.addEventListener('change', function () { c.conditionOperator = opSel.value; });
+
+        // Filter By (dimension) select.
+        const dimSel = root.querySelector('[data-role="dimension"]');
+        state.dimensions.forEach(function (d) {
+            const opt = document.createElement('option');
+            opt.value = d.dimensionCode;
+            opt.textContent = d.dimensionName + (d.isPickable ? '' : ' (no value picker yet)');
+            opt.setAttribute('data-pickable', d.isPickable ? '1' : '0');
+            dimSel.appendChild(opt);
+        });
+        dimSel.value = c.dimensionCode || (state.dimensions[0] ? state.dimensions[0].dimensionCode : '');
+        dimSel.addEventListener('change', function () {
+            c.dimensionCode = dimSel.value;
+            c.values = [];
+            populateValues(root, c);
+        });
+
+        // NOT + include-all.
+        const notCb = root.querySelector('[data-role="is-not"]');
+        notCb.checked = !!c.isNot;
+        notCb.addEventListener('change', function () { c.isNot = notCb.checked; });
+
+        const allCb = root.querySelector('[data-role="include-all"]');
+        allCb.checked = !!c.includeAll;
+        allCb.addEventListener('change', function () {
+            c.includeAll = allCb.checked;
+            populateValues(root, c);
+        });
+
+        root.querySelector('[data-role="remove-condition"]').addEventListener('click', function () {
+            if (!confirm('Remove this condition?')) return;
+            g.conditions.splice(ci, 1);
+            renderGroups();
+        });
+
+        // Initial values render.
+        populateValues(root, c);
+
+        return root;
+    }
+
+    async function populateValues(condRoot, c) {
+        const sel  = condRoot.querySelector('[data-role="values"]');
+        const hint = condRoot.querySelector('[data-role="values-hint"]');
+        sel.innerHTML = '';
+
+        if (c.includeAll) {
+            sel.disabled = true;
+            hint.textContent = 'All values of this dimension will be in scope.';
+            return;
+        }
+        const dim = state.dimensions.find(function (d) { return d.dimensionCode === c.dimensionCode; });
+        if (!dim) {
+            sel.disabled = true;
+            hint.textContent = 'Pick a dimension first.';
+            return;
+        }
+        if (!dim.isPickable) {
+            sel.disabled = true;
+            hint.textContent = 'Value picker for "' + dim.dimensionName +
+                '" is not yet wired to a Practice Management lookup. Tick "Include all values" to keep this condition, or wait for Stage 2b.';
+            return;
+        }
+        sel.disabled = !state.header.isEditable;
+        hint.textContent = 'Loading...';
+
+        try {
+            const arr = await fetchValues(dim.dimensionCode);
+            sel.innerHTML = '';
+            arr.forEach(function (v) {
+                const opt = document.createElement('option');
+                opt.value = String(v.id != null ? v.id : '');
+                const label = (v.name || '') + (v.code ? ' (' + v.code + ')' : '');
+                opt.textContent = label;
+                opt.setAttribute('data-code', v.code || '');
+                opt.setAttribute('data-name', v.name || '');
+                if (c.values.some(function (x) { return String(x.entityId) === opt.value; })) {
+                    opt.selected = true;
+                }
+                sel.appendChild(opt);
+            });
+            hint.textContent = arr.length
+                ? 'Hold Ctrl / Cmd to multi-select.'
+                : 'No values available for this dimension in this organization.';
+
+            sel.addEventListener('change', function () {
+                c.values = Array.from(sel.selectedOptions).map(function (opt) {
+                    return {
+                        entityId   : Number(opt.value),
+                        entityCode : opt.getAttribute('data-code') || null,
+                        entityName : opt.getAttribute('data-name') || null
+                    };
+                });
+            });
+        } catch (err) {
+            hint.textContent = 'Failed to load values: ' + (err.message || err);
+        }
+    }
+
+    async function fetchValues(dimensionCode) {
+        if (state.valueCache[dimensionCode]) return state.valueCache[dimensionCode];
+        const url = U(API + '/scope-dimensions/' + encodeURIComponent(dimensionCode) +
+                      '/values?organizationId=' + encodeURIComponent(state.orgId));
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b = await r.json();
+        const rows = (b && (b.data || b.Data)) || [];
+        // Normalize casing.
+        const norm = rows.map(function (v) {
+            return { id: v.id != null ? v.id : v.Id,
+                     code: v.code != null ? v.code : v.Code,
+                     name: v.name != null ? v.name : v.Name };
+        }).filter(function (v) { return v.id != null; });
+        state.valueCache[dimensionCode] = norm;
+        return norm;
+    }
+
+    // -----------------------------------------------------------------
+    // Static wiring
+    // -----------------------------------------------------------------
+    function wireStaticButtons() {
+        document.getElementById('oaScopeAddGroupBtn').addEventListener('click', function () {
+            if (!state.definitionId || !state.header) {
+                setMessage('error', 'Pick a definition first.');
+                return;
+            }
+            if (!state.header.isEditable) {
+                setMessage('error', 'This version is not a Draft, so scope cannot be edited here.');
+                return;
+            }
+            state.model.groups.push({
+                groupOperator : state.model.groups.length === 0 ? 'AND' : 'AND',
+                groupOrder    : state.model.groups.length + 1,
+                groupLabel    : '',
+                conditions    : []
+            });
+            renderGroups();
+        });
+
+        document.getElementById('oaScopeReloadBtn').addEventListener('click', async function () {
+            if (!state.definitionId || !state.orgId) {
+                setMessage('error', 'Pick an organization and definition first.');
+                return;
+            }
+            state.valueCache = {};
+            try {
+                await loadDefinitionById(state.definitionId);
+                await loadScope();
+                buildModelFromServer();
+                loadSimpleFromModel();
+                state.mode = isSimpleCompatible(state.model) ? 'simple' : 'advanced';
+                applyMode();
+                renderBanner();
+                renderReadonlyBannerIfNeeded();
+                document.getElementById('oaScopeSaveBtn').disabled = !state.header.isEditable;
+                setMessage('ok', 'Reloaded.');
+            } catch (err) {
+                setMessage('error', 'Reload failed: ' + (err.message || err));
+            }
+        });
+
+        document.getElementById('oaScopeSaveBtn').addEventListener('click', saveScope);
+
+        // Mode toggle.
+        document.getElementById('oaScopeModeSimpleBtn').addEventListener('click', function () {
+            if (state.mode === 'simple') return;
+            // Advanced -> Simple is only allowed when the current
+            // Advanced model is simple-compatible. Otherwise ask the
+            // user to first clean up the advanced expression.
+            if (!isSimpleCompatible(state.model)) {
+                setMessage('error',
+                    'This scope uses Advanced features (OR / NOT / multiple groups / "All values" / dimensions with no picker). ' +
+                    'Remove those in Advanced mode before switching to Simple.');
+                return;
+            }
+            state.mode = 'simple';
+            loadSimpleFromModel();
+            applyMode();
+            setMessage('ok', 'Switched to Simple mode.');
+        });
+        document.getElementById('oaScopeModeAdvancedBtn').addEventListener('click', function () {
+            if (state.mode === 'advanced') return;
+            // Simple -> Advanced: convert simpleSelections into groups so
+            // the user can extend the rule freely.
+            state.model = buildModelFromSimple();
+            state.mode  = 'advanced';
+            applyMode();
+            setMessage('ok', 'Switched to Advanced mode.');
+        });
+    }
+
+    async function saveScope() {
+        if (!state.header.isEditable) return;
+
+        // Simple Mode: translate simpleSelections into the same JSON shape
+        // the backend already understands. One group, N conditions (one
+        // per non-empty dimension), AND-combined, no NOT, no include_all.
+        // Advanced Mode: use the model as edited by the user.
+        const modelToSend = state.mode === 'simple'
+            ? buildModelFromSimple()
+            : state.model;
+
+        const body = {
+            organizationId : Number(state.orgId),
+            definitionId   : Number(state.definitionId),
+            actor          : null,
+            groups         : modelToSend.groups.map(function (g, gi) {
+                return {
+                    groupOperator : g.groupOperator || 'AND',
+                    groupOrder    : gi + 1,
+                    groupLabel    : g.groupLabel || null,
+                    conditions    : g.conditions.map(function (c, ci) {
+                        return {
+                            dimensionCode     : c.dimensionCode,
+                            isNot             : !!c.isNot,
+                            conditionOperator : c.conditionOperator || 'AND',
+                            conditionOrder    : ci + 1,
+                            includeAll        : !!c.includeAll,
+                            values            : (c.values || []).map(function (v) {
+                                return {
+                                    entityId   : v.entityId,
+                                    entityCode : v.entityCode || null,
+                                    entityName : v.entityName || null
+                                };
+                            })
+                        };
+                    })
+                };
+            })
+        };
+
+        // Front-end validation: every non-includeAll condition needs at
+        // least one selected value.
+        for (let gi = 0; gi < body.groups.length; gi++) {
+            const g = body.groups[gi];
+            for (let ci = 0; ci < g.conditions.length; ci++) {
+                const c = g.conditions[ci];
+                if (!c.dimensionCode) {
+                    setMessage('error', (state.mode === 'simple'
+                        ? 'Pick a filter for row ' + (ci + 1) + '.'
+                        : 'Group ' + (gi+1) + ' condition ' + (ci+1) + ': pick a dimension.'));
+                    return;
+                }
+                if (!c.includeAll && (!c.values || c.values.length === 0)) {
+                    setMessage('error', (state.mode === 'simple'
+                        ? 'Pick at least one value for every filter you fill in.'
+                        : 'Group ' + (gi+1) + ' condition ' + (ci+1) +
+                          ': pick at least one value or enable "All values".'));
+                    return;
+                }
+            }
+        }
+
+        try {
+            const url = U(API + '/definitions/' + state.definitionId + '/scope');
+            const r = await fetch(url, {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Scope saved.');
+        } catch (err) {
+            setMessage('error', 'Save failed: ' + (err.message || err));
+        }
+    }
+
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaScopeMessage');
+        el.hidden = false;
+        el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+
+    // ==================================================================
+    // Simple Mode
+    // ==================================================================
+
+    // A model is "simple-compatible" if it can be represented as a single
+    // AND-only group of AND-only conditions, each on a distinct pickable
+    // dimension, with no NOT and no include_all.
+    function isSimpleCompatible(model) {
+        if (!model || !model.groups || model.groups.length === 0) return true;
+        if (model.groups.length > 1) return false;
+        const g = model.groups[0];
+        if ((g.groupOperator || 'AND') !== 'AND') return false;
+        const seen = new Set();
+        for (const c of (g.conditions || [])) {
+            if (c.isNot) return false;
+            if ((c.conditionOperator || 'AND') !== 'AND') return false;
+            if (c.includeAll) return false;
+            if (!c.dimensionCode) return false;
+            const dim = state.dimensions.find(function (d) { return d.dimensionCode === c.dimensionCode; });
+            if (!dim || !dim.isPickable) return false;
+            if (seen.has(c.dimensionCode)) return false;
+            seen.add(c.dimensionCode);
+        }
+        return true;
+    }
+
+    // Copy the Advanced model's conditions into state.simpleSelections
+    // so switching modes preserves picks.
+    function loadSimpleFromModel() {
+        state.simpleSelections = {};
+        if (!state.model.groups || state.model.groups.length === 0) return;
+        const g = state.model.groups[0];
+        for (const c of (g.conditions || [])) {
+            if (!c.dimensionCode) continue;
+            state.simpleSelections[c.dimensionCode] = (c.values || []).map(function (v) {
+                return {
+                    entityId   : v.entityId,
+                    entityCode : v.entityCode || null,
+                    entityName : v.entityName || null
+                };
+            });
+        }
+    }
+
+    // Build the same JSON shape the Advanced model uses, but from the
+    // Simple selections. One AND group; one AND condition per non-empty
+    // dimension; no NOT, no include_all.
+    function buildModelFromSimple() {
+        const conditions = [];
+        state.dimensions
+            .filter(function (d) { return d.isPickable; })
+            .forEach(function (d) {
+                const vals = state.simpleSelections[d.dimensionCode] || [];
+                if (!vals.length) return;
+                conditions.push({
+                    dimensionCode     : d.dimensionCode,
+                    isNot             : false,
+                    conditionOperator : 'AND',
+                    conditionOrder    : conditions.length + 1,
+                    includeAll        : false,
+                    values            : vals.slice()
+                });
+            });
+        return {
+            groups: conditions.length ? [{
+                groupOperator : 'AND',
+                groupOrder    : 1,
+                groupLabel    : '',
+                conditions    : conditions
+            }] : []
+        };
+    }
+
+    // Show the requested mode section and reflect it in the toggle.
+    function applyMode() {
+        const simple = state.mode === 'simple';
+        document.getElementById('oaScopeSimpleMode').hidden   = !simple;
+        document.getElementById('oaScopeAdvancedMode').hidden =  simple;
+
+        const sBtn = document.getElementById('oaScopeModeSimpleBtn');
+        const aBtn = document.getElementById('oaScopeModeAdvancedBtn');
+        sBtn.setAttribute('aria-pressed', String(simple));
+        aBtn.setAttribute('aria-pressed', String(!simple));
+        sBtn.style.background = simple ? '#0f172a' : '';
+        sBtn.style.color      = simple ? '#fff'    : '';
+        aBtn.style.background = simple ? '' : '#0f172a';
+        aBtn.style.color      = simple ? '' : '#fff';
+
+        if (simple) renderSimpleFilters();
+        else        renderGroups();
+    }
+
+    // Render one filter card per pickable dimension.
+    function renderSimpleFilters() {
+        const host = document.getElementById('oaScopeSimpleFilters');
+        host.innerHTML = '';
+        const dims = state.dimensions.filter(function (d) { return d.isPickable; });
+        if (!dims.length) {
+            host.innerHTML = '<div class="pm-empty" style="padding:12px;">No pickable dimensions are wired to a Practice Management lookup yet.</div>';
+            return;
+        }
+        dims.forEach(function (dim) {
+            host.appendChild(renderSimpleFilterCard(dim));
+        });
+        if (!state.header.isEditable) {
+            host.querySelectorAll('input, button').forEach(function (el) { el.disabled = true; });
+        }
+    }
+
+    function renderSimpleFilterCard(dim) {
+        const tpl  = document.getElementById('oaScopeSimpleFilterTemplate').content.cloneNode(true);
+        const root = tpl.querySelector('.oa-simple-filter');
+        root.setAttribute('data-dim-code', dim.dimensionCode);
+
+        root.querySelector('[data-role="dim-name"]').textContent = 'Filter by ' + dim.dimensionName;
+        updateSimpleFilterSummary(root, dim);
+
+        // Header click toggles the body.
+        const header  = root.querySelector('.oa-simple-filter-header');
+        const body    = root.querySelector('.oa-simple-filter-body');
+        const chev    = root.querySelector('[data-role="chevron"]');
+        header.addEventListener('click', async function (e) {
+            // Don't collapse when clicking on the badge.
+            if (e.target.closest('[data-role="count-badge"]')) return;
+            const nowHidden = !body.hidden;
+            body.hidden = nowHidden;
+            chev.className = 'fa-solid ' + (nowHidden ? 'fa-chevron-down' : 'fa-chevron-up');
+            if (!nowHidden) {
+                // Expanding -- load values if not cached, then render.
+                await ensureValuesLoaded(dim.dimensionCode, body);
+                renderSimpleValueList(root, dim);
+                const search = root.querySelector('[data-role="search"]');
+                if (search) search.focus();
+            }
+        });
+
+        // Search input.
+        const search = root.querySelector('[data-role="search"]');
+        search.value = state.simpleSearches[dim.dimensionCode] || '';
+        search.addEventListener('input', function () {
+            state.simpleSearches[dim.dimensionCode] = search.value;
+            renderSimpleValueList(root, dim);
+        });
+
+        // Select all / Clear -- affect only currently filtered rows.
+        root.querySelector('[data-role="select-all"]').addEventListener('click', function () {
+            const visible = filteredValuesFor(dim.dimensionCode, state.simpleSearches[dim.dimensionCode] || '');
+            const current = state.simpleSelections[dim.dimensionCode] || [];
+            const byId = new Map(current.map(function (v) { return [String(v.entityId), v]; }));
+            visible.forEach(function (v) {
+                if (v.id == null) return;
+                byId.set(String(v.id), { entityId: v.id, entityCode: v.code || null, entityName: v.name || null });
+            });
+            state.simpleSelections[dim.dimensionCode] = Array.from(byId.values());
+            renderSimpleValueList(root, dim);
+            updateSimpleFilterSummary(root, dim);
+        });
+        root.querySelector('[data-role="clear"]').addEventListener('click', function () {
+            state.simpleSelections[dim.dimensionCode] = [];
+            renderSimpleValueList(root, dim);
+            updateSimpleFilterSummary(root, dim);
+        });
+
+        return root;
+    }
+
+    async function ensureValuesLoaded(dimCode, cardBody) {
+        if (state.valueCache[dimCode]) return;
+        const status = cardBody.querySelector('[data-role="status"]');
+        const list   = cardBody.querySelector('[data-role="list"]');
+        list.innerHTML = '';
+        if (status) status.textContent = 'Loading values...';
+        try {
+            const url = U(API + '/scope-dimensions/' + encodeURIComponent(dimCode) +
+                          '/values?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            state.valueCache[dimCode] = rows.map(function (v) {
+                return { id: v.id != null ? v.id : v.Id,
+                         code: v.code != null ? v.code : v.Code,
+                         name: v.name != null ? v.name : v.Name };
+            }).filter(function (v) { return v.id != null; });
+        } catch (err) {
+            state.valueCache[dimCode] = [];
+            if (status) status.textContent = 'Failed to load values: ' + (err.message || err);
+        }
+    }
+
+    function filteredValuesFor(dimCode, search) {
+        const all = state.valueCache[dimCode] || [];
+        const q = String(search || '').trim().toLowerCase();
+        if (!q) return all;
+        return all.filter(function (v) {
+            const n = String(v.name || '').toLowerCase();
+            const c = String(v.code || '').toLowerCase();
+            return n.indexOf(q) >= 0 || c.indexOf(q) >= 0;
+        });
+    }
+
+    function renderSimpleValueList(cardRoot, dim) {
+        const list   = cardRoot.querySelector('[data-role="list"]');
+        const status = cardRoot.querySelector('[data-role="status"]');
+        const search = state.simpleSearches[dim.dimensionCode] || '';
+        const values = filteredValuesFor(dim.dimensionCode, search);
+        const selected = state.simpleSelections[dim.dimensionCode] || [];
+        const selectedIds = new Set(selected.map(function (v) { return String(v.entityId); }));
+
+        if (!values.length) {
+            list.innerHTML = '<div style="padding:8px; color:#94a3b8; font-size:12px;">' +
+                (state.valueCache[dim.dimensionCode] && state.valueCache[dim.dimensionCode].length
+                    ? 'No matches.'
+                    : 'No values available for this organization.') + '</div>';
+        } else {
+            list.innerHTML = values.map(function (v) {
+                const id = String(v.id);
+                const label = (v.name || '') + (v.code ? ' (' + v.code + ')' : '');
+                return '<label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; cursor:pointer;">'
+                     + '<input type="checkbox" data-role="value" data-id="' + wf.escape(id)
+                     + '" data-code="' + wf.escape(v.code || '')
+                     + '" data-name="' + wf.escape(v.name || '') + '"'
+                     + (selectedIds.has(id) ? ' checked' : '') + ' />'
+                     + '<span>' + wf.escape(label) + '</span>'
+                     + '</label>';
+            }).join('');
+        }
+
+        list.querySelectorAll('input[data-role="value"]').forEach(function (cb) {
+            cb.addEventListener('change', function () {
+                const id   = cb.getAttribute('data-id');
+                const code = cb.getAttribute('data-code') || null;
+                const name = cb.getAttribute('data-name') || null;
+                const list = state.simpleSelections[dim.dimensionCode] || [];
+                if (cb.checked) {
+                    if (!list.some(function (v) { return String(v.entityId) === id; })) {
+                        list.push({ entityId: Number(id), entityCode: code, entityName: name });
+                    }
+                } else {
+                    const idx = list.findIndex(function (v) { return String(v.entityId) === id; });
+                    if (idx >= 0) list.splice(idx, 1);
+                }
+                state.simpleSelections[dim.dimensionCode] = list;
+                updateSimpleFilterSummary(cardRoot, dim);
+            });
+        });
+
+        if (status) {
+            const total  = (state.valueCache[dim.dimensionCode] || []).length;
+            const shown  = values.length;
+            const chosen = selected.length;
+            status.textContent = chosen + ' selected'
+                + (search ? ' · showing ' + shown + ' of ' + total : ' · ' + total + ' available');
+        }
+    }
+
+    function updateSimpleFilterSummary(cardRoot, dim) {
+        const selected = state.simpleSelections[dim.dimensionCode] || [];
+        const summary  = cardRoot.querySelector('[data-role="dim-summary"]');
+        const badge    = cardRoot.querySelector('[data-role="count-badge"]');
+        if (!selected.length) {
+            summary.textContent = 'Not filtered (all ' + dim.dimensionName.toLowerCase() + ' will be in scope)';
+            badge.hidden = true;
+            badge.textContent = '';
+        } else {
+            const names = selected.map(function (v) { return v.entityName || v.entityCode || ('#' + v.entityId); });
+            const preview = names.slice(0, 3).join(', ') + (names.length > 3 ? ', +' + (names.length - 3) + ' more' : '');
+            summary.textContent = selected.length + ' selected: ' + preview;
+            badge.hidden = false;
+            badge.textContent = selected.length + ' selected';
+        }
+    }
+
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

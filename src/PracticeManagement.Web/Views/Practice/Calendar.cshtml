@@ -39,6 +39,90 @@
         </div>
     </div>
 
+    <!--
+        Unified Calendar filters. The frontend keeps these values in
+        localStorage so returning to the page restores the same view.
+        Every filter narrows the merged event set (Practice Instance +
+        Assurance Plan / Plan Item / Execution / Observation / Gap).
+        Owner picker reuses window.__roleHolderPicker from
+        _workflow-common.cshtml, matching every Assurance dialog.
+    -->
+    <div class="cal-filter-panel" id="calFilterPanel">
+        <div class="cal-filter-row">
+            <div class="cal-filter-group" data-cal-filter-group="sourceModules">
+                <span class="cal-filter-label">Modules</span>
+                <div class="cal-chip-row" data-cal-chip-row>
+                    <button type="button" class="cal-chip source-PracticeInstance active" data-cal-chip-value="PracticeInstance"><span class="cal-chip-dot"></span>Practice Instance</button>
+                    <button type="button" class="cal-chip source-AssurancePlan active" data-cal-chip-value="AssurancePlan"><span class="cal-chip-dot"></span>Plan</button>
+                    <button type="button" class="cal-chip source-AssurancePlanItem active" data-cal-chip-value="AssurancePlanItem"><span class="cal-chip-dot"></span>Plan Item</button>
+                    <button type="button" class="cal-chip source-AssuranceExecution active" data-cal-chip-value="AssuranceExecution"><span class="cal-chip-dot"></span>Execution</button>
+                    <button type="button" class="cal-chip source-AssuranceObservation active" data-cal-chip-value="AssuranceObservation"><span class="cal-chip-dot"></span>Observation</button>
+                    <button type="button" class="cal-chip source-AssuranceGap active" data-cal-chip-value="AssuranceGap"><span class="cal-chip-dot"></span>Gap</button>
+                </div>
+            </div>
+        </div>
+        <div class="cal-filter-row">
+            <div class="cal-filter-group" data-cal-filter-group="statuses">
+                <span class="cal-filter-label">Status</span>
+                <div class="cal-chip-row" data-cal-chip-row>
+                    <button type="button" class="cal-chip status-chip status-Upcoming" data-cal-chip-value="Upcoming">Upcoming</button>
+                    <button type="button" class="cal-chip status-chip status-InProgress" data-cal-chip-value="InProgress">In Progress</button>
+                    <button type="button" class="cal-chip status-chip status-Overdue" data-cal-chip-value="Overdue">Overdue</button>
+                    <button type="button" class="cal-chip status-chip status-Open" data-cal-chip-value="Open">Open</button>
+                    <button type="button" class="cal-chip status-chip status-Planned" data-cal-chip-value="Planned">Planned</button>
+                    <button type="button" class="cal-chip status-chip status-Closed" data-cal-chip-value="Closed">Closed</button>
+                    <button type="button" class="cal-chip status-chip status-Skipped" data-cal-chip-value="Skipped">Skipped</button>
+                    <button type="button" class="cal-chip status-chip status-Moved" data-cal-chip-value="Moved">Moved</button>
+                </div>
+            </div>
+            <div class="cal-filter-group" data-cal-filter-group="criticalities">
+                <span class="cal-filter-label">Criticality</span>
+                <div class="cal-chip-row" data-cal-chip-row>
+                    <button type="button" class="cal-chip crit-chip crit-Critical" data-cal-chip-value="Critical">Critical</button>
+                    <button type="button" class="cal-chip crit-chip crit-High"     data-cal-chip-value="High">High</button>
+                    <button type="button" class="cal-chip crit-chip crit-Medium"   data-cal-chip-value="Medium">Medium</button>
+                    <button type="button" class="cal-chip crit-chip crit-Low"      data-cal-chip-value="Low">Low</button>
+                </div>
+            </div>
+        </div>
+        <div class="cal-filter-row">
+            <div class="cal-filter-group cal-filter-owner">
+                <span class="cal-filter-label">Owner</span>
+                <select id="calFilterOwnerRole" class="cal-filter-select" aria-label="Owner Role">
+                    <option value="">Loading roles...</option>
+                </select>
+                <select id="calFilterOwnerEmp" class="cal-filter-select" aria-label="Owner Employee (current holder)">
+                    <option value="">-- pick a role first --</option>
+                </select>
+            </div>
+            <div class="cal-filter-group">
+                <span class="cal-filter-label">Definition</span>
+                <select id="calFilterDefinition" class="cal-filter-select">
+                    <option value="">All definitions</option>
+                </select>
+            </div>
+            <div class="cal-filter-group cal-filter-search">
+                <span class="cal-filter-label">Search</span>
+                <input id="calFilterSearch" type="search" class="cal-filter-input" placeholder="Title, owner or entity..." />
+            </div>
+            <button type="button" class="pm-button small" id="calFilterReset" title="Clear all filters">
+                <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset
+            </button>
+        </div>
+    </div>
+
+    <!-- Legend: one dot per source module so users can decode chip colors. -->
+    <div class="cal-legend" id="calLegend" aria-label="Event color legend">
+        <div class="cal-legend-item"><span class="cal-legend-swatch source-PracticeInstance"></span>Practice Instance</div>
+        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssurancePlan"></span>Plan</div>
+        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssurancePlanItem"></span>Plan Item</div>
+        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssuranceExecution"></span>Execution</div>
+        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssuranceObservation"></span>Observation</div>
+        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssuranceGap"></span>Gap</div>
+        <div class="cal-legend-sep"></div>
+        <div class="cal-legend-item"><span class="cal-legend-swatch status-Overdue"></span>Overdue border</div>
+    </div>
+
     <!-- Calendar grid -->
     <div id="calGrid" class="cal-grid cal-month-view">
         <!-- Rendered by JavaScript -->

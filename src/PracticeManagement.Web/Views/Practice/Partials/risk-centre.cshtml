@@ -1,0 +1,1040 @@
+@*
+    Risk Centre (migrations 169-172, 176, 204-207).
+    Rendered from Manage.cshtml when Model.Key == "risk-centre".
+
+    Two tabs, because the BRD has two things and they are not the same
+    thing (BRD §3):
+
+      Candidates     potential risks raised by a GRAC source, awaiting
+                     the initial assessment (BRD: "Initial Risk Analysis") that §1 makes mandatory.
+      Risk Register  the authoritative repository of risks that have
+                     completed that assessment (§9).
+
+    Two routes converge on the register (§4):
+      A  Source -> Candidate -> Analysis -> Register
+      B  Create Custom Risk (creation + analysis in one form) -> Register
+
+    Route B lives on the Register tab, not the Candidates tab, because
+    §4B is explicit that a custom risk has no candidate stage.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>Assess before register. Risk candidates raised by Gap, Exception, Assurance, Obligation and other GRAC sources are assessed here before entering the Risk Register; authorised users can also create a custom risk directly.</p>
+    </div>
+</div>
+
+<div class="pm-tabs risk-tabs" role="tablist">
+    <button type="button" class="risk-tab is-active" data-risk-tab="candidates" role="tab" aria-selected="true">
+        <i class="fa-solid fa-inbox"></i> Risk Candidates
+    </button>
+    <button type="button" class="risk-tab" data-risk-tab="register" role="tab" aria-selected="false">
+        <i class="fa-solid fa-book"></i> Risk Register
+    </button>
+    @* BRD §23 — separate visibility for Candidates and Register, plus the
+       §19 approval queue and the §21 notification outbox. *@
+    <button type="button" class="risk-tab" data-risk-tab="dashboard" role="tab" aria-selected="false">
+        <i class="fa-solid fa-chart-pie"></i> Dashboard
+    </button>
+    <button type="button" class="pm-button icon risk-tab-action" id="riskConfigBtn"
+            title="Risk Centre settings" aria-label="Risk Centre settings">
+        <i class="fa-solid fa-gear"></i>
+    </button>
+</div>
+
+@* ================= Tab 1 — Risk Candidates (BRD §6, §16) ============ *@
+<section class="pm-panel" id="riskListView" hidden>
+    <div class="pm-toolbar">
+        <select id="riskFilterOrganization"><option value="">Select organization</option></select>
+        <select id="riskFilterStatus">
+            <option value="">All statuses</option>
+            @* 'Pending' is the stored code for BRD §16 "New" — see migration 205. *@
+            <option value="Pending" selected>New</option>
+            <option value="UnderAnalysis">Under assessment</option>
+            <option value="ClarificationRequired">Clarification required</option>
+            <option value="AnalysisCompleted">Assessment completed</option>
+            <option value="Registered">Registered</option>
+            <option value="Rejected">Rejected</option>
+            <option value="ClosedAsDuplicate">Closed as duplicate</option>
+            <option value="Withdrawn">Withdrawn</option>
+            <option value="Accepted">Accepted (legacy)</option>
+        </select>
+        <select id="riskFilterSource"><option value="">All sources</option></select>
+        <button class="pm-button icon" id="riskRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="riskTable">
+            <thead>
+                <tr>
+                    <th>Candidate</th>
+                    <th>Source</th>
+                    <th>Rating</th>
+                    <th>Analyst</th>
+                    <th>Identified</th>
+                    <th>Status</th>
+                    <th>Registered risk</th>
+                    <th>Att</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="riskTableBody">
+                <tr><td colspan="9" class="pm-empty-row">Select an organization to load candidates.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ================= Tab 2 — Risk Register (BRD §9, §17, §23) ========= *@
+<section class="pm-panel" id="riskRegisterView" hidden>
+    <div class="pm-toolbar">
+        <select id="regFilterStatus">
+            <option value="">All statuses</option>
+            <option value="Active" selected>Active</option>
+            <option value="UnderTreatment">Under treatment</option>
+            <option value="Accepted">Accepted</option>
+            <option value="Monitoring">Monitoring</option>
+            <option value="Closed">Closed</option>
+            <option value="Retired">Retired</option>
+        </select>
+        <select id="regFilterSource"><option value="">All sources</option></select>
+        <select id="regFilterCategory"><option value="">All categories</option></select>
+        <select id="regFilterRating">
+            <option value="">All ratings</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+        </select>
+        @* A registered risk with no rating is outstanding work, not bad
+           data — so it is filterable, not hidden. *@
+        <select id="regFilterPending">
+            <option value="">Scored and unscored</option>
+            <option value="1">Analysis pending</option>
+            <option value="0">Analysis done</option>
+        </select>
+        <input type="search" id="regFilterSearch" placeholder="Search title / statement / RSK-..." />
+        <button class="pm-button icon" id="regRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+        @* BRD §4B / §11 — Route B lives here, next to the register it feeds. *@
+        <button class="pm-button primary" id="regCustomBtn" type="button">
+            <i class="fa-solid fa-plus"></i> Create custom risk
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="regTable">
+            <thead>
+                <tr>
+                    <th>Risk ID</th>
+                    <th>Risk</th>
+                    <th>Category</th>
+                    <th>Source</th>
+                    <th>Rating</th>
+                    <th>Owner</th>
+                    <th>Status</th>
+                    <th>Registered</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="regTableBody">
+                <tr><td colspan="9" class="pm-empty-row">Select an organization to load the register.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ================= Tab 3 — Dashboard (BRD §19, §21, §23) =========== *@
+<section class="pm-panel" id="riskDashboardView" hidden>
+    <div class="pm-toolbar">
+        <label class="risk-inline-label">
+            Trend window
+            <select id="dashTrendMonths">
+                <option value="6">6 months</option>
+                <option value="12" selected>12 months</option>
+                <option value="24">24 months</option>
+            </select>
+        </label>
+        <button class="pm-button icon" id="dashRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    @* --- Risk Candidates block (§23) --- *@
+    <h3 class="risk-subhead">Risk candidates</h3>
+    <div class="risk-tiles" id="dashCandidateTiles"></div>
+
+    @* --- Approval queue (§19) --- *@
+    <h3 class="risk-subhead">Awaiting approval</h3>
+    <div class="pm-table-wrap">
+        <table id="approvalTable">
+            <thead>
+                <tr>
+                    <th>Candidate</th><th>Risk statement</th><th>Category</th>
+                    <th>Rating</th><th>Owner</th><th>Analysed</th><th>Waiting</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="approvalTableBody">
+                <tr><td colspan="8" class="pm-empty-row">Nothing awaiting approval.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* --- Candidate ageing (§23) --- *@
+    <h3 class="risk-subhead">Candidate ageing <span class="pm-hint">(open candidates only)</span></h3>
+    <div class="risk-two-col">
+        <div class="risk-bars" id="dashAgeing"></div>
+        <div class="pm-table-wrap">
+            <table id="ageingTable">
+                <thead>
+                    <tr><th>Candidate</th><th>Source</th><th>Status</th><th>Analyst</th><th>Age</th></tr>
+                </thead>
+                <tbody id="ageingTableBody">
+                    <tr><td colspan="5" class="pm-empty-row">No open candidates.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    @* --- Risk Register block (§23) --- *@
+    <h3 class="risk-subhead">Risk register</h3>
+    <div class="risk-tiles" id="dashRegisterTiles"></div>
+
+    <div class="risk-grid-4">
+        <div><h4 class="risk-subhead">By rating</h4>       <div class="risk-bars" id="dashByRating"></div></div>
+        <div><h4 class="risk-subhead">By category</h4>     <div class="risk-bars" id="dashByCategory"></div></div>
+        <div><h4 class="risk-subhead">By source</h4>       <div class="risk-bars" id="dashBySource"></div></div>
+        <div><h4 class="risk-subhead">By business unit</h4><div class="risk-bars" id="dashByUnit"></div></div>
+        <div><h4 class="risk-subhead">By owner</h4>        <div class="risk-bars" id="dashByOwner"></div></div>
+        <div><h4 class="risk-subhead">Candidates by source</h4><div class="risk-bars" id="dashCandBySource"></div></div>
+    </div>
+
+    @* --- Trend (§23) --- *@
+    <h3 class="risk-subhead">Risk trend</h3>
+    <div class="pm-table-wrap">
+        <table id="trendTable">
+            <thead>
+                <tr><th>Month</th><th>Candidates raised</th><th>Risks registered</th><th>Risks closed</th><th>Net</th></tr>
+            </thead>
+            <tbody id="trendTableBody"></tbody>
+        </table>
+    </div>
+
+    @* --- Overdue risk actions (§23), read from Task Centre --- *@
+    <h3 class="risk-subhead">Overdue risk actions <span class="pm-hint">(from Task Centre)</span></h3>
+    <div class="pm-table-wrap">
+        <table id="overdueTable">
+            <thead>
+                <tr><th>Task</th><th>Title</th><th>Owner</th><th>Priority</th><th>Due</th><th>SLA</th></tr>
+            </thead>
+            <tbody id="overdueTableBody">
+                <tr><td colspan="6" class="pm-empty-row">No overdue risk actions.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* --- Notification outbox (§21) --- *@
+    <h3 class="risk-subhead">
+        Notification outbox
+        <span class="pm-hint">records who should be told — delivery is a dispatcher's job</span>
+    </h3>
+    <div class="pm-toolbar">
+        <select id="notifFilterStatus">
+            <option value="">All</option>
+            <option value="Pending" selected>Pending</option>
+            <option value="Sent">Sent</option>
+            <option value="Failed">Failed</option>
+            <option value="Suppressed">Suppressed</option>
+        </select>
+        <button class="pm-button" id="notifSweepBtn" type="button">
+            <i class="fa-solid fa-rotate"></i> Run sweep
+        </button>
+        <span class="pm-hint" id="notifCounts"></span>
+    </div>
+    <div class="pm-table-wrap">
+        <table id="notifTable">
+            <thead>
+                <tr><th>Event</th><th>Subject</th><th>Recipient</th><th>Why</th><th>Status</th><th>Occurred</th></tr>
+            </thead>
+            <tbody id="notifTableBody">
+                <tr><td colspan="6" class="pm-empty-row">No notifications recorded.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ================= Settings modal (BRD §19, §22) ==================== *@
+<div class="pm-modal" id="riskConfigModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Risk Centre settings</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-config aria-label="Close">&times;</button>
+        </header>
+        <form id="riskConfigForm">
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full risk-check">
+                    <input type="checkbox" id="cfgApprovalRequired" />
+                    <span>Require formal approval before a risk is registered</span>
+                </label>
+                <label>
+                    <span>Only for risks rated at or above</span>
+                    <select id="cfgMinRating">
+                        <option value="">Every risk</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Approver role</span>
+                    <select id="cfgApproverRole"><option value="">Any authorised user</option></select>
+                </label>
+                <label class="pm-form-grid-full risk-check">
+                    <input type="checkbox" id="cfgDefaultTreatment" />
+                    <span>Pre-tick "raise a treatment task" on the Risk Register</span>
+                </label>
+                <label class="pm-form-grid-full risk-check">
+                    <input type="checkbox" id="cfgNotifications" />
+                    <span>Record notification obligations for risk workflow events</span>
+                </label>
+                <label class="pm-form-grid-full risk-check">
+                    <input type="checkbox" id="cfgAllowLegacyAccept" />
+                    <span>
+                        Allow the legacy "Accept" triage
+                        <span class="pm-hint">superseded by Register — enable only while migrating</span>
+                    </span>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Notes</span>
+                    <textarea id="cfgNotes" rows="2" maxlength="1000"></textarea>
+                </label>
+            </div>
+
+            <h3 class="risk-subhead">Who is notified (BRD §21)</h3>
+            <div class="pm-table-wrap">
+                <table id="cfgNotifyTable">
+                    <thead><tr><th>Event</th><th>Roles notified</th></tr></thead>
+                    <tbody id="cfgNotifyBody"></tbody>
+                </table>
+            </div>
+            <p class="pm-hint">
+                Configured through <code>grac_practice.org_risk_config_notify_role</code>.
+                Participants named by the workflow itself — the analyst, the risk owner,
+                the approver role — are always notified and need no configuration.
+            </p>
+
+            <p class="pm-form-message" id="cfgMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-config>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Approval decision modal (BRD §19) ================ *@
+<div class="pm-modal" id="riskApprovalModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Review risk for registration</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-approval aria-label="Close">&times;</button>
+        </header>
+        <form id="riskApprovalForm">
+            <input type="hidden" id="apCandidateId" />
+            <dl class="risk-meta" id="apMeta"></dl>
+            <p class="pm-hint">
+                Validate the risk classification and rating. Approving does not register the
+                risk — registration stays a separate, deliberate act.
+            </p>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Remark <span class="pm-hint">(required when returning for further assessment)</span></span>
+                    <textarea id="apRemark" rows="3" maxlength="4000"></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="apMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-approval>Cancel</button>
+                <button type="button" class="pm-button" id="apReturnBtn">
+                    <i class="fa-solid fa-rotate-left"></i> Return for further assessment
+                </button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Approve</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Treatment task modal (BRD §22) =================== *@
+<div class="pm-modal" id="riskTreatmentModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Raise a treatment task</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-treatment aria-label="Close">&times;</button>
+        </header>
+        <form id="riskTreatmentForm">
+            <input type="hidden" id="trRiskId" />
+            <dl class="risk-meta" id="trMeta"></dl>
+            <p class="pm-hint">
+                Registration does not create treatment work by itself. This hands the action to
+                Task Centre as a task candidate, where its owner, priority and SLA are confirmed.
+            </p>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Task title</span>
+                    <input type="text" id="trTitle" maxlength="250"
+                           placeholder="Defaults to &quot;Risk treatment: &lt;risk title&gt;&quot;" />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>What needs doing</span>
+                    <textarea id="trDescription" rows="3" maxlength="4000"></textarea>
+                </label>
+                <label>
+                    <span>Priority</span>
+                    <select id="trPriority">
+                        <option value="">Derive from the risk rating</option>
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Proposed owner</span>
+                    <select id="trOwner"><option value="">Task Centre's owner ladder</option></select>
+                </label>
+                <label class="pm-form-grid-full risk-check">
+                    <input type="checkbox" id="trAllowAdditional" />
+                    <span>
+                        This is an additional action for the same risk
+                        <span class="pm-hint">leave unticked to avoid raising a duplicate</span>
+                    </span>
+                </label>
+            </div>
+
+            <h3 class="risk-subhead">Existing treatment work</h3>
+            <div class="pm-table-wrap">
+                <table id="trWorkTable">
+                    <thead><tr><th>Kind</th><th>Ref</th><th>Title</th><th>Owner</th><th>Status</th><th>Due</th></tr></thead>
+                    <tbody id="trWorkBody"></tbody>
+                </table>
+            </div>
+
+            <p class="pm-form-message" id="trMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-treatment>Close</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-list-check"></i> Raise task candidate</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Candidate detail modal =========================== *@
+<div class="pm-modal" id="riskDetailModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="riskDetailTitle">Risk candidate</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-detail aria-label="Close">&times;</button>
+        </header>
+        <div style="padding:0 4px 8px;">
+            <dl class="risk-meta" id="riskDetailMeta"></dl>
+
+            @* BRD §20 — every retained analysis version. *@
+            <h3 class="risk-subhead">Assessment history</h3>
+            <div id="riskAnalysisHistory" class="risk-history"></div>
+
+            @* Task Centre integration (Task Centre BRD §15 / §14). *@
+            <div id="riskRelatedTasks" style="margin-top:14px;"></div>
+        </div>
+        <footer>
+            <button class="pm-button" type="button" data-close-risk-detail>Close</button>
+        </footer>
+    </div>
+</div>
+
+@* Shared across Gap / Risk / Observation — see the partial's header. *@
+<partial name="Partials/_related-tasks-panel" />
+
+@* ================= Risk Assessment modal (BRD §7.1) =================
+    NAMING: the BRD calls this the "Initial Risk Analysis" and every
+    database object, procedure and API route keeps that word —
+    risk_analysis, sp_risk_analysis_save, GET /{id}/analysis. Only the
+    user-facing label is "Assessment", because that is what the business
+    calls it. Renaming the schema would break the BRD traceability the
+    whole module is documented against, for a vocabulary preference.
+=================================================================== *@
+<div class="pm-modal" id="riskAnalysisModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Risk assessment</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-analysis aria-label="Close">&times;</button>
+        </header>
+        <form id="riskAnalysisForm">
+            <input type="hidden" id="anCandidateId" />
+            <dl class="risk-meta" id="anMeta"></dl>
+
+            @* FIVE FIELDS, DELIBERATELY.
+               Category, likelihood and impact are NOT asked here — they
+               are stage 2, done from the Risk Register once the risk is
+               recorded. A candidate arriving from a Gap rarely carries
+               enough to score honestly, and demanding a score at the
+               front door produces invented numbers, not safer ones. *@
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Risk statement<span class="pm-required">*</span></span>
+                    <textarea id="anStatement" rows="2" maxlength="1000" required
+                              placeholder="There is a risk that ... leading to ..."></textarea>
+                </label>
+                <label>
+                    <span>Threat<span class="pm-required">*</span></span>
+                    <select id="anThreat" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Vulnerability<span class="pm-required">*</span></span>
+                    <select id="anVulnerability" required><option value="">-- select --</option></select>
+                </label>
+                @* Shown only when "Others" is chosen. The procedure
+                   enforces the same rule (56403 / 56405), so a stale
+                   client cannot save an unnamed "Others". *@
+                <label class="pm-form-grid-full" id="anThreatOtherWrap" hidden>
+                    <span>Describe the threat<span class="pm-required">*</span></span>
+                    <textarea id="anThreatDescription" rows="2" maxlength="4000"
+                              placeholder="What is the threat?"></textarea>
+                </label>
+                <label class="pm-form-grid-full" id="anVulnOtherWrap" hidden>
+                    <span>Describe the vulnerability<span class="pm-required">*</span></span>
+                    <textarea id="anVulnerabilityDescription" rows="2" maxlength="4000"
+                              placeholder="What is the weakness the threat exploits?"></textarea>
+                </label>
+                <label>
+                    <span>Risk owner<span class="pm-required">*</span></span>
+                    <select id="anOwner" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Business function<span class="pm-required">*</span></span>
+                    <select id="anBusinessFunction" required><option value="">-- select --</option></select>
+                </label>
+            </div>
+            <p class="pm-form-message" id="anMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-analysis>Cancel</button>
+                @* BRD §8B — "the analysis determines that the candidate does
+                   not constitute a risk". That decision belongs next to the
+                   assessment that reached it, not in a row menu. Reuses the
+                   existing reject modal so the mandatory-reason rule lives
+                   in one place. *@
+                <button type="button" class="pm-button danger" id="anRejectBtn">
+                    <i class="fa-solid fa-ban"></i> Not a risk — reject
+                </button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save assessment</button>
+                @* BRD §8A — enabled once an assessment exists; the API still
+                   re-checks completeness, this is only a UI affordance. *@
+                <button type="button" class="pm-button primary" id="anSaveRegisterBtn">
+                    <i class="fa-solid fa-book-bookmark"></i> Save &amp; register
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Duplicate detection modal (BRD §15) ============== *@
+<div class="pm-modal" id="riskDuplicateModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Possible duplicate risks</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-duplicate aria-label="Close">&times;</button>
+        </header>
+        <div style="padding:0 4px 8px;">
+            <p class="pm-hint">
+                These registered risks look similar. You may continue and register a separate
+                risk, or close this candidate as a duplicate of one of them.
+            </p>
+            <div class="pm-table-wrap">
+                <table id="dupTable">
+                    <thead>
+                        <tr>
+                            <th>Risk ID</th><th>Risk</th><th>Source</th>
+                            <th>Rating</th><th>Status</th><th>Match</th><th aria-label="Actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="dupTableBody"></tbody>
+                </table>
+            </div>
+            <p class="pm-form-message" id="dupMessage" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="pm-modal-footer">
+            <button type="button" class="pm-button" data-close-risk-duplicate>Cancel</button>
+            <button type="button" class="pm-button primary" id="dupContinueBtn">
+                <i class="fa-solid fa-arrow-right"></i> Not a duplicate — continue
+            </button>
+        </footer>
+    </div>
+</div>
+
+@* ================= Custom risk modal (BRD §4B, §11) ================= *@
+<div class="pm-modal" id="riskCustomModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Create custom risk</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-custom aria-label="Close">&times;</button>
+        </header>
+        <form id="riskCustomForm">
+            <p class="pm-hint">
+                Creation and assessment in one step — a custom risk has no candidate stage.
+                The same five fields as a candidate assessment, so both routes enter the
+                register having answered the same questions. Scoring is done afterwards,
+                from the Risk Register.
+            </p>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Risk title<span class="pm-required">*</span></span>
+                    <input type="text" id="cxTitle" maxlength="300" required />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Risk statement<span class="pm-required">*</span></span>
+                    <textarea id="cxStatement" rows="2" maxlength="1000" required
+                              placeholder="There is a risk that ... leading to ..."></textarea>
+                </label>
+                <label>
+                    <span>Threat<span class="pm-required">*</span></span>
+                    <select id="cxThreat" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Vulnerability<span class="pm-required">*</span></span>
+                    <select id="cxVulnerability" required><option value="">-- select --</option></select>
+                </label>
+                <label class="pm-form-grid-full" id="cxThreatOtherWrap" hidden>
+                    <span>Describe the threat<span class="pm-required">*</span></span>
+                    <textarea id="cxThreatDescription" rows="2" maxlength="4000"></textarea>
+                </label>
+                <label class="pm-form-grid-full" id="cxVulnOtherWrap" hidden>
+                    <span>Describe the vulnerability<span class="pm-required">*</span></span>
+                    <textarea id="cxVulnerabilityDescription" rows="2" maxlength="4000"></textarea>
+                </label>
+                <label>
+                    <span>Risk owner<span class="pm-required">*</span></span>
+                    <select id="cxOwner" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Business function<span class="pm-required">*</span></span>
+                    <select id="cxBusinessFunction" required><option value="">-- select --</option></select>
+                </label>
+            </div>
+            <p class="pm-form-message" id="cxMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-custom>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-book-bookmark"></i> Create &amp; register</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Registered risk detail modal (BRD §9.1, §10) ===== *@
+<div class="pm-modal" id="regDetailModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="regDetailTitle">Registered risk</h2>
+            <button class="pm-modal-close" type="button" data-close-reg-detail aria-label="Close">&times;</button>
+        </header>
+        <div style="padding:0 4px 8px;">
+            <dl class="risk-meta" id="regDetailMeta"></dl>
+            @* BRD §10 — Risk Register -> Analysis -> Candidate -> Source. *@
+            <h3 class="risk-subhead">Traceability</h3>
+            <div id="regTrace" class="risk-trace"></div>
+            <div id="regRelatedTasks" style="margin-top:14px;"></div>
+        </div>
+        <footer>
+            <button class="pm-button" type="button" data-close-reg-detail>Close</button>
+        </footer>
+    </div>
+</div>
+
+@* ================= Register ANALYSIS modal — stage 2 (BRD §7.1) =====
+    The scoring work, on a risk that is already in the register. This is
+    where category, likelihood and impact are asked, and where the §19
+    approval gate applies — because this is the stage that produces a
+    rating for a rating threshold to judge.
+=================================================================== *@
+<div class="pm-modal" id="riskRegAnalysisModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Risk analysis</h2>
+            <button class="pm-modal-close" type="button" data-close-reg-analysis aria-label="Close">&times;</button>
+        </header>
+        <form id="riskRegAnalysisForm">
+            <input type="hidden" id="raRiskId" />
+            <dl class="risk-meta" id="raMeta"></dl>
+            <div class="pm-form-grid">
+                <label>
+                    <span>Risk category<span class="pm-required">*</span></span>
+                    <select id="raCategory" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Process</span>
+                    <input type="text" id="raProcess" maxlength="200" />
+                </label>
+                <label>
+                    <span>Likelihood<span class="pm-required">*</span></span>
+                    <select id="raLikelihood" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Impact<span class="pm-required">*</span></span>
+                    <select id="raImpact" required><option value="">-- select --</option></select>
+                </label>
+                <div class="pm-form-grid-full">
+                    @* Resolved from the organisation's own matrix, never
+                       typed in. The server recomputes it on save. *@
+                    <span class="pm-hint">Inherent risk rating</span>
+                    <div id="raRating" class="risk-rating-preview">Select likelihood and impact</div>
+                </div>
+                <label class="pm-form-grid-full">
+                    <span>Risk cause</span>
+                    <textarea id="raCause" rows="2" maxlength="4000"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Potential consequence / impact</span>
+                    <textarea id="raConsequence" rows="2" maxlength="4000"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Existing controls</span>
+                    <textarea id="raControls" rows="2" maxlength="4000"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Risk description</span>
+                    <textarea id="raDescription" rows="2" maxlength="4000"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Analyst remarks</span>
+                    <textarea id="raRemarks" rows="2" maxlength="4000"></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="raMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-reg-analysis>Cancel</button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-floppy-disk"></i> Save analysis
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Stage-2 approval modal (BRD §19) ================= *@
+<div class="pm-modal" id="riskRegApprovalModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Review risk analysis</h2>
+            <button class="pm-modal-close" type="button" data-close-reg-approval aria-label="Close">&times;</button>
+        </header>
+        <form id="riskRegApprovalForm">
+            <input type="hidden" id="rgaRiskId" />
+            <dl class="risk-meta" id="rgaMeta"></dl>
+            <p class="pm-hint">
+                Validate the classification and rating. Until this is approved the register
+                keeps its previous rating — an unvalidated score does not become official.
+            </p>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Remark <span class="pm-hint">(required when returning)</span></span>
+                    <textarea id="rgaRemark" rows="3" maxlength="4000"></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="rgaMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-reg-approval>Cancel</button>
+                <button type="button" class="pm-button" id="rgaReturnBtn">
+                    <i class="fa-solid fa-rotate-left"></i> Return for rework
+                </button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Approve</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Register status modal (BRD §17) ================== *@
+<div class="pm-modal" id="regStatusModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Change risk status</h2>
+            <button class="pm-modal-close" type="button" data-close-reg-status aria-label="Close">&times;</button>
+        </header>
+        <form id="regStatusForm">
+            <input type="hidden" id="rsRiskId" />
+            <dl class="risk-meta" id="rsMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>New status<span class="pm-required">*</span></span>
+                    <select id="rsStatus" required>
+                        <option value="Active">Active</option>
+                        <option value="UnderTreatment">Under treatment</option>
+                        <option value="Accepted">Accepted</option>
+                        <option value="Monitoring">Monitoring</option>
+                        <option value="Closed">Closed</option>
+                        <option value="Retired">Retired</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Reason / remark <span class="pm-hint">(required to close or retire)</span></span>
+                    <textarea id="rsRemark" rows="3" maxlength="4000"></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="rsMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-reg-status>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Apply</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Register owner modal (BRD §18) =================== *@
+<div class="pm-modal" id="regOwnerModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Change risk owner</h2>
+            <button class="pm-modal-close" type="button" data-close-reg-owner aria-label="Close">&times;</button>
+        </header>
+        <form id="regOwnerForm">
+            <input type="hidden" id="roRiskId" />
+            <dl class="risk-meta" id="roMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Risk owner<span class="pm-required">*</span></span>
+                    <select id="roOwner" required><option value="">-- select --</option></select>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Remark</span>
+                    <textarea id="roRemark" rows="3" maxlength="4000"></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="roMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-reg-owner>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-user-check"></i> Apply</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Accept modal (LEGACY) ===========================
+    Retained for organisations still using the pre-BRD triage that
+    migration 199 wired to Task Centre. "Register" is the BRD §8A path
+    and is what the row menu offers first.
+=================================================================== *@
+<div class="pm-modal" id="riskAcceptModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Accept risk candidate <span class="pm-hint">(legacy triage)</span></h2>
+            <button class="pm-modal-close" type="button" data-close-risk-accept aria-label="Close">&times;</button>
+        </header>
+        <form id="riskAcceptForm" enctype="multipart/form-data">
+            <input type="hidden" id="riskAcceptId" />
+            <dl class="risk-meta" id="riskAcceptMeta"></dl>
+
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Acceptance note<span class="pm-required">*</span></span>
+                    <textarea id="riskAcceptNote" rows="4" maxlength="5000" required
+                              placeholder="Why this is being tracked as a formal risk; approvals obtained; owner..."></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Formal risk reference <span class="pm-hint">(if already logged in an external risk register)</span></span>
+                    <input type="text" id="riskAcceptFormalRef" maxlength="200"
+                           placeholder="e.g. RSK-2026-01452" />
+                </label>
+
+                @* Evidence-style capture -- same vocabulary as exception centre. *@
+                <label class="pm-form-grid-full">
+                    <span>Supporting evidence <span class="pm-hint">(optional)</span></span>
+                    <select id="riskAcceptMethod">
+                        <option value="">-- none --</option>
+                        <option value="Manual">Manual (upload a file)</option>
+                        <option value="Automated">Automated (link an external record)</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="riskAcceptFileWrap" hidden>
+                    <span>File<span class="pm-required">*</span></span>
+                    <input type="file" id="riskAcceptFile" />
+                </label>
+                <label id="riskAcceptLocationWrap" hidden>
+                    <span>Location<span class="pm-required">*</span></span>
+                    <input type="text" id="riskAcceptLocation" maxlength="500"
+                           placeholder="e.g. Archer / ServiceNow / SharePoint" />
+                </label>
+                <label id="riskAcceptLocatorWrap" hidden>
+                    <span>Locator<span class="pm-required">*</span></span>
+                    <input type="text" id="riskAcceptLocator" maxlength="500"
+                           placeholder="e.g. https://... or record id" />
+                </label>
+            </div>
+            <p class="pm-form-message" id="riskAcceptMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-accept>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Accept</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Reject modal (BRD §8B) =========================== *@
+<div class="pm-modal" id="riskRejectModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Reject risk candidate</h2>
+            <button class="pm-modal-close" type="button" data-close-risk-reject aria-label="Close">&times;</button>
+        </header>
+        <form id="riskRejectForm">
+            <input type="hidden" id="riskRejectId" />
+            <dl class="risk-meta" id="riskRejectMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Rejection reason<span class="pm-required">*</span></span>
+                    <textarea id="riskRejectReason" rows="4" maxlength="5000" required
+                              placeholder="Not a real risk / already tracked elsewhere / does not require registration..."></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="riskRejectMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-risk-reject>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-ban"></i> Reject</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* The "Return for clarification" (BRD §8C) and "Withdraw" modals were
+   removed with the two-action candidate menu. Their API endpoints and
+   stored procedures remain and still enforce their rules; §8C's
+   ClarificationRequired status is still reached — and still rendered —
+   when an approver returns a risk for further assessment. *@
+
+<style>
+    /* ---- tabs ---- */
+    .risk-tabs { display: flex; gap: 4px; margin: 0 0 12px 0; border-bottom: 1px solid #e2e8f0; }
+    .risk-tab {
+        background: transparent; border: 0; border-bottom: 2px solid transparent;
+        padding: 10px 16px; font-size: 14px; font-weight: 600; color: #718096; cursor: pointer;
+    }
+    .risk-tab:hover { color: #2d3748; }
+    .risk-tab.is-active { color: #2b6cb0; border-bottom-color: #2b6cb0; }
+
+    /* ---- chips ---- */
+    .risk-status-chip { display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .risk-pending    { background: #fefcbf; color: #744210; }
+    .risk-analysing  { background: #bee3f8; color: #2a4365; }
+    .risk-clarify    { background: #feebc8; color: #7b341e; }
+    .risk-analysed   { background: #c4f1f9; color: #234e52; }
+    .risk-registered { background: #c6f6d5; color: #22543d; }
+    .risk-accepted   { background: #c6f6d5; color: #22543d; }
+    .risk-rejected   { background: #fed7d7; color: #742a2a; }
+    .risk-duplicate  { background: #e9d8fd; color: #44337a; }
+    .risk-withdrawn  { background: #edf2f7; color: #4a5568; }
+
+    .risk-severity-chip { display: inline-block; padding: 2px 8px; border-radius: 4px;
+        font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .risk-sev-critical { background: #742a2a; color: #fff; }
+    .risk-sev-high     { background: #fed7d7; color: #742a2a; }
+    .risk-sev-medium   { background: #fefcbf; color: #744210; }
+    .risk-sev-low      { background: #c6f6d5; color: #22543d; }
+
+    .risk-source-chip { display: inline-block; padding: 2px 8px; border-radius: 4px;
+        background: #edf2f7; color: #2d3748; font-size: 11px; font-weight: 600; }
+
+    /* ---- meta / history / trace ---- */
+    .risk-meta {
+        display: grid; grid-template-columns: 150px 1fr; row-gap: 6px; column-gap: 12px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+    }
+    .risk-meta dt { color: #718096; font-weight: 600; margin: 0;
+                    text-transform: uppercase; font-size: 11px; align-self: center; }
+    .risk-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+
+    .risk-subhead { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+                    color: #718096; margin: 16px 0 8px; }
+    .risk-history table { width: 100%; font-size: 12px; border-collapse: collapse; }
+    .risk-history th, .risk-history td { padding: 6px 8px; border-bottom: 1px solid #edf2f7; text-align: left; }
+    .risk-history th { color: #718096; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+
+    .risk-trace { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+    .risk-trace-step { padding: 6px 10px; background: #edf2f7; border-radius: 6px; color: #2d3748; }
+    .risk-trace-step a { color: #2b6cb0; text-decoration: none; }
+    .risk-trace-step a:hover { text-decoration: underline; }
+    .risk-trace-arrow { color: #a0aec0; }
+
+    /* ---- dashboard (BRD §23) ---- */
+    .risk-tab-action { margin-left: auto; align-self: center; }
+    .risk-inline-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #4a5568; }
+
+    .risk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                  gap: 10px; margin-bottom: 8px; }
+    .risk-tile { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+                 padding: 12px 14px; }
+    .risk-tile .v { font-size: 24px; font-weight: 700; color: #2d3748; line-height: 1.1; }
+    .risk-tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+                    color: #718096; margin-top: 4px; }
+    .risk-tile.is-clickable { cursor: pointer; }
+    .risk-tile.is-clickable:hover { border-color: #2b6cb0; background: #ebf8ff; }
+    .risk-tile.is-alert .v { color: #c53030; }
+
+    .risk-grid-4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                   gap: 16px; margin-bottom: 8px; }
+    .risk-two-col { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 16px; }
+    @@media (max-width: 900px) { .risk-two-col { grid-template-columns: 1fr; } }
+
+    /* A bar chart made of divs. Deliberate: this dashboard must render
+       with no charting dependency, and a labelled proportional bar is
+       what these tiles actually need. */
+    .risk-bars { display: flex; flex-direction: column; gap: 6px; }
+    .risk-bar-row { display: grid; grid-template-columns: 130px 1fr 46px;
+                    align-items: center; gap: 8px; font-size: 12px; }
+    .risk-bar-row .lbl { color: #4a5568; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .risk-bar-row .trk { background: #edf2f7; border-radius: 4px; height: 14px; overflow: hidden; }
+    .risk-bar-row .fil { background: #2b6cb0; height: 100%; border-radius: 4px; }
+    .risk-bar-row .num { text-align: right; color: #2d3748; font-weight: 600; }
+    .risk-bar-row.is-clickable { cursor: pointer; }
+    .risk-bar-row.is-clickable:hover .lbl { color: #2b6cb0; text-decoration: underline; }
+
+    .risk-check { display: flex; align-items: flex-start; gap: 8px; }
+    .risk-check input { margin-top: 3px; }
+
+    .risk-rating-preview {
+        padding: 8px 12px; border-radius: 6px; background: #edf2f7; color: #4a5568;
+        font-weight: 600; font-size: 13px; display: inline-block; min-width: 220px;
+    }
+    .risk-rating-preview[data-rating="Critical"] { background: #742a2a; color: #fff; }
+    .risk-rating-preview[data-rating="High"]     { background: #fed7d7; color: #742a2a; }
+    .risk-rating-preview[data-rating="Medium"]   { background: #fefcbf; color: #744210; }
+    .risk-rating-preview[data-rating="Low"]      { background: #c6f6d5; color: #22543d; }
+
+    /* Modal overlay (defensive CSS same as exception + gap-detail so
+       pm-modal renders as a proper popup regardless of global stylesheet). */
+    .pm-modal {
+        position: fixed; inset: 0; z-index: 1100;
+        display: flex; align-items: flex-start; justify-content: center;
+        background: rgba(15, 23, 42, 0.55); padding: 40px 20px; overflow-y: auto;
+    }
+    .pm-modal[hidden] { display: none !important; }
+    .pm-modal-panel {
+        background: #fff; border-radius: 8px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+        padding: 20px; width: 100%; max-width: 560px;
+        max-height: calc(100vh - 80px); overflow-y: auto;
+    }
+    .pm-modal-panel.pm-modal-wide { max-width: 820px; }
+    .pm-modal-panel > header {
+        display: flex; justify-content: space-between; align-items: center;
+        border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;
+    }
+    .pm-modal-panel > header h2 { margin: 0; font-size: 18px; color: #2d3748; }
+    .pm-modal-close { background: transparent; border: 0; padding: 0;
+        font-size: 26px; line-height: 1; cursor: pointer; color: #718096; }
+    .pm-modal-close:hover { color: #e53e3e; }
+    .pm-modal-footer { display: flex; justify-content: flex-end; gap: 8px;
+        margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+</style>
+
+<script src="~/js/RiskCentre/risk-centre.js" asp-append-version="true"></script>

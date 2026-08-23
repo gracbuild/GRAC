@@ -1,0 +1,255 @@
+@*
+    Resolve -- instance list
+    Screen key: `resolve`
+
+    Replaces the tabbed dependency-category workbench. That screen was
+    organised around registers: pick Applications, see every instance that
+    needs one. Useful to a register owner, useless to the person who has to
+    make one instance operational and has to visit six tabs to find out
+    what it still needs.
+
+    This list is one row per practice instance the signed-in user owns --
+    an organization-scoped admin sees all of them -- with its obligation
+    and dependency progress on the row, so nothing has to be opened to see
+    what is outstanding. The row action opens the workspace.
+
+    Self-contained: workflow partials render before practice.js in
+    Manage.cshtml, so only __wfCommon is available here.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<style>
+    #rvRoot .pm-panel + .pm-panel { margin-top: 14px; }
+    #rvRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 10px; }
+    #rvRoot .pm-badge, .pm-page-heading .pm-badge {
+        display: inline-block; padding: 1px 7px; border-radius: 10px;
+        background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a);
+        font-size: 11px; font-weight: 600;
+    }
+    /* Progress reads at a glance: complete is quiet, outstanding is not. */
+    #rvRoot .rv-progress { font-size: 12px; white-space: nowrap; }
+    #rvRoot .rv-progress.done    { color: #166534; }
+    #rvRoot .rv-progress.pending { color: #b45309; font-weight: 600; }
+    #rvRoot .rv-progress.none    { color: var(--grac-muted, #758095); }
+
+    /* ---- Grid layout ----
+       table-layout: fixed with an explicit colgroup, so one long instance
+       name cannot squeeze every other column to nothing. The two name
+       columns truncate with an ellipsis and carry the full text as a
+       tooltip; everything else is sized to its content and never wraps. */
+    #rvRoot .rv-grid { width: 100%; table-layout: fixed; border-collapse: collapse; }
+    #rvRoot .rv-grid th,
+    #rvRoot .rv-grid td {
+        padding: 9px 12px; text-align: left; vertical-align: middle;
+        border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    }
+    #rvRoot .rv-grid th {
+        font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--grac-muted, #758095); font-weight: 600;
+        white-space: nowrap; background: #f8fafc;
+        border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    }
+    #rvRoot .rv-grid td { font-size: 13px; color: var(--grac-ink, #25345a); }
+    #rvRoot .rv-grid tbody tr:hover { background: #f8fafc; }
+    #rvRoot .rv-grid tbody tr:last-child td { border-bottom: 0; }
+
+    #rvRoot .rv-truncate {
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #rvRoot .rv-grid .rv-code { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #rvRoot .rv-grid .rv-sub  { display: block; font-size: 11px; color: var(--grac-muted, #758095); }
+    #rvRoot .rv-grid .rv-num  { white-space: nowrap; }
+    #rvRoot .rv-actions { text-align: right; white-space: nowrap; }
+
+    /* Below this the fixed columns stop fitting; let the table scroll
+       sideways rather than crush the names. */
+    #rvRoot .rv-scroll { overflow-x: auto; }
+    @@media (max-width: 1100px) {
+        #rvRoot .rv-grid { min-width: 1040px; }
+    }
+
+    /* Toolbar: the organization is a short fixed control, the filter takes
+       what is left, and the count sits with them instead of drifting to
+       the far edge of the panel. */
+    #rvRoot .rv-toolbar {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        margin-bottom: 10px;
+    }
+    #rvRoot .rv-toolbar #rvOrganization { width: 220px; flex: 0 0 auto; }
+    #rvRoot .rv-toolbar #rvSearch { flex: 1 1 240px; max-width: 420px; }
+    #rvRoot .rv-toolbar .pm-badge { margin-left: auto; }
+</style>
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p id="rvScopeNote">Practice instances waiting on you.</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="rvUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-link pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="rvUnavailableTitle">Resolve is not available.</h2>
+        <p id="rvUnavailableBody"></p>
+    </div>
+</section>
+
+<section class="pm-panel" id="rvRoot" hidden>
+    <div class="pm-toolbar rv-toolbar">
+        <select id="rvOrganization"><option value="">Loading...</option></select>
+        <input type="search" id="rvSearch" placeholder="Filter by instance or practice..." />
+        <button class="pm-button icon" id="rvRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right"></i>
+        </button>
+        <span class="pm-badge" id="rvCount"></span>
+    </div>
+
+    <div id="rvList"><div class="pm-empty compact">Loading...</div></div>
+</section>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const esc = v => window.__wfCommon.escape(v);
+
+    let orgId = null, rows = [], isAdmin = false, timer = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) {
+            return window.__wfCommon.unavailable('rvUnavailable', 'rvUnavailableTitle', 'rvUnavailableBody',
+                'No organizations are available for your account.', '');
+        }
+        document.getElementById('rvRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('rvOrganization', orgs);
+
+        document.getElementById('rvOrganization').addEventListener('change', load);
+        document.getElementById('rvRefreshBtn').addEventListener('click', load);
+        document.getElementById('rvSearch').addEventListener('input', function () {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(load, 250);
+        });
+        await load();
+    }
+
+    async function load() {
+        orgId = document.getElementById('rvOrganization').value || null;
+        const host = document.getElementById('rvList');
+        if (!orgId) { host.innerHTML = '<div class="pm-empty compact">Select an organization.</div>'; return; }
+
+        host.innerHTML = '<div class="pm-empty compact">Loading...</div>';
+        const search = document.getElementById('rvSearch').value || '';
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances?organizationId=')
+                        + encodeURIComponent(orgId)
+                        + '&search=' + encodeURIComponent(search)
+                        + '&pageSize=200',
+                        { credentials: 'same-origin' });
+            if (!r.ok) {
+                const b = await r.json().catch(() => ({}));
+                host.innerHTML = '<div class="pm-empty compact">'
+                    + esc(b.error || ('Could not load instances (HTTP ' + r.status + ').')) + '</div>';
+                return;
+            }
+            const body = await r.json();
+            rows    = body.data || body.Data || [];
+            isAdmin = !!(body.isAdmin ?? body.IsAdmin);
+            document.getElementById('rvScopeNote').textContent = isAdmin
+                ? 'Every practice instance in this organization.'
+                : 'Practice instances you own.';
+            render();
+        } catch (err) {
+            console.error('resolve: list failed', err);
+            host.innerHTML = '<div class="pm-empty compact">Could not load instances.</div>';
+        }
+    }
+
+    const F = (row, k) => row[k] ?? row[k.charAt(0).toUpperCase() + k.slice(1)] ?? null;
+
+    function progress(done, total, noun) {
+        done = Number(done || 0); total = Number(total || 0);
+        if (!total) return '<span class="rv-progress none">no ' + noun + '</span>';
+        const cls = done >= total ? 'done' : 'pending';
+        return '<span class="rv-progress ' + cls + '">' + done + ' / ' + total + ' ' + noun + '</span>';
+    }
+
+    function render() {
+        const host = document.getElementById('rvList');
+        document.getElementById('rvCount').textContent =
+            rows.length + ' instance' + (rows.length === 1 ? '' : 's');
+
+        if (!rows.length) {
+            host.innerHTML = '<div class="pm-empty compact">'
+                + (isAdmin
+                    ? 'No active practice instances in this organization. Create them from a practice, using Configure.'
+                    : 'No practice instances are assigned to you. An instance is assigned to the manager of the team it was created for.')
+                + '</div>';
+            return;
+        }
+
+        // Practice code and name go in one cell, code above name, so the
+        // long framework titles stop stealing width from everything else.
+        host.innerHTML = '<div class="rv-scroll"><table class="rv-grid">'
+            + '<colgroup>'
+              + '<col style="width:110px">'          // instance code
+              + '<col>'                              // instance name
+              + '<col style="width:30%">'            // practice
+              + (isAdmin ? '<col style="width:130px">' : '')
+              + '<col style="width:135px">'          // obligations
+              + '<col style="width:140px">'          // dependencies
+              + '<col style="width:140px">'          // status
+              + '<col style="width:120px">'          // action
+            + '</colgroup>'
+            + '<thead><tr>'
+              + '<th>Code</th><th>Instance</th><th>Practice</th>'
+              + (isAdmin ? '<th>Owner</th>' : '')
+              + '<th>Obligations</th><th>Dependencies</th><th>Status</th><th></th>'
+            + '</tr></thead><tbody>'
+            + rows.map(function (row) {
+                const name     = F(row, 'instanceName') || '';
+                const pCode    = F(row, 'practiceCode') || '';
+                const pName    = F(row, 'practiceName') || '';
+                const dept     = F(row, 'department') || '';
+                const owner    = F(row, 'ownerName') || '';
+
+                return '<tr>'
+                    + '<td class="rv-code">' + esc(F(row, 'instanceCode')) + '</td>'
+                    + '<td class="rv-truncate" title="' + esc(name) + '">' + esc(name)
+                        + (dept ? '<span class="rv-sub rv-truncate">' + esc(dept) + '</span>' : '')
+                        + '</td>'
+                    + '<td class="rv-truncate" title="' + esc([pCode, pName].filter(Boolean).join(' - ')) + '">'
+                        + esc(pCode)
+                        + (pName ? '<span class="rv-sub rv-truncate">' + esc(pName) + '</span>' : '')
+                        + '</td>'
+                    + (isAdmin
+                        ? '<td class="rv-truncate" title="' + esc(owner) + '">'
+                          + (owner ? esc(owner) : '<span class="rv-progress none">no owner</span>') + '</td>'
+                        : '')
+                    + '<td class="rv-num">' + progress(F(row, 'adoptedObligations'), F(row, 'totalObligations'), 'adopted') + '</td>'
+                    + '<td class="rv-num">' + progress(F(row, 'resolvedDependencies'), F(row, 'totalDependencies'), 'resolved') + '</td>'
+                    + '<td>' + window.__wfCommon.badge(F(row, 'implementationStatus')) + '</td>'
+                    + '<td class="rv-actions"><button class="pm-button small" type="button" data-open="'
+                        + esc(F(row, 'practiceInstanceId')) + '">'
+                        + '<i class="fa-solid fa-link"></i> Resolve</button></td>'
+                    + '</tr>';
+            }).join('')
+            + '</tbody></table></div>';
+
+        host.querySelectorAll('button[data-open]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                window.location.assign(U('/Practice/Index/resolve-workspace')
+                    + '?instanceId=' + encodeURIComponent(this.getAttribute('data-open'))
+                    + '&organizationId=' + encodeURIComponent(orgId));
+            });
+        });
+    }
+})();
+</script>

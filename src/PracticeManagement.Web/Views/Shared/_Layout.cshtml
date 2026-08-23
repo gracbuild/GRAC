@@ -1,4 +1,8 @@
 @using PracticeManagement.Web.Models
+@using PracticeManagement.Web.Security
+@* ISession.GetString is an extension in this namespace, and Razor's
+   implicit usings do not include it. *@
+@using Microsoft.AspNetCore.Http
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @{
     var screens = ViewBag.Screens as PracticeScreen[] ?? Array.Empty<PracticeScreen>();
@@ -34,6 +38,20 @@
     var workbenchOpen = (resolveScreen?.Key == currentArea) || workbenchScreens.Any(x => x.Key == currentArea);
     var practiceOpen = practiceScreens.Any(x => x.Key == currentArea) || workbenchOpen;
     var currentGroup = isOrganizationManagementModule ? "Organization Management" : onboardingOpen ? PracticeScreen.OrganizationOnboardingGroup : organizationOpen ? PracticeScreen.OrganizationAdministrationGroup : dependencyOpen ? PracticeScreen.OrganizationDependenciesGroup : practiceOpen ? PracticeScreen.PracticeManagementGroup : "Practice Management";
+
+    // Signed-in identity for the navbar. The name was hardcoded to
+    // "Practice Admin", which told every user they were somebody else.
+    // Read straight from session — the layout renders on every authorised
+    // request and the session is already the source of truth for
+    // ViewBag.RoleName elsewhere in this file's controllers.
+    var signedInName = Context.Session.GetString(PracticeSessionIdentity.DisplayNameKey);
+    if (string.IsNullOrWhiteSpace(signedInName))
+        signedInName = Context.Session.GetString(PracticeSessionIdentity.UserKey);
+    // Sessions created before this change carry neither key; showing the
+    // module title beats showing another user's name.
+    if (string.IsNullOrWhiteSpace(signedInName)) signedInName = moduleTitle;
+    var signedInRole = Context.Session.GetString(PracticeSessionIdentity.RoleNameKey);
+    var signedInOrg = Context.Session.GetString(PracticeSessionIdentity.OrganizationNameKey);
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -109,10 +127,28 @@
                         <div class="image">
                             <img src="~/lib/FrontEnd/dist/img/avatar5.png" class="img-circle elevation-2" alt="User Image" />
                         </div>
-                        <div class="info"><span id="spnUserName">Practice Admin</span></div>
+                        <div class="info">
+                            <span id="spnUserName" title="@signedInName">@signedInName</span>
+                            @if (!string.IsNullOrWhiteSpace(signedInRole))
+                            {
+                                <small class="d-block user-role" id="spnUserRole">@signedInRole</small>
+                            }
+                        </div>
                     </div>
                 </a>
                 <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right cacca-ddw">
+                    <div class="dropdown-header text-left">
+                        <strong>@signedInName</strong>
+                        @if (!string.IsNullOrWhiteSpace(signedInRole))
+                        {
+                            <br /><span class="text-muted">@signedInRole</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(signedInOrg))
+                        {
+                            <br /><span class="text-muted">@signedInOrg</span>
+                        }
+                    </div>
+                    <div class="dropdown-divider"></div>
                     <form class="logout-form" action="@logoutUrl" method="post">
                         @Html.AntiForgeryToken()
                         <button class="dropdown-item" type="submit"><i class="fa fa-power-off"></i> Sign Out</button>
@@ -455,6 +491,65 @@
             syncPracticeMenuState();
         });
     </script>
+
+    @*
+        Unread notification badge on the "My Notifications" sidebar item
+        (Task Centre v2, Phase 5 — BRD §13).
+
+        WHY IN THE LAYOUT AND NOT THE MENU PARTIAL
+        The menu tree is rendered server-side from menu_master and knows
+        nothing about any one feature's counts. Teaching it about
+        notifications would couple a generic navigation component to one
+        module. Instead this attaches to the `data-menu-key` hook the tree
+        already emits, so the tree stays feature-agnostic.
+
+        WHY THE WHOLE THING IS BEST-EFFORT
+        A badge must never break navigation. Every failure path — endpoint
+        missing (Phase 3 not deployed), account not mapped to an employee,
+        network down — leaves the sidebar exactly as it was.
+    *@
+    <script>
+        (function () {
+            'use strict';
+            var host = document.querySelector('li[data-menu-key="my-notifications"] a .nav-link-text, li[data-menu-key="my-notifications"] a p');
+            if (!host) return;   // screen not permitted for this user, or feature flag off
+
+            var base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+
+            function render(count) {
+                var existing = host.querySelector('.pm-notif-badge');
+                if (!count) { if (existing) existing.remove(); return; }
+
+                var el = existing || document.createElement('span');
+                el.className = 'badge badge-danger right pm-notif-badge';
+                // Cap the display, not the meaning: "99+" reads instantly,
+                // a four-digit number does not.
+                el.textContent = count > 99 ? '99+' : String(count);
+                el.title = count + ' unread task notification' + (count === 1 ? '' : 's');
+                if (!existing) host.appendChild(el);
+            }
+
+            function poll() {
+                fetch(base + '/practice/api/task-notifications/me/counts', { credentials: 'same-origin' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (c) { if (c) render(Number(c.pendingCount) || 0); })
+                    .catch(function () { /* leave the sidebar untouched */ });
+            }
+
+            poll();
+            // Five minutes, matching the sweeper's default interval — a
+            // tighter poll could not surface anything new.
+            window.setInterval(poll, 300000);
+
+            // The notifications screen marks things read; refresh the badge
+            // when the user comes back to the tab rather than making them
+            // wait out the interval.
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) poll();
+            });
+        })();
+    </script>
+
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

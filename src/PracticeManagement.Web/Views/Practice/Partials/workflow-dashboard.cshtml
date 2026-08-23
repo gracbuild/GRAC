@@ -1,0 +1,104 @@
+@*
+    Workflow Dashboard (BRD Sec 16) -- KPI cards for the Event Assurance
+    Engine. Backed by /practice/api/workflow/dashboard/counts.
+    Screen key: `workflow-dashboard`
+    Feature flag: `screen.workflow-dashboard`
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="wdUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-chart-line pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="wdUnavailableTitle">Workflow Dashboard is not yet enabled for this organization.</h2>
+        <p id="wdUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-dashboard</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="wdRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="wdFilterOrganization"><option value="">All organizations</option></select>
+        <button class="pm-button icon" id="wdRefreshBtn" type="button"><i class="fa-solid fa-rotate-right"></i></button>
+    </div>
+
+    <div id="wdCards" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:12px;">
+        @* Cards injected by JS. *@
+    </div>
+</section>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-dashboard';
+    let orgId = null;
+
+    const CARDS = [
+        { key: 'eventsReceived',     label: 'Events Received',       tone: 'neutral' },
+        { key: 'assuranceGenerated', label: 'Assurance Generated',   tone: 'ok' },
+        { key: 'pendingAssurance',   label: 'Pending Assurance',     tone: 'warn' },
+        { key: 'overdueAssurance',   label: 'Overdue Assurance',     tone: 'error' },
+        { key: 'failedAssurance',    label: 'Failed Assurance',      tone: 'error' },
+        { key: 'openGaps',           label: 'Open Gaps',             tone: 'warn' },
+        { key: 'activeWorkflows',    label: 'Active Workflows',      tone: 'neutral' },
+        { key: 'activeEvents',       label: 'Active Events',         tone: 'neutral' },
+        { key: 'activeChecklists',   label: 'Active Checklists',     tone: 'neutral' }
+    ];
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('wdUnavailable','wdUnavailableTitle','wdUnavailableBody','No organizations available.','');
+        document.getElementById('wdRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('wdFilterOrganization', orgs);
+        document.getElementById('wdFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('wdRefreshBtn').addEventListener('click', reload);
+        renderCards(null);
+        await onOrgChange();
+    }
+    async function onOrgChange() {
+        orgId = document.getElementById('wdFilterOrganization').value || null;
+        if (!orgId) { renderCards(null); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('wdRoot').hidden = true; document.getElementById('wdUnavailable').hidden = false; return; }
+        await reload();
+    }
+    async function reload() {
+        if (!orgId) return;
+        try {
+            const r = await fetch(U('/practice/api/workflow/dashboard/counts?organizationId=') + encodeURIComponent(orgId), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderCards(await r.json());
+        } catch (err) {
+            renderCards(null, err.message);
+        }
+    }
+    function renderCards(counts, error) {
+        const host = document.getElementById('wdCards'); host.innerHTML = '';
+        if (error) {
+            host.innerHTML = '<div class="pm-empty">Failed to load counts: ' + window.__wfCommon.escape(error) + '</div>';
+            return;
+        }
+        for (const c of CARDS) {
+            const v = counts ? Number(counts[c.key] || 0) : 0;
+            const bg = c.tone === 'error' ? '#fee2e2' : c.tone === 'warn' ? '#fef3c7' : c.tone === 'ok' ? '#dcfce7' : '#f1f5f9';
+            const fg = c.tone === 'error' ? '#991b1b' : c.tone === 'warn' ? '#92400e' : c.tone === 'ok' ? '#166534' : '#0f172a';
+            const div = document.createElement('div');
+            div.style = 'border-radius:8px; padding:14px 16px; background:' + bg + '; color:' + fg + '; box-shadow:0 1px 2px rgba(15,23,42,.08);';
+            div.innerHTML = '<div style="font-size:11px; text-transform:uppercase; letter-spacing:.04em; opacity:.8;">' + window.__wfCommon.escape(c.label) + '</div>'
+                          + '<div style="font-size:28px; font-weight:700; margin-top:4px;">' + window.__wfCommon.escape(String(v)) + '</div>';
+            host.appendChild(div);
+        }
+    }
+})();
+</script>

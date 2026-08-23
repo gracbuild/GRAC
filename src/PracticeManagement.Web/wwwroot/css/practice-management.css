@@ -453,11 +453,12 @@
  *      ApplicablePracticeCount, PrimaryOwner, Criticality, Actions.
  *      Long field = Name (nth-child(2)).
  *  - Level 2 (source-statements URL OR drilled-in from Level 1) columns
- *    rendered by renderStatementRows:
- *      Hierarchy, StatementReference, StatementTitle, StatementText,
+ *    rendered by renderStatementTree:
+ *      Hierarchy, StatementReference, StatementTitle,
  *      ApplicabilityStatus, PracticeCount, Actions.
- *      Long fields = StatementTitle (nth-child(3)),
- *                    StatementText  (nth-child(4)).
+ *      Long field = StatementTitle (nth-child(3)).
+ *      StatementText was dropped from the grid, so nth-child(4) is now the
+ *      short ApplicabilityStatus badge and must NOT be widened.
  *   Level 2 drill-down still lives under the organization-controls URL, so
  *   we target both screen keys.
  */
@@ -474,12 +475,8 @@
 
 .pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(3),
 .pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(3),
-.pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(4),
-.pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(4),
 .pm-table-wrap[data-screen-key="source-statements"] td:nth-child(3),
-.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(3),
-.pm-table-wrap[data-screen-key="source-statements"] td:nth-child(4),
-.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(4) {
+.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(3) {
     max-width: 360px;
     min-width: 220px;
     white-space: normal;
@@ -988,6 +985,15 @@
     padding: 6px 11px;
 }
 
+/* Control grouping band in the Organization Practices grid, and the
+   module grouping band in the Role Menu Permissions matrix.  Same role
+   as pm-statement-row above, but it keeps the grid's body text size -
+   it is the outermost grouping level, not a sub-heading under one. */
+.pm-table-wrap tbody tr.pm-control-group-row td {
+    color: #172033;
+    font-weight: 700;
+}
+
 /* Release drill-in context row (release label + back button). */
 .pm-table-wrap tbody tr.pm-release-context-row td {
     align-items: center;
@@ -1167,7 +1173,8 @@
    width the base .pm-table-wrap td:last-child rule enforces. */
 .pm-table-wrap tbody tr.pm-source-node-row td[colspan],
 .pm-table-wrap tbody tr.pm-statement-row td[colspan],
-.pm-table-wrap tbody tr.pm-release-context-row td[colspan] {
+.pm-table-wrap tbody tr.pm-release-context-row td[colspan],
+.pm-table-wrap tbody tr.pm-control-group-row td[colspan] {
     text-align: left;
     width: auto;
 }
@@ -1904,6 +1911,89 @@
     padding: 3px 10px;
 }
 
+/* Obligation Taxonomy (Phase 2F) -- type badge + typed detail block.
+   Colors per type_code aligned with the 7-type atomic taxonomy so the
+   category is visually distinct at a glance. */
+.pm-typed-detail {
+    align-items: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pm-obligation-type-badge {
+    align-items: center;
+    border-radius: 999px;
+    color: #fff;
+    display: inline-flex;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .35px;
+    padding: 3px 10px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.pm-obligation-type-state         { background: #2465ca; }  /* blue    */
+.pm-obligation-type-execution     { background: #0f7a49; }  /* green   */
+.pm-obligation-type-assurance     { background: #7c5fbf; }  /* purple  */
+.pm-obligation-type-eventresponse { background: #c0392b; }  /* red     */
+.pm-obligation-type-constraint    { background: #b45900; }  /* orange  */
+.pm-obligation-type-evidence      { background: #4d6178; }  /* slate   */
+.pm-obligation-type-retention     { background: #0f766e; }  /* teal    */
+
+.pm-typed-detail-body {
+    background: #f6f8fc;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 6px;
+    color: var(--grac-ink, #172033);
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 100%;
+    font-size: 12px;
+    gap: 4px;
+    padding: 6px 10px;
+}
+
+.pm-typed-detail-row {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    line-height: 1.4;
+}
+
+.pm-typed-detail-row strong {
+    color: var(--grac-ink, #172033);
+}
+
+.pm-typed-detail-row .pm-typed-op {
+    background: #eef3fb;
+    border-radius: 4px;
+    color: var(--grac-blue, #2465ca);
+    font-family: monospace;
+    padding: 0 4px;
+}
+
+.pm-typed-detail-row .pm-typed-value {
+    font-family: monospace;
+}
+
+.pm-typed-detail-row em {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    font-style: normal;
+}
+
+.pm-obligation-evidence-row .pm-typed-src {
+    background: #f0e9db;
+    border-radius: 4px;
+    color: #8a5a00;
+    font-size: 10.5px;
+    padding: 1px 6px;
+}
+
 .pm-obligation-chip em {
     color: var(--grac-muted, #758095);
     font-size: 10.5px;
@@ -1986,4 +2076,137 @@
 
 .pm-subscription-tree .pm-tree-row.release.recommended:hover {
     background: #e6f2df;
+}
+
+/* ------------------------------------------------------------------
+   Inline "Parent Practice Obligations" reference panel.
+   Rendered inside the Practice Instance view/edit/add form. Visual
+   language matches the modal (pm-obligation-*) so users see the same
+   card layout in both places, but the container is a compact panel
+   with a subtle header instead of a full dialog chrome.
+   ------------------------------------------------------------------ */
+.pm-inline-obligations {
+    background: #f8fafc;
+    border: 1px solid #e2e7f0;
+    border-radius: 8px;
+    grid-column: 1 / -1; /* span the full form grid width */
+    margin-top: 16px;
+    padding: 12px 14px;
+}
+.pm-inline-obligations-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.pm-inline-obligations-header h3 {
+    color: var(--grac-ink, #172033);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .3px;
+    margin: 0 0 2px;
+    text-transform: uppercase;
+}
+.pm-inline-obligations-header p {
+    color: var(--grac-muted, #758095);
+    font-size: 11.5px;
+    margin: 0;
+}
+.pm-inline-obligations-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 340px;
+    overflow-y: auto;
+}
+/* Slightly tighter card layout inside the inline panel -- the modal
+   has more room so its default padding is generous; here we shave it. */
+.pm-inline-obligations-body .pm-obligation-group {
+    background: #fff;
+    border: 1px solid #e2e7f0;
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+.pm-inline-obligations-body .pm-obligation-group-header {
+    align-items: center;
+    color: var(--grac-ink, #172033);
+    display: flex;
+    font-size: 12px;
+    gap: 8px;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.pm-inline-obligations-body .pm-obligation-group-header em {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 500;
+}
+.pm-inline-obligations-body .pm-obligation-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.pm-inline-obligations-body .pm-obligation-card {
+    background: #fbfcfe;
+    border: 1px solid #edf1f7;
+    border-radius: 5px;
+    padding: 6px 8px;
+}
+.pm-inline-obligations-body .pm-obligation-card-header h4 {
+    font-size: 12.5px;
+    font-weight: 700;
+    margin: 0 0 4px;
+}
+.pm-inline-obligations-body .pm-obligation-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+.pm-inline-obligations-body .pm-obligation-chip {
+    background: #eef2f7;
+    border-radius: 3px;
+    color: var(--grac-ink, #172033);
+    display: inline-flex;
+    font-size: 10.5px;
+    gap: 3px;
+    padding: 2px 6px;
+}
+.pm-inline-obligations-body .pm-obligation-chip em {
+    color: var(--grac-muted, #758095);
+    font-style: normal;
+}
+.pm-inline-obligations-body .pm-obligation-evidence {
+    border-top: 1px dashed #edf1f7;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+    padding-top: 4px;
+}
+.pm-inline-obligations-body .pm-obligation-evidence-title {
+    color: var(--grac-muted, #758095);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+}
+.pm-inline-obligations-body .pm-obligation-evidence-row {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 11px;
+    gap: 4px;
+}
+.pm-inline-obligations-body .pm-obligation-empty {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    padding: 6px 2px;
+}
+.pm-inline-obligations-body .pm-obligation-remarks {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    font-style: italic;
 }

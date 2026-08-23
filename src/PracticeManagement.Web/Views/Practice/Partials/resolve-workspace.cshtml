@@ -1,0 +1,1096 @@
+@*
+    Resolve workspace -- one practice instance
+    Screen key: `resolve-workspace`
+
+    Everything an instance still needs, on one page:
+        1. its details, as a compact header strip
+        2. an obligation card per published obligation, adopted or not
+        3. a dependency card per declared category
+
+    LAYOUT
+    ------
+    Two columns on a wide screen, one on a narrow one, and each card is
+    collapsed to a summary line until it is opened. The point is that the
+    outstanding work is visible without scrolling: a card that is done
+    stays one line, only what needs attention takes space.
+
+    The obligation edit fields appear inside the card that owns them, so
+    "adopt as published" is one tick and "adopt with our own parameters"
+    is that tick plus the fields underneath -- no second dialog, no
+    separate mode.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<style>
+    #rwRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 10px; }
+    #rwRoot .pm-panel-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--grac-ink, #25345a); }
+    #rwRoot .pm-badge, .pm-page-heading .pm-badge {
+        display: inline-block; padding: 1px 7px; border-radius: 10px;
+        background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a);
+        font-size: 11px; font-weight: 600;
+    }
+
+    /* Header strip: the instance facts, one line of chips, no scrolling. */
+    #rwRoot .rw-facts {
+        display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0;
+    }
+    #rwRoot .rw-facts div { min-width: 130px; }
+    #rwRoot .rw-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--grac-muted, #758095);
+    }
+    #rwRoot .rw-facts dd { margin: 0; font-size: 13px; color: var(--grac-ink, #25345a); }
+
+    /* Two columns on a wide screen, one when there is no room. */
+    #rwRoot .rw-columns {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+        gap: 14px; align-items: start; margin-top: 14px;
+    }
+
+    #rwRoot .rw-card {
+        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 8px;
+        background: #fff; margin-bottom: 8px; overflow: hidden;
+    }
+    #rwRoot .rw-card.adopted  { border-left: 3px solid #16a34a; }
+    #rwRoot .rw-card.modified { border-left: 3px solid #2563eb; }
+    #rwRoot .rw-card.resolved { border-left: 3px solid #16a34a; }
+    #rwRoot .rw-card.pending  { border-left: 3px solid #d97706; }
+
+    /* The whole summary row is the toggle, so a card opens without hunting
+       for a chevron. */
+    #rwRoot .rw-card-head {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 12px; cursor: pointer; width: 100%;
+        background: none; border: 0; text-align: left; font: inherit;
+    }
+    #rwRoot .rw-card-head:hover { background: #f8fafc; }
+    #rwRoot .rw-card-title { flex: 1 1 auto; font-size: 13px; color: var(--grac-ink, #25345a); }
+    #rwRoot .rw-card-title small { display: block; color: var(--grac-muted, #758095); font-size: 11px; }
+    #rwRoot .rw-card-body { padding: 0 12px 12px; border-top: 1px solid var(--grac-line, #e2e7f0); }
+    #rwRoot .rw-card-body[hidden] { display: none; }
+
+    #rwRoot .rw-published {
+        background: #f8fafc; border-radius: 6px; padding: 8px 10px; margin: 10px 0;
+        font-size: 12px; color: var(--grac-ink, #25345a);
+    }
+    #rwRoot .rw-published span { display: inline-block; margin-right: 16px; }
+    #rwRoot .rw-published em { color: var(--grac-muted, #758095); font-style: normal; }
+
+    #rwRoot .rw-fields {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 12px;
+    }
+    #rwRoot .rw-fields label { display: block; font-size: 11px; color: var(--grac-muted, #758095); }
+    #rwRoot .rw-fields input, #rwRoot .rw-fields select, #rwRoot .rw-fields textarea {
+        width: 100%; font-size: 12px; padding: 4px 6px;
+        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 5px;
+    }
+    #rwRoot .rw-fields .full { grid-column: 1 / -1; }
+    #rwRoot .rw-card-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+    #rwRoot .rw-resolve-form {
+        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 8px;
+        background: #f8fafc; padding: 12px; margin-bottom: 12px;
+    }
+
+    /* Evidence sits inside the obligation that produced it, indented so
+       the nesting is obvious without another level of card chrome. */
+    #rwRoot .rw-frequency {
+        margin-top: 12px; padding-top: 10px;
+        border-top: 1px dashed var(--grac-line, #e2e7f0);
+    }
+    #rwRoot .rw-frequency .rw-fields { align-items: end; }
+    #rwRoot .rw-freq-actions { display: flex; align-items: center; gap: 8px; }
+
+    #rwRoot .rw-evidence {
+        margin-top: 12px; padding-top: 10px;
+        border-top: 1px dashed var(--grac-line, #e2e7f0);
+    }
+    #rwRoot .rw-evidence h4 {
+        margin: 0 0 4px; font-size: 12px; text-transform: uppercase;
+        letter-spacing: .04em; color: var(--grac-muted, #758095);
+    }
+    #rwRoot .rw-evidence-row {
+        border-left: 2px solid #d97706; padding: 8px 0 8px 10px; margin-top: 8px;
+    }
+    #rwRoot .rw-evidence-row.done { border-left-color: #16a34a; }
+    #rwRoot .rw-evidence-head {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px;
+    }
+    #rwRoot .rw-note { font-size: 11px; color: var(--grac-muted, #758095); }
+    #rwRoot .rw-warn { color: #b45309; }
+    #rwRoot .rw-ok   { color: #166534; }
+    #rwRoot .rw-sticky {
+        position: sticky; bottom: 0; background: #fff; padding: 10px 0;
+        border-top: 1px solid var(--grac-line, #e2e7f0); display: flex; gap: 8px; align-items: center;
+    }
+</style>
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="rwHeading">Operationalize</h1>
+        <p id="rwSubheading">Loading...</p>
+    </div>
+    <div>
+        <a class="pm-button ghost" id="rwBackBtn" href="#"><i class="fa-solid fa-arrow-left"></i> Back to Resolve</a>
+    </div>
+</div>
+
+<section class="pm-panel" id="rwUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-link pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="rwUnavailableTitle">This practice instance could not be opened.</h2>
+        <p id="rwUnavailableBody">Open it from the Resolve list.</p>
+    </div>
+</section>
+
+<div id="rwRoot" hidden>
+    <section class="pm-panel">
+        <dl class="rw-facts" id="rwFacts"></dl>
+
+        @* Configure defaults these from the practice's obligations; this is
+           where the owner changes them. Kept on the header rather than in a
+           card of its own -- it is one fact about the instance, not a third
+           thing to resolve. *@
+        <div class="rw-frequency" id="rwFrequencyBox">
+            <div class="rw-fields">
+                <div><label>Execution frequency
+                    <select id="rwExecFreq"><option value="">Not set</option></select>
+                </label></div>
+                <div><label>Assurance frequency
+                    <select id="rwAssurFreq"><option value="">Not set</option></select>
+                </label></div>
+                <div class="rw-freq-actions">
+                    <button class="pm-button ghost small" id="rwFreqSave" type="button">
+                        <i class="fa-solid fa-floppy-disk"></i> Save frequency
+                    </button>
+                    <span class="rw-note" id="rwFreqMsg"></span>
+                </div>
+            </div>
+            <p class="rw-note">Defaulted from this practice's obligations. Change it if this instance runs to a different cadence.</p>
+        </div>
+    </section>
+
+    <div class="rw-columns">
+        <section class="pm-panel">
+            <div class="pm-toolbar" style="padding:0 0 6px">
+                <h2 class="pm-panel-title">Obligations</h2>
+                <span class="pm-badge" id="rwObligationCount"></span>
+                <button class="pm-button ghost small" id="rwExpandAll" type="button">Expand all</button>
+                <button class="pm-button ghost small" id="rwCollapseAll" type="button">Collapse all</button>
+            </div>
+            <p class="pm-hint">
+                Published against this practice by the authority, from releases this
+                organization subscribes to. Tick one to take it on as published, or
+                open it and change the parameters that differ here.
+            </p>
+            <div class="pm-message" id="rwObligationMessage" style="display:none"></div>
+            <div id="rwObligations"><div class="pm-empty compact">Loading obligations...</div></div>
+            <div class="rw-sticky" id="rwObligationBar" hidden>
+                <button class="pm-button" id="rwSaveObligations" type="button">
+                    <i class="fa-solid fa-circle-check"></i> Save obligations
+                </button>
+                <span class="rw-note" id="rwObligationDirty"></span>
+            </div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-toolbar" style="padding:0 0 6px">
+                <h2 class="pm-panel-title">Dependencies</h2>
+                <span class="pm-badge" id="rwDependencyCount"></span>
+            </div>
+            <p class="pm-hint">
+                Pick the category this instance needs, then the object it resolves to.
+                The object list follows the category -- Application lists applications,
+                Vendor lists vendors, and so on.
+            </p>
+            <div class="pm-message" id="rwDependencyMessage" style="display:none"></div>
+
+            @* Category first, then object -- the same two-step the old Resolve
+               screen used, and the same dependency-options endpoint the
+               Practice Instance form fills its picker from. *@
+            <div class="rw-resolve-form" id="rwDependencyForm" hidden>
+                <div class="rw-fields">
+                    <div><label>Dependency category
+                        <select id="rwDepCategory"><option value="">Select category...</option></select>
+                    </label></div>
+                    <div><label>Object
+                        <select id="rwDepObject"><option value="">Select a category first</option></select>
+                    </label></div>
+                    <div><label>Resolution owner
+                        <select id="rwDepOwner"><option value="">Unassigned</option></select>
+                    </label></div>
+                    <div class="full"><label>Remarks
+                        <input type="text" id="rwDepRemarks">
+                    </label></div>
+                </div>
+                <div class="rw-card-actions">
+                    <button class="pm-button small" id="rwDepSave" type="button" disabled>
+                        <i class="fa-solid fa-link"></i> Resolve
+                    </button>
+                    <span class="rw-note" id="rwDepHint"></span>
+                </div>
+            </div>
+
+            <div id="rwDependencies"><div class="pm-empty compact">Loading dependencies...</div></div>
+        </section>
+    </div>
+</div>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U    = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const esc  = v => window.__wfCommon.escape(v);
+
+    let instanceId = null, orgId = null, instance = null;
+    let obligations = [], frequencies = [], employees = [], evidence = [];
+    const dirty = new Set();          // obligation ids with unsaved edits
+    const open  = new Set();          // expanded card keys
+
+    // ------------------------------------------------------------------
+    async function init() {
+        const q = new URLSearchParams(window.location.search);
+        instanceId = Number(q.get('instanceId') || 0) || null;
+        orgId      = Number(q.get('organizationId') || 0) || null;
+
+        document.getElementById('rwBackBtn').href = U('/Practice/Index/resolve');
+        if (!instanceId) {
+            return unavailable('No practice instance was identified in the link.',
+                               'Open it from the Resolve list.');
+        }
+
+        document.getElementById('rwExpandAll').addEventListener('click', function () {
+            obligations.forEach(o => open.add('ob-' + F(o, 'obligationId')));
+            renderObligations();
+        });
+        document.getElementById('rwCollapseAll').addEventListener('click', function () {
+            obligations.forEach(o => open.delete('ob-' + F(o, 'obligationId')));
+            renderObligations();
+        });
+        document.getElementById('rwSaveObligations').addEventListener('click', saveObligations);
+        document.getElementById('rwFreqSave').addEventListener('click', saveFrequency);
+
+        wireDependencyForm();
+
+        if (!(await loadInstance())) return;
+        loadLookups();
+        loadObligations();
+        loadDependencies();
+    }
+
+    function unavailable(title, body) {
+        document.getElementById('rwRoot').hidden = true;
+        document.getElementById('rwSubheading').textContent = '';
+        window.__wfCommon.unavailable('rwUnavailable', 'rwUnavailableTitle', 'rwUnavailableBody', title, body);
+    }
+
+    const F = (row, k) => row?.[k] ?? row?.[k.charAt(0).toUpperCase() + k.slice(1)] ?? null;
+
+    // ---------- 1. Instance ------------------------------------------
+    async function loadInstance() {
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances/' + encodeURIComponent(instanceId))
+                        + (orgId ? '?organizationId=' + encodeURIComponent(orgId) : ''),
+                        { credentials: 'same-origin' });
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                // The API refuses an instance the caller does not own, so
+                // say that rather than a bare HTTP code.
+                unavailable('This practice instance could not be opened.',
+                            body.error || ('HTTP ' + r.status));
+                return false;
+            }
+            instance = body.data || body.Data;
+            if (!instance) { unavailable('This practice instance could not be loaded.', ''); return false; }
+
+            orgId = orgId || Number(F(instance, 'organizationId') || 0) || null;
+            renderInstance();
+            document.getElementById('rwRoot').hidden = false;
+            return true;
+        } catch (err) {
+            console.error('resolve-workspace: instance load failed', err);
+            unavailable('This practice instance could not be loaded.', 'Check that the API is running.');
+            return false;
+        }
+    }
+
+    function renderInstance() {
+        document.getElementById('rwHeading').textContent = F(instance, 'instanceName') || 'Operationalize';
+        document.getElementById('rwSubheading').textContent =
+            [F(instance, 'instanceCode'),
+             [F(instance, 'practiceCode'), F(instance, 'practiceName')].filter(Boolean).join(' - '),
+             F(instance, 'organizationName')].filter(Boolean).join('  |  ');
+
+        const facts = [
+            ['Owner',          F(instance, 'ownerName')],
+            ['Department',     F(instance, 'department')],
+            ['Execution',      F(instance, 'executionFrequency')],
+            ['Assurance',      F(instance, 'assuranceFrequency')],
+            ['Practice Type',  F(instance, 'assuranceMode')],
+            ['Criticality',    F(instance, 'criticality')],
+            ['Implementation', F(instance, 'implementationStatus')]
+        ].filter(([, v]) => v);
+
+        document.getElementById('rwFacts').innerHTML = facts
+            .map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('');
+    }
+
+    // ---------- instance frequency ------------------------------------
+    // The detail proc returns names, not ids, so the current value is
+    // matched back by name. A frequency that has since been deactivated
+    // simply shows as unset rather than quietly selecting a neighbour.
+    function renderFrequency() {
+        if (!instance || !frequencies.length) return;
+        const idOf = name => {
+            if (!name) return '';
+            const hit = frequencies.find(f => f.label === name);
+            return hit ? hit.value : '';
+        };
+        document.getElementById('rwExecFreq').innerHTML =
+            options(frequencies, idOf(F(instance, 'executionFrequency')), 'Not set');
+        document.getElementById('rwAssurFreq').innerHTML =
+            options(frequencies, idOf(F(instance, 'assuranceFrequency')), 'Not set');
+    }
+
+    async function saveFrequency() {
+        const exec  = document.getElementById('rwExecFreq').value;
+        const assur = document.getElementById('rwAssurFreq').value;
+        const msg   = document.getElementById('rwFreqMsg');
+        msg.textContent = 'Saving...';
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/frequency'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({
+                    practiceInstanceId:   instanceId,
+                    executionFrequencyId: exec  ? Number(exec)  : null,
+                    assuranceFrequencyId: assur ? Number(assur) : null
+                })
+            });
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                msg.textContent = body.error || ('Could not save (HTTP ' + r.status + ').');
+                return;
+            }
+            msg.textContent = body.message || 'Saved.';
+            await loadInstance();       // the header strip shows the names
+            renderFrequency();
+        } catch (err) {
+            console.error('resolve-workspace: save frequency failed', err);
+            msg.textContent = 'Could not save the frequency.';
+        }
+    }
+
+    // ---------- lookups ----------------------------------------------
+    // Frequencies for the edit fields, employees for a dependency's
+    // resolution owner. Both come from the same lookups feed the rest of
+    // the app uses; failure is not fatal -- the fields fall back to free
+    // text and a blank owner list.
+    //
+    // THE EMPLOYEE LIST MUST BE FILTERED BY ORGANIZATION.
+    // The lookups procedure returns every employee of every organization
+    // the caller may see -- and for a system admin, every employee in the
+    // database. Each row carries its OrganizationId for exactly this
+    // reason, and practice.js narrows the same lookup with
+    // lookupItemsFor(). Dropping that column here would offer a colleague
+    // from another organization as this instance's resolution owner.
+    //
+    // Rows with no OrganizationId are global master data (frequencies,
+    // criticalities) and are left alone.
+    async function loadLookups() {
+        try {
+            const r = await fetch(U('/practice-management-gateway/lookups'), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const rows = rowsOf(await r.json());
+            const pick = key => rows
+                .filter(x => String(x.LookupKey ?? x.lookupKey ?? '') === key)
+                .map(x => ({
+                    value: String(x.Value ?? x.value),
+                    label: String(x.Label ?? x.label ?? ''),
+                    organizationId: String(x.OrganizationId ?? x.organizationId ?? '')
+                }));
+
+            frequencies = pick('frequency-master');
+            renderFrequency();
+
+            const all = pick('users-id');
+            // Fail closed: without an organization in hand, offer nobody
+            // rather than everybody.
+            employees = orgId
+                ? all.filter(e => !e.organizationId || e.organizationId === String(orgId))
+                : [];
+
+            renderObligations();
+            renderDependencies();
+        } catch (_) { /* fields degrade to free text */ }
+    }
+
+    function unwrap(v) {
+        if (typeof v === 'string') {
+            const t = v.trim();
+            if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+                try { return unwrap(JSON.parse(t)); } catch (_) { return v; }
+            }
+        }
+        if (v && typeof v === 'object' && Array.isArray(v.$values)) return v.$values.map(unwrap);
+        if (Array.isArray(v)) return v.map(unwrap);
+        return v;
+    }
+    function rowsOf(body) {
+        const d = unwrap(body?.data ?? body?.Data ?? body ?? []);
+        if (!Array.isArray(d)) return [];
+        return (d.length && Array.isArray(d[0])) ? d.flat() : d;
+    }
+
+    function options(list, selected, blank) {
+        return '<option value="">' + esc(blank || 'As published') + '</option>'
+            + list.map(o => '<option value="' + esc(o.value) + '"'
+                + (String(o.value) === String(selected ?? '') ? ' selected' : '') + '>'
+                + esc(o.label) + '</option>').join('');
+    }
+
+    // ---------- 2. Obligations ---------------------------------------
+    async function loadObligations() {
+        const host = document.getElementById('rwObligations');
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances/'
+                        + encodeURIComponent(instanceId) + '/obligations'), { credentials: 'same-origin' });
+            if (!r.ok) {
+                const b = await r.json().catch(() => ({}));
+                host.innerHTML = '<div class="pm-empty compact">'
+                    + esc(b.error || ('Could not load obligations (HTTP ' + r.status + ').')) + '</div>';
+                return;
+            }
+            const body = await r.json();
+            obligations = (body.data || body.Data || []).map(o => Object.assign({}, o, { _edit: null }));
+            await loadEvidence();      // the cards render evidence inline
+            renderObligations();
+        } catch (err) {
+            console.error('resolve-workspace: obligations failed', err);
+            host.innerHTML = '<div class="pm-empty compact">Could not load obligations.</div>';
+        }
+    }
+
+    async function loadEvidence() {
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances/'
+                        + encodeURIComponent(instanceId) + '/evidence'), { credentials: 'same-origin' });
+            evidence = r.ok ? ((await r.json()).data || []) : [];
+        } catch (err) {
+            // Not fatal: the obligation cards still work, they just show
+            // no evidence rows.
+            console.error('resolve-workspace: evidence failed', err);
+            evidence = [];
+        }
+    }
+
+    async function saveEvidence(evidenceId) {
+        const rowEl = document.querySelector('[data-ev="' + evidenceId + '"]');
+        const msgEl = document.querySelector('[data-ev-msg="' + evidenceId + '"]');
+        if (!rowEl) return;
+
+        const read = name => {
+            const label = rowEl.querySelector('[data-ev-field="' + name + '"]');
+            const input = label ? label.querySelector('input, select, textarea') : null;
+            return input ? input.value : '';
+        };
+        const ownerId = read('ownerEmployeeId');
+
+        if (msgEl) msgEl.textContent = 'Saving...';
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/evidence'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({
+                    practiceInstanceId:    instanceId,
+                    evidenceId:            Number(evidenceId),
+                    collectionFrequencyId: read('collectionFrequencyId') ? Number(read('collectionFrequencyId')) : null,
+                    retentionPeriod:       read('retentionPeriod') || null,
+                    ownerEmployeeId:       ownerId ? Number(ownerId) : null,
+                    // Null cannot mean both "unchanged" and "remove", so
+                    // clearing the owner is said explicitly.
+                    clearOwner:            !ownerId,
+                    evidenceDescription:   read('evidenceDescription') || null,
+                    evidenceLocation:      read('evidenceLocation') || null,
+                    evidenceLocator:       read('evidenceLocator') || null
+                })
+            });
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                if (msgEl) msgEl.textContent = body.error || ('Could not save (HTTP ' + r.status + ').');
+                return;
+            }
+            if (msgEl) msgEl.textContent = body.message || 'Saved.';
+            await loadEvidence();
+            renderObligations();
+        } catch (err) {
+            console.error('resolve-workspace: save evidence failed', err);
+            if (msgEl) msgEl.textContent = 'Could not save the evidence.';
+        }
+    }
+
+    // Current value of a field: an unsaved edit wins, then what was
+    // adopted, then nothing (meaning "as published").
+    function val(o, key) {
+        if (o._edit && key in o._edit) return o._edit[key];
+        return F(o, key);
+    }
+
+    function renderObligations() {
+        const host = document.getElementById('rwObligations');
+        const adopted = obligations.filter(o => F(o, 'isAdopted')).length;
+        document.getElementById('rwObligationCount').textContent =
+            adopted + ' / ' + obligations.length + ' adopted';
+
+        if (!obligations.length) {
+            host.innerHTML = '<div class="pm-empty compact">'
+                + 'No obligations are published against this practice from a subscribed release. '
+                + 'Check the organization\'s repository subscriptions.</div>';
+            document.getElementById('rwObligationBar').hidden = true;
+            return;
+        }
+
+        host.innerHTML = obligations.map(function (o) {
+            const id  = F(o, 'obligationId');
+            const key = 'ob-' + id;
+            const isOpen   = open.has(key);
+            const adoptedF = !!val(o, 'isAdopted');
+            const modified = !!F(o, 'organizationModified');
+            const cls = adoptedF ? (modified ? 'modified' : 'adopted') : '';
+
+            const pubEv  = Number(F(o, 'publishedEvidenceCount') || 0);
+            const gotEv  = Number(F(o, 'resolvedEvidenceCount') || 0);
+            const evNote = pubEv
+                ? (gotEv >= pubEv
+                    ? '<span class="rw-ok">' + gotEv + ' evidence</span>'
+                    : '<span class="rw-warn">' + gotEv + ' / ' + pubEv + ' evidence</span>')
+                : '<span class="rw-note">no evidence published</span>';
+
+            return '<article class="rw-card ' + cls + '">'
+              + '<button class="rw-card-head" type="button" data-toggle="' + esc(key) + '">'
+                + '<input type="checkbox" data-adopt="' + esc(id) + '"' + (adoptedF ? ' checked' : '') + '>'
+                + '<span class="rw-card-title">' + esc(F(o, 'obligationName'))
+                  + '<small>' + esc(F(o, 'typeName') || F(o, 'typeCode') || '')
+                  + (F(o, 'frameworkRelease') ? '  |  ' + esc(F(o, 'frameworkRelease')) : '')
+                  + '  |  ' + evNote + '</small></span>'
+                + (modified ? '<span class="pm-badge">Modified</span>' : '')
+                + '<i class="fa-solid fa-chevron-' + (isOpen ? 'up' : 'down') + '"></i>'
+              + '</button>'
+              + '<div class="rw-card-body"' + (isOpen ? '' : ' hidden') + '>'
+                + (F(o, 'obligationText')
+                    ? '<p class="pm-hint" style="margin-top:10px">' + esc(F(o, 'obligationText')) + '</p>' : '')
+                + '<div class="rw-published">'
+                  + '<span><em>Published frequency:</em> ' + esc(F(o, 'publishedExecutionFrequency') || '-') + '</span>'
+                  + '<span><em>Responsibility:</em> ' + esc(F(o, 'publishedResponsibility') || '-') + '</span>'
+                  + '<span><em>Approval:</em> ' + esc(F(o, 'publishedApprovalAuthority') || '-') + '</span>'
+                  + '<span><em>Retention:</em> ' + esc(F(o, 'publishedRetention') || '-') + '</span>'
+                + '</div>'
+                + '<p class="rw-note">Leave a field blank to keep the published value.</p>'
+                + '<div class="rw-fields">'
+                  + field(id, 'executionFrequencyId', 'Execution frequency',
+                          options(frequencies, val(o, 'executionFrequencyId')), true)
+                  + field(id, 'assuranceFrequencyId', 'Assurance frequency',
+                          options(frequencies, val(o, 'assuranceFrequencyId')), true)
+                  + field(id, 'responsibility', 'Responsibility',
+                          '<input type="text" value="' + esc(val(o, 'responsibility') || '') + '">')
+                  + field(id, 'approvalAuthority', 'Approval authority',
+                          '<input type="text" value="' + esc(val(o, 'approvalAuthority') || '') + '">')
+                  + field(id, 'retentionPeriod', 'Retention',
+                          '<input type="text" value="' + esc(val(o, 'retentionPeriod') || '') + '">')
+                  + '<div class="full">' + field(id, 'remarks', 'Remarks',
+                          '<textarea rows="2">' + esc(val(o, 'remarks') || '') + '</textarea>', false, true) + '</div>'
+                + '</div>'
+                + evidenceBlock(o)
+                + (F(o, 'adoptedBy')
+                    ? '<p class="rw-note" style="margin-top:8px">Adopted by ' + esc(F(o, 'adoptedBy')) + '.</p>' : '')
+              + '</div>'
+            + '</article>';
+        }).join('');
+
+        wireObligationCards();
+        document.getElementById('rwObligationBar').hidden = false;
+        document.getElementById('rwObligationDirty').textContent =
+            dirty.size ? dirty.size + ' unsaved change' + (dirty.size === 1 ? '' : 's') : '';
+    }
+
+    // ---------- evidence, inside the obligation card ------------------
+    // Four states, and each gets its own sentence. Collapsing them into
+    // one "no evidence" line was wrong: an obligation that publishes
+    // evidence but has not been saved yet was being told the authority
+    // publishes none, which the summary line above it flatly contradicted.
+    function evidenceBlock(o) {
+        const id   = Number(F(o, 'obligationId'));
+        const pub  = Number(F(o, 'publishedEvidenceCount') || 0);
+        const mine = evidence.filter(e => Number(F(e, 'sourceObligationId')) === id);
+
+        // What the server has recorded, versus what the checkbox currently
+        // shows. Ticking is not adopting -- the rows appear on Save.
+        const savedAdopted   = !!F(o, 'isAdopted');
+        const pendingAdopted = !!val(o, 'isAdopted');
+
+        if (!pub && !mine.length) {
+            return '<div class="rw-evidence"><h4>Evidence</h4>'
+                + '<p class="rw-note">The authority publishes no evidence for this obligation.</p></div>';
+        }
+
+        if (!mine.length) {
+            const n = pub + ' evidence row' + (pub === 1 ? '' : 's');
+            const note = pendingAdopted && !savedAdopted
+                ? 'Press Save obligations to create ' + n + ' to fill in.'
+                : savedAdopted
+                  ? pub + ' evidence type' + (pub === 1 ? ' is' : 's are') + ' published, but no row exists here. '
+                    + 'That type may have no match in this organization\'s evidence catalogue -- press '
+                    + 'Save obligations to try again; the result will say how many were skipped.'
+                  : 'Adopting this will create ' + n + ' to fill in.';
+            return '<div class="rw-evidence"><h4>Evidence</h4>'
+                + '<p class="rw-note">' + esc(note) + '</p></div>';
+        }
+
+        return '<div class="rw-evidence"><h4>Evidence <span class="pm-badge">'
+             + mine.filter(e => F(e, 'isResolved')).length + ' / ' + mine.length + ' resolved</span></h4>'
+             + '<p class="rw-note">A location and a locator are both needed before evidence counts as resolved.</p>'
+             + mine.map(function (e) {
+                 const eid  = F(e, 'evidenceId');
+                 const done = !!F(e, 'isResolved');
+                 return '<div class="rw-evidence-row' + (done ? ' done' : '') + '" data-ev="' + esc(eid) + '">'
+                   + '<div class="rw-evidence-head">'
+                     + '<i class="fa-solid ' + (done ? 'fa-circle-check rw-ok' : 'fa-circle-dot rw-warn') + '"></i>'
+                     + '<strong>' + esc(F(e, 'evidenceType') || 'Evidence') + '</strong>'
+                     + (F(e, 'organizationModified') ? '<span class="pm-badge">Organization defined</span>' : '')
+                   + '</div>'
+                   + '<div class="rw-fields">'
+                     + evField(eid, 'evidenceLocation', 'Location',
+                         '<input type="text" value="' + esc(F(e, 'evidenceLocation') || '')
+                         + '" placeholder="Where it is kept">')
+                     + evField(eid, 'evidenceLocator', 'Locator',
+                         '<input type="text" value="' + esc(F(e, 'evidenceLocator') || '')
+                         + '" placeholder="Path, link or reference">')
+                     + evField(eid, 'ownerEmployeeId', 'Owner',
+                         '<select>' + options(employees, ownerIdOf(F(e, 'evidenceOwner')), 'Unassigned') + '</select>')
+                     + evField(eid, 'collectionFrequencyId', 'Collection frequency',
+                         '<select>' + options(frequencies, F(e, 'collectionFrequencyId'), 'Not set') + '</select>')
+                     + evField(eid, 'retentionPeriod', 'Retention',
+                         '<input type="text" value="' + esc(F(e, 'retentionPeriod') || '') + '">')
+                     + '<div class="full">' + evField(eid, 'evidenceDescription', 'Description',
+                         '<textarea rows="2">' + esc(F(e, 'evidenceDescription') || '') + '</textarea>', true) + '</div>'
+                   + '</div>'
+                   + '<div class="rw-card-actions">'
+                     + '<button class="pm-button small" type="button" data-ev-save="' + esc(eid) + '">'
+                       + '<i class="fa-solid fa-floppy-disk"></i> Save evidence</button>'
+                     + '<span class="rw-note" data-ev-msg="' + esc(eid) + '"></span>'
+                   + '</div>'
+                 + '</div>';
+             }).join('')
+             + '</div>';
+    }
+
+    function evField(eid, name, label, control, bare) {
+        const inner = '<label data-ev-field="' + esc(name) + '" data-ev-id="' + esc(eid) + '">'
+            + esc(label) + control + '</label>';
+        return bare ? inner : '<div>' + inner + '</div>';
+    }
+
+    // evidence_owner is a name column -- the existing form fills it from a
+    // lookup whose value IS the name. The picker here works in ids, so map
+    // the stored name back to one for display. An owner who has since left
+    // the organization simply shows as unassigned rather than silently
+    // matching somebody else.
+    function ownerIdOf(name) {
+        if (!name) return '';
+        const hit = employees.find(e => e.label === name || e.label.endsWith(' - ' + name));
+        return hit ? hit.value : '';
+    }
+
+    function field(id, name, label, control, isSelect, bare) {
+        const inner = isSelect ? '<select>' + control + '</select>' : control;
+        const wrapped = '<label data-field="' + esc(name) + '" data-ob="' + esc(id) + '">'
+            + esc(label) + inner + '</label>';
+        return bare ? wrapped : '<div>' + wrapped + '</div>';
+    }
+
+    function wireObligationCards() {
+        const host = document.getElementById('rwObligations');
+
+        host.querySelectorAll('[data-toggle]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                // The checkbox lives inside the toggle so the row reads as
+                // one control; clicking it must tick, not expand.
+                if (e.target.matches('input[type="checkbox"]')) return;
+                const key = this.getAttribute('data-toggle');
+                open.has(key) ? open.delete(key) : open.add(key);
+                renderObligations();
+            });
+        });
+
+        host.querySelectorAll('input[data-adopt]').forEach(function (cb) {
+            cb.addEventListener('change', function () {
+                const id = Number(this.getAttribute('data-adopt'));
+                const o  = obligations.find(x => Number(F(x, 'obligationId')) === id);
+                if (!o) return;
+                o._edit = o._edit || {};
+                o._edit.isAdopted = this.checked;
+                dirty.add(id);
+                renderObligations();
+            });
+        });
+
+        host.querySelectorAll('[data-ev-save]').forEach(function (b) {
+            b.addEventListener('click', function () { saveEvidence(this.getAttribute('data-ev-save')); });
+        });
+
+        host.querySelectorAll('[data-field]').forEach(function (label) {
+            const input = label.querySelector('input, select, textarea');
+            if (!input) return;
+            input.addEventListener('change', function () {
+                const id   = Number(label.getAttribute('data-ob'));
+                const name = label.getAttribute('data-field');
+                const o    = obligations.find(x => Number(F(x, 'obligationId')) === id);
+                if (!o) return;
+                o._edit = o._edit || {};
+                o._edit[name] = this.value === '' ? null : this.value;
+                // Editing a parameter is a statement of intent to take the
+                // obligation on, so tick it rather than silently discarding
+                // the edit at save time.
+                if (!val(o, 'isAdopted')) o._edit.isAdopted = true;
+                dirty.add(id);
+                document.getElementById('rwObligationDirty').textContent =
+                    dirty.size + ' unsaved change' + (dirty.size === 1 ? '' : 's');
+                const cb = host.querySelector('input[data-adopt="' + id + '"]');
+                if (cb) cb.checked = true;
+            });
+        });
+    }
+
+    async function saveObligations() {
+        if (!dirty.size) {
+            window.__wfCommon.setMessage('rwObligationMessage', 'Nothing has changed.', 'info');
+            return;
+        }
+        const btn = document.getElementById('rwSaveObligations');
+        btn.disabled = true;
+        window.__wfCommon.setMessage('rwObligationMessage', 'Saving...', 'info');
+
+        const payload = obligations
+            .filter(o => dirty.has(Number(F(o, 'obligationId'))))
+            .map(function (o) {
+                const num = v => (v === null || v === undefined || v === '') ? null : Number(v);
+                return {
+                    obligationId:         Number(F(o, 'obligationId')),
+                    isAdopted:            !!val(o, 'isAdopted'),
+                    executionFrequencyId: num(val(o, 'executionFrequencyId')),
+                    executionFrequency:   labelOf(frequencies, val(o, 'executionFrequencyId')),
+                    assuranceFrequencyId: num(val(o, 'assuranceFrequencyId')),
+                    assuranceFrequency:   labelOf(frequencies, val(o, 'assuranceFrequencyId')),
+                    responsibility:       val(o, 'responsibility') || null,
+                    approvalAuthority:    val(o, 'approvalAuthority') || null,
+                    retentionPeriod:      val(o, 'retentionPeriod') || null,
+                    remarks:              val(o, 'remarks') || null
+                };
+            });
+
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/obligations'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({
+                    practiceInstanceId: instanceId,
+                    organizationId:     orgId,
+                    obligations:        payload
+                })
+            });
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                window.__wfCommon.setMessage('rwObligationMessage',
+                    body.error || ('Could not save (HTTP ' + r.status + ').'), 'error');
+                btn.disabled = false;
+                return;
+            }
+
+            // Say what happened, including the part that did not: an
+            // evidence type with no practice-side match produced no row,
+            // and a silent count would disagree with the obligation.
+            const adopted = Number(body.adoptedCount ?? 0);
+            const removed = Number(body.removedCount ?? 0);
+            const unmapped = Number(body.unmappedEvidenceTypes ?? 0);
+            const parts = [];
+            if (adopted) parts.push(adopted + ' adopted');
+            if (removed) parts.push(removed + ' removed');
+            if (unmapped) parts.push(unmapped + ' evidence type'
+                + (unmapped === 1 ? '' : 's') + ' had no match here and were skipped');
+            window.__wfCommon.setMessage('rwObligationMessage',
+                (parts.join('. ') || 'Saved') + '.', unmapped ? 'info' : 'ok');
+
+            dirty.clear();
+            btn.disabled = false;
+            await loadObligations();
+        } catch (err) {
+            console.error('resolve-workspace: save obligations failed', err);
+            window.__wfCommon.setMessage('rwObligationMessage', 'Could not save obligations.', 'error');
+            btn.disabled = false;
+        }
+    }
+
+    function labelOf(list, value) {
+        if (value === null || value === undefined || value === '') return null;
+        const hit = list.find(o => String(o.value) === String(value));
+        return hit ? hit.label : null;
+    }
+
+    // ---------- 3. Dependencies --------------------------------------
+    let dependencyCategories = [], dependencyResolutions = [];
+
+    async function loadDependencies() {
+        const host = document.getElementById('rwDependencies');
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances/'
+                        + encodeURIComponent(instanceId) + '/dependencies'), { credentials: 'same-origin' });
+            if (!r.ok) {
+                const b = await r.json().catch(() => ({}));
+                host.innerHTML = '<div class="pm-empty compact">'
+                    + esc(b.error || ('Could not load dependencies (HTTP ' + r.status + ').')) + '</div>';
+                return;
+            }
+            const body = await r.json();
+            dependencyCategories  = body.data || body.Data || [];
+            dependencyResolutions = body.resolutions || body.Resolutions || [];
+            renderDependencies();
+        } catch (err) {
+            console.error('resolve-workspace: dependencies failed', err);
+            host.innerHTML = '<div class="pm-empty compact">Could not load dependencies.</div>';
+        }
+    }
+
+    function renderDependencies() {
+        const host = document.getElementById('rwDependencies');
+        const done = dependencyCategories.filter(c => F(c, 'isResolved')).length;
+        document.getElementById('rwDependencyCount').textContent =
+            done + ' / ' + dependencyCategories.length + ' resolved';
+
+        if (!dependencyCategories.length) {
+            document.getElementById('rwDependencyForm').hidden = true;
+            host.innerHTML = '<div class="pm-empty compact">'
+                + 'This instance declares no dependencies, so there is nothing to resolve. '
+                + 'Add them under Dependencies on the Practice Instance form.</div>';
+            return;
+        }
+
+        // The category list is what the instance actually declares. Offering
+        // every dependency type would let the user pick one the procedure
+        // then refuses -- a dead end dressed up as a choice.
+        const sel = document.getElementById('rwDepCategory');
+        const keep = sel.value;
+        sel.innerHTML = '<option value="">Select category...</option>'
+            + dependencyCategories.map(function (c) {
+                const solved = !!F(c, 'isResolved');
+                return '<option value="' + esc(F(c, 'dependencyTypeId')) + '">'
+                    + esc(F(c, 'dependencyCategory'))
+                    + (solved ? '  (resolved)' : '')
+                    + '</option>';
+            }).join('');
+        if (keep) sel.value = keep;
+        document.getElementById('rwDependencyForm').hidden = false;
+
+        document.getElementById('rwDepOwner').innerHTML = options(employees, '', 'Unassigned');
+
+        // Current state, read-only, one card per declared category.
+        host.innerHTML = dependencyCategories.map(function (c) {
+            const typeId = F(c, 'dependencyTypeId');
+            const key    = 'dep-' + typeId;
+            const isOpen = open.has(key);
+            const solved = !!F(c, 'isResolved');
+            const mine   = dependencyResolutions.filter(r => Number(F(r, 'dependencyTypeId')) === Number(typeId));
+
+            return '<article class="rw-card ' + (solved ? 'resolved' : 'pending') + '">'
+              + '<button class="rw-card-head" type="button" data-toggle="' + esc(key) + '">'
+                + '<i class="fa-solid ' + (solved ? 'fa-circle-check rw-ok' : 'fa-circle-exclamation rw-warn') + '"></i>'
+                + '<span class="rw-card-title">' + esc(F(c, 'dependencyCategory'))
+                  + '<small>' + (solved ? esc(F(c, 'resolvedNames') || '') : 'Not resolved') + '</small></span>'
+                + (mine.length ? '<i class="fa-solid fa-chevron-' + (isOpen ? 'up' : 'down') + '"></i>' : '')
+              + '</button>'
+              + '<div class="rw-card-body"' + (isOpen ? '' : ' hidden') + '>'
+                + (mine.length
+                    ? '<table class="pm-table" style="margin-top:10px"><tbody>'
+                      + mine.map(r => '<tr>'
+                          + '<td>' + esc(F(r, 'resolvedDependencyName')) + '</td>'
+                          + '<td class="rw-note">' + esc(F(r, 'resolutionOwnerName') || '') + '</td>'
+                          + '<td class="rw-note">' + esc(F(r, 'remarks') || '') + '</td>'
+                          + '<td style="text-align:right"><button class="pm-button ghost small" type="button"'
+                            + ' data-dep-remove="' + esc(F(r, 'resolutionId')) + '"'
+                            + ' title="Remove this object"><i class="fa-solid fa-xmark"></i></button></td>'
+                          + '</tr>').join('')
+                      + '</tbody></table>'
+                    : '<p class="rw-note" style="margin-top:10px">Nothing resolved yet.</p>')
+              + '</div>'
+            + '</article>';
+        }).join('');
+
+        host.querySelectorAll('[data-toggle]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                if (e.target.closest('[data-dep-remove]')) return;
+                const key = this.getAttribute('data-toggle');
+                open.has(key) ? open.delete(key) : open.add(key);
+                renderDependencies();
+            });
+        });
+        host.querySelectorAll('[data-dep-remove]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                removeDependency(Number(this.getAttribute('data-dep-remove')));
+            });
+        });
+    }
+
+    async function removeDependency(resolutionId) {
+        if (!resolutionId) return;
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/dependencies/remove'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ practiceInstanceId: instanceId, resolutionId: resolutionId })
+            });
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                window.__wfCommon.setMessage('rwDependencyMessage',
+                    body.error || ('Could not remove (HTTP ' + r.status + ').'), 'error');
+                return;
+            }
+            window.__wfCommon.setMessage('rwDependencyMessage', body.message || 'Removed.', 'ok');
+            await loadDependencies();
+        } catch (err) {
+            console.error('resolve-workspace: remove dependency failed', err);
+            window.__wfCommon.setMessage('rwDependencyMessage', 'Could not remove the object.', 'error');
+        }
+    }
+
+    function wireDependencyForm() {
+        const cat  = document.getElementById('rwDepCategory');
+        const obj  = document.getElementById('rwDepObject');
+        const save = document.getElementById('rwDepSave');
+
+        cat.addEventListener('change', function () {
+            obj.innerHTML = '<option value="">Loading...</option>';
+            save.disabled = true;
+            document.getElementById('rwDepHint').textContent = '';
+            if (!this.value) {
+                obj.innerHTML = '<option value="">Select a category first</option>';
+                return;
+            }
+            loadDependencyObjects(Number(this.value));
+        });
+
+        obj.addEventListener('change', function () {
+            save.disabled = !this.value;
+            document.getElementById('rwDepHint').textContent = '';
+        });
+        save.addEventListener('click', saveDependency);
+    }
+
+    // The register objects for the chosen category. dependency-options is
+    // the same endpoint the Practice Instance form fills its picker from,
+    // and it decides the register from the dependency type -- Application
+    // returns applications, Vendor returns vendors, and so on.
+    async function loadDependencyObjects(dependencyTypeId) {
+        const sel = document.getElementById('rwDepObject');
+        try {
+            const r = await fetch(U('/practice-management-gateway/dependency-options/query'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ data: {
+                    organizationId:   orgId,
+                    dependencyTypeId: dependencyTypeId,
+                    pageNumber: 1, pageSize: 500
+                }})
+            });
+            if (!r.ok) { sel.innerHTML = '<option value="">(could not load objects)</option>'; return; }
+            const list = rowsOf(await r.json())
+                .map(x => ({ value: String(x.Value ?? x.value ?? ''), label: String(x.Label ?? x.label ?? '') }))
+                .filter(x => x.value && x.label);
+
+            if (!list.length) {
+                // Say which register is empty rather than leaving a blank
+                // dropdown -- the fix is in that register, not here.
+                const label = document.getElementById('rwDepCategory').selectedOptions[0]?.textContent || 'this register';
+                sel.innerHTML = '<option value="">(no active objects)</option>';
+                document.getElementById('rwDepHint').textContent =
+                    'Nothing to pick: ' + label.replace('  (resolved)', '')
+                    + ' has no active records for this organization yet.';
+                return;
+            }
+            sel.innerHTML = '<option value="">Select...</option>'
+                + list.map(o => '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>').join('');
+        } catch (_) {
+            sel.innerHTML = '<option value="">(could not load objects)</option>';
+        }
+    }
+
+    async function saveDependency() {
+        const cat     = document.getElementById('rwDepCategory');
+        const sel     = document.getElementById('rwDepObject');
+        const owner   = document.getElementById('rwDepOwner');
+        const remarks = document.getElementById('rwDepRemarks');
+
+        if (!cat.value) {
+            window.__wfCommon.setMessage('rwDependencyMessage', 'Pick a dependency category.', 'error');
+            return;
+        }
+        if (!sel.value) {
+            window.__wfCommon.setMessage('rwDependencyMessage', 'Pick an object to resolve against.', 'error');
+            return;
+        }
+        const dependencyTypeId = Number(cat.value);
+        // One object per submit. The endpoint takes a list because the
+        // procedure was written that way, and a list of one costs nothing --
+        // pressing Resolve again with a different object adds another row
+        // rather than replacing this one.
+        const objects = [{
+            id:   Number(sel.value),
+            name: sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : ''
+        }];
+
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/dependencies'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({
+                    practiceInstanceId: instanceId,
+                    organizationId:     orgId,
+                    dependencyTypeId:   dependencyTypeId,
+                    objects:            objects,
+                    resolutionOwnerId:  owner && owner.value ? Number(owner.value) : null,
+                    remarks:            remarks ? (remarks.value || null) : null
+                })
+            });
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                window.__wfCommon.setMessage('rwDependencyMessage',
+                    body.error || ('Could not resolve (HTTP ' + r.status + ').'), 'error');
+                return;
+            }
+            window.__wfCommon.setMessage('rwDependencyMessage', body.message || 'Dependency resolved.', 'ok');
+            // Clear the object, keep the category and the owner: resolving
+            // another object in the same register is the common next move,
+            // and each press adds a row rather than replacing the last.
+            sel.value = '';
+            if (remarks) remarks.value = '';
+            document.getElementById('rwDepSave').disabled = true;
+            document.getElementById('rwDepHint').textContent = '';
+            await loadDependencies();
+        } catch (err) {
+            console.error('resolve-workspace: save dependency failed', err);
+            window.__wfCommon.setMessage('rwDependencyMessage', 'Could not resolve the dependency.', 'error');
+        }
+    }
+})();
+</script>

@@ -1,0 +1,279 @@
+@*
+    My Notifications  (BRD §13 delivery — Phase 4)
+
+    The in-app dispatcher for task_notification_outbox. Phase 3 recorded
+    WHO should be told that a task is Due Soon, Breached or past its
+    escalation point; this screen is how they find out.
+
+    WHY "READ" MEANS "SENT"
+        For an in-app channel, the recipient opening and acknowledging the
+        message IS the delivery. Rather than invent a fifth lifecycle
+        state, a read maps to status_code 'Sent'.
+
+    WHY NOTHING IS MARKED AUTOMATICALLY
+        Auto-marking on render would record "delivered" for rows the user
+        scrolled past. These rows are the evidence that somebody was told
+        about an SLA breach, so the marking is explicit — per row, or an
+        intentional "Mark all read". The unread badge then means what it
+        says.
+
+    SCOPING
+        Every read and write goes through /practice/api/task-notifications/me*,
+        which takes the recipient from the SESSION. The browser never names
+        a recipient: these messages identify overdue work and the people
+        accountable for it, so one user must not be able to read another's.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="myNotifUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-bell-slash pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="myNotifUnavailableTitle">Notifications are not available for your account.</h2>
+        <p id="myNotifUnavailableBody">Your sign-in is not linked to an employee record, so no task notifications can be addressed to you. Ask a GRAC Admin to link it.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="myNotifRoot" hidden>
+
+    <div class="pm-tabs" role="tablist" aria-label="Notification filters">
+        <button role="tab" data-notif-tab="Pending" class="active" aria-selected="true">Unread <span class="pm-badge" id="notifCountUnread">0</span></button>
+        <button role="tab" data-notif-tab="Sent"                  aria-selected="false">Read <span class="pm-badge" id="notifCountRead">0</span></button>
+        <button role="tab" data-notif-tab=""                      aria-selected="false">All</button>
+    </div>
+
+    <div class="pm-toolbar">
+        <select id="notifFilterEvent">
+            <option value="">All events</option>
+            <option value="WARNING">Due soon</option>
+            <option value="BREACH">Breached</option>
+            <option value="ESCALATION">Escalation</option>
+        </select>
+        <button class="pm-button icon" id="notifRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button" id="notifMarkAllBtn" type="button">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i> Mark all read
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Event</th><th>Task</th><th>Why you</th>
+                    <th>Due</th><th>Received</th><th>Status</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="myNotifBody"><tr><td colspan="7" class="pm-empty">Loading...</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="pm-pager" data-pager="notifications">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    // Resolved lazily — see the note in tasks.cshtml about PathBase.
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const PAGE_SIZE = 25;
+    let page = 1;
+    let statusFilter = 'Pending';
+    let eventFilter  = '';
+
+    const EVENT_STYLE = {
+        WARNING:    { bg: '#fef9c3', fg: '#854d0e', label: 'Due soon'   },
+        BREACH:     { bg: '#fee2e2', fg: '#991b1b', label: 'Breached'   },
+        ESCALATION: { bg: '#ffedd5', fg: '#9a3412', label: 'Escalation' }
+    };
+
+    function esc(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function fmtDate(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toISOString().slice(0, 10);
+    }
+
+    async function init() {
+        const root    = document.getElementById('myNotifRoot');
+        const unavail = document.getElementById('myNotifUnavailable');
+
+        // The counts endpoint answers "is this account addressable?"
+        // without a second probe: an unmapped account gets zeroes rather
+        // than an error, so we ask for the list to decide.
+        let probe;
+        try {
+            probe = await fetch(U('/practice/api/task-notifications/me?pageSize=1'), { credentials: 'same-origin' });
+        } catch (_) {
+            unavail.hidden = false;
+            document.getElementById('myNotifUnavailableTitle').textContent = 'Notifications could not be loaded.';
+            document.getElementById('myNotifUnavailableBody').textContent  = 'The service is unreachable. Try again shortly.';
+            return;
+        }
+
+        if (probe.status === 403) { unavail.hidden = false; return; }
+        if (probe.status === 401) {
+            unavail.hidden = false;
+            document.getElementById('myNotifUnavailableTitle').textContent = 'Your session has expired.';
+            document.getElementById('myNotifUnavailableBody').textContent  = 'Sign in again to see your notifications.';
+            return;
+        }
+
+        root.hidden = false;
+
+        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                statusFilter = btn.getAttribute('data-notif-tab') || '';
+                page = 1;
+                document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
+                    const on = b === btn;
+                    b.classList.toggle('active', on);
+                    b.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+                load();
+            });
+        });
+
+        document.getElementById('notifFilterEvent').addEventListener('change', function (e) {
+            eventFilter = e.target.value; page = 1; load();
+        });
+        document.getElementById('notifRefreshBtn').addEventListener('click', function () { load(); refreshCounts(); });
+        document.getElementById('notifMarkAllBtn').addEventListener('click', markAll);
+
+        const pager = document.querySelector('.pm-pager[data-pager="notifications"]');
+        pager.querySelector('[data-pg="prev"]').addEventListener('click', function () {
+            if (page > 1) { page--; load(); }
+        });
+        pager.querySelector('[data-pg="next"]').addEventListener('click', function () { page++; load(); });
+
+        await refreshCounts();
+        await load();
+    }
+
+    async function refreshCounts() {
+        try {
+            const r = await fetch(U('/practice/api/task-notifications/me/counts'), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const c = await r.json();
+            document.getElementById('notifCountUnread').textContent = c.pendingCount || 0;
+            document.getElementById('notifCountRead').textContent   = c.sentCount    || 0;
+        } catch (_) { /* a badge must never break the page */ }
+    }
+
+    async function load() {
+        const body = document.getElementById('myNotifBody');
+        body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+
+        let url = U('/practice/api/task-notifications/me?page=') + page + '&pageSize=' + PAGE_SIZE;
+        if (statusFilter) url += '&statusCode=' + encodeURIComponent(statusFilter);
+        if (eventFilter)  url += '&notifyEventCode=' + encodeURIComponent(eventFilter);
+
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            render(await r.json());
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + esc(err.message) + '</td></tr>';
+        }
+    }
+
+    function render(payload) {
+        const body = document.getElementById('myNotifBody');
+        const rows = (payload && payload.rows) || [];
+        body.innerHTML = '';
+
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">'
+                           + (statusFilter === 'Pending' ? 'Nothing unread. ' : '')
+                           + 'No notifications here.</td></tr>';
+        } else {
+            for (const n of rows) {
+                const ev = EVENT_STYLE[n.notifyEventCode]
+                        || { bg: '#f1f5f9', fg: '#475569', label: n.notifyEventCode };
+                const unread = n.statusCode === 'Pending';
+                const tr = document.createElement('tr');
+                if (unread) tr.style.fontWeight = '600';
+                tr.innerHTML = [
+                    '<td><span class="pm-badge" style="background:' + ev.bg + '; color:' + ev.fg + ';">'
+                        + esc(ev.label) + '</span></td>',
+                    '<td>' + esc(n.taskNumber || ('#' + n.taskId)) + '<div style="font-size:11px; font-weight:400; color:#64748b;">'
+                        + esc(n.taskTitle || '') + '</div></td>',
+                    // BRD §13 distinguishes owner reminders from configured
+                    // management escalation; the recipient should know which
+                    // one reached them.
+                    '<td>' + (n.recipientReasonCode === 'OWNER'
+                              ? 'You own this task'
+                              : 'Role: ' + esc(n.roleName || '')) + '</td>',
+                    '<td>' + esc(fmtDate(n.dueAt)) + '</td>',
+                    '<td>' + esc(fmtDate(n.enteredDt)) + '</td>',
+                    '<td>' + (unread ? '<span class="pm-badge" style="background:#dbeafe; color:#1e40af;">Unread</span>'
+                                     : '<span class="pm-badge">Read</span>') + '</td>',
+                    '<td>' + (unread
+                        ? '<button type="button" class="pm-button" data-mark="' + esc(n.taskNotificationId) + '">Mark read</button>'
+                        : '') + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+            body.querySelectorAll('[data-mark]').forEach(function (b) {
+                b.addEventListener('click', function () { markOne(b.getAttribute('data-mark')); });
+            });
+        }
+
+        const pager = document.querySelector('.pm-pager[data-pager="notifications"]');
+        pager.querySelector('[data-pg="label"]').textContent = 'Page ' + ((payload && payload.pageNumber) || 1);
+        pager.querySelector('[data-pg="total"]').textContent = ((payload && payload.totalCount) || 0) + ' total';
+    }
+
+    async function markOne(id) {
+        try {
+            const r = await fetch(U('/practice/api/task-notifications/') + encodeURIComponent(id) + '/mark', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify({ statusCode: 'Sent' })
+            });
+            if (r.ok) { load(); refreshCounts(); }
+            else {
+                const b = await r.json().catch(function () { return {}; });
+                alert(b.error || ('Could not mark read (HTTP ' + r.status + ')'));
+            }
+        } catch (err) { alert('Network error: ' + err.message); }
+    }
+
+    async function markAll() {
+        if (!confirm('Mark all your unread notifications as read?')) return;
+        let url = U('/practice/api/task-notifications/me/mark-all');
+        if (eventFilter) url += '?notifyEventCode=' + encodeURIComponent(eventFilter);
+        try {
+            const r = await fetch(url, { method: 'POST', credentials: 'same-origin' });
+            const b = await r.json().catch(function () { return {}; });
+            if (r.ok) {
+                if (b.markedCount != null) alert(b.markedCount + ' notification(s) marked read.');
+                load(); refreshCounts();
+            } else {
+                alert(b.error || ('Could not mark all read (HTTP ' + r.status + ')'));
+            }
+        } catch (err) { alert('Network error: ' + err.message); }
+    }
+})();
+</script>

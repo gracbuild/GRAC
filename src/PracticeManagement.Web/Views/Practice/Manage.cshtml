@@ -14,10 +14,70 @@
     {
         "tasks", "gaps", "waivers", "applicability-decision", "ownership-tree",
         "my-assignments", "gap-view", "handover", "auditor-workbench",
-        "risk-register", "kri-dashboard", "adapter-bindings"
+        "risk-register", "kri-dashboard", "adapter-bindings",
+        // Workflow & Event-Driven Assurance Engine (BRD v1.0).
+        // Each key resolves to Views/Practice/Partials/{key}.cshtml.
+        "workflows", "workflow-stages", "workflow-entity-types",
+        "workflow-events", "workflow-checklists", "workflow-event-mappings",
+        "event-assurance", "workflow-dashboard",
+        // Role / asset-category scoped event assurance (migrations 123/124/125).
+        // "workflow-event-inbox" retired -- see Task Center's Event Driven
+        // Assurance tab (migration 135).
+        // "workflow-scope-mapping" retired -- role checklists are a section on
+        // the Role Master form; asset-category checklists are the screen below
+        // (migration 138).
+        "asset-category-assurance",
+        // Full-page practice view (migration 139) -- replaces the view modal.
+        "practice-view",
+        // Resolve (migrations 140/141): a flat owner-scoped list, and a
+        // full-page workspace per instance. "resolve" moves here from the
+        // generic grid, so practice.js no longer renders the old tabbed
+        // dependency workbench for it.
+        "resolve", "resolve-workspace",
+        // Phase 2 Assurance Management (BRD Part 2) -- NEW independent
+        // module. Each key resolves to Views/Practice/Partials/{key}.cshtml.
+        // Menu rows seeded under nav-assurance by migrations 071 / 075 / 078 / 081.
+        "org-assurance-definitions",
+        "org-assurance-scope-builder",
+        "org-assurance-question-sets",
+        "org-assurance-evidence-config",
+        "org-assurance-workflow-config",
+        "org-assurance-scoring-config",
+        "org-assurance-plans",
+        "org-assurance-triggers",
+        "org-assurance-scope-resolution",
+        "org-assurance-executions",
+        "org-assurance-observations",
+        // "org-assurance-gaps" retired (109-113); Assurance gaps now
+        // land in the unified Gap Center (Practice/Index/gaps).
+        // Document Upload + Acknowledgement module (migrations 146-154).
+        // Phase 1: register + upload + review/approve workflow.
+        // Phase 2: admin acknowledgement batches over published docs.
+        // Phase 3: employee-side inbox for pending acknowledgements.
+        "document-uploads",
+        "document-acknowledgements",
+        "my-acknowledgements",
+        // Task Centre v2 Phase 4 (migrations 201-203) -- the in-app
+        // dispatcher for SLA task notifications. Personal inbox, scoped to
+        // the session's employee id.
+        "my-notifications",
+        // Gap Centre v1.0 -- dedicated lifecycle detail page. The existing
+        // "gaps" partial is untouched; this is the drill-down landing.
+        "gap-detail",
+        "exception-centre",
+        "risk-centre",
+        // Organization SLA Configuration (migrations 178/179/180).
+        // Adopts Control Management SLA masters into per-org configs with
+        // warning/escalation thresholds, notify roles and process bindings.
+        "org-sla-config"
     };
     if (workflowScreens.Contains(Model.Key))
     {
+        @* Emitted before the early return below, so BOTH paths get it: the
+           workflow partials rendered here, and the generic layout further
+           down that loads practice.js. Without this the asset screen would
+           need its own copy of the editor. *@
+        <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
         <partial name="Partials/@Model.Key" model="Model" />
         return;
     }
@@ -78,7 +138,7 @@
         }
         @if (!isOrganizationWorkspace && !isDependencyWorkbench && Model.Key != "organizations" && Model.Key != "audit-trace" && Model.Key != "control-applicability" && !isResolve && !isReadOnlyAssuranceView && permissions.Contains("ADD"))
         {
-            <button class="pm-button primary" id="addRecord" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> @(Model.Key == "organization-controls" ? "Add Release" : Model.Key == "organization-requirements" || Model.Key == "practices" ? "Add Practice" : Model.Key == "practice-instances" ? "Add New Instance" : Model.Key == "assurance-generation" ? "Generate Activity" : Model.Key == "assurance-activities" ? "Add Activity" : "Add Record")</button>
+            <button class="pm-button primary" id="addRecord" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> @(Model.Key == "organization-controls" ? "Add Release" : Model.Key == "organization-requirements" || Model.Key == "practices" ? "Add Practice" : Model.Key == "practice-instances" ? "Add New Instance" : Model.Key == "assurance-generation" ? "Generate Activity" : Model.Key == "assurance-activities" ? "Add Activity" : Model.Key == "roles" ? "Add Role" : "Add Record")</button>
         }
         @* Q13/Q14/Q15 v2 — the "Add Implementation Task" action now lives in the row-level 3-dot menu.
              Row-level injection happens in _add-implementation-task-modal.cshtml when ImplementationStatus = "Not Implemented". *@
@@ -304,5 +364,6 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         window.pmRoleName="@(ViewBag.RoleName ?? "")";
         window.pmEmployeeId="@(ViewBag.EmployeeId ?? "")";
     </script>
+    <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
     <script src="~/js/practice.js" asp-append-version="true"></script>
 }

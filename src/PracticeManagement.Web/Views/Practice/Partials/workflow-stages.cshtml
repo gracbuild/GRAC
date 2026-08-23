@@ -1,0 +1,212 @@
+@*
+    Workflow Stages (BRD Sec 7) -- pick a workflow, then manage its stages.
+    Screen key: `workflow-stages`  ·  Group: Workflow
+    Feature flag: `screen.workflow-stages`
+    Backed by /practice/api/workflow/workflows/{id}/stages
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="wsUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-route pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="wsUnavailableTitle">Workflow Stages is not yet enabled for this organization.</h2>
+        <p id="wsUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-stages</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="wsRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="wsFilterOrganization"><option value="">All organizations</option></select>
+        <select id="wsFilterWorkflow" disabled><option value="">Select workflow...</option></select>
+        <button class="pm-button icon" id="wsRefreshBtn" type="button" title="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="wsAddBtn" type="button" disabled><i class="fa-solid fa-plus"></i> Add Stage</button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Seq</th><th>Code</th><th>Name</th><th>Description</th><th>Allowed Transitions</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="wsBody"><tr><td colspan="7" class="pm-empty">Pick a workflow to load stages.</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<dialog id="wsDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="wsForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="wsDialogTitle" style="margin:0; font-size:18px;">Add Stage</h2>
+            <button type="button" id="wsClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="wsMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="wsEditId" />
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Sequence
+                <input id="wsSequence" type="number" min="1" value="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Code *
+                <input id="wsCode" type="text" maxlength="60" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
+                <select id="wsStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="Active" selected>Active</option><option value="Inactive">Inactive</option>
+                </select>
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Name *
+            <input id="wsName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
+            <textarea id="wsDescription" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Allowed Transitions (CSV of stage codes)
+            <input id="wsAllowed" type="text" maxlength="1000" placeholder="e.g. CONFIRMED,PROMOTED" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="wsCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="wsSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-stages';
+    let orgId = null, workflowId = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('wsUnavailable', 'wsUnavailableTitle', 'wsUnavailableBody',
+            'No organizations are available for your account.', '');
+        document.getElementById('wsRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('wsFilterOrganization', orgs);
+        document.getElementById('wsFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('wsFilterWorkflow').addEventListener('change', onWorkflowChange);
+        document.getElementById('wsRefreshBtn').addEventListener('click', reload);
+        document.getElementById('wsAddBtn').addEventListener('click', function () { openDialog(null); });
+        wireDialog();
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        orgId = document.getElementById('wsFilterOrganization').value || null;
+        const wfSel = document.getElementById('wsFilterWorkflow');
+        wfSel.innerHTML = '<option value="">Loading...</option>'; wfSel.disabled = true;
+        document.getElementById('wsAddBtn').disabled = true;
+        if (!orgId) { wfSel.innerHTML = '<option value="">Select workflow...</option>'; return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('wsRoot').hidden = true; document.getElementById('wsUnavailable').hidden = false; return; }
+        const url = U('/practice/api/workflow/workflows?organizationId=') + encodeURIComponent(orgId) + '&pageSize=200';
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const b = await r.json();
+            const rows = (b && b.rows) || [];
+            wfSel.innerHTML = '<option value="">Select workflow...</option>';
+            for (const row of rows) {
+                const opt = document.createElement('option');
+                opt.value = String(row.workflowId);
+                opt.textContent = row.workflowCode + ' - ' + row.workflowName;
+                wfSel.appendChild(opt);
+            }
+            wfSel.disabled = false;
+        } catch (_) { wfSel.innerHTML = '<option value="">Failed to load workflows</option>'; }
+    }
+
+    function onWorkflowChange() {
+        workflowId = document.getElementById('wsFilterWorkflow').value || null;
+        document.getElementById('wsAddBtn').disabled = !workflowId;
+        reload();
+    }
+
+    async function reload() {
+        if (!workflowId) { setBody('<tr><td colspan="7" class="pm-empty">Pick a workflow to load stages.</td></tr>'); return; }
+        setBody('<tr><td colspan="7" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(U('/practice/api/workflow/workflows/') + encodeURIComponent(workflowId) + '/stages',
+                                  { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const rows = await r.json();
+            const body = document.getElementById('wsBody'); body.innerHTML = '';
+            if (!rows.length) { setBody('<tr><td colspan="7" class="pm-empty">No stages yet.</td></tr>'); return; }
+            for (const s of rows) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = [
+                    '<td>' + window.__wfCommon.escape(String(s.stageSequence)) + '</td>',
+                    '<td>' + window.__wfCommon.escape(s.stageCode) + '</td>',
+                    '<td>' + window.__wfCommon.escape(s.stageName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(s.description || '') + '</td>',
+                    '<td>' + window.__wfCommon.escape(s.allowedTransitions || '') + '</td>',
+                    '<td>' + window.__wfCommon.badge(s.status) + '</td>',
+                    '<td><button type="button" class="pm-button" data-edit-id="' + s.workflowStageId + '"><i class="fa-solid fa-pen"></i></button></td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+            body.querySelectorAll('[data-edit-id]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const id = Number(btn.getAttribute('data-edit-id'));
+                    const row = rows.find(function (x) { return x.workflowStageId === id; });
+                    if (row) openDialog(row);
+                });
+            });
+        } catch (err) { setBody('<tr><td colspan="7" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
+    }
+
+    function setBody(html) { document.getElementById('wsBody').innerHTML = html; }
+
+    function openDialog(row) {
+        const dlg = document.getElementById('wsDialog'); if (!dlg) return;
+        document.getElementById('wsDialogTitle').textContent = row ? 'Edit Stage' : 'Add Stage';
+        document.getElementById('wsEditId').value      = row ? row.workflowStageId : '';
+        document.getElementById('wsSequence').value    = row ? row.stageSequence : 1;
+        document.getElementById('wsCode').value        = row ? row.stageCode : '';
+        document.getElementById('wsName').value        = row ? row.stageName : '';
+        document.getElementById('wsDescription').value = row ? (row.description || '') : '';
+        document.getElementById('wsAllowed').value     = row ? (row.allowedTransitions || '') : '';
+        document.getElementById('wsStatus').value      = row ? row.status : 'Active';
+        window.__wfCommon.setMessage('wsMessage', null);
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+    function closeDialog() { const d = document.getElementById('wsDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireDialog() {
+        document.getElementById('wsClose').addEventListener('click', closeDialog);
+        document.getElementById('wsCancel').addEventListener('click', closeDialog);
+        document.getElementById('wsForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            if (!workflowId) { window.__wfCommon.setMessage('wsMessage', 'Pick a workflow first.', 'error'); return; }
+            const submit = document.getElementById('wsSubmit'); submit.disabled = true;
+            const editId = document.getElementById('wsEditId').value;
+            const payload = {
+                workflowStageId:     editId ? Number(editId) : null,
+                workflowId:          Number(workflowId),
+                stageCode:           document.getElementById('wsCode').value.trim(),
+                stageName:           document.getElementById('wsName').value.trim(),
+                description:         document.getElementById('wsDescription').value.trim() || null,
+                stageSequence:       Number(document.getElementById('wsSequence').value || 1),
+                allowedTransitions:  document.getElementById('wsAllowed').value.trim() || null,
+                status:              document.getElementById('wsStatus').value
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/workflow-stages'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('wsMessage', 'Saved.', 'ok'); setTimeout(function () { closeDialog(); reload(); }, 400); }
+                else     { window.__wfCommon.setMessage('wsMessage', b.error || 'Save failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('wsMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+})();
+</script>

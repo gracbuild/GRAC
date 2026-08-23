@@ -1,0 +1,179 @@
+@*
+    Entity Types (BRD Sec 9) -- configurable, org-defined entity types.
+    Screen key: `workflow-entity-types`
+    Feature flag: `screen.workflow-entity-types`
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="etUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-shapes pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="etUnavailableTitle">Entity Types is not yet enabled for this organization.</h2>
+        <p id="etUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-entity-types</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="etRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="etFilterOrganization"><option value="">All organizations</option></select>
+        <button class="pm-button icon" id="etRefreshBtn" type="button"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="etAddBtn" type="button"><i class="fa-solid fa-plus"></i> Add Entity Type</button>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Category</th><th>Code</th><th>Name</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="etBody"><tr><td colspan="6" class="pm-empty">Select an organization to load entity types.</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<dialog id="etDialog" style="border:none; border-radius:8px; padding:0; max-width:560px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="etForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="etDialogTitle" style="margin:0; font-size:18px;">Add Entity Type</h2>
+            <button type="button" id="etClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="etMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="etEditId" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Code *
+                <input id="etCode" type="text" maxlength="60" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Category
+                <select id="etCategory" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="">(select)</option>
+                    <option>Asset</option><option>Tool</option><option>Application</option>
+                    <option>People</option><option>Vendor</option><option>Branch</option>
+                    <option>Department</option><option>Custom</option>
+                </select>
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Name *
+            <input id="etName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
+            <textarea id="etDescription" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Status
+            <select id="etStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="Active" selected>Active</option><option value="Inactive">Inactive</option>
+            </select>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="etCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="etSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-entity-types';
+    let orgId = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('etUnavailable','etUnavailableTitle','etUnavailableBody','No organizations available.','');
+        document.getElementById('etRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('etFilterOrganization', orgs);
+        document.getElementById('etFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('etRefreshBtn').addEventListener('click', reload);
+        document.getElementById('etAddBtn').addEventListener('click', function () { openDialog(null); });
+        wireDialog();
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        orgId = document.getElementById('etFilterOrganization').value || null;
+        if (!orgId) { setBody('<tr><td colspan="6" class="pm-empty">Select an organization to load entity types.</td></tr>'); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('etRoot').hidden = true; document.getElementById('etUnavailable').hidden = false; return; }
+        await reload();
+    }
+    async function reload() {
+        if (!orgId) return;
+        setBody('<tr><td colspan="6" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(U('/practice/api/workflow/entity-types?organizationId=') + encodeURIComponent(orgId), { credentials: 'same-origin' });
+            const rows = await r.json();
+            const body = document.getElementById('etBody'); body.innerHTML = '';
+            if (!rows.length) { setBody('<tr><td colspan="6" class="pm-empty">No entity types yet.</td></tr>'); return; }
+            for (const t of rows) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = [
+                    '<td>' + window.__wfCommon.escape(t.entityCategory || '') + '</td>',
+                    '<td>' + window.__wfCommon.escape(t.entityTypeCode) + '</td>',
+                    '<td>' + window.__wfCommon.escape(t.entityTypeName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(t.description || '') + '</td>',
+                    '<td>' + window.__wfCommon.badge(t.status) + '</td>',
+                    '<td><button type="button" class="pm-button" data-edit-id="' + t.entityTypeId + '"><i class="fa-solid fa-pen"></i></button></td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+            body.querySelectorAll('[data-edit-id]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const id = Number(btn.getAttribute('data-edit-id'));
+                    const row = rows.find(function (x) { return x.entityTypeId === id; });
+                    if (row) openDialog(row);
+                });
+            });
+        } catch (err) { setBody('<tr><td colspan="6" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
+    }
+    function setBody(html) { document.getElementById('etBody').innerHTML = html; }
+
+    function openDialog(row) {
+        const dlg = document.getElementById('etDialog'); if (!dlg) return;
+        document.getElementById('etDialogTitle').textContent = row ? 'Edit Entity Type' : 'Add Entity Type';
+        document.getElementById('etEditId').value       = row ? row.entityTypeId : '';
+        document.getElementById('etCode').value         = row ? row.entityTypeCode : '';
+        document.getElementById('etName').value         = row ? row.entityTypeName : '';
+        document.getElementById('etCategory').value     = row ? (row.entityCategory || '') : '';
+        document.getElementById('etDescription').value  = row ? (row.description || '') : '';
+        document.getElementById('etStatus').value       = row ? row.status : 'Active';
+        window.__wfCommon.setMessage('etMessage', null);
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+    function closeDialog() { const d = document.getElementById('etDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireDialog() {
+        document.getElementById('etClose').addEventListener('click', closeDialog);
+        document.getElementById('etCancel').addEventListener('click', closeDialog);
+        document.getElementById('etForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submit = document.getElementById('etSubmit'); submit.disabled = true;
+            const editId = document.getElementById('etEditId').value;
+            const payload = {
+                entityTypeId:    editId ? Number(editId) : null,
+                organizationId:  Number(orgId),
+                entityTypeCode:  document.getElementById('etCode').value.trim(),
+                entityTypeName:  document.getElementById('etName').value.trim(),
+                description:     document.getElementById('etDescription').value.trim() || null,
+                entityCategory:  document.getElementById('etCategory').value || null,
+                status:          document.getElementById('etStatus').value
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/entity-types'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('etMessage', 'Saved.', 'ok'); setTimeout(function () { closeDialog(); reload(); }, 400); }
+                else     { window.__wfCommon.setMessage('etMessage', b.error || 'Save failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('etMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+})();
+</script>

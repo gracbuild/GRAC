@@ -175,6 +175,26 @@ body.sidebar-collapse .main-sidebar:hover .logo-collapsed {
     line-height: 20px;
     letter-spacing: 0%;
     color:#000;
+    /* A name is user data and can be long. Cap it rather than let the
+       navbar reflow; the full value is on the title attribute and in the
+       dropdown header. */
+    display: inline-block;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+.navbar-nav .nav-link #spnUserRole {
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 14px;
+    color: #64748b;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 

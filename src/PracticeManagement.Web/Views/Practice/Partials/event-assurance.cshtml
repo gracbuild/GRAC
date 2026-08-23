@@ -1,0 +1,232 @@
+@*
+    Event Assurance (BRD Sec 13/14) -- one row per event received; trigger,
+    complete, close.
+    Screen key: `event-assurance`
+    Feature flag: `screen.event-assurance`
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="eaUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-shield-halved pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="eaUnavailableTitle">Event Assurance is not yet enabled for this organization.</h2>
+        <p id="eaUnavailableBody">Ask a GRAC Admin to turn on <code>screen.event-assurance</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="eaRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="eaFilterOrganization"><option value="">All organizations</option></select>
+        <select id="eaFilterStatus">
+            <option value="">All statuses</option>
+            <option>Received</option><option>Pending</option><option>InProgress</option>
+            <option>Completed</option><option>Failed</option><option>Overdue</option>
+        </select>
+        <input id="eaSearch" type="text" placeholder="Search event / entity..." />
+        <button class="pm-button icon" id="eaRefreshBtn" type="button"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="eaTriggerBtn" type="button"><i class="fa-solid fa-bolt"></i> Trigger Event</button>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr>
+                <th>Event</th><th>Entity</th><th>Checklist</th><th>Trigger</th>
+                <th>Owner</th><th>Due</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="eaBody"><tr><td colspan="8" class="pm-empty">Select an organization to load event assurance.</td></tr></tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="event-assurance">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+<dialog id="eaDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="eaForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Trigger Event</h2>
+            <button type="button" id="eaClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="eaMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Event *
+            <select id="eaEvent" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Entity Type
+            <select id="eaEntityType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">(select)</option></select>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Entity Reference
+                <input id="eaEntityRef" type="text" maxlength="200" placeholder="external id" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Entity Display Name
+                <input id="eaEntityName" type="text" maxlength="300" placeholder="e.g. John Doe" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Trigger Source
+            <select id="eaSource" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="Manual" selected>Manual</option>
+                <option>API</option><option>HRMS</option><option>ERP</option>
+                <option>ITSM</option><option>CMDB</option>
+                <option>Webhook</option><option>MessageQueue</option>
+            </select>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="eaCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="eaSubmit" class="pm-button primary">Trigger</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.event-assurance';
+    let orgId = null, page = 1;
+    const PAGE_SIZE = 25;
+    let searchDebounce = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('eaUnavailable','eaUnavailableTitle','eaUnavailableBody','No organizations available.','');
+        document.getElementById('eaRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('eaFilterOrganization', orgs);
+        document.getElementById('eaFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('eaFilterStatus').addEventListener('change', function () { page = 1; reload(); });
+        document.getElementById('eaSearch').addEventListener('input', function () {
+            clearTimeout(searchDebounce); searchDebounce = setTimeout(function () { page = 1; reload(); }, 300);
+        });
+        document.getElementById('eaRefreshBtn').addEventListener('click', reload);
+        document.getElementById('eaTriggerBtn').addEventListener('click', openDialog);
+        window.__wfCommon.wirePager('event-assurance', function (delta) { page = Math.max(1, page + delta); reload(); });
+        wireDialog();
+        await onOrgChange();
+    }
+    async function onOrgChange() {
+        orgId = document.getElementById('eaFilterOrganization').value || null;
+        if (!orgId) { setBody('<tr><td colspan="8" class="pm-empty">Select an organization to load event assurance.</td></tr>'); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('eaRoot').hidden = true; document.getElementById('eaUnavailable').hidden = false; return; }
+        page = 1; await reload();
+    }
+    async function reload() {
+        if (!orgId) return;
+        const st = document.getElementById('eaFilterStatus').value;
+        const q  = document.getElementById('eaSearch').value.trim();
+        const url = U('/practice/api/workflow/event-instances?organizationId=') + encodeURIComponent(orgId)
+                  + '&page=' + page + '&pageSize=' + PAGE_SIZE
+                  + (st ? '&statusCode=' + encodeURIComponent(st) : '')
+                  + (q  ? '&search=' + encodeURIComponent(q) : '');
+        setBody('<tr><td colspan="8" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows = (payload && payload.rows) || [];
+            const body = document.getElementById('eaBody'); body.innerHTML = '';
+            if (!rows.length) { setBody('<tr><td colspan="8" class="pm-empty">No event assurance instances yet.</td></tr>'); }
+            else {
+                for (const e of rows) {
+                    const tr = document.createElement('tr');
+                    const isClosed = (e.status === 'Completed' || e.status === 'Failed' || e.status === 'Cancelled');
+                    tr.innerHTML = [
+                        '<td>' + window.__wfCommon.escape(e.eventCode + ' - ' + e.eventName) + '</td>',
+                        '<td>' + window.__wfCommon.escape((e.entityTypeName || '') + (e.entityDisplayName ? ' / ' + e.entityDisplayName : (e.entityReference ? ' / ' + e.entityReference : ''))) + '</td>',
+                        '<td>' + window.__wfCommon.escape(e.checklistName || '') + '</td>',
+                        '<td>' + window.__wfCommon.escape(e.triggerSource || '') + '</td>',
+                        '<td>' + window.__wfCommon.escape(e.ownerEmployeeId != null ? String(e.ownerEmployeeId) : '') + '</td>',
+                        '<td>' + window.__wfCommon.escape(e.dueDate ? String(e.dueDate).substring(0, 10) : '') + '</td>',
+                        '<td>' + window.__wfCommon.badge(e.status) + '</td>',
+                        '<td>' + (isClosed ? '' : ('<button type="button" class="pm-button" data-complete-id="' + e.eventInstanceId + '"><i class="fa-solid fa-check"></i> Complete</button>')) + '</td>'
+                    ].join('');
+                    body.appendChild(tr);
+                }
+                body.querySelectorAll('[data-complete-id]').forEach(function (btn) {
+                    btn.addEventListener('click', async function () {
+                        const id = btn.getAttribute('data-complete-id');
+                        if (!confirm('Mark event assurance #' + id + ' complete?')) return;
+                        try {
+                            const r = await fetch(U('/practice/api/workflow/event-instances/') + encodeURIComponent(id) + '/complete', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                credentials: 'same-origin', body: JSON.stringify({ comments: 'Marked complete from Event Assurance.' })
+                            });
+                            if (r.ok) reload();
+                            else { const b = await r.json().catch(function () { return {}; }); alert(b.error || 'Complete failed'); }
+                        } catch (err) { alert('Network error: ' + err.message); }
+                    });
+                });
+            }
+            window.__wfCommon.updatePager('event-assurance', payload);
+        } catch (err) { setBody('<tr><td colspan="8" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
+    }
+    function setBody(html) { document.getElementById('eaBody').innerHTML = html; }
+
+    async function loadPickers() {
+        async function fetchList(url) { try { const r = await fetch(url, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
+        const evSel = document.getElementById('eaEvent'); evSel.innerHTML = '<option value="">Loading...</option>';
+        const etSel = document.getElementById('eaEntityType'); etSel.innerHTML = '<option value="">(select)</option>';
+        const events = await fetchList(U('/practice/api/workflow/events?organizationId=') + encodeURIComponent(orgId) + '&statusCode=Active&pageSize=200');
+        const entTypes = await fetchList(U('/practice/api/workflow/entity-types?organizationId=') + encodeURIComponent(orgId) + '&statusCode=Active');
+        evSel.innerHTML = '<option value="">(select)</option>';
+        ((events && events.rows) || []).forEach(function (r) {
+            const o = document.createElement('option'); o.value = String(r.eventDefinitionId);
+            o.textContent = r.eventCode + ' - ' + r.eventName; evSel.appendChild(o);
+        });
+        (entTypes || []).forEach(function (r) {
+            const o = document.createElement('option'); o.value = String(r.entityTypeId);
+            o.textContent = (r.entityCategory ? r.entityCategory + ' - ' : '') + r.entityTypeName; etSel.appendChild(o);
+        });
+    }
+    async function openDialog() {
+        const dlg = document.getElementById('eaDialog'); if (!dlg) return;
+        window.__wfCommon.setMessage('eaMessage', null);
+        ['eaEntityRef','eaEntityName'].forEach(function (id) { document.getElementById(id).value = ''; });
+        document.getElementById('eaSource').value = 'Manual';
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+        await loadPickers();
+    }
+    function closeDialog() { const d = document.getElementById('eaDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireDialog() {
+        document.getElementById('eaClose').addEventListener('click', closeDialog);
+        document.getElementById('eaCancel').addEventListener('click', closeDialog);
+        document.getElementById('eaForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const evId = document.getElementById('eaEvent').value;
+            if (!evId) { window.__wfCommon.setMessage('eaMessage', 'Select an event.', 'error'); return; }
+            const submit = document.getElementById('eaSubmit'); submit.disabled = true;
+            const etId = document.getElementById('eaEntityType').value;
+            const payload = {
+                organizationId:     Number(orgId),
+                eventDefinitionId:  Number(evId),
+                entityTypeId:       etId ? Number(etId) : null,
+                entityReference:    document.getElementById('eaEntityRef').value.trim() || null,
+                entityDisplayName:  document.getElementById('eaEntityName').value.trim() || null,
+                triggerSource:      document.getElementById('eaSource').value
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/event-instances/trigger'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('eaMessage', 'Event triggered #' + (b.eventInstanceId || '?'), 'ok'); setTimeout(function () { closeDialog(); reload(); }, 500); }
+                else     { window.__wfCommon.setMessage('eaMessage', b.error || 'Trigger failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('eaMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+})();
+</script>

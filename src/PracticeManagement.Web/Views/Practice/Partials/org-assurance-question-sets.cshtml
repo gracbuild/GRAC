@@ -1,0 +1,838 @@
+@*
+    Assurance Question Sets (BRD Part 2 Sec 4) -- Phase 2 Stage 2.
+
+    Screen key : `org-assurance-question-sets`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Question Sets (migration 078)
+    Feature    : screen.org-assurance-question-sets
+    Backend    :
+        GET    /practice/api/org-assurance/question-sets?organizationId=&search=&page=&pageSize=
+        POST   /practice/api/org-assurance/question-sets
+        GET    /practice/api/org-assurance/question-sets/{id}?organizationId=
+        DELETE /practice/api/org-assurance/question-sets/{id}?organizationId=
+        GET    /practice/api/org-assurance/question-sets/{id}/questions?organizationId=
+        POST   /practice/api/org-assurance/questions
+        GET    /practice/api/org-assurance/questions/{id}?organizationId=
+        DELETE /practice/api/org-assurance/questions/{id}?organizationId=
+        GET    /practice/api/org-assurance/admin-question-types
+
+    UX:
+      * Two-panel layout: LEFT = paginated list of question sets;
+        RIGHT = questions inside the selected set.
+      * Both panels use the shared 3-dots menu (.pm-action-trigger /
+        .pm-action-menu) established by tasks.cshtml / gaps.cshtml.
+      * Admin (grac_new) question type dropdown; Owner dropdown from
+        the existing /practice/api/organizations/{orgId}/employees API.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="qsUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-clipboard-list pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="qsUnavailableTitle">Question Sets are not available for this organization.</h2>
+        <p id="qsUnavailableBody">Ask a GRAC Admin to enable <code>screen.org-assurance-question-sets</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="qsRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="qsFilterOrganization"><option value="">Loading organizations...</option></select>
+        <input id="qsSearch" type="text" placeholder="Search set name / code..." />
+        <button class="pm-button icon" id="qsRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="qsAddSetBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Set
+        </button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:minmax(320px, 420px) 1fr; gap:12px; margin-top:12px;">
+        <div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Owner</th>
+                            <th style="text-align:right;">#Q</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="qsSetBody">
+                        <tr><td colspan="6" class="pm-empty">Select an organization to load sets.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pm-pager" data-pager="qs-set">
+                <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                <span data-pg="label">Page 1</span>
+                <button class="pm-button" data-pg="next" type="button">Next</button>
+                <span data-pg="total" class="pm-pager-total">0 total</span>
+            </div>
+        </div>
+
+        <div>
+            <div class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <span style="font-weight:600;" id="qsSelectedSetName">Select a question set to view its questions.</span>
+                    <span class="pm-badge" id="qsSelectedSetCode" hidden></span>
+                </div>
+                <div>
+                    <button class="pm-button primary" id="qsAddQuestionBtn" type="button" disabled>
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Question
+                    </button>
+                </div>
+            </div>
+
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:70px;">Order</th>
+                            <th>Code</th>
+                            <th>Text</th>
+                            <th>Type</th>
+                            <th style="text-align:center;">Mandatory</th>
+                            <th style="text-align:right;">Weight</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="qsQuestionBody">
+                        <tr><td colspan="7" class="pm-empty">No set selected.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* ---------- Add / Edit Question Set dialog ---------- *@
+<dialog id="qsSetDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="qsSetForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="qsSetDialogTitle" style="margin:0; font-size:18px;">Add Question Set</h2>
+            <button type="button" id="qsSetClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="qsSetMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="qsSetEditId" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Code <span style="color:#b91c1c;">*</span></span>
+                <input id="qsSetCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Status</span>
+                <select id="qsSetStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                    <option value="Active" selected>Active</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Inactive">Inactive</option>
+                </select>
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Name <span style="color:#b91c1c;">*</span></span>
+            <input id="qsSetName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Owner</span>
+            <select id="qsSetOwnerEmployee" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                <option value="">Loading employees...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Description</span>
+            <textarea id="qsSetDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="qsSetCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="qsSetSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- Add / Edit Question dialog ---------- *@
+<dialog id="qsQuestionDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="qsQuestionForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="qsQuestionDialogTitle" style="margin:0; font-size:18px;">Add Question</h2>
+            <button type="button" id="qsQuestionClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="qsQuestionMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="qsQuestionEditId" />
+        <div style="display:grid; grid-template-columns:1fr 120px 120px 120px; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Code <span style="color:#b91c1c;">*</span></span>
+                <input id="qsQuestionCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Order</span>
+                <input id="qsQuestionOrder" type="number" min="0" step="1" value="0" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Weight</span>
+                <input id="qsQuestionWeight" type="number" step="0.01" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Mandatory</span>
+                <input id="qsQuestionMandatory" type="checkbox" style="margin-top:10px; align-self:flex-start;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Question Type (Admin)</span>
+            <select id="qsQuestionType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                <option value="">Loading question types...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Question Text <span style="color:#b91c1c;">*</span></span>
+            <textarea id="qsQuestionText" rows="3" maxlength="4000" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Help Text</span>
+            <textarea id="qsQuestionHelp" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Expected Response</span>
+            <textarea id="qsQuestionExpected" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="qsQuestionCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="qsQuestionSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API      = '/practice/api/org-assurance';
+    const FEATURE  = 'screen.org-assurance-question-sets';
+    const U        = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId          : '',
+        search         : '',
+        page           : 1,
+        pageSize       : 25,
+        total          : 0,
+        selectedSetId  : null,
+        selectedSet    : null,
+        setsById       : {},           // cache picker rows -> row (has organizationId)
+        questionTypes  : [],
+        employees      : []
+    };
+
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    async function boot() {
+        wf.wirePager('qs-set', function (delta) {
+            const next    = state.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.page = next; reloadSets();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('qsUnavailable', 'qsUnavailableTitle', 'qsUnavailableBody',
+                'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('qsFilterOrganization', orgs);
+        state.orgId = document.getElementById('qsFilterOrganization').value || '';
+
+        const enabled = await wf.checkFeature(FEATURE, state.orgId);
+        if (!enabled) {
+            wf.unavailable('qsUnavailable', 'qsUnavailableTitle', 'qsUnavailableBody',
+                'Question Sets are not available for this organization.',
+                'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('qsRoot').hidden = false;
+
+        await loadEmployees(state.orgId);
+        await loadQuestionTypes();
+        wireControls();
+        reloadSets();
+    }
+
+    // -----------------------------------------------------------------
+    // Static wiring
+    // -----------------------------------------------------------------
+    function wireControls() {
+        document.getElementById('qsFilterOrganization').addEventListener('change', function (e) {
+            state.orgId         = e.target.value || '';
+            state.page          = 1;
+            state.selectedSetId = null;
+            state.selectedSet   = null;
+            renderSelectedSetHeader();
+            document.getElementById('qsQuestionBody').innerHTML =
+                '<tr><td colspan="7" class="pm-empty">No set selected.</td></tr>';
+            document.getElementById('qsAddQuestionBtn').disabled = true;
+            loadEmployees(state.orgId);
+            reloadSets();
+        });
+        document.getElementById('qsSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.page = 1;
+            clearTimeout(window.__qsSearchTimer);
+            window.__qsSearchTimer = setTimeout(reloadSets, 250);
+        });
+        document.getElementById('qsRefreshBtn').addEventListener('click', function () { reloadSets(); reloadQuestions(); });
+        document.getElementById('qsAddSetBtn').addEventListener('click', function () { openSetDialog(null); });
+        document.getElementById('qsAddQuestionBtn').addEventListener('click', function () { openQuestionDialog(null); });
+
+        document.getElementById('qsSetClose').addEventListener('click', closeSetDialog);
+        document.getElementById('qsSetCancel').addEventListener('click', closeSetDialog);
+        document.getElementById('qsSetForm').addEventListener('submit', function (e) { e.preventDefault(); saveSet(); });
+
+        document.getElementById('qsQuestionClose').addEventListener('click', closeQuestionDialog);
+        document.getElementById('qsQuestionCancel').addEventListener('click', closeQuestionDialog);
+        document.getElementById('qsQuestionForm').addEventListener('submit', function (e) { e.preventDefault(); saveQuestion(); });
+
+        wireRowMenus();
+    }
+
+    // -----------------------------------------------------------------
+    // Lookups
+    // -----------------------------------------------------------------
+    async function loadEmployees(orgId) {
+        const sel = document.getElementById('qsSetOwnerEmployee');
+        if (!orgId) {
+            sel.innerHTML = '<option value="">(select an organization first)</option>';
+            state.employees = [];
+            return;
+        }
+        sel.innerHTML = '<option value="">Loading employees...</option>';
+        try {
+            const url = U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees';
+            const r   = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const arr = await r.json();
+            state.employees = Array.isArray(arr) ? arr : [];
+            renderEmployeeOptions();
+        } catch (err) {
+            sel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+            state.employees = [];
+        }
+    }
+    function renderEmployeeOptions(selectedId) {
+        const sel = document.getElementById('qsSetOwnerEmployee');
+        sel.innerHTML = '';
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = state.employees.length ? '-- select an owner --' : 'No active employees';
+        sel.appendChild(ph);
+        for (const e of state.employees) {
+            const opt  = document.createElement('option');
+            opt.value  = String(e.employeeId || e.EmployeeId || '');
+            let label  = e.employeeName || e.EmployeeName || '';
+            const code = e.employeeCode || e.EmployeeCode;
+            if (code) label += ' (' + code + ')';
+            opt.textContent = label;
+            opt.setAttribute('data-name', e.employeeName || e.EmployeeName || '');
+            sel.appendChild(opt);
+        }
+        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
+    }
+
+    async function loadQuestionTypes() {
+        const sel = document.getElementById('qsQuestionType');
+        try {
+            const r = await fetch(U(API + '/admin-question-types'), { credentials: 'same-origin' });
+            if (!r.ok) {
+                sel.innerHTML = '<option value="">(no question types available)</option>';
+                return;
+            }
+            const b = await r.json();
+            state.questionTypes = (b && (b.data || b.Data)) || [];
+            renderQuestionTypeOptions();
+        } catch (_) {
+            sel.innerHTML = '<option value="">(failed to load question types)</option>';
+        }
+    }
+    function renderQuestionTypeOptions(selectedId) {
+        const sel = document.getElementById('qsQuestionType');
+        sel.innerHTML = '';
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = state.questionTypes.length
+            ? '-- select a question type --'
+            : '(no question types published by Admin)';
+        sel.appendChild(ph);
+        for (const t of state.questionTypes) {
+            const id   = t.id   || t.Id;
+            const code = t.code || t.Code || '';
+            const name = t.name || t.Name || '';
+            const opt  = document.createElement('option');
+            opt.value  = String(id != null ? id : '');
+            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            opt.setAttribute('data-code', code);
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        }
+        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
+    }
+
+    // -----------------------------------------------------------------
+    // Sets list
+    // -----------------------------------------------------------------
+    async function reloadSets() {
+        const body = document.getElementById('qsSetBody');
+        if (!state.orgId) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Select an organization to load sets.</td></tr>';
+            wf.updatePager('qs-set', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="6" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.search) qs.set('search', state.search);
+            qs.set('page',     String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/question-sets?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.total = Number(payload.totalCount || payload.TotalCount || 0);
+            const rows  = payload.rows || payload.Rows || [];
+            renderSetsRows(rows);
+            wf.updatePager('qs-set', {
+                pageNumber : state.page,
+                totalCount : state.total,
+                pageSize   : state.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderSetsRows(rows) {
+        const body = document.getElementById('qsSetBody');
+        state.setsById = {};
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">No question sets yet. Click "Add Set" to create one.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(function (row) {
+            const id     = row.questionSetId || row.QuestionSetId;
+            const code   = row.setCode  || row.SetCode  || '';
+            const name   = row.setName  || row.SetName  || '';
+            const owner  = row.ownerDisplayName || row.OwnerDisplayName || '';
+            const status = row.status   || row.Status   || 'Active';
+            const count  = row.questionCount || row.QuestionCount || 0;
+            if (id != null) state.setsById[String(id)] = row;
+            const isSelected = state.selectedSetId != null && String(state.selectedSetId) === String(id);
+            return '<tr data-id="' + id + '"'
+                 + (isSelected ? ' style="background:#eff6ff;"' : '')
+                 + '><td>' + wf.escape(code) + '</td>'
+                 + '<td>' + wf.escape(name) + '</td>'
+                 + '<td>' + wf.escape(owner) + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(String(count)) + '</td>'
+                 + '<td>' + wf.badge(status) + '</td>'
+                 + '<td>' + trigger(id, 'set') + '</td>'
+                 + '</tr>';
+        }).join('');
+
+        // Row click -> select set + load its questions.
+        body.querySelectorAll('tr[data-id]').forEach(function (tr) {
+            tr.addEventListener('click', function (e) {
+                // Ignore clicks on the 3-dots trigger / open menu.
+                if (e.target.closest('.pm-action-trigger')) return;
+                if (e.target.closest('.pm-action-menu'))    return;
+                const id = tr.getAttribute('data-id');
+                if (!id) return;
+                selectSet(Number(id));
+            });
+        });
+    }
+
+    async function selectSet(setId) {
+        state.selectedSetId = setId;
+        state.selectedSet   = state.setsById[String(setId)] || null;
+        // Re-render sets to highlight the selected row.
+        // (Cheap because rows are already in DOM; simplest is a full reload.)
+        document.querySelectorAll('#qsSetBody tr').forEach(function (tr) {
+            tr.style.background = (tr.getAttribute('data-id') === String(setId)) ? '#eff6ff' : '';
+        });
+        renderSelectedSetHeader();
+        document.getElementById('qsAddQuestionBtn').disabled = false;
+        await reloadQuestions();
+    }
+
+    function renderSelectedSetHeader() {
+        const name = document.getElementById('qsSelectedSetName');
+        const code = document.getElementById('qsSelectedSetCode');
+        if (!state.selectedSet) {
+            name.textContent = 'Select a question set to view its questions.';
+            code.hidden = true;
+            return;
+        }
+        name.textContent = state.selectedSet.setName || state.selectedSet.SetName || '';
+        code.textContent = state.selectedSet.setCode || state.selectedSet.SetCode || '';
+        code.hidden = false;
+    }
+
+    // -----------------------------------------------------------------
+    // Questions list
+    // -----------------------------------------------------------------
+    async function reloadQuestions() {
+        const body = document.getElementById('qsQuestionBody');
+        if (!state.selectedSetId || !state.orgId) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No set selected.</td></tr>';
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+        try {
+            const url = U(API + '/question-sets/' + state.selectedSetId +
+                        '/questions?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="7" class="pm-empty">No questions yet. Click "Add Question" to add one.</td></tr>';
+                return;
+            }
+            body.innerHTML = rows.map(function (q) {
+                const id    = q.questionId || q.QuestionId;
+                const code  = q.questionCode || q.QuestionCode || '';
+                const text  = q.questionText || q.QuestionText || '';
+                const type  = q.questionTypeName || q.QuestionTypeName || '';
+                const mand  = q.isMandatory ?? q.IsMandatory;
+                const order = q.displayOrder ?? q.DisplayOrder ?? '';
+                const wt    = q.weight ?? q.Weight;
+                return '<tr data-id="' + id + '">'
+                     + '<td style="text-align:right;">' + wf.escape(String(order)) + '</td>'
+                     + '<td>' + wf.escape(code) + '</td>'
+                     + '<td style="max-width:420px; overflow:hidden; text-overflow:ellipsis;">' + wf.escape(text) + '</td>'
+                     + '<td>' + wf.escape(type) + '</td>'
+                     + '<td style="text-align:center;">' + (mand ? '<i class="fa-solid fa-check" style="color:#166534;"></i>' : '') + '</td>'
+                     + '<td style="text-align:right;">' + wf.escape(wt == null ? '' : String(wt)) + '</td>'
+                     + '<td>' + trigger(id, 'question') + '</td>'
+                     + '</tr>';
+            }).join('');
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Set dialog
+    // -----------------------------------------------------------------
+    async function openSetDialog(id) {
+        const dlg = document.getElementById('qsSetDialog');
+        clearSetMessage();
+        renderEmployeeOptions();
+        if (id) {
+            document.getElementById('qsSetDialogTitle').textContent = 'Edit Question Set';
+            try {
+                const r = await fetch(U(API + '/question-sets/' + id + '?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+                if (!r.ok) { alert('Failed to load set (HTTP ' + r.status + ').'); return; }
+                const b = await r.json();
+                const d = (b && (b.data || b.Data)) || null;
+                if (!d) { alert('Set not found.'); return; }
+                document.getElementById('qsSetEditId').value      = String(d.questionSetId || d.QuestionSetId || '');
+                document.getElementById('qsSetCode').value        = d.setCode || d.SetCode || '';
+                document.getElementById('qsSetCode').disabled     = true;
+                document.getElementById('qsSetName').value        = d.setName || d.SetName || '';
+                document.getElementById('qsSetStatus').value      = d.status  || d.Status  || 'Active';
+                document.getElementById('qsSetDescription').value = d.description || d.Description || '';
+                renderEmployeeOptions(d.ownerEmployeeId || d.OwnerEmployeeId || '');
+            } catch (err) { alert('Failed: ' + (err.message || err)); return; }
+        } else {
+            document.getElementById('qsSetDialogTitle').textContent = 'Add Question Set';
+            document.getElementById('qsSetForm').reset();
+            document.getElementById('qsSetEditId').value  = '';
+            document.getElementById('qsSetCode').disabled = false;
+            renderEmployeeOptions();
+        }
+        dlg.showModal();
+    }
+    function closeSetDialog() { document.getElementById('qsSetDialog').close(); }
+
+    async function saveSet() {
+        const idStr = document.getElementById('qsSetEditId').value;
+        const ownerSel = document.getElementById('qsSetOwnerEmployee');
+        const ownerOpt = ownerSel.options[ownerSel.selectedIndex] || null;
+        const ownerId  = ownerSel.value ? Number(ownerSel.value) : null;
+        const ownerNm  = ownerOpt && ownerId != null ? (ownerOpt.getAttribute('data-name') || null) : null;
+
+        const body = {
+            organizationId    : Number(state.orgId),
+            questionSetId     : idStr ? Number(idStr) : null,
+            setCode           : document.getElementById('qsSetCode').value.trim(),
+            setName           : document.getElementById('qsSetName').value.trim(),
+            description       : document.getElementById('qsSetDescription').value || null,
+            ownerEmployeeId   : ownerId,
+            ownerDisplayName  : ownerNm,
+            status            : document.getElementById('qsSetStatus').value,
+            actor             : null
+        };
+        try {
+            const r = await fetch(U(API + '/question-sets'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { showSetMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            closeSetDialog();
+            reloadSets();
+        } catch (err) {
+            showSetMessage('error', err.message || String(err));
+        }
+    }
+
+    async function deleteSet(id) {
+        if (!confirm('Delete this question set (and all its questions)?')) return;
+        try {
+            const url = U(API + '/question-sets/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            if (String(state.selectedSetId) === String(id)) {
+                state.selectedSetId = null;
+                state.selectedSet   = null;
+                renderSelectedSetHeader();
+                document.getElementById('qsAddQuestionBtn').disabled = true;
+                document.getElementById('qsQuestionBody').innerHTML =
+                    '<tr><td colspan="7" class="pm-empty">No set selected.</td></tr>';
+            }
+            reloadSets();
+        } catch (err) { alert('Delete failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Question dialog
+    // -----------------------------------------------------------------
+    async function openQuestionDialog(id) {
+        if (!state.selectedSetId) { alert('Select a set first.'); return; }
+        const dlg = document.getElementById('qsQuestionDialog');
+        clearQuestionMessage();
+        renderQuestionTypeOptions();
+        if (id) {
+            document.getElementById('qsQuestionDialogTitle').textContent = 'Edit Question';
+            try {
+                const r = await fetch(U(API + '/questions/' + id + '?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+                if (!r.ok) { alert('Failed to load question (HTTP ' + r.status + ').'); return; }
+                const b = await r.json();
+                const d = (b && (b.data || b.Data)) || null;
+                if (!d) { alert('Question not found.'); return; }
+                document.getElementById('qsQuestionEditId').value    = String(d.questionId || d.QuestionId || '');
+                document.getElementById('qsQuestionCode').value      = d.questionCode || d.QuestionCode || '';
+                document.getElementById('qsQuestionCode').disabled   = true;
+                document.getElementById('qsQuestionOrder').value     = String(d.displayOrder ?? d.DisplayOrder ?? 0);
+                document.getElementById('qsQuestionWeight').value    = (d.weight != null ? d.weight : (d.Weight != null ? d.Weight : ''));
+                document.getElementById('qsQuestionMandatory').checked = !!(d.isMandatory ?? d.IsMandatory);
+                document.getElementById('qsQuestionText').value      = d.questionText || d.QuestionText || '';
+                document.getElementById('qsQuestionHelp').value      = d.helpText || d.HelpText || '';
+                document.getElementById('qsQuestionExpected').value  = d.expectedResponse || d.ExpectedResponse || '';
+                renderQuestionTypeOptions(d.questionTypeId || d.QuestionTypeId || '');
+            } catch (err) { alert('Failed: ' + (err.message || err)); return; }
+        } else {
+            document.getElementById('qsQuestionDialogTitle').textContent = 'Add Question';
+            document.getElementById('qsQuestionForm').reset();
+            document.getElementById('qsQuestionEditId').value  = '';
+            document.getElementById('qsQuestionCode').disabled = false;
+            document.getElementById('qsQuestionOrder').value   = '0';
+            renderQuestionTypeOptions();
+        }
+        dlg.showModal();
+    }
+    function closeQuestionDialog() { document.getElementById('qsQuestionDialog').close(); }
+
+    async function saveQuestion() {
+        const idStr   = document.getElementById('qsQuestionEditId').value;
+        const typeSel = document.getElementById('qsQuestionType');
+        const typeOpt = typeSel.options[typeSel.selectedIndex] || null;
+        const typeId  = typeSel.value ? Number(typeSel.value) : null;
+        const typeCd  = typeOpt && typeId != null ? (typeOpt.getAttribute('data-code') || null) : null;
+        const typeNm  = typeOpt && typeId != null ? (typeOpt.getAttribute('data-name') || null) : null;
+
+        const wtRaw = document.getElementById('qsQuestionWeight').value;
+        const wtVal = wtRaw === '' || wtRaw == null ? null : Number(wtRaw);
+
+        const body = {
+            organizationId    : Number(state.orgId),
+            questionSetId     : Number(state.selectedSetId),
+            questionId        : idStr ? Number(idStr) : null,
+            questionCode      : document.getElementById('qsQuestionCode').value.trim(),
+            questionText      : document.getElementById('qsQuestionText').value.trim(),
+            helpText          : document.getElementById('qsQuestionHelp').value || null,
+            questionTypeId    : typeId,
+            questionTypeCode  : typeCd,
+            questionTypeName  : typeNm,
+            isMandatory       : document.getElementById('qsQuestionMandatory').checked,
+            displayOrder      : Number(document.getElementById('qsQuestionOrder').value || 0),
+            weight            : (wtVal != null && isFinite(wtVal)) ? wtVal : null,
+            expectedResponse  : document.getElementById('qsQuestionExpected').value || null,
+            actor             : null
+        };
+        try {
+            const r = await fetch(U(API + '/questions'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { showQuestionMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            closeQuestionDialog();
+            reloadQuestions();
+            reloadSets();   // #Q column
+        } catch (err) {
+            showQuestionMessage('error', err.message || String(err));
+        }
+    }
+
+    async function deleteQuestion(id) {
+        if (!confirm('Delete this question?')) return;
+        try {
+            const url = U(API + '/questions/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            reloadQuestions();
+            reloadSets();
+        } catch (err) { alert('Delete failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // 3-dot menu (shared pattern)
+    // -----------------------------------------------------------------
+    function trigger(id, kind) {
+        return '<button type="button" class="pm-action-trigger"'
+             + ' data-id="' + id + '" data-kind="' + wf.escape(kind) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+
+    function buildMenu(id, kind) {
+        if (kind === 'set') {
+            return [
+                { icon: 'fa-pen',            label: 'Edit',      action: function () { openSetDialog(id); } },
+                { icon: 'fa-list-check',     label: 'View Questions',
+                                             action: function () { selectSet(Number(id)); } },
+                { icon: 'fa-trash',          label: 'Delete',    action: function () { deleteSet(id); } }
+            ];
+        }
+        return [
+            { icon: 'fa-pen',  label: 'Edit',   action: function () { openQuestionDialog(id); } },
+            { icon: 'fa-trash', label: 'Delete', action: function () { deleteQuestion(id); } }
+        ];
+    }
+
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trg) {
+        if (!openMenuEl) return;
+        const r  = trg.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trg, items) {
+        closeRowMenu();
+        openMenuTrigger = trg;
+        trg.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[question-sets] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trg);
+    }
+    function wireRowMenus() {
+        function attach(bodyId) {
+            const body = document.getElementById(bodyId);
+            if (!body) return;
+            body.addEventListener('click', function (e) {
+                const trg = e.target.closest('.pm-action-trigger');
+                if (!trg || !body.contains(trg)) return;
+                e.preventDefault(); e.stopPropagation();
+                if (openMenuTrigger === trg) { closeRowMenu(); return; }
+                const id   = trg.getAttribute('data-id');
+                const kind = trg.getAttribute('data-kind') || '';
+                openRowMenu(trg, buildMenu(id, kind));
+            });
+        }
+        attach('qsSetBody');
+        attach('qsQuestionBody');
+
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu'))    return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function showSetMessage(kind, text) {
+        const el = document.getElementById('qsSetMessage');
+        el.style.display = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent = text;
+    }
+    function clearSetMessage() {
+        const el = document.getElementById('qsSetMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+    function showQuestionMessage(kind, text) {
+        const el = document.getElementById('qsQuestionMessage');
+        el.style.display = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent = text;
+    }
+    function clearQuestionMessage() {
+        const el = document.getElementById('qsQuestionMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

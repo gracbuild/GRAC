@@ -1,0 +1,196 @@
+@*
+    Organization SLA Configuration -- migrations 178 / 179 / 180 / 181.
+
+    Screen key : `org-sla-config`
+    Group      : Governance
+    Menu       : nav-governance -> SLA Configuration (migration 180)
+    Feature    : screen.org-sla-config
+
+    Master-first flow (post-186):
+      * Grid lists EVERY grac_new.sla_master row for the org with
+        one of three statuses: Not Configured / Active / Inactive.
+      * 3-dot menu:
+          Not Configured -> Configure
+          Active         -> Configure, Inactivate
+          Inactive       -> Configure, Reactivate
+      * Configure dialog is the one-stop shop -- thresholds AND all
+        three notify-role sets (WARNING / BREACH / ESCALATION) are
+        edited here. The old separate Notifies dialog was retired
+        in 182; the Bind Processes dialog was retired in 186.
+      * Configuring a Not Configured row auto-activates it (server
+        side: sp_org_sla_config_upsert on 181).
+      * SLA-to-gap resolution uses severity -> classification match
+        (sp_org_sla_match_for_severity, 184). No process-binding
+        surface remains.
+
+    Backend:
+        GET  /practice/api/org-sla/masters-with-config?organizationId=&search=   (grid)
+        GET  /practice/api/org-sla/configs/{id}?organizationId=                  (detail for notify + bindings dialogs)
+        POST /practice/api/org-sla/configs                                       (create or update -- idempotent by master)
+        POST /practice/api/org-sla/configs/set-active                            (toggle is_active)
+        POST /practice/api/org-sla/configs/{id}/notify-roles                     (full-replace notify roles)
+        POST /practice/api/org-sla/configs/{id}/process-bindings                 (full-replace bindings)
+        GET  /practice/api/org-sla/process-types                                 (bindings dropdown)
+        GET  /practice/api/org-roles?organizationId=                             (roles feed, shared)
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaSlaHeading">@Model.Title</h1>
+        <p id="oaSlaSubtitle">@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaSlaRoot">
+    @* Picker toolbar *@
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaSlaPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:260px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:220px;">
+            <span>Search</span>
+            <input id="oaSlaSearch" type="text" placeholder="Search SLA code / classification / process..." maxlength="200"
+                   style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="oaSlaReloadBtn" type="button">Reload</button>
+        </div>
+    </div>
+
+    <div id="oaSlaMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>SLA</th>
+                    <th>Process</th>
+                    <th>Classification</th>
+                    <th style="width:110px;">Duration</th>
+                    <th style="width:110px;">Time Basis</th>
+                    <th style="width:80px;">Warning %</th>
+                    <th style="width:80px;">Escalation %</th>
+                    <th style="width:120px;">Status</th>
+                    <th style="width:70px;">Roles</th>
+                    <th style="width:60px;"></th>
+                </tr>
+            </thead>
+            <tbody id="oaSlaGridBody">
+                <tr><td colspan="10" class="pm-empty">Pick an organization to see the SLA masters.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ================== Configure dialog ==================
+   One-stop dialog (post-182): master identity header, threshold
+   inputs, AND the three notify-role multi-selects (WARNING / BREACH
+   / ESCALATION). The old separate Notifies dialog was retired.
+*@
+<dialog id="oaSlaConfigDialog"
+        style="border:none; border-radius:8px; padding:0; max-width:920px; width:96%; min-height:640px; max-height:92vh; overflow:visible; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaSlaConfigForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaSlaConfigTitle" style="margin:0; font-size:18px;">Configure SLA</h2>
+            <button type="button" id="oaSlaConfigClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaSlaConfigMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        @* Read-only master identity header -- master is fixed by the
+           clicked grid row (no picker needed post-181). *@
+        <div id="oaSlaConfigMasterCard"
+             style="padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; font-size:13px; color:#0f172a;">
+            <div><strong id="oaSlaConfigMasterName">--</strong>
+                 <span id="oaSlaConfigMasterCode" style="color:#64748b; margin-left:6px;"></span></div>
+            <div id="oaSlaConfigMasterMeta" style="color:#475569; font-size:12px; margin-top:2px;"></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Timeline</span>
+                <input id="oaSlaConfigTotal" type="number" min="0" step="1" placeholder="from master"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Warning % <span style="color:#b91c1c;">*</span></span>
+                <input id="oaSlaConfigWarning" type="number" min="0" max="100" step="0.01" required
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Escalation % <span style="color:#b91c1c;">*</span></span>
+                <input id="oaSlaConfigEsc" type="number" min="0" max="100" step="0.01" required
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Time Basis</span>
+                <select id="oaSlaConfigTimeBasis"
+                        style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                    <option value="">-- from master --</option>
+                    <option value="Calendar Days">Calendar Days</option>
+                    <option value="Business Days">Business Days</option>
+                    <option value="Calendar Hours">Calendar Hours</option>
+                    <option value="Business Hours">Business Hours</option>
+                </select>
+            </label>
+        </div>
+        <p style="margin:6px 0 0; color:#94a3b8; font-size:11px;">
+            Warning % must be less than or equal to Escalation %. Both fire before BREACH (100% of SLA).
+        </p>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Notes</span>
+            <textarea id="oaSlaConfigNotes" rows="2" maxlength="1000"
+                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+
+        @* Notify roles -- three events, each with a role multi-select.
+           Roles are resolved to current holders at notify time via
+           sp_org_role_holders_list (117). *@
+        <div style="margin-top:16px; padding-top:12px; border-top:1px solid #e2e8f0;">
+            <h3 style="margin:0 0 4px; font-size:14px; color:#0f172a;">Notify Roles</h3>
+            <p style="margin:0 0 10px; color:#475569; font-size:12px;">
+                Pick the roles to notify when each event fires. The current holder(s)
+                of the role are resolved at fire time.
+            </p>
+            @* Collapsible multi-select combo: the underlying <select
+               multiple> stays as the semantic backing (submit code reads
+               selectedOptions); the visible UI is a trigger + popover
+               built by mountMultiDropdown() in JS.  *@
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Warning</span>
+                    <div class="pm-multi-host" data-target="oaSlaConfigNotifyWarning" style="margin-top:2px; position:relative;"></div>
+                    <select id="oaSlaConfigNotifyWarning" multiple style="display:none;"></select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Escalation</span>
+                    <div class="pm-multi-host" data-target="oaSlaConfigNotifyEsc" style="margin-top:2px; position:relative;"></div>
+                    <select id="oaSlaConfigNotifyEsc" multiple style="display:none;"></select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>SLA Breach</span>
+                    <div class="pm-multi-host" data-target="oaSlaConfigNotifyBreach" style="margin-top:2px; position:relative;"></div>
+                    <select id="oaSlaConfigNotifyBreach" multiple style="display:none;"></select>
+                </label>
+            </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaSlaConfigCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaSlaConfigSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+@* Process bindings dialog retired in migration 186. Severity ->
+   classification match (via sp_org_sla_match_for_severity) is now the
+   only SLA lookup pattern. *@
+
+<script src="~/js/OrgSlaConfig/org-sla-config.js" asp-append-version="true"></script>

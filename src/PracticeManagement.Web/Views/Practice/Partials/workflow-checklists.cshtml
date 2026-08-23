@@ -1,0 +1,321 @@
+@*
+    Checklists + items (BRD Sec 11)
+    Screen key: `workflow-checklists`
+    Feature flag: `screen.workflow-checklists`
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="clUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-list-check pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="clUnavailableTitle">Checklists is not yet enabled for this organization.</h2>
+        <p id="clUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-checklists</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="clRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="clFilterOrganization"><option value="">All organizations</option></select>
+        <input id="clSearch" type="text" placeholder="Search checklist..." />
+        <button class="pm-button icon" id="clRefreshBtn" type="button"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="clAddBtn" type="button"><i class="fa-solid fa-plus"></i> Add Checklist</button>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Code</th><th>Name</th><th>Version</th><th>Items</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="clBody"><tr><td colspan="6" class="pm-empty">Select an organization to load checklists.</td></tr></tbody>
+        </table>
+    </div>
+
+    <h3 style="margin-top:20px;">Items of selected checklist</h3>
+    <div class="pm-toolbar">
+        <select id="clItemsFilter" disabled><option value="">Select a checklist above...</option></select>
+        <button class="pm-button primary" id="clItemAddBtn" type="button" disabled><i class="fa-solid fa-plus"></i> Add Item</button>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Seq</th><th>Item</th><th>Type</th><th>Mandatory</th><th>Evidence</th><th>Approval</th><th>Role</th><th>Due (days)</th><th>Status</th></tr></thead>
+            <tbody id="clItemsBody"><tr><td colspan="9" class="pm-empty">Select a checklist to load items.</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<dialog id="clDialog" style="border:none; border-radius:8px; padding:0; max-width:560px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="clForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="clDialogTitle" style="margin:0; font-size:18px;">Add Checklist</h2>
+            <button type="button" id="clClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="clMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="clEditId" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Code *
+                <input id="clCode" type="text" maxlength="60" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Version
+                <input id="clVersion" type="text" maxlength="20" value="1.0" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Name *
+            <input id="clName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
+            <textarea id="clDescription" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Status
+            <select id="clStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="Active" selected>Active</option><option value="Draft">Draft</option><option value="Inactive">Inactive</option><option value="Archived">Archived</option>
+            </select>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="clCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="clSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="clItemDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="clItemForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Add Checklist Item</h2>
+            <button type="button" id="clItemClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="clItemMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div style="display:grid; grid-template-columns:1fr 2fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Sequence
+                <input id="clItemSeq" type="number" min="1" value="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Item Type
+                <select id="clItemType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option>Manual</option><option>Automated</option><option>API Validation</option>
+                    <option>Document Upload</option><option>Observation</option>
+                    <option>Approval</option><option>Integration Call</option>
+                </select>
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Item Text *
+            <input id="clItemText" type="text" maxlength="500" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-top:10px;">
+            <label style="display:flex; align-items:center; font-size:12px; color:#475569; gap:6px;"><input id="clItemMandatory" type="checkbox" checked /> Mandatory</label>
+            <label style="display:flex; align-items:center; font-size:12px; color:#475569; gap:6px;"><input id="clItemEvidence" type="checkbox" /> Evidence</label>
+            <label style="display:flex; align-items:center; font-size:12px; color:#475569; gap:6px;"><input id="clItemAttachment" type="checkbox" /> Attachment</label>
+            <label style="display:flex; align-items:center; font-size:12px; color:#475569; gap:6px;"><input id="clItemApproval" type="checkbox" /> Approval</label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Responsible Role
+                <input id="clItemRole" type="text" maxlength="100" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Due Period (days)
+                <input id="clItemDueDays" type="number" min="0" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="clItemCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="clItemSubmit" class="pm-button primary">Save Item</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-checklists';
+    let orgId = null, selectedChecklistId = null;
+    let searchDebounce = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('clUnavailable','clUnavailableTitle','clUnavailableBody','No organizations available.','');
+        document.getElementById('clRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('clFilterOrganization', orgs);
+        document.getElementById('clFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('clRefreshBtn').addEventListener('click', reload);
+        document.getElementById('clSearch').addEventListener('input', function () {
+            clearTimeout(searchDebounce); searchDebounce = setTimeout(reload, 300);
+        });
+        document.getElementById('clAddBtn').addEventListener('click', function () { openDialog(null); });
+        document.getElementById('clItemsFilter').addEventListener('change', function () {
+            selectedChecklistId = document.getElementById('clItemsFilter').value || null;
+            document.getElementById('clItemAddBtn').disabled = !selectedChecklistId;
+            reloadItems();
+        });
+        document.getElementById('clItemAddBtn').addEventListener('click', openItemDialog);
+        wireDialog();
+        wireItemDialog();
+        await onOrgChange();
+    }
+    async function onOrgChange() {
+        orgId = document.getElementById('clFilterOrganization').value || null;
+        if (!orgId) { setBody('<tr><td colspan="6" class="pm-empty">Select an organization to load checklists.</td></tr>'); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('clRoot').hidden = true; document.getElementById('clUnavailable').hidden = false; return; }
+        await reload();
+    }
+    async function reload() {
+        if (!orgId) return;
+        const q = document.getElementById('clSearch').value.trim();
+        const url = U('/practice/api/workflow/checklists?organizationId=') + encodeURIComponent(orgId)
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        setBody('<tr><td colspan="6" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const payload = await r.json();
+            const rows = (payload && payload.rows) || [];
+            const body = document.getElementById('clBody'); body.innerHTML = '';
+            const sel  = document.getElementById('clItemsFilter'); sel.innerHTML = '<option value="">Select a checklist above...</option>';
+            if (!rows.length) { setBody('<tr><td colspan="6" class="pm-empty">No checklists yet.</td></tr>'); sel.disabled = true; return; }
+            for (const c of rows) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = [
+                    '<td>' + window.__wfCommon.escape(c.checklistCode) + '</td>',
+                    '<td>' + window.__wfCommon.escape(c.checklistName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(c.version) + '</td>',
+                    '<td>' + window.__wfCommon.escape(String(c.itemCount || 0)) + '</td>',
+                    '<td>' + window.__wfCommon.badge(c.status) + '</td>',
+                    '<td><button type="button" class="pm-button" data-edit-id="' + c.checklistId + '"><i class="fa-solid fa-pen"></i></button></td>'
+                ].join('');
+                body.appendChild(tr);
+                const opt = document.createElement('option'); opt.value = String(c.checklistId);
+                opt.textContent = c.checklistCode + ' - ' + c.checklistName; sel.appendChild(opt);
+            }
+            sel.disabled = false;
+            body.querySelectorAll('[data-edit-id]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const id = Number(btn.getAttribute('data-edit-id'));
+                    const row = rows.find(function (x) { return x.checklistId === id; });
+                    if (row) openDialog(row);
+                });
+            });
+        } catch (err) { setBody('<tr><td colspan="6" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
+    }
+    async function reloadItems() {
+        const body = document.getElementById('clItemsBody');
+        if (!selectedChecklistId) { body.innerHTML = '<tr><td colspan="9" class="pm-empty">Select a checklist to load items.</td></tr>'; return; }
+        body.innerHTML = '<tr><td colspan="9" class="pm-empty">Loading...</td></tr>';
+        try {
+            const r = await fetch(U('/practice/api/workflow/checklists/') + encodeURIComponent(selectedChecklistId) + '/items', { credentials: 'same-origin' });
+            const items = await r.json();
+            body.innerHTML = '';
+            if (!items.length) { body.innerHTML = '<tr><td colspan="9" class="pm-empty">No items yet.</td></tr>'; return; }
+            for (const it of items) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = [
+                    '<td>' + window.__wfCommon.escape(String(it.itemSequence)) + '</td>',
+                    '<td>' + window.__wfCommon.escape(it.itemText) + '</td>',
+                    '<td>' + window.__wfCommon.escape(it.itemType) + '</td>',
+                    '<td>' + (it.isMandatory ? 'Yes' : 'No') + '</td>',
+                    '<td>' + (it.evidenceRequired ? 'Yes' : 'No') + '</td>',
+                    '<td>' + (it.approvalRequired ? 'Yes' : 'No') + '</td>',
+                    '<td>' + window.__wfCommon.escape(it.responsibleRole || '') + '</td>',
+                    '<td>' + window.__wfCommon.escape(it.duePeriodDays != null ? String(it.duePeriodDays) : '') + '</td>',
+                    '<td>' + window.__wfCommon.badge(it.status) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        } catch (err) { body.innerHTML = '<tr><td colspan="9" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'; }
+    }
+    function setBody(html) { document.getElementById('clBody').innerHTML = html; }
+
+    function openDialog(row) {
+        const dlg = document.getElementById('clDialog'); if (!dlg) return;
+        document.getElementById('clDialogTitle').textContent = row ? 'Edit Checklist' : 'Add Checklist';
+        document.getElementById('clEditId').value       = row ? row.checklistId : '';
+        document.getElementById('clCode').value         = row ? row.checklistCode : '';
+        document.getElementById('clName').value         = row ? row.checklistName : '';
+        document.getElementById('clVersion').value      = row ? row.version : '1.0';
+        document.getElementById('clDescription').value  = row ? (row.description || '') : '';
+        document.getElementById('clStatus').value       = row ? row.status : 'Active';
+        window.__wfCommon.setMessage('clMessage', null);
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+    function closeDialog() { const d = document.getElementById('clDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireDialog() {
+        document.getElementById('clClose').addEventListener('click', closeDialog);
+        document.getElementById('clCancel').addEventListener('click', closeDialog);
+        document.getElementById('clForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submit = document.getElementById('clSubmit'); submit.disabled = true;
+            const editId = document.getElementById('clEditId').value;
+            const payload = {
+                checklistId:    editId ? Number(editId) : null,
+                organizationId: Number(orgId),
+                checklistCode:  document.getElementById('clCode').value.trim(),
+                checklistName:  document.getElementById('clName').value.trim(),
+                description:    document.getElementById('clDescription').value.trim() || null,
+                version:        document.getElementById('clVersion').value.trim() || '1.0',
+                status:         document.getElementById('clStatus').value
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/checklists'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('clMessage', 'Saved.', 'ok'); setTimeout(function () { closeDialog(); reload(); }, 400); }
+                else     { window.__wfCommon.setMessage('clMessage', b.error || 'Save failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('clMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+
+    function openItemDialog() {
+        const dlg = document.getElementById('clItemDialog'); if (!dlg) return;
+        ['clItemText','clItemRole','clItemDueDays'].forEach(function (id) { const el = document.getElementById(id); if (el) el.value = ''; });
+        document.getElementById('clItemSeq').value  = 1;
+        document.getElementById('clItemType').value = 'Manual';
+        document.getElementById('clItemMandatory').checked  = true;
+        document.getElementById('clItemEvidence').checked   = false;
+        document.getElementById('clItemAttachment').checked = false;
+        document.getElementById('clItemApproval').checked   = false;
+        window.__wfCommon.setMessage('clItemMessage', null);
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+    function closeItemDialog() { const d = document.getElementById('clItemDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireItemDialog() {
+        document.getElementById('clItemClose').addEventListener('click', closeItemDialog);
+        document.getElementById('clItemCancel').addEventListener('click', closeItemDialog);
+        document.getElementById('clItemForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            if (!selectedChecklistId) { window.__wfCommon.setMessage('clItemMessage', 'Select a checklist first.', 'error'); return; }
+            const submit = document.getElementById('clItemSubmit'); submit.disabled = true;
+            const dueRaw = document.getElementById('clItemDueDays').value;
+            const payload = {
+                checklistItemId:     null,
+                checklistId:         Number(selectedChecklistId),
+                itemSequence:        Number(document.getElementById('clItemSeq').value || 1),
+                itemText:            document.getElementById('clItemText').value.trim(),
+                itemType:            document.getElementById('clItemType').value,
+                isMandatory:         document.getElementById('clItemMandatory').checked,
+                evidenceRequired:    document.getElementById('clItemEvidence').checked,
+                attachmentRequired:  document.getElementById('clItemAttachment').checked,
+                approvalRequired:    document.getElementById('clItemApproval').checked,
+                responsibleRole:     document.getElementById('clItemRole').value.trim() || null,
+                duePeriodDays:       dueRaw === '' ? null : Number(dueRaw),
+                status:              'Active'
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/checklist-items'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('clItemMessage', 'Saved.', 'ok'); setTimeout(function () { closeItemDialog(); reloadItems(); reload(); }, 400); }
+                else     { window.__wfCommon.setMessage('clItemMessage', b.error || 'Save failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('clItemMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+})();
+</script>

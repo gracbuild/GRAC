@@ -14,4 +14,22 @@
     <ProjectReference Include="..\..\..\ControlManagement\src\ControlManagement.Security\ControlManagement.Security.csproj" />
   </ItemGroup>
 
+  <!-- Sign-in verification moved into the API (database is reached only
+       through the API). PasswordHasher is authored once in the Web project
+       and LINKED here so a single source file compiles into both assemblies
+       — no duplicated security code. Namespace stays PracticeManagement.Web.Security. -->
+  <ItemGroup>
+    <Compile Include="..\PracticeManagement.Web\Security\PasswordHasher.cs" Link="Security\PasswordHasher.cs" />
+  </ItemGroup>
+
+  <!-- Same arrangement, same reason. The entity-type -> permission-area
+       mapping has to be identical on both tiers: the Web gateway checks
+       it before forwarding, the API checks it again before executing. It
+       lived only in the gateway, so the API tested the raw entity type
+       and answered 403 for [release-statements] to callers who legitimately
+       held organization-controls:VIEW. One source file, two assemblies. -->
+  <ItemGroup>
+    <Compile Include="..\PracticeManagement.Web\Security\PermissionAreaMap.cs" Link="Security\PermissionAreaMap.cs" />
+  </ItemGroup>
+
 </Project>

@@ -1,5 +1,17 @@
 # Task engine — developer notes
 
+> **Superseded in part by Task Centre v2.** Migrations 192–196 add owner
+> resolution, priority governance, the standard-vs-extended SLA split,
+> parent/child decomposition, an activity + evidence trail and a real
+> detail view — see **[task-centre-v2.md](task-centre-v2.md)**.
+>
+> Everything below still describes live behaviour: v2 is strictly
+> additive. The two places to read v2 first are the **Lifecycle** section
+> (v2 maps the BRD's `APPROVED → IN PROGRESS → COMPLETED` onto these
+> states rather than replacing them) and the **API** table (v2 adds
+> detail, governance and decomposition endpoints, and `sp_task_list` now
+> excludes child tasks by default).
+
 **Charter reference:** §12.1.3 (work item), §13.1 (`practice_task` shape)
 **Migrations:** `037_task_engine.sql`, `037_task_engine_procs.sql`, `037_task_engine_rollback.sql`, `041_feature_flag.sql`
 **Smoke test:** `database/deployment/08_UAT_Diagnostics_TaskEngine.sql`

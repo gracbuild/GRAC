@@ -1,0 +1,206 @@
+@*
+    Document Acknowledgements -- admin batches (Phase 2)
+    Rendered from Manage.cshtml when Model.Key == "document-acknowledgements".
+
+    Three views inside the partial, swapped by JS:
+      1. List view    -- batches with progress bars + New Batch button
+      2. Create view  -- name + due date + multi-select of pending docs
+      3. Detail view  -- batch header + docs on the left, users on the right
+                         (click a doc to load its user status)
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>Roll published documents into named batches and track who has acknowledged each one.</p>
+    </div>
+</div>
+
+@* =============================================================
+   VIEW 1 -- List of batches
+   ============================================================= *@
+<section class="pm-panel" id="ackListView" hidden>
+    <div class="pm-toolbar">
+        <select id="ackFilterOrganization"><option value="">Select organization</option></select>
+        <button class="pm-button icon" id="ackRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+        <button class="pm-button primary" id="ackNewBtn" type="button">
+            <i class="fa-solid fa-plus"></i> New Batch
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="ackTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Due</th>
+                    <th>Docs</th>
+                    <th>Users</th>
+                    <th>Acknowledged</th>
+                    <th style="min-width:180px;">Progress</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="ackTableBody">
+                <tr><td colspan="9" class="pm-empty-row">Select an organization to load batches.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* =============================================================
+   VIEW 2 -- Create batch
+   ============================================================= *@
+<section class="pm-panel" id="ackCreateView" hidden>
+    <div class="pm-toolbar">
+        <button type="button" class="pm-button" data-ack-back>
+            <i class="fa-solid fa-arrow-left"></i> Back to list
+        </button>
+        <h2 style="margin: 0 0 0 8px; font-size: 18px;">New Acknowledgement Batch</h2>
+    </div>
+
+    <form id="ackCreateForm" novalidate>
+        <div class="pm-form-grid">
+            <label>
+                <span>Batch Name<span class="pm-required">*</span></span>
+                <input type="text" id="ackCreateName" required maxlength="200" />
+            </label>
+            <label>
+                <span>Due Date</span>
+                <input type="date" id="ackCreateDueDate" />
+            </label>
+        </div>
+
+        <h3 style="margin-top: 20px; font-size: 14px; color: #4a5568;">
+            Pending documents
+            <span class="pm-hint" style="font-weight: normal;">Tick the documents to include in this batch.</span>
+        </h3>
+
+        <div class="pm-table-wrap ack-pending-wrap">
+            <table id="ackPendingTable">
+                <thead>
+                    <tr>
+                        <th style="width: 34px;"><input type="checkbox" id="ackPendingAll" /></th>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Version</th>
+                        <th>Cycle</th>
+                        <th>Queued</th>
+                    </tr>
+                </thead>
+                <tbody id="ackPendingBody">
+                    <tr><td colspan="6" class="pm-empty-row">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p class="pm-form-message" id="ackCreateMessage" role="status" aria-live="polite"></p>
+
+        <div class="pm-toolbar" style="justify-content: flex-end;">
+            <button type="button" class="pm-button" data-ack-back>Cancel</button>
+            <button type="submit" class="pm-button primary" id="ackCreateSubmit">Create Batch</button>
+        </div>
+    </form>
+</section>
+
+@* =============================================================
+   VIEW 3 -- Batch detail (split pane: docs left, users right)
+   ============================================================= *@
+<section class="pm-panel" id="ackDetailView" hidden>
+    <div class="pm-toolbar">
+        <button type="button" class="pm-button" data-ack-back>
+            <i class="fa-solid fa-arrow-left"></i> Back to list
+        </button>
+        <h2 id="ackDetailTitle" style="margin: 0 0 0 8px; font-size: 18px;">Batch</h2>
+    </div>
+
+    <dl class="ack-detail-meta" id="ackDetailMeta"></dl>
+
+    <div class="ack-detail-split">
+        <div class="ack-detail-docs">
+            <h3>Documents in this batch</h3>
+            <div class="pm-table-wrap">
+                <table id="ackDetailDocs">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Users</th>
+                            <th>Ack'd</th>
+                            <th style="min-width:120px;">Progress</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ackDetailDocsBody"><tr><td colspan="5" class="pm-empty-row">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="ack-detail-users">
+            <h3 id="ackUsersHeader">Users</h3>
+            <p class="pm-hint" id="ackUsersHint">Pick a document on the left to see who has acknowledged it.</p>
+            <div class="pm-table-wrap" id="ackUsersWrap" hidden>
+                <table id="ackDetailUsers">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                            <th>Acknowledged</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ackDetailUsersBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+    /* Progress bar reused across list + detail. */
+    .ack-progress { display: inline-block; width: 160px; height: 8px; background: #edf2f7; border-radius: 4px; overflow: hidden; vertical-align: middle; }
+    .ack-progress > span { display: block; height: 100%; background: #48bb78; }
+    .ack-progress-label { display: inline-block; margin-left: 8px; font-size: 12px; color: #4a5568; vertical-align: middle; }
+
+    .ack-status-chip {
+        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; text-transform: uppercase;
+    }
+    .ack-status-open      { background: #fefcbf; color: #744210; }
+    .ack-status-progress  { background: #bee3f8; color: #2c5282; }
+    .ack-status-completed { background: #c6f6d5; color: #22543d; }
+    .ack-status-pending   { background: #fed7d7; color: #742a2a; }
+    .ack-status-ack       { background: #c6f6d5; color: #22543d; }
+
+    .ack-pending-wrap { max-height: 300px; overflow-y: auto; }
+
+    .ack-detail-meta {
+        display: grid; grid-template-columns: 120px 1fr 120px 1fr;
+        gap: 6px 12px; margin: 0 0 16px 0;
+        padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+    }
+    .ack-detail-meta dt { color: #718096; font-weight: 600; margin: 0;
+                          text-transform: uppercase; font-size: 11px; }
+    .ack-detail-meta dd { margin: 0; color: #2d3748; }
+
+    .ack-detail-split {
+        display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px;
+        min-height: 400px;
+    }
+    @@media (max-width: 900px) { .ack-detail-split { grid-template-columns: 1fr; } }
+    .ack-detail-docs, .ack-detail-users {
+        padding: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
+    }
+    .ack-detail-docs h3, .ack-detail-users h3 {
+        margin: 0 0 10px 0; font-size: 14px; color: #2d3748;
+    }
+    #ackDetailDocs tbody tr { cursor: pointer; }
+    #ackDetailDocs tbody tr.ack-doc-selected { background: #ebf8ff; }
+</style>
+
+<script src="~/js/DocumentAcknowledgement/document-acknowledgements.js" asp-append-version="true"></script>

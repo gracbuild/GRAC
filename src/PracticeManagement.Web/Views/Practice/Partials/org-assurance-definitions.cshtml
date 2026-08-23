@@ -1,0 +1,803 @@
+@*
+    Assurance Definitions (BRD Part 2 Sec 1) -- Phase 2 Assurance
+    Management, Stage 1. NEW, INDEPENDENT module.
+
+    Screen key : `org-assurance-definitions`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Assurance Definitions (migration 071)
+    Feature    : screen.org-assurance-definitions
+    Backend    : /practice/api/org-assurance/*
+                 -> /api/practice/org-assurance/*
+
+    Follows the same partial + inline-JS pattern used by
+    workflows.cshtml. Uses the shared __wfCommon helpers loaded via
+    _workflow-common.cshtml (org list, badge, escape, pager).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaDefUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-file-shield pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaDefUnavailableTitle">Organization Assurance module is not yet enabled for this organization.</h2>
+        <p id="oaDefUnavailableBody">Ask a GRAC Admin to turn on <code>screen.org-assurance-definitions</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaDefRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="oaDefFilterOrganization"><option value="">All organizations</option></select>
+        <select id="oaDefFilterStatus">
+            <option value="">All statuses</option>
+        </select>
+        <input id="oaDefSearch" type="text" placeholder="Search name / code..." />
+        <button class="pm-button icon" id="oaDefRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaDefAddBtn" type="button" title="Add Assurance Definition">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Definition
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th><th>Name</th><th>Category</th>
+                    <th>Owner</th><th>Version</th>
+                    <th>Status</th><th>Effective</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="oaDefBody">
+                <tr><td colspan="8" class="pm-empty">Select an organization to load assurance definitions.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="oa-def">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+@* ---------- Add / Edit dialog ---------- *@
+<dialog id="oaDefDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaDefForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaDefDialogTitle" style="margin:0; font-size:18px;">Add Assurance Definition</h2>
+            <button type="button" id="oaDefClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaDefMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="oaDefEditId" />
+        @* Two-column grid. `align-items:start` keeps rows top-aligned even if
+           a label wraps -- prevents the "Code" input dropping below "Effective
+           Date" that the earlier layout produced. Each label wraps its title +
+           required-asterisk in a single <span> so the asterisk cannot fall
+           onto its own line under flex-direction:column. *@
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Code <span style="color:#b91c1c;">*</span></span>
+                <input id="oaDefCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Effective Date</span>
+                <input id="oaDefEffectiveDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Name <span style="color:#b91c1c;">*</span></span>
+            <input id="oaDefName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        @* minmax(0,1fr) instead of 1fr so long <option> text in the Owner
+           selects can't push the second column wider than its slot and
+           force a horizontal scrollbar on the dialog. *@
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-top:10px; align-items:start;">
+            @* Assurance Category is fed from the GRAC Admin (Phase 1) master
+               grac_new.assurance_category via /practice/api/org-assurance/categories.
+               Selected option carries category id / code / name via data-* attrs. *@
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Assurance Category</span>
+                <select id="oaDefCategory" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; width:100%; box-sizing:border-box;">
+                    <option value="">Loading categories...</option>
+                </select>
+            </label>
+            @* 119 hybrid role+employee Owner picker.
+               Role dropdown = organization_role (assurance-capable roles).
+               Employee dropdown = current active holders of the picked role.
+               The SP auto-resolves whichever side is left blank (Q1-A). *@
+            <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Owner</span>
+                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                    <select id="oaDefOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                        <option value="">Loading roles...</option>
+                    </select>
+                    <select id="oaDefOwnerEmployee" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                        <option value="">-- pick a role first --</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Objective
+            <textarea id="oaDefObjective" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
+            <textarea id="oaDefDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaDefCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaDefSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- History / Version dialog ---------- *@
+<dialog id="oaDefHistoryDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaDefHistoryTitle" style="margin:0; font-size:18px;">Version History</h2>
+            <button type="button" id="oaDefHistoryClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div style="max-height:60vh; overflow:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">When</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">Action</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">From</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">To</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">Actor</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="oaDefHistoryBody">
+                    <tr><td colspan="6" class="pm-empty" style="padding:12px;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing - _workflow-common partial not rendered'); return; }
+
+    const API      = '/practice/api/org-assurance';
+    const FEATURE  = 'screen.org-assurance-definitions';
+    const U        = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId      : '',
+        status     : '',
+        search     : '',
+        page       : 1,
+        pageSize   : 25,
+        total      : 0,
+        statuses   : [],
+        categories : []    // Admin-published assurance categories
+        // 119: employees[] removed -- picker maintains its own per-role holder cache.
+    };
+
+    // 3-dot action menu shared state (matches the pattern in
+    // Partials/tasks.cshtml and gaps.cshtml -- uses the shared
+    // .pm-action-trigger / .pm-action-menu CSS classes).
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    // -----------------------------------------------------------------
+    // Boot
+    // -----------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    async function boot() {
+        wf.wirePager('oa-def', delta => {
+            const next = state.page + delta;
+            if (next < 1) return;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next > maxPage) return;
+            state.page = next;
+            reload();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaDefUnavailable', 'oaDefUnavailableTitle', 'oaDefUnavailableBody',
+                'No accessible organizations',
+                'Your account does not have any organizations linked. Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaDefFilterOrganization', orgs);
+        state.orgId = document.getElementById('oaDefFilterOrganization').value || '';
+
+        const enabled = await wf.checkFeature(FEATURE, state.orgId);
+        if (!enabled) {
+            wf.unavailable('oaDefUnavailable', 'oaDefUnavailableTitle', 'oaDefUnavailableBody',
+                'Organization Assurance module is not yet enabled for this organization.',
+                'Ask a GRAC Admin to turn on ' + FEATURE + ' for this organization.');
+            return;
+        }
+
+        document.getElementById('oaDefRoot').hidden = false;
+        await loadStatuses();
+        await loadCategories();
+        // 119 hybrid Owner picker fetches roles + holders lazily on dialog open
+        // via window.__roleHolderPicker.attach() -- no eager employee fetch here.
+        wireControls();
+        reload();
+    }
+
+    async function loadStatuses() {
+        try {
+            const r = await fetch(U(API + '/statuses'), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            state.statuses = rows;
+            const sel = document.getElementById('oaDefFilterStatus');
+            for (const s of rows) {
+                const opt = document.createElement('option');
+                opt.value = s.statusCode || s.StatusCode;
+                opt.textContent = s.statusName || s.StatusName;
+                sel.appendChild(opt);
+            }
+        } catch (_) { /* non-fatal */ }
+    }
+
+    // Loads Admin (grac_new) published assurance categories once per page.
+    async function loadCategories() {
+        const sel = document.getElementById('oaDefCategory');
+        try {
+            const r = await fetch(U(API + '/categories'), { credentials: 'same-origin' });
+            if (!r.ok) {
+                sel.innerHTML = '<option value="">(no categories available)</option>';
+                return;
+            }
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            state.categories = rows;
+            renderCategoryOptions();
+        } catch (_) {
+            sel.innerHTML = '<option value="">(failed to load categories)</option>';
+        }
+    }
+
+    function renderCategoryOptions(selectedId) {
+        const sel = document.getElementById('oaDefCategory');
+        sel.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = state.categories.length
+            ? '-- select a category --'
+            : '(no categories published by Admin)';
+        sel.appendChild(placeholder);
+        for (const c of state.categories) {
+            const id   = c.id   || c.Id;
+            const code = c.code || c.Code || '';
+            const name = c.name || c.Name || '';
+            const opt  = document.createElement('option');
+            opt.value = String(id != null ? id : '');
+            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            opt.setAttribute('data-code', code);
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        }
+        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
+    }
+
+    // 119 -- loadEmployees / renderEmployeeOptions retired.
+    // Owner picker now uses window.__roleHolderPicker from _workflow-common.cshtml
+    // which fetches roles from /practice/api/org-roles and holders per-role
+    // on demand. See openDialog() for the attach() call.
+
+    function wireControls() {
+        document.getElementById('oaDefFilterOrganization').addEventListener('change', function (e) {
+            state.orgId = e.target.value || '';
+            state.page = 1;
+            // 119 hybrid Owner picker -- drop cached roles/holders so the next
+            // dialog open re-fetches for the newly-selected org.
+            if (window.__roleHolderPicker && typeof window.__roleHolderPicker.invalidateCaches === 'function') {
+                window.__roleHolderPicker.invalidateCaches();
+            }
+            reload();
+        });
+        document.getElementById('oaDefFilterStatus').addEventListener('change', function (e) {
+            state.status = e.target.value || '';
+            state.page = 1;
+            reload();
+        });
+        document.getElementById('oaDefSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.page = 1;
+            clearTimeout(window.__oaDefSearchTimer);
+            window.__oaDefSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaDefRefreshBtn').addEventListener('click', reload);
+        document.getElementById('oaDefAddBtn').addEventListener('click', function () { openDialog(null); });
+
+        document.getElementById('oaDefClose').addEventListener('click', closeDialog);
+        document.getElementById('oaDefCancel').addEventListener('click', closeDialog);
+        document.getElementById('oaDefForm').addEventListener('submit', function (e) {
+            e.preventDefault(); saveDefinition();
+        });
+
+        document.getElementById('oaDefHistoryClose').addEventListener('click', function () {
+            document.getElementById('oaDefHistoryDialog').close();
+        });
+
+        // 3-dot row menu delegation -- attach once, event-delegated on
+        // the tbody so we don't need to re-wire after each reload.
+        wireRowMenu();
+    }
+
+    // -----------------------------------------------------------------
+    // Load list
+    // -----------------------------------------------------------------
+    async function reload() {
+        const body = document.getElementById('oaDefBody');
+        if (!state.orgId) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Select an organization to load assurance definitions.</td></tr>';
+            wf.updatePager('oa-def', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.status) qs.set('statusCode', state.status);
+            if (state.search) qs.set('search', state.search);
+            qs.set('page',     String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { renderError(r); return; }
+            const payload = await r.json();
+            state.total = Number(payload.totalCount || payload.TotalCount || 0);
+            const rows  = payload.rows || payload.Rows || [];
+            renderRows(rows);
+            wf.updatePager('oa-def', {
+                pageNumber : state.page,
+                totalCount : state.total,
+                pageSize   : state.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    async function renderError(r) {
+        const body = document.getElementById('oaDefBody');
+        let msg = 'HTTP ' + r.status;
+        try {
+            const j = await r.json();
+            if (j && (j.error || j.Error)) msg += ' -- ' + (j.error || j.Error);
+        } catch (_) { /* ignore */ }
+        body.innerHTML = '<tr><td colspan="8" class="pm-empty">Failed to load: ' + wf.escape(msg) + '</td></tr>';
+    }
+
+    function renderRows(rows) {
+        const body = document.getElementById('oaDefBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">No definitions yet. Click "Add Definition" to create one.</td></tr>';
+            return;
+        }
+        const html = rows.map(function (row) {
+            const id           = row.definitionId       || row.DefinitionId;
+            const code         = row.definitionCode     || row.DefinitionCode || '';
+            const name         = row.definitionName     || row.DefinitionName || '';
+            const category     = row.currentCategoryName|| row.CurrentCategoryName || '';
+            // 119 hybrid role+employee -- compose "Role (Employee)" label; fall back gracefully.
+            const ownerRole    = row.ownerRoleName      || row.OwnerRoleName      || '';
+            const ownerEmp     = row.ownerDisplayName   || row.OwnerDisplayName   || '';
+            const owner        = (ownerRole && ownerEmp) ? (ownerRole + ' (' + ownerEmp + ')')
+                                : (ownerRole || ownerEmp);
+            const versionNo    = row.currentVersionNumber || row.CurrentVersionNumber || '';
+            const versionLabel = row.currentVersionLabel  || row.CurrentVersionLabel  || '';
+            const statusCode   = row.currentStatusCode  || row.CurrentStatusCode || '';
+            const statusName   = row.currentStatusName  || row.CurrentStatusName || '';
+            const effective    = formatDate(row.currentEffectiveDate || row.CurrentEffectiveDate);
+            const versionText  = versionLabel ? versionLabel : (versionNo ? String(versionNo) : '');
+
+            return '<tr data-id="' + id + '" data-status="' + wf.escape(statusCode) + '">'
+                + '<td>' + wf.escape(code) + '</td>'
+                + '<td>' + wf.escape(name) + '</td>'
+                + '<td>' + wf.escape(category) + '</td>'
+                + '<td>' + wf.escape(owner) + '</td>'
+                + '<td>' + wf.escape(versionText) + '</td>'
+                + '<td>' + wf.badge(statusName) + '</td>'
+                + '<td>' + wf.escape(effective) + '</td>'
+                + '<td>' + actionsTrigger(id, statusCode) + '</td>'
+                + '</tr>';
+        }).join('');
+        body.innerHTML = html;
+
+        // Row menu delegation is wired once (see wireRowMenu()); no
+        // per-row listener attach needed here.
+    }
+
+    // Render a single 3-dot trigger button per row. Menu items are
+    // built lazily on click via buildActionsMenu(id, statusCode).
+    function actionsTrigger(id, statusCode) {
+        return '<button type="button" class="pm-action-trigger"'
+             + ' data-id="'    + id + '"'
+             + ' data-status="' + wf.escape(statusCode) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+
+    // Menu items per row -- driven by lifecycle status. Static entries
+    // (Edit / Scope / History) are always present; transition entries
+    // appear only when the current status allows them.
+    function buildActionsMenu(id, statusCode) {
+        const items = [
+            { icon: 'fa-pen',              label: 'Edit',
+                action: function () { handleRowAction(id, 'edit'); } },
+            { icon: 'fa-diagram-project',  label: 'Scope',
+                action: function () { handleRowAction(id, 'scope'); } },
+            { icon: 'fa-file-circle-check',label: 'Evidence',
+                action: function () { handleRowAction(id, 'evidence'); } },
+            { icon: 'fa-sitemap',          label: 'Workflow',
+                action: function () { handleRowAction(id, 'workflow'); } },
+            { icon: 'fa-gauge',            label: 'Scoring',
+                action: function () { handleRowAction(id, 'scoring'); } },
+            { icon: 'fa-bolt',             label: 'Triggers',
+                action: function () { handleRowAction(id, 'triggers'); } },
+            { icon: 'fa-circle-nodes',     label: 'Resolve Scope',
+                action: function () { handleRowAction(id, 'scope-resolution'); } },
+            { icon: 'fa-play-circle',      label: 'Executions',
+                action: function () { handleRowAction(id, 'executions'); } },
+            { icon: 'fa-clock-rotate-left',label: 'History',
+                action: function () { handleRowAction(id, 'history'); } }
+        ];
+        if (statusCode === 'Draft')
+            items.push({ icon: 'fa-paper-plane', label: 'Submit for Review',
+                action: function () { handleRowAction(id, 'submit'); } });
+        if (statusCode === 'UnderReview')
+            items.push({ icon: 'fa-check', label: 'Approve',
+                action: function () { handleRowAction(id, 'approve'); } });
+        if (statusCode === 'Approved')
+            items.push({ icon: 'fa-play', label: 'Activate',
+                action: function () { handleRowAction(id, 'activate'); } });
+        if (statusCode === 'Active')
+            items.push({ icon: 'fa-box-archive', label: 'Retire',
+                action: function () { handleRowAction(id, 'retire'); } });
+        return items;
+    }
+
+    // ---------- shared row-menu open/close/position (mirrors tasks.cshtml) ----------
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trigger) {
+        if (!openMenuEl) return;
+        const r  = trigger.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trigger, items) {
+        closeRowMenu();
+        openMenuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            if (it.disabled) { b.disabled = true; b.title = it.disabledReason || ''; }
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[org-assurance-definitions] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trigger);
+    }
+    function wireRowMenu() {
+        const body = document.getElementById('oaDefBody');
+        if (body) {
+            body.addEventListener('click', function (e) {
+                const trigger = e.target.closest('.pm-action-trigger');
+                if (!trigger || !body.contains(trigger)) return;
+                e.preventDefault(); e.stopPropagation();
+                if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+                const id         = trigger.getAttribute('data-id');
+                const statusCode = trigger.getAttribute('data-status') || '';
+                openRowMenu(trigger, buildActionsMenu(id, statusCode));
+            });
+        }
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu')) return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+
+    function handleRowAction(id, action) {
+        if (action === 'edit')     return openDialog(id);
+        if (action === 'history')  return openHistory(id);
+        if (action === 'scope') {
+            // Navigate to the Scope Builder screen with the definition
+            // preselected. The builder loads the definition + scope tree
+            // from the ?definitionId= query param.
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-scope-builder?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'evidence') {
+            // Navigate to the Evidence Config screen with the definition
+            // preselected. Same pattern as Scope.
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-evidence-config?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'workflow') {
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-workflow-config?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'scoring') {
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-scoring-config?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'triggers') {
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-triggers?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'scope-resolution') {
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-scope-resolution?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'executions') {
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-executions?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        return doTransition(id, action);
+    }
+
+    async function doTransition(id, action) {
+        const reason = window.prompt('Reason (optional):', '');
+        const url    = U(API + '/definitions/' + id + '/' + action);
+        try {
+            const r = await fetch(url, {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify({
+                    organizationId : Number(state.orgId),
+                    definitionId   : Number(id),
+                    reasonText     : reason || null,
+                    actor          : null
+                })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Failed: ' + ((j && (j.error || j.Error)) || ('HTTP ' + r.status))); return; }
+            reload();
+        } catch (err) {
+            alert('Failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Add / Edit dialog
+    // -----------------------------------------------------------------
+    async function openDialog(id) {
+        const dlg = document.getElementById('oaDefDialog');
+        clearMessage();
+
+        if (id) {
+            document.getElementById('oaDefDialogTitle').textContent = 'Edit Assurance Definition';
+            try {
+                const r = await fetch(U(API + '/definitions/' + id + '?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+                if (!r.ok) { alert('Failed to load definition.'); return; }
+                const b = await r.json();
+                const d = (b && (b.data || b.Data)) || null;
+                if (!d) { alert('Definition not found.'); return; }
+                document.getElementById('oaDefEditId').value        = String(d.definitionId || d.DefinitionId || '');
+                document.getElementById('oaDefCode').value          = d.definitionCode || d.DefinitionCode || '';
+                document.getElementById('oaDefCode').disabled       = true; // code is immutable after create
+                document.getElementById('oaDefName').value          = d.definitionName || d.DefinitionName || '';
+                document.getElementById('oaDefEffectiveDate').value = onlyDate(d.effectiveDate || d.EffectiveDate);
+                document.getElementById('oaDefObjective').value     = d.objective || d.Objective || '';
+                document.getElementById('oaDefDescription').value   = d.description || d.Description || '';
+
+                // Prefer the Admin category id; fall back to code match if id
+                // is missing (definition might have been created before the
+                // dropdown existed). Refresh options with the selected value.
+                const catId = d.assuranceCategoryId || d.AssuranceCategoryId || '';
+                let selectedCatId = catId ? String(catId) : '';
+                if (!selectedCatId) {
+                    const code = d.assuranceCategoryCode || d.AssuranceCategoryCode || '';
+                    const match = state.categories.find(function (c) {
+                        return String(c.code || c.Code || '') === code;
+                    });
+                    if (match) selectedCatId = String(match.id || match.Id || '');
+                }
+                renderCategoryOptions(selectedCatId);
+
+                // 119 hybrid Owner picker -- seed with the definition's snapshot.
+                if (state.orgId && window.__roleHolderPicker) {
+                    try {
+                        await window.__roleHolderPicker.attach({
+                            organizationId    : Number(state.orgId),
+                            roleSelectId      : 'oaDefOwnerRole',
+                            employeeSelectId  : 'oaDefOwnerEmployee',
+                            initialRoleId     : d.ownerRoleId       || d.OwnerRoleId,
+                            initialRoleName   : d.ownerRoleName     || d.OwnerRoleName,
+                            initialEmployeeId : d.ownerEmployeeId   || d.OwnerEmployeeId,
+                            initialEmployeeName: d.ownerDisplayName || d.OwnerDisplayName,
+                            allowEmpty        : true
+                        });
+                    } catch (_) { /* soft-fail -- dropdowns stay empty */ }
+                }
+            } catch (err) {
+                alert('Failed: ' + (err.message || err));
+                return;
+            }
+        } else {
+            document.getElementById('oaDefDialogTitle').textContent  = 'Add Assurance Definition';
+            document.getElementById('oaDefEditId').value             = '';
+            document.getElementById('oaDefCode').disabled            = false;
+            document.getElementById('oaDefForm').reset();
+            // reset() clears the selects too; repopulate placeholders.
+            renderCategoryOptions('');
+            // 119 hybrid Owner picker -- fresh dialog, no initial snapshot.
+            if (state.orgId && window.__roleHolderPicker) {
+                try {
+                    await window.__roleHolderPicker.attach({
+                        organizationId  : Number(state.orgId),
+                        roleSelectId    : 'oaDefOwnerRole',
+                        employeeSelectId: 'oaDefOwnerEmployee',
+                        allowEmpty      : true
+                    });
+                } catch (_) { /* soft-fail */ }
+            }
+        }
+        dlg.showModal();
+    }
+
+    function closeDialog() { document.getElementById('oaDefDialog').close(); }
+
+    async function saveDefinition() {
+        const idStr    = document.getElementById('oaDefEditId').value;
+
+        // Assurance Category -- pull id + code + name from the selected option.
+        const catSel   = document.getElementById('oaDefCategory');
+        const catOpt   = catSel.options[catSel.selectedIndex] || null;
+        const catId    = catSel.value ? Number(catSel.value) : null;
+        const catCode  = catOpt && catId != null ? (catOpt.getAttribute('data-code') || null) : null;
+        const catName  = catOpt && catId != null ? (catOpt.getAttribute('data-name') || null) : null;
+
+        // 119 hybrid Owner -- read picker state; SP auto-resolves the missing side.
+        const ownerState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaDefOwnerRole', 'oaDefOwnerEmployee')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+
+        const body  = {
+            organizationId          : Number(state.orgId),
+            definitionId            : idStr ? Number(idStr) : null,
+            definitionCode          : document.getElementById('oaDefCode').value.trim(),
+            definitionName          : document.getElementById('oaDefName').value.trim(),
+            ownerRoleId             : ownerState.roleId       || null,
+            ownerRoleName           : ownerState.roleName     || null,
+            ownerEmployeeId         : ownerState.employeeId   || null,
+            ownerDisplayName        : ownerState.employeeName || null,
+            description             : document.getElementById('oaDefDescription').value || null,
+            objective               : document.getElementById('oaDefObjective').value || null,
+            effectiveDate           : document.getElementById('oaDefEffectiveDate').value || null,
+            assuranceCategoryId     : catId,
+            assuranceCategoryCode   : catCode,
+            assuranceCategoryName   : catName,
+            actor                   : null
+        };
+        try {
+            const r = await fetch(U(API + '/definitions'), {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                showMessage('error', (j && (j.error || j.Error)) || ('HTTP ' + r.status));
+                return;
+            }
+            closeDialog();
+            reload();
+        } catch (err) {
+            showMessage('error', err.message || String(err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // History dialog
+    // -----------------------------------------------------------------
+    async function openHistory(id) {
+        const dlg  = document.getElementById('oaDefHistoryDialog');
+        const body = document.getElementById('oaDefHistoryBody');
+        body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">Loading...</td></tr>';
+        dlg.showModal();
+        try {
+            const r = await fetch(U(API + '/definitions/' + id + '/history?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">Failed to load history.</td></tr>'; return; }
+            const j = await r.json();
+            const rows = (j && (j.data || j.Data)) || [];
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">No history yet.</td></tr>';
+                return;
+            }
+            body.innerHTML = rows.map(function (h) {
+                return '<tr>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(formatDate(h.enteredDt || h.EnteredDt)) + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.actionCode || h.ActionCode || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.fromStatusName || h.FromStatusName || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.toStatusName   || h.ToStatusName   || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.actorDisplayName || h.ActorDisplayName || h.enteredBy || h.EnteredBy || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.reasonText || h.ReasonText || '') + '</td>'
+                    + '</tr>';
+            }).join('');
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">Failed: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function showMessage(kind, text) {
+        const el = document.getElementById('oaDefMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent      = text;
+    }
+    function clearMessage() {
+        const el = document.getElementById('oaDefMessage');
+        el.style.display = 'none';
+        el.textContent   = '';
+    }
+    function formatDate(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0,10);
+    }
+    function onlyDate(v) {
+        if (!v) return '';
+        const s = String(v);
+        return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
+    }
+    async function safeJson(r) {
+        try { return await r.json(); } catch (_) { return null; }
+    }
+})();
+</script>

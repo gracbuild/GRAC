@@ -1,0 +1,879 @@
+@*
+    Assurance Evidence Config (BRD Part 2 Sec 5) -- Phase 2 Stage 2.
+
+    Screen key : `org-assurance-evidence-config`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Evidence Config (migration 081)
+    Feature    : screen.org-assurance-evidence-config
+    Backend    :
+        GET  /practice/api/org-assurance/evidence-types
+        GET  /practice/api/org-assurance/collection-methods
+        GET  /practice/api/org-assurance/definitions/{id}?organizationId=
+        GET  /practice/api/org-assurance/definitions?organizationId=&search=&page=&pageSize=
+        GET  /practice/api/org-assurance/definitions/{id}/evidence-config?organizationId=
+        POST /practice/api/org-assurance/definitions/{id}/evidence-config
+
+    UX:
+      * Same picker pattern as the Scope Builder: Org + Definition
+        dropdowns at the top; URL ?definitionId=X preselects.
+      * Table of evidence items -- add row, edit inline, remove row,
+        drag not required (order is a numeric field).
+      * Editable only when the current version is Draft (header.isEditable).
+      * Evidence type / collection method dropdowns are fed from the
+        existing PM masters (evidence_type_master, collection_method_master).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaEvHeading">@Model.Title</h1>
+        <p id="oaEvSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaEvBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Definitions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaEvUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-file-circle-check pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaEvUnavailableTitle">Evidence Config is not available.</h2>
+        <p id="oaEvUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaEvRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaEvPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+            <span>Assurance Definition</span>
+            <select id="oaEvPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">Select an organization first</option>
+            </select>
+        </label>
+    </div>
+
+    <div id="oaEvBanner" hidden class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <span style="font-weight:600;" id="oaEvDefName">Definition</span>
+            <span class="pm-badge" id="oaEvDefStatus">Status</span>
+            <span style="color:#64748b;" id="oaEvDefVersion">Version</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="oaEvReloadBtn" type="button">Reload</button>
+            <button class="pm-button primary" id="oaEvSaveBtn" type="button" disabled>Save Config</button>
+        </div>
+    </div>
+
+    <div id="oaEvReadonlyBanner" hidden
+         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+        This version is not a Draft, so the evidence config is shown read-only.
+    </div>
+
+    <div id="oaEvMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:70px;">Order</th>
+                    <th>Label</th>
+                    <th>Evidence Type</th>
+                    <th>Collection Method</th>
+                    <th>Frequency</th>
+                    <th>Owner</th>
+                    <th style="text-align:center; width:90px;">Mandatory</th>
+                    <th style="width:70px;"></th>
+                </tr>
+            </thead>
+            <tbody id="oaEvBody">
+                <tr><td colspan="8" class="pm-empty">Pick a definition to configure evidence.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-top:12px;">
+        <button class="pm-button" id="oaEvAddBtn" type="button" disabled>
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Evidence Item
+        </button>
+    </div>
+</section>
+
+@* ---------- Add / Edit Evidence Item dialog ---------- *@
+<dialog id="oaEvItemDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaEvItemForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaEvItemDialogTitle" style="margin:0; font-size:18px;">Add Evidence Item</h2>
+            <button type="button" id="oaEvItemClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaEvItemMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        @* Basic identity *@
+        <div style="display:grid; grid-template-columns:1fr 100px 130px; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Label <span style="color:#b91c1c;">*</span></span>
+                <input id="oaEvItemLabel" type="text" maxlength="240" required
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Order</span>
+                <input id="oaEvItemOrder" type="number" min="0" step="1"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; padding-top:16px;">
+                <span style="display:flex; align-items:center; gap:6px;">
+                    <input id="oaEvItemMandatory" type="checkbox" />
+                    Mandatory
+                </span>
+            </label>
+        </div>
+
+        @* Classification *@
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Evidence Type</span>
+                <select id="oaEvItemType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Collection Method</span>
+                <select id="oaEvItemMethod" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Collection Frequency</span>
+                <select id="oaEvItemFrequency" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+        </div>
+
+        @* Ownership (role + employee) + Retention.
+           minmax(0,1fr) + min-width:0 so long role/holder names can't
+           push a column wider than its slot and add a scrollbar. *@
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start; margin-top:10px;">
+            <div style="min-width:0;">
+                <div style="font-size:12px; color:#475569; margin-bottom:2px;">Owner Role</div>
+                <select id="oaEvItemOwnerRole"
+                        style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                    <option value="">Loading roles...</option>
+                </select>
+                <div style="font-size:11px; color:#64748b; margin-top:6px; margin-bottom:2px;">
+                    Owner (current holder)
+                </div>
+                <select id="oaEvItemOwnerEmp"
+                        style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                    <option value="">Pick role first</option>
+                </select>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Retention Period</span>
+                <input id="oaEvItemRetention" type="text" maxlength="120"
+                       placeholder="e.g. 7 years, 24 months"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+            </label>
+        </div>
+
+        @* Validity + Expiry *@
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Validity (days)</span>
+                <input id="oaEvItemValidity" type="number" min="0" step="1"
+                       placeholder="How many days the evidence remains valid"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Expiry Warn (days)</span>
+                <input id="oaEvItemExpiryWarn" type="number" min="0" step="1"
+                       placeholder="How many days before expiry to warn"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+
+        @* Auto-engine details -- location + locator *@
+        <div id="oaEvItemAutoBanner"
+             style="margin-top:12px; padding:8px 12px; border-radius:6px; background:#eff6ff; color:#1e40af; font-size:12px; display:none;">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            The automated engine will use <strong>Evidence Location</strong> and
+            <strong>Evidence Locator</strong> to fetch this evidence.
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Evidence Location</span>
+                <input id="oaEvItemLocation" type="text" maxlength="500"
+                       placeholder="Where the evidence lives (repository, folder, system)"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Evidence Locator</span>
+                <input id="oaEvItemLocator" type="text" maxlength="500"
+                       placeholder="Path / URL / query / API endpoint to reach it"
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+
+        @* Description *@
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Description</span>
+            <textarea id="oaEvItemDescription" rows="3" maxlength="4000"
+                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaEvItemCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaEvItemSubmit" class="pm-button primary">Save Item</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        definitionId  : null,
+        orgId         : null,
+        allOrgs       : [],
+        definitionsById : {},
+        header        : null,     // flattened from GET evidence-config response
+        definition    : null,
+        evidenceTypes : [],
+        collectionMethods : [],
+        frequencies   : [],
+        items         : [],       // in-memory edit model
+        editingIndex  : -1        // which item the dialog is editing (-1 = new)
+    };
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readDefinitionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('definitionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-definitions';
+    }
+
+    async function boot() {
+        document.getElementById('oaEvBackBtn').setAttribute('href', backHref());
+        document.getElementById('oaEvRoot').hidden = false;
+
+        try { await Promise.all([loadEvidenceTypes(), loadCollectionMethods(), loadFrequencies()]); }
+        catch (err) { setMessage('error', 'Failed to load lookups: ' + (err.message || err)); }
+
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaEvPickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            setMessage('error', 'Your account is not linked to any organizations.');
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        state.definitionId = readDefinitionIdFromUrl();
+
+        orgSel.addEventListener('change', function () {
+            state.orgId        = orgSel.value || null;
+            state.definitionId = null;
+            state.definition   = null;
+            state.header       = null;
+            state.items        = [];
+            renderBanner();
+            renderReadonlyBannerIfNeeded();
+            renderItems();
+            document.getElementById('oaEvSaveBtn').disabled = true;
+            document.getElementById('oaEvBanner').hidden = true;
+            document.getElementById('oaEvAddBtn').disabled = true;
+            populateDefinitionPicker();
+        });
+        document.getElementById('oaEvPickDef').addEventListener('change', function (e) {
+            const id = e.target.value ? Number(e.target.value) : null;
+            if (id) selectDefinition(id);
+        });
+
+        wireStaticButtons();
+
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+        await populateDefinitionPicker();
+
+        if (state.definitionId) {
+            await selectDefinition(state.definitionId);
+        }
+    }
+
+    async function populateDefinitionPicker() {
+        const defSel = document.getElementById('oaEvPickDef');
+        defSel.innerHTML = '<option value="">Loading definitions...</option>';
+        defSel.disabled = true;
+
+        if (!state.orgId) {
+            defSel.innerHTML = '<option value="">Select an organization first</option>';
+            return;
+        }
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows    = payload.rows || payload.Rows || [];
+            defSel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = rows.length ? '-- select a definition --' : 'No definitions in this organization.';
+            defSel.appendChild(ph);
+            rows.forEach(function (row) {
+                const id   = row.definitionId  || row.DefinitionId;
+                const code = row.definitionCode|| row.DefinitionCode || '';
+                const name = row.definitionName|| row.DefinitionName || '';
+                const st   = row.currentStatusName || row.CurrentStatusName || '';
+                if (id != null) state.definitionsById[String(id)] = row;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '') + (st ? '  –  ' + st : '');
+                defSel.appendChild(opt);
+            });
+            if (state.definitionId) defSel.value = String(state.definitionId);
+        } catch (err) {
+            defSel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        } finally { defSel.disabled = false; }
+    }
+
+    async function selectDefinition(definitionId) {
+        state.definitionId = definitionId;
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.set('definitionId', String(definitionId));
+            window.history.replaceState(null, '', u.toString());
+        } catch (_) {}
+
+        try { await resolveOrgForDefinition(definitionId); }
+        catch (err) { setMessage('error', 'Could not load definition #' + definitionId + ': ' + (err.message || err)); return; }
+
+        try { await loadConfig(); }
+        catch (err) { setMessage('error', 'Failed to load evidence config: ' + (err.message || err)); return; }
+
+        document.getElementById('oaEvBanner').hidden = false;
+        renderBanner();
+        renderReadonlyBannerIfNeeded();
+        renderItems();
+        document.getElementById('oaEvSaveBtn').disabled = !state.header.isEditable;
+        document.getElementById('oaEvAddBtn').disabled  = !state.header.isEditable;
+    }
+
+    async function resolveOrgForDefinition(definitionId) {
+        const cached = state.definitionsById[String(definitionId)];
+        const cachedOrg = cached && String(cached.organizationId || cached.OrganizationId || '');
+        const seen = new Set(); const orgsToTry = [];
+        function push(v) { if (v && !seen.has(v)) { seen.add(v); orgsToTry.push(v); } }
+        push(cachedOrg); push(state.orgId);
+        (state.allOrgs || []).forEach(function (o) { push(o.value); });
+
+        let lastStatus = null;
+        for (const oid of orgsToTry) {
+            const url = U(API + '/definitions/' + definitionId + '?organizationId=' + encodeURIComponent(oid));
+            let r;
+            try { r = await fetch(url, { credentials: 'same-origin' }); }
+            catch (_) { continue; }
+            if (r.ok) {
+                const b = await r.json().catch(function () { return null; });
+                const d = (b && (b.data || b.Data)) || null;
+                if (d) {
+                    if (state.orgId !== String(oid)) {
+                        state.orgId = String(oid);
+                        const orgSel = document.getElementById('oaEvPickOrg');
+                        if (orgSel && orgSel.value !== state.orgId) {
+                            orgSel.value = state.orgId;
+                            await populateDefinitionPicker();
+                            const defSel = document.getElementById('oaEvPickDef');
+                            if (defSel) defSel.value = String(definitionId);
+                        }
+                    }
+                    state.definition = d;
+                    return;
+                }
+            } else { lastStatus = r.status; }
+        }
+        throw new Error(lastStatus
+            ? ('HTTP ' + lastStatus + ' -- definition not found in any accessible organization.')
+            : 'Definition not found in any accessible organization.');
+    }
+
+    async function loadEvidenceTypes() {
+        const r = await fetch(U(API + '/evidence-types'), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b = await r.json();
+        state.evidenceTypes = (b && (b.data || b.Data)) || [];
+    }
+    async function loadCollectionMethods() {
+        const r = await fetch(U(API + '/collection-methods'), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b = await r.json();
+        state.collectionMethods = (b && (b.data || b.Data)) || [];
+    }
+    async function loadFrequencies() {
+        const r = await fetch(U(API + '/frequencies'), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b = await r.json();
+        state.frequencies = (b && (b.data || b.Data)) || [];
+    }
+
+    async function loadConfig() {
+        if (!state.orgId || !state.definitionId) return;
+        const url = U(API + '/definitions/' + state.definitionId + '/evidence-config?organizationId=' + encodeURIComponent(state.orgId));
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' loading evidence config');
+        const json = await r.json();
+
+        const hdr = (json && (json.header || json.Header)) || {};
+        state.header = {
+            definitionId      : hdr.definitionId      || hdr.DefinitionId,
+            versionId         : hdr.versionId         || hdr.VersionId,
+            currentVersionId  : hdr.currentVersionId  || hdr.CurrentVersionId,
+            currentStatusCode : hdr.currentStatusCode || hdr.CurrentStatusCode,
+            isEditable        : !!(hdr.isEditable    ?? hdr.IsEditable)
+        };
+        const items = (json && (json.items || json.Items)) || [];
+        state.items = items.map(function (i) {
+            return {
+                evidenceTypeId          : i.evidenceTypeId          ?? i.EvidenceTypeId ?? null,
+                evidenceTypeCode        : i.evidenceTypeCode        ?? i.EvidenceTypeCode ?? null,
+                evidenceTypeName        : i.evidenceTypeName        ?? i.EvidenceTypeName ?? null,
+                collectionMethodId      : i.collectionMethodId      ?? i.CollectionMethodId ?? null,
+                collectionMethodCode    : i.collectionMethodCode    ?? i.CollectionMethodCode ?? null,
+                collectionMethodName    : i.collectionMethodName    ?? i.CollectionMethodName ?? null,
+                collectionFrequencyId   : i.collectionFrequencyId   ?? i.CollectionFrequencyId ?? null,
+                collectionFrequencyCode : i.collectionFrequencyCode ?? i.CollectionFrequencyCode ?? null,
+                collectionFrequencyName : i.collectionFrequencyName ?? i.CollectionFrequencyName ?? null,
+                evidenceOwner           : i.evidenceOwner           ?? i.EvidenceOwner ?? '',
+                retentionPeriod         : i.retentionPeriod         ?? i.RetentionPeriod ?? '',
+                evidenceLocation        : i.evidenceLocation        ?? i.EvidenceLocation ?? '',
+                evidenceLocator         : i.evidenceLocator         ?? i.EvidenceLocator ?? '',
+                evidenceLabel           : i.evidenceLabel           ?? i.EvidenceLabel ?? '',
+                description             : i.description             ?? i.Description ?? '',
+                isMandatory             : !!(i.isMandatory          ?? i.IsMandatory),
+                validityDays            : i.validityDays            ?? i.ValidityDays ?? null,
+                expiryWarningDays       : i.expiryWarningDays       ?? i.ExpiryWarningDays ?? null,
+                displayOrder            : i.displayOrder            ?? i.DisplayOrder ?? 0,
+                // 118 hybrid role+employee Owner
+                ownerRoleId             : i.ownerRoleId             ?? i.OwnerRoleId ?? null,
+                ownerRoleName           : i.ownerRoleName           ?? i.OwnerRoleName ?? null,
+                ownerEmployeeId         : i.ownerEmployeeId         ?? i.OwnerEmployeeId ?? null,
+                ownerDisplayName        : i.ownerDisplayName        ?? i.OwnerDisplayName ?? null
+            };
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Render
+    // -----------------------------------------------------------------
+    function renderBanner() {
+        const d = state.definition; const h = state.header;
+        if (!d || !h) {
+            document.getElementById('oaEvDefName').textContent    = '';
+            document.getElementById('oaEvDefStatus').textContent  = '';
+            document.getElementById('oaEvDefVersion').textContent = '';
+            document.getElementById('oaEvHeading').textContent    = 'Evidence Config';
+            document.getElementById('oaEvSubtitle').textContent   =
+                'Pick an organization and an assurance definition to configure evidence.';
+            return;
+        }
+        document.getElementById('oaEvDefName').textContent =
+            (d.definitionName || d.DefinitionName || '(no name)') +
+            '  (' + (d.definitionCode || d.DefinitionCode || '') + ')';
+        document.getElementById('oaEvDefStatus').textContent  = d.currentStatusName || d.CurrentStatusName || '';
+        document.getElementById('oaEvDefVersion').textContent = 'v' +
+            (d.currentVersionNumber || d.CurrentVersionNumber || h.versionId || '?');
+        document.getElementById('oaEvHeading').textContent = 'Evidence: ' + (d.definitionName || d.DefinitionName || '');
+        document.getElementById('oaEvSubtitle').textContent =
+            'Configure the evidence expected for a definition -- type, collection method, mandatory, validity, expiry.';
+    }
+    function renderReadonlyBannerIfNeeded() {
+        const banner = document.getElementById('oaEvReadonlyBanner');
+        banner.hidden = state.header ? !!state.header.isEditable : true;
+    }
+
+    function renderItems() {
+        const body = document.getElementById('oaEvBody');
+        if (!state.definitionId || !state.header) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Pick a definition to configure evidence.</td></tr>';
+            return;
+        }
+        if (!state.items.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">' +
+                (state.header.isEditable
+                    ? 'No evidence items yet. Click "Add Evidence Item" to start.'
+                    : 'No evidence has been configured for this version.') +
+                '</td></tr>';
+            return;
+        }
+        body.innerHTML = state.items.map(function (item, index) {
+            const order = item.displayOrder ?? '';
+            const label = item.evidenceLabel || '';
+            const type  = item.evidenceTypeName || item.evidenceTypeCode || '';
+            const method= item.collectionMethodName || item.collectionMethodCode || '';
+            const freq  = item.collectionFrequencyName || item.collectionFrequencyCode || '';
+            // 118 hybrid: show role (holder) label; fall back to legacy free-text
+            const owner = (function () {
+                const rn = item.ownerRoleName;
+                const en = item.ownerDisplayName;
+                if (rn && en) return rn + ' (' + en + ')';
+                if (rn)       return rn + ' (role only)';
+                if (en)       return en;
+                return item.evidenceOwner || '';
+            })();
+            const mand  = item.isMandatory
+                ? '<i class="fa-solid fa-check" style="color:#166534;" aria-hidden="true"></i>'
+                : '';
+            return '<tr data-idx="' + index + '">'
+                + '<td>' + wf.escape(String(order)) + '</td>'
+                + '<td>' + wf.escape(label) + '</td>'
+                + '<td>' + wf.escape(type) + '</td>'
+                + '<td>' + wf.escape(method) + '</td>'
+                + '<td>' + wf.escape(freq) + '</td>'
+                + '<td>' + wf.escape(owner) + '</td>'
+                + '<td style="text-align:center;">' + mand + '</td>'
+                + '<td style="white-space:nowrap;">'
+                +   '<button type="button" class="pm-button" data-role="edit"   data-idx="' + index + '" title="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button> '
+                +   '<button type="button" class="pm-button" data-role="remove" data-idx="' + index + '" title="Remove" style="color:#b91c1c;"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>'
+                + '</td>'
+                + '</tr>';
+        }).join('');
+
+        wireRowEvents();
+
+        if (!state.header.isEditable) {
+            body.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
+        }
+    }
+
+    function wireRowEvents() {
+        const body = document.getElementById('oaEvBody');
+        body.querySelectorAll('button[data-role]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const idx  = Number(btn.getAttribute('data-idx'));
+                const role = btn.getAttribute('data-role');
+                if (Number.isNaN(idx)) return;
+                if (role === 'edit') {
+                    openItemDialog(idx);
+                } else if (role === 'remove') {
+                    if (!confirm('Remove this evidence item?')) return;
+                    state.items.splice(idx, 1);
+                    renderItems();
+                }
+            });
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Add / Edit dialog
+    // -----------------------------------------------------------------
+    async function openItemDialog(idx) {
+        state.editingIndex = (idx == null || idx < 0) ? -1 : idx;
+        clearItemMessage();
+
+        // Populate dropdowns.
+        fillOptions('oaEvItemType',      state.evidenceTypes,     '-- select --');
+        fillOptions('oaEvItemMethod',    state.collectionMethods, '-- select --');
+        fillOptions('oaEvItemFrequency', state.frequencies,       '-- none --');
+
+        const isEdit = state.editingIndex >= 0;
+        const item   = isEdit ? state.items[state.editingIndex] : blankItem();
+        document.getElementById('oaEvItemDialogTitle').textContent = isEdit ? 'Edit Evidence Item' : 'Add Evidence Item';
+
+        document.getElementById('oaEvItemLabel').value      = item.evidenceLabel      || '';
+        document.getElementById('oaEvItemOrder').value      = String(item.displayOrder ?? (state.items.length + 1));
+        document.getElementById('oaEvItemMandatory').checked = !!item.isMandatory;
+        document.getElementById('oaEvItemType').value        = item.evidenceTypeId       != null ? String(item.evidenceTypeId)       : '';
+        document.getElementById('oaEvItemMethod').value      = item.collectionMethodId   != null ? String(item.collectionMethodId)   : '';
+        document.getElementById('oaEvItemFrequency').value   = item.collectionFrequencyId != null ? String(item.collectionFrequencyId): '';
+        document.getElementById('oaEvItemRetention').value  = item.retentionPeriod   || '';
+        document.getElementById('oaEvItemValidity').value   = item.validityDays == null ? '' : String(item.validityDays);
+        document.getElementById('oaEvItemExpiryWarn').value = item.expiryWarningDays == null ? '' : String(item.expiryWarningDays);
+        document.getElementById('oaEvItemLocation').value   = item.evidenceLocation  || '';
+        document.getElementById('oaEvItemLocator').value    = item.evidenceLocator   || '';
+        document.getElementById('oaEvItemDescription').value = item.description      || '';
+
+        // 118 hybrid role+employee picker for Evidence Owner.
+        if (state.orgId && window.__roleHolderPicker) {
+            try {
+                await window.__roleHolderPicker.attach({
+                    organizationId    : Number(state.orgId),
+                    roleSelectId      : 'oaEvItemOwnerRole',
+                    employeeSelectId  : 'oaEvItemOwnerEmp',
+                    initialRoleId     : item.ownerRoleId,
+                    initialRoleName   : item.ownerRoleName,
+                    initialEmployeeId : item.ownerEmployeeId,
+                    initialEmployeeName: item.ownerDisplayName,
+                    allowEmpty        : true
+                });
+            } catch (_) { /* soft-fail -- dropdowns stay empty */ }
+        }
+
+        updateAutoBanner();
+        document.getElementById('oaEvItemDialog').showModal();
+    }
+
+    function blankItem() {
+        return {
+            evidenceTypeId       : null, evidenceTypeCode: null, evidenceTypeName: null,
+            collectionMethodId   : null, collectionMethodCode: null, collectionMethodName: null,
+            collectionFrequencyId: null, collectionFrequencyCode: null, collectionFrequencyName: null,
+            evidenceOwner        : '',
+            // 118 hybrid role+employee owner -- start empty; picker fills them.
+            ownerRoleId          : null,
+            ownerRoleName        : null,
+            ownerEmployeeId      : null,
+            ownerDisplayName     : null,
+            retentionPeriod      : '',
+            evidenceLocation     : '',
+            evidenceLocator      : '',
+            evidenceLabel        : '',
+            description          : '',
+            isMandatory          : false,
+            validityDays         : null,
+            expiryWarningDays    : null,
+            displayOrder         : state.items.length + 1
+        };
+    }
+
+    function fillOptions(selectId, rows, placeholder) {
+        const sel = document.getElementById(selectId);
+        sel.innerHTML = '';
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = rows && rows.length ? (placeholder || '-- select --') : '(none available)';
+        sel.appendChild(ph);
+        (rows || []).forEach(function (row) {
+            const id   = row.id   ?? row.Id;
+            const code = row.code ?? row.Code ?? '';
+            const name = row.name ?? row.Name ?? '';
+            const opt  = document.createElement('option');
+            opt.value  = String(id != null ? id : '');
+            opt.textContent = name || code;
+            opt.setAttribute('data-code', code);
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        });
+    }
+
+    // Show the "automated engine" hint banner when the picked method
+    // isn't obviously Manual. Match by code first, then by name fallback.
+    function updateAutoBanner() {
+        const sel  = document.getElementById('oaEvItemMethod');
+        const opt  = sel.options[sel.selectedIndex] || null;
+        const code = (opt && opt.getAttribute('data-code')) ? opt.getAttribute('data-code').toUpperCase() : '';
+        const name = (opt && opt.getAttribute('data-name')) ? opt.getAttribute('data-name').toUpperCase() : '';
+        const looksManual =
+            !opt || opt.value === '' ||
+            code.indexOf('MANUAL') >= 0 || name.indexOf('MANUAL') >= 0;
+        document.getElementById('oaEvItemAutoBanner').style.display = looksManual ? 'none' : 'block';
+    }
+
+    function closeItemDialog() { document.getElementById('oaEvItemDialog').close(); }
+
+    function saveItemFromDialog() {
+        const label = document.getElementById('oaEvItemLabel').value.trim();
+        if (!label) { showItemMessage('error', 'Label is required.'); return; }
+
+        function optData(id) {
+            const sel = document.getElementById(id);
+            const opt = sel.options[sel.selectedIndex] || null;
+            const val = sel.value ? Number(sel.value) : null;
+            return {
+                id   : val,
+                code : opt && val != null ? (opt.getAttribute('data-code') || null) : null,
+                name : opt && val != null ? (opt.getAttribute('data-name') || null) : null
+            };
+        }
+        const et = optData('oaEvItemType');
+        const cm = optData('oaEvItemMethod');
+        const cf = optData('oaEvItemFrequency');
+
+        const validRaw  = document.getElementById('oaEvItemValidity').value;
+        const expiryRaw = document.getElementById('oaEvItemExpiryWarn').value;
+
+        // 118 hybrid role+employee owner -- read picker state; SP auto-resolves
+        // whichever side is missing on the server.
+        const ownerState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaEvItemOwnerRole', 'oaEvItemOwnerEmp')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+        // Legacy free-text -- keep populated for backward compat readers.
+        const ownerFreeText = ownerState.employeeName || ownerState.roleName || '';
+
+        const updated = {
+            evidenceTypeId          : et.id,   evidenceTypeCode       : et.code, evidenceTypeName       : et.name,
+            collectionMethodId      : cm.id,   collectionMethodCode   : cm.code, collectionMethodName   : cm.name,
+            collectionFrequencyId   : cf.id,   collectionFrequencyCode: cf.code, collectionFrequencyName: cf.name,
+            evidenceOwner           : ownerFreeText,
+            ownerRoleId             : ownerState.roleId       || null,
+            ownerRoleName           : ownerState.roleName     || null,
+            ownerEmployeeId         : ownerState.employeeId   || null,
+            ownerDisplayName        : ownerState.employeeName || null,
+            retentionPeriod         : document.getElementById('oaEvItemRetention').value.trim(),
+            evidenceLocation        : document.getElementById('oaEvItemLocation').value.trim(),
+            evidenceLocator         : document.getElementById('oaEvItemLocator').value.trim(),
+            evidenceLabel           : label,
+            description             : document.getElementById('oaEvItemDescription').value || '',
+            isMandatory             : document.getElementById('oaEvItemMandatory').checked,
+            validityDays            : validRaw  === '' ? null : Number(validRaw),
+            expiryWarningDays       : expiryRaw === '' ? null : Number(expiryRaw),
+            displayOrder            : Number(document.getElementById('oaEvItemOrder').value || (state.items.length + 1))
+        };
+        if (state.editingIndex >= 0) {
+            state.items[state.editingIndex] = updated;
+        } else {
+            state.items.push(updated);
+        }
+        renderItems();
+        closeItemDialog();
+    }
+
+    function showItemMessage(kind, text) {
+        const el = document.getElementById('oaEvItemMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent      = text;
+    }
+    function clearItemMessage() {
+        const el = document.getElementById('oaEvItemMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+
+    // -----------------------------------------------------------------
+    // Static wiring
+    // -----------------------------------------------------------------
+    function wireStaticButtons() {
+        document.getElementById('oaEvAddBtn').addEventListener('click', function () {
+            if (!state.definitionId || !state.header) { setMessage('error', 'Pick a definition first.'); return; }
+            if (!state.header.isEditable) { setMessage('error', 'This version is not a Draft.'); return; }
+            openItemDialog(-1);
+        });
+
+        // Dialog wiring.
+        document.getElementById('oaEvItemClose').addEventListener('click', closeItemDialog);
+        document.getElementById('oaEvItemCancel').addEventListener('click', closeItemDialog);
+        document.getElementById('oaEvItemForm').addEventListener('submit', function (e) {
+            e.preventDefault(); saveItemFromDialog();
+        });
+        document.getElementById('oaEvItemMethod').addEventListener('change', updateAutoBanner);
+
+        document.getElementById('oaEvReloadBtn').addEventListener('click', async function () {
+            if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick an organization and definition first.'); return; }
+            try {
+                await loadConfig();
+                renderBanner(); renderReadonlyBannerIfNeeded(); renderItems();
+                document.getElementById('oaEvSaveBtn').disabled = !state.header.isEditable;
+                document.getElementById('oaEvAddBtn').disabled  = !state.header.isEditable;
+                setMessage('ok', 'Reloaded.');
+            } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); }
+        });
+
+        document.getElementById('oaEvSaveBtn').addEventListener('click', saveConfig);
+    }
+
+    async function saveConfig() {
+        if (!state.header || !state.header.isEditable) return;
+
+        // Client-side validation: label required for every row.
+        for (let i = 0; i < state.items.length; i++) {
+            const item = state.items[i];
+            if (!item.evidenceLabel || !item.evidenceLabel.trim()) {
+                setMessage('error', 'Row ' + (i + 1) + ': label is required.');
+                return;
+            }
+        }
+
+        const body = {
+            organizationId : Number(state.orgId),
+            definitionId   : Number(state.definitionId),
+            actor          : null,
+            items          : state.items.map(function (i, idx) {
+                return {
+                    evidenceTypeId          : i.evidenceTypeId,
+                    evidenceTypeCode        : i.evidenceTypeCode,
+                    evidenceTypeName        : i.evidenceTypeName,
+                    collectionMethodId      : i.collectionMethodId,
+                    collectionMethodCode    : i.collectionMethodCode,
+                    collectionMethodName    : i.collectionMethodName,
+                    collectionFrequencyId   : i.collectionFrequencyId,
+                    collectionFrequencyCode : i.collectionFrequencyCode,
+                    collectionFrequencyName : i.collectionFrequencyName,
+                    evidenceOwner           : i.evidenceOwner   ? i.evidenceOwner.trim()   : null,
+                    // 118 hybrid role+employee owner -- SP auto-fills the sibling
+                    // side when only one is supplied.
+                    ownerRoleId             : i.ownerRoleId      != null ? i.ownerRoleId      : null,
+                    ownerRoleName           : i.ownerRoleName    != null ? i.ownerRoleName    : null,
+                    ownerEmployeeId         : i.ownerEmployeeId  != null ? i.ownerEmployeeId  : null,
+                    ownerDisplayName        : i.ownerDisplayName != null ? i.ownerDisplayName : null,
+                    retentionPeriod         : i.retentionPeriod ? i.retentionPeriod.trim() : null,
+                    evidenceLocation        : i.evidenceLocation? i.evidenceLocation.trim(): null,
+                    evidenceLocator         : i.evidenceLocator ? i.evidenceLocator.trim() : null,
+                    evidenceLabel           : i.evidenceLabel.trim(),
+                    description             : i.description || null,
+                    isMandatory             : !!i.isMandatory,
+                    validityDays            : i.validityDays,
+                    expiryWarningDays       : i.expiryWarningDays,
+                    displayOrder            : (i.displayOrder != null ? i.displayOrder : (idx + 1))
+                };
+            })
+        };
+        try {
+            const url = U(API + '/definitions/' + state.definitionId + '/evidence-config');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Evidence config saved.');
+        } catch (err) { setMessage('error', 'Save failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaEvMessage');
+        el.hidden = false;
+        el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

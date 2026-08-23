@@ -1,0 +1,633 @@
+@*
+    Assurance Scope Resolution (BRD Part 2 Sec 3) -- Phase 2 Stage 3.
+
+    Screen key : `org-assurance-scope-resolution`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Scope Resolution (migration 097)
+    Feature    : screen.org-assurance-scope-resolution
+    Backend    :
+        POST /practice/api/org-assurance/definitions/{id}/scope-resolve
+        GET  /practice/api/org-assurance/definitions/{id}/scope-resolutions?organizationId=&versionId=&page=&pageSize=
+        GET  /practice/api/org-assurance/scope-resolutions/{id}?organizationId=
+        GET  /practice/api/org-assurance/scope-resolutions/{id}/entities?organizationId=&dimensionCode=&search=&page=&pageSize=
+
+    UX:
+      * Org + Definition picker at top.
+      * LEFT panel: paginated resolution history (PREVIEW / EXECUTION,
+        when, who, total count).
+      * RIGHT panel: selected snapshot detail -- summary by dimension +
+        filterable entity list.
+      * Top action: "Preview Resolve Now" runs the engine over the
+        current version's scope and creates a PREVIEW row.
+      * Snapshot is IMMUTABLE -- no edits, just view / drilldown.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaRsHeading">@Model.Title</h1>
+        <p id="oaRsSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaRsBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Definitions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaRsUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-nodes pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaRsUnavailableTitle">Scope Resolution is not available.</h2>
+        <p id="oaRsUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaRsRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaRsPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+            <span>Assurance Definition</span>
+            <select id="oaRsPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">Select an organization first</option>
+            </select>
+        </label>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button primary" id="oaRsPreviewBtn" type="button" disabled>
+                <i class="fa-solid fa-play" aria-hidden="true"></i> Preview Resolve Now
+            </button>
+        </div>
+    </div>
+
+    <div id="oaRsBanner" hidden class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <span style="font-weight:600;" id="oaRsDefName">Definition</span>
+            <span class="pm-badge" id="oaRsDefStatus">Status</span>
+            <span style="color:#64748b;" id="oaRsDefVersion">Version</span>
+        </div>
+    </div>
+
+    <div id="oaRsMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div style="display:grid; grid-template-columns:minmax(360px, 480px) 1fr; gap:12px; margin-top:12px;">
+        @* LEFT: history list *@
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <h2 style="font-size:15px; margin:0; color:#0f172a;">Resolution History</h2>
+                <button class="pm-button icon" id="oaRsRefreshBtn" type="button" title="Refresh">
+                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Purpose</th>
+                            <th>By</th>
+                            <th style="text-align:right;">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaRsHistoryBody">
+                        <tr><td colspan="4" class="pm-empty">Pick a definition to load history.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pm-pager" data-pager="oa-rs-history">
+                <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                <span data-pg="label">Page 1</span>
+                <button class="pm-button" data-pg="next" type="button">Next</button>
+                <span data-pg="total" class="pm-pager-total">0 total</span>
+            </div>
+        </div>
+
+        @* RIGHT: snapshot detail *@
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <h2 style="font-size:15px; margin:0; color:#0f172a;" id="oaRsDetailTitle">Snapshot</h2>
+                    <p style="font-size:12px; color:#64748b; margin:4px 0 0;" id="oaRsDetailSubtitle">Select a row from the history to view its snapshot.</p>
+                </div>
+            </div>
+
+            <div id="oaRsSummaryBlock" hidden style="margin-bottom:12px;">
+                <div style="display:flex; flex-wrap:wrap; gap:8px;" id="oaRsSummaryTiles"></div>
+            </div>
+
+            <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Filter by Dimension</span>
+                    <select id="oaRsEntityDimFilter" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                        <option value="">All</option>
+                    </select>
+                </label>
+                <input id="oaRsEntitySearch" type="text" placeholder="Search entity name / code..." />
+            </div>
+
+            <div class="pm-table-wrap" style="margin-top:8px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Dimension</th>
+                            <th>Entity</th>
+                            <th>Code</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaRsEntityBody">
+                        <tr><td colspan="4" class="pm-empty">No snapshot selected.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pm-pager" data-pager="oa-rs-entities">
+                <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                <span data-pg="label">Page 1</span>
+                <button class="pm-button" data-pg="next" type="button">Next</button>
+                <span data-pg="total" class="pm-pager-total">0 total</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        definitionId  : null,
+        orgId         : null,
+        allOrgs       : [],
+        definitionsById : {},
+        definition    : null,
+
+        history       : { page: 1, pageSize: 25, total: 0, rows: [] },
+        selectedResolutionId : null,
+        selectedDetail : null,     // { header, dimensionSummary }
+        entities      : { page: 1, pageSize: 50, total: 0, rows: [], dim: '', search: '' }
+    };
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readDefinitionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('definitionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-definitions';
+    }
+
+    async function boot() {
+        document.getElementById('oaRsBackBtn').setAttribute('href', backHref());
+        document.getElementById('oaRsRoot').hidden = false;
+
+        wf.wirePager('oa-rs-history', function (delta) {
+            const next = state.history.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.history.total / state.history.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.history.page = next; reloadHistory();
+        });
+        wf.wirePager('oa-rs-entities', function (delta) {
+            const next = state.entities.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.entities.total / state.entities.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.entities.page = next; reloadEntities();
+        });
+
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaRsPickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        state.definitionId = readDefinitionIdFromUrl();
+
+        orgSel.addEventListener('change', function () {
+            state.orgId = orgSel.value || null;
+            state.definitionId = null; state.definition = null;
+            state.selectedResolutionId = null; state.selectedDetail = null;
+            state.history = { page: 1, pageSize: 25, total: 0, rows: [] };
+            state.entities = { page: 1, pageSize: 50, total: 0, rows: [], dim: '', search: '' };
+            renderBanner(); renderHistory(); renderDetail(); renderEntities();
+            document.getElementById('oaRsPreviewBtn').disabled = true;
+            document.getElementById('oaRsBanner').hidden       = true;
+            populateDefinitionPicker();
+        });
+        document.getElementById('oaRsPickDef').addEventListener('change', function (e) {
+            const id = e.target.value ? Number(e.target.value) : null;
+            if (id) selectDefinition(id);
+        });
+
+        wireStaticButtons();
+
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+        await populateDefinitionPicker();
+
+        if (state.definitionId) await selectDefinition(state.definitionId);
+    }
+
+    // -----------------------------------------------------------------
+    // Picker
+    // -----------------------------------------------------------------
+    async function populateDefinitionPicker() {
+        const defSel = document.getElementById('oaRsPickDef');
+        defSel.innerHTML = '<option value="">Loading definitions...</option>';
+        defSel.disabled = true;
+        if (!state.orgId) { defSel.innerHTML = '<option value="">Select an organization first</option>'; return; }
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows = payload.rows || payload.Rows || [];
+            defSel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = ''; ph.textContent = rows.length ? '-- select a definition --' : 'No definitions in this organization.';
+            defSel.appendChild(ph);
+            rows.forEach(function (row) {
+                const id = row.definitionId || row.DefinitionId;
+                const code = row.definitionCode || row.DefinitionCode || '';
+                const name = row.definitionName || row.DefinitionName || '';
+                const st = row.currentStatusName || row.CurrentStatusName || '';
+                if (id != null) state.definitionsById[String(id)] = row;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '') + (st ? '  –  ' + st : '');
+                defSel.appendChild(opt);
+            });
+            if (state.definitionId) defSel.value = String(state.definitionId);
+        } catch (err) {
+            defSel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        } finally { defSel.disabled = false; }
+    }
+
+    async function selectDefinition(definitionId) {
+        state.definitionId = definitionId;
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.set('definitionId', String(definitionId));
+            window.history.replaceState(null, '', u.toString());
+        } catch (_) {}
+
+        try { await resolveOrgForDefinition(definitionId); }
+        catch (err) { setMessage('error', 'Could not load definition #' + definitionId + ': ' + (err.message || err)); return; }
+
+        document.getElementById('oaRsBanner').hidden = false;
+        renderBanner();
+        document.getElementById('oaRsPreviewBtn').disabled = false;
+        state.history.page = 1;
+        await reloadHistory();
+    }
+
+    async function resolveOrgForDefinition(definitionId) {
+        const cached = state.definitionsById[String(definitionId)];
+        const cachedOrg = cached && String(cached.organizationId || cached.OrganizationId || '');
+        const seen = new Set(); const orgsToTry = [];
+        function push(v) { if (v && !seen.has(v)) { seen.add(v); orgsToTry.push(v); } }
+        push(cachedOrg); push(state.orgId);
+        (state.allOrgs || []).forEach(function (o) { push(o.value); });
+
+        let lastStatus = null;
+        for (const oid of orgsToTry) {
+            const url = U(API + '/definitions/' + definitionId + '?organizationId=' + encodeURIComponent(oid));
+            let r; try { r = await fetch(url, { credentials: 'same-origin' }); } catch (_) { continue; }
+            if (r.ok) {
+                const b = await r.json().catch(function () { return null; });
+                const d = (b && (b.data || b.Data)) || null;
+                if (d) {
+                    if (state.orgId !== String(oid)) {
+                        state.orgId = String(oid);
+                        const orgSel = document.getElementById('oaRsPickOrg');
+                        if (orgSel && orgSel.value !== state.orgId) {
+                            orgSel.value = state.orgId;
+                            await populateDefinitionPicker();
+                            const defSel = document.getElementById('oaRsPickDef');
+                            if (defSel) defSel.value = String(definitionId);
+                        }
+                    }
+                    state.definition = d;
+                    return;
+                }
+            } else { lastStatus = r.status; }
+        }
+        throw new Error(lastStatus
+            ? ('HTTP ' + lastStatus + ' -- definition not found in any accessible organization.')
+            : 'Definition not found in any accessible organization.');
+    }
+
+    function renderBanner() {
+        const d = state.definition;
+        if (!d) {
+            document.getElementById('oaRsDefName').textContent    = '';
+            document.getElementById('oaRsDefStatus').textContent  = '';
+            document.getElementById('oaRsDefVersion').textContent = '';
+            return;
+        }
+        document.getElementById('oaRsDefName').textContent =
+            (d.definitionName || d.DefinitionName || '(no name)') +
+            '  (' + (d.definitionCode || d.DefinitionCode || '') + ')';
+        document.getElementById('oaRsDefStatus').textContent  = d.currentStatusName || d.CurrentStatusName || '';
+        document.getElementById('oaRsDefVersion').textContent = 'v' +
+            (d.currentVersionNumber || d.CurrentVersionNumber || '?');
+        document.getElementById('oaRsHeading').textContent = 'Scope Resolution: ' + (d.definitionName || d.DefinitionName || '');
+        document.getElementById('oaRsSubtitle').textContent =
+            'Preview or view Scope Resolution snapshots. Each snapshot is immutable and traceable back to the definition version that produced it.';
+    }
+
+    // -----------------------------------------------------------------
+    // History
+    // -----------------------------------------------------------------
+    async function reloadHistory() {
+        const body = document.getElementById('oaRsHistoryBody');
+        if (!state.orgId || !state.definitionId) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Pick a definition to load history.</td></tr>';
+            wf.updatePager('oa-rs-history', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="4" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page',     String(state.history.page));
+            qs.set('pageSize', String(state.history.pageSize));
+            const url = U(API + '/definitions/' + state.definitionId + '/scope-resolutions?' + qs.toString());
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="4" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.history.total = Number(payload.totalCount || payload.TotalCount || 0);
+            state.history.rows  = payload.rows || payload.Rows || [];
+            renderHistory();
+            wf.updatePager('oa-rs-history', {
+                pageNumber : state.history.page,
+                totalCount : state.history.total,
+                pageSize   : state.history.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderHistory() {
+        const body = document.getElementById('oaRsHistoryBody');
+        if (!state.history.rows.length) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">No resolutions yet. Click "Preview Resolve Now" to create one.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.history.rows.map(function (row) {
+            const id      = row.resolutionId       || row.ResolutionId;
+            const when    = formatDateTime(row.resolvedAt || row.ResolvedAt);
+            const purpose = row.resolutionPurpose  || row.ResolutionPurpose || '';
+            const by      = row.resolvedBy         || row.ResolvedBy || '';
+            const total   = row.totalEntityCount   || row.TotalEntityCount || 0;
+            const isSel   = state.selectedResolutionId && String(state.selectedResolutionId) === String(id);
+            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '')
+                 + '><td>' + wf.escape(when) + '</td>'
+                 + '<td>' + wf.badge(purpose) + '</td>'
+                 + '<td>' + wf.escape(by) + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(String(total)) + '</td>'
+                 + '</tr>';
+        }).join('');
+
+        body.querySelectorAll('tr[data-id]').forEach(function (tr) {
+            tr.addEventListener('click', function () {
+                const id = tr.getAttribute('data-id');
+                if (!id) return;
+                selectResolution(Number(id));
+            });
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Detail + entities
+    // -----------------------------------------------------------------
+    async function selectResolution(resolutionId) {
+        state.selectedResolutionId = resolutionId;
+        document.querySelectorAll('#oaRsHistoryBody tr').forEach(function (tr) {
+            tr.style.background = (tr.getAttribute('data-id') === String(resolutionId)) ? '#eff6ff' : '';
+        });
+        state.entities = { page: 1, pageSize: 50, total: 0, rows: [], dim: '', search: '' };
+        document.getElementById('oaRsEntityDimFilter').value = '';
+        document.getElementById('oaRsEntitySearch').value    = '';
+        try {
+            const url = U(API + '/scope-resolutions/' + resolutionId + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            state.selectedDetail = await r.json();
+        } catch (err) {
+            setMessage('error', 'Failed to load snapshot: ' + (err.message || err));
+            return;
+        }
+        renderDetail();
+        await reloadEntities();
+    }
+
+    function renderDetail() {
+        const d = state.selectedDetail;
+        const title = document.getElementById('oaRsDetailTitle');
+        const sub   = document.getElementById('oaRsDetailSubtitle');
+        const block = document.getElementById('oaRsSummaryBlock');
+        const tiles = document.getElementById('oaRsSummaryTiles');
+        const filter= document.getElementById('oaRsEntityDimFilter');
+
+        if (!d || !d.header) {
+            title.textContent = 'Snapshot';
+            sub.textContent   = 'Select a row from the history to view its snapshot.';
+            block.hidden = true; tiles.innerHTML = '';
+            filter.innerHTML  = '<option value="">All</option>';
+            return;
+        }
+
+        const hdr = d.header;
+        title.textContent = 'Snapshot #' + hdr.resolutionId +
+            '  (' + (hdr.resolutionPurpose || '') + ')';
+        sub.textContent = formatDateTime(hdr.resolvedAt) + ' by ' + (hdr.resolvedBy || '') +
+            ' -- ' + (hdr.totalEntityCount || 0) + ' entities total';
+
+        const summary = d.dimensionSummary || [];
+        if (!summary.length) {
+            block.hidden = true; tiles.innerHTML = '';
+        } else {
+            block.hidden = false;
+            tiles.innerHTML = summary.map(function (s) {
+                const code  = s.dimensionCode || '';
+                const name  = s.dimensionName || code;
+                const count = s.entityCount || 0;
+                return '<div style="border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; background:#f8fafc; min-width:160px;">'
+                     + '<div style="font-size:11px; color:#64748b;">' + wf.escape(name) + '</div>'
+                     + '<div style="font-size:20px; font-weight:600; color:#0f172a;">' + wf.escape(String(count)) + '</div>'
+                     + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div>'
+                     + '</div>';
+            }).join('');
+        }
+
+        // Populate dimension filter with the resolved dimensions.
+        filter.innerHTML = '';
+        const all = document.createElement('option');
+        all.value = ''; all.textContent = 'All';
+        filter.appendChild(all);
+        summary.forEach(function (s) {
+            const opt = document.createElement('option');
+            opt.value = s.dimensionCode || '';
+            opt.textContent = (s.dimensionName || s.dimensionCode || '') + ' (' + (s.entityCount || 0) + ')';
+            filter.appendChild(opt);
+        });
+    }
+
+    async function reloadEntities() {
+        const body = document.getElementById('oaRsEntityBody');
+        if (!state.selectedResolutionId) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">No snapshot selected.</td></tr>';
+            wf.updatePager('oa-rs-entities', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="4" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.entities.dim)    qs.set('dimensionCode', state.entities.dim);
+            if (state.entities.search) qs.set('search',        state.entities.search);
+            qs.set('page',     String(state.entities.page));
+            qs.set('pageSize', String(state.entities.pageSize));
+            const url = U(API + '/scope-resolutions/' + state.selectedResolutionId + '/entities?' + qs.toString());
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="4" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.entities.total = Number(payload.totalCount || payload.TotalCount || 0);
+            state.entities.rows  = payload.rows || payload.Rows || [];
+            renderEntities();
+            wf.updatePager('oa-rs-entities', {
+                pageNumber : state.entities.page,
+                totalCount : state.entities.total,
+                pageSize   : state.entities.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderEntities() {
+        const body = document.getElementById('oaRsEntityBody');
+        if (!state.entities.rows.length) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">No entities in this snapshot.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.entities.rows.map(function (row) {
+            const dim = row.dimensionName || row.DimensionName || row.dimensionCode || row.DimensionCode || '';
+            const name = row.entityName || row.EntityName || '';
+            const code = row.entityCode || row.EntityCode || '';
+            const grp  = row.sourceGroupOrder     ?? row.SourceGroupOrder ?? '';
+            const con  = row.sourceConditionOrder ?? row.SourceConditionOrder ?? '';
+            const src  = (grp !== '' || con !== '') ? ('G' + grp + '/C' + con) : '';
+            return '<tr>'
+                 + '<td>' + wf.escape(dim) + '</td>'
+                 + '<td>' + wf.escape(name) + '</td>'
+                 + '<td>' + wf.escape(code) + '</td>'
+                 + '<td>' + wf.escape(src) + '</td>'
+                 + '</tr>';
+        }).join('');
+    }
+
+    // -----------------------------------------------------------------
+    // Static wiring
+    // -----------------------------------------------------------------
+    function wireStaticButtons() {
+        document.getElementById('oaRsPreviewBtn').addEventListener('click', previewResolve);
+        document.getElementById('oaRsRefreshBtn').addEventListener('click', function () {
+            reloadHistory(); if (state.selectedResolutionId) reloadEntities();
+        });
+        document.getElementById('oaRsEntityDimFilter').addEventListener('change', function (e) {
+            state.entities.dim = e.target.value || '';
+            state.entities.page = 1;
+            reloadEntities();
+        });
+        document.getElementById('oaRsEntitySearch').addEventListener('input', function (e) {
+            state.entities.search = e.target.value || '';
+            state.entities.page = 1;
+            clearTimeout(window.__oaRsSearchTimer);
+            window.__oaRsSearchTimer = setTimeout(reloadEntities, 250);
+        });
+    }
+
+    async function previewResolve() {
+        if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick a definition first.'); return; }
+        try {
+            const body = {
+                organizationId    : Number(state.orgId),
+                definitionId      : Number(state.definitionId),
+                versionId         : null,
+                resolutionPurpose : 'PREVIEW',
+                executionId       : null,
+                actor             : null
+            };
+            const url = U(API + '/definitions/' + state.definitionId + '/scope-resolve');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Preview resolution created.');
+            state.history.page = 1;
+            await reloadHistory();
+            const newId = j && (j.resolutionId || j.ResolutionId);
+            if (newId) await selectResolution(Number(newId));
+        } catch (err) {
+            setMessage('error', 'Preview failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaRsMessage');
+        el.hidden = false;
+        el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    function formatDateTime(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return String(v);
+        return d.toISOString().replace('T', ' ').slice(0, 19);
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

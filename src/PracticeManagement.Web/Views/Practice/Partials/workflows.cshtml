@@ -1,0 +1,270 @@
+@*
+    Workflow Definitions (BRD Sec 6)
+    Screen key: `workflows`  ·  Group: Workflow
+    Feature flag: `screen.workflows` (seeded ON by migration 068)
+    Backed by /practice/api/workflow/workflows
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="wfUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-diagram-project pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="wfUnavailableTitle">Workflow module is not yet enabled for this organization.</h2>
+        <p id="wfUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflows</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="wfRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="wfFilterOrganization"><option value="">All organizations</option></select>
+        <input id="wfSearch" type="text" placeholder="Search workflow name / code..." />
+        <button class="pm-button icon" id="wfRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="wfAddBtn" type="button" title="Add Workflow">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Workflow
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th><th>Name</th><th>Applicable Entity</th>
+                    <th>Version</th><th>Owner</th><th>Status</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="wfBody"><tr><td colspan="7" class="pm-empty">Select an organization to load workflows.</td></tr></tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="workflows">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+@* ---------- Add / Edit Workflow dialog ---------- *@
+<dialog id="wfDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="wfForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="wfDialogTitle" style="margin:0; font-size:18px;">Add Workflow</h2>
+            <button type="button" id="wfClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="wfMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="wfEditId" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Code <span style="color:#b91c1c;">*</span>
+                <input id="wfCode" type="text" maxlength="60" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Version
+                <input id="wfVersion" type="text" maxlength="20" value="1.0" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Name <span style="color:#b91c1c;">*</span>
+            <input id="wfName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Applicable Entity Type
+            <input id="wfApplicableEntity" type="text" maxlength="100" placeholder="e.g. Employee, Asset, Vendor, Application" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
+            <textarea id="wfDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
+                <select id="wfStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="Active" selected>Active</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Inactive">Inactive</option>
+                    <option value="Archived">Archived</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Default Template
+                <select id="wfIsDefault" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="false" selected>No</option>
+                    <option value="true">Yes</option>
+                </select>
+            </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="wfCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="wfSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U        = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const API      = '/practice/api/workflow';
+    const FEATURE  = 'screen.workflows';
+    let selectedOrgId = null;
+    let page          = 1;
+    const PAGE_SIZE   = 25;
+    let searchDebounce = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('wfUnavailable', 'wfUnavailableTitle', 'wfUnavailableBody',
+            'No organizations are available for your account.',
+            'Ask a GRAC Admin to map your account to an organization.');
+        document.getElementById('wfRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('wfFilterOrganization', orgs);
+        document.getElementById('wfFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('wfRefreshBtn').addEventListener('click', reload);
+        document.getElementById('wfSearch').addEventListener('input', function () {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(function () { page = 1; reload(); }, 300);
+        });
+        document.getElementById('wfAddBtn').addEventListener('click', function () { openDialog(null); });
+        wirePager();
+        wireDialog();
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        selectedOrgId = document.getElementById('wfFilterOrganization').value || null;
+        if (!selectedOrgId) {
+            setBody('<tr><td colspan="7" class="pm-empty">Select an organization to load workflows.</td></tr>');
+            return;
+        }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, selectedOrgId);
+        if (!enabled) {
+            document.getElementById('wfRoot').hidden = true;
+            document.getElementById('wfUnavailable').hidden = false;
+            return;
+        }
+        document.getElementById('wfRoot').hidden = false;
+        document.getElementById('wfUnavailable').hidden = true;
+        page = 1;
+        await reload();
+    }
+
+    async function reload() {
+        if (!selectedOrgId) return;
+        const q = document.getElementById('wfSearch').value.trim();
+        const url = U(API + '/workflows?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&page=' + page + '&pageSize=' + PAGE_SIZE
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        setBody('<tr><td colspan="7" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            render(await r.json());
+        } catch (err) {
+            setBody('<tr><td colspan="7" class="pm-empty">Failed to load: ' + window.__wfCommon.escape(err.message) + '</td></tr>');
+        }
+    }
+
+    function render(payload) {
+        const rows = (payload && payload.rows) || [];
+        const body = document.getElementById('wfBody'); body.innerHTML = '';
+        if (!rows.length) { setBody('<tr><td colspan="7" class="pm-empty">No workflows yet. Click Add Workflow to create one.</td></tr>'); }
+        else {
+            for (const r of rows) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = [
+                    '<td>' + window.__wfCommon.escape(r.workflowCode) + '</td>',
+                    '<td>' + window.__wfCommon.escape(r.workflowName) + '</td>',
+                    '<td>' + window.__wfCommon.escape(r.applicableEntityType || '') + '</td>',
+                    '<td>' + window.__wfCommon.escape(r.version) + '</td>',
+                    '<td>' + window.__wfCommon.escape(r.ownerEmployeeId != null ? String(r.ownerEmployeeId) : '') + '</td>',
+                    '<td>' + window.__wfCommon.badge(r.status) + '</td>',
+                    '<td><button type="button" class="pm-button" data-edit-id="' + r.workflowId + '"><i class="fa-solid fa-pen"></i> Edit</button></td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+            body.querySelectorAll('[data-edit-id]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const id = Number(btn.getAttribute('data-edit-id'));
+                    const row = rows.find(function (x) { return x.workflowId === id; });
+                    if (row) openDialog(row);
+                });
+            });
+        }
+        window.__wfCommon.updatePager('workflows', payload);
+    }
+
+    function setBody(html) { document.getElementById('wfBody').innerHTML = html; }
+    function wirePager() {
+        window.__wfCommon.wirePager('workflows', function (delta) {
+            page = Math.max(1, page + delta); reload();
+        });
+    }
+
+    function openDialog(row) {
+        const dlg = document.getElementById('wfDialog'); if (!dlg) return;
+        document.getElementById('wfDialogTitle').textContent = row ? 'Edit Workflow' : 'Add Workflow';
+        document.getElementById('wfEditId').value    = row ? row.workflowId : '';
+        document.getElementById('wfCode').value      = row ? row.workflowCode : '';
+        document.getElementById('wfName').value      = row ? row.workflowName : '';
+        document.getElementById('wfVersion').value   = row ? row.version : '1.0';
+        document.getElementById('wfApplicableEntity').value = row ? (row.applicableEntityType || '') : '';
+        document.getElementById('wfDescription').value      = row ? (row.description || '') : '';
+        document.getElementById('wfStatus').value    = row ? row.status : 'Active';
+        document.getElementById('wfIsDefault').value = row && row.isDefaultTemplate ? 'true' : 'false';
+        window.__wfCommon.setMessage('wfMessage', null);
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+    function closeDialog() {
+        const dlg = document.getElementById('wfDialog'); if (!dlg) return;
+        if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+    }
+    function wireDialog() {
+        document.getElementById('wfClose').addEventListener('click', closeDialog);
+        document.getElementById('wfCancel').addEventListener('click', closeDialog);
+        document.getElementById('wfForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const code = document.getElementById('wfCode').value.trim();
+            const name = document.getElementById('wfName').value.trim();
+            if (!code || !name) { window.__wfCommon.setMessage('wfMessage', 'Code and Name are required.', 'error'); return; }
+            const submit = document.getElementById('wfSubmit'); submit.disabled = true;
+            window.__wfCommon.setMessage('wfMessage', 'Saving...');
+            const editId = document.getElementById('wfEditId').value;
+            const payload = {
+                workflowId:           editId ? Number(editId) : null,
+                organizationId:       Number(selectedOrgId),
+                workflowCode:         code,
+                workflowName:         name,
+                description:          document.getElementById('wfDescription').value.trim() || null,
+                applicableEntityType: document.getElementById('wfApplicableEntity').value.trim() || null,
+                version:              document.getElementById('wfVersion').value.trim() || '1.0',
+                status:               document.getElementById('wfStatus').value,
+                isDefaultTemplate:    document.getElementById('wfIsDefault').value === 'true'
+            };
+            try {
+                const r = await fetch(U(API + '/workflows'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) {
+                    window.__wfCommon.setMessage('wfMessage', 'Saved workflow #' + (b.workflowId || '?'), 'ok');
+                    setTimeout(function () { closeDialog(); reload(); }, 500);
+                } else {
+                    window.__wfCommon.setMessage('wfMessage', b.error || 'Save failed', 'error');
+                    submit.disabled = false;
+                }
+            } catch (err) {
+                window.__wfCommon.setMessage('wfMessage', 'Network error: ' + err.message, 'error');
+                submit.disabled = false;
+            }
+        });
+    }
+})();
+</script>

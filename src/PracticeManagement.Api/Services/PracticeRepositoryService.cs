@@ -91,6 +91,75 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         }
     }
 
+    // Caches whether each migration-134 shim exists. The application and the
+    // database are deployed separately, so the app must not assume a migration
+    // has run. Populated once per procedure name per process lifetime.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> ShimAvailability = new();
+
+    /// <summary>
+    /// Maps the two entity types whose logic moved out of the monolith
+    /// (migrations 133/134) to their own procedures. Everything else is
+    /// returned unchanged.
+    ///
+    /// Only the procedure NAME is substituted -- the `procedure` variable
+    /// itself is deliberately left alone, so the post-call handling further
+    /// down that keys on "dbo.pm_manage_practice_repository" /
+    /// "dbo.pm_get_practice_repository" continues to treat these as ordinary
+    /// manage / query calls.
+    ///
+    /// If migration 134 has not been applied the monolith is used instead.
+    /// The screens then work exactly as they did before -- they simply ignore
+    /// the personnel-type and team-type fields -- rather than failing with
+    /// SQL error 2812, "Could not find stored procedure". An unapplied
+    /// migration should degrade a feature, not break a screen.
+    /// </summary>
+    private static async Task<string> ResolveProcedureAsync(DbConnection connection, string procedure,
+        string entityType, CancellationToken cancellationToken)
+    {
+        var isManage = procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase);
+        var isQuery  = procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase);
+        if (!isManage && !isQuery) return procedure;
+
+        string? shim = null;
+        if (entityType.Equals("users", StringComparison.OrdinalIgnoreCase))
+            shim = isManage
+                ? "grac_practice.sp_org_user_repository_manage"
+                : "grac_practice.sp_org_user_repository_get";
+        else if (entityType.Equals("teams", StringComparison.OrdinalIgnoreCase))
+            shim = isManage
+                ? "grac_practice.sp_org_team_repository_manage"
+                : "grac_practice.sp_org_team_repository_get";
+
+        if (shim is null) return procedure;
+        return await ShimExistsAsync(connection, shim, cancellationToken) ? shim : procedure;
+    }
+
+    private static async Task<bool> ShimExistsAsync(DbConnection connection, string shim,
+        CancellationToken cancellationToken)
+    {
+        if (ShimAvailability.TryGetValue(shim, out var cached)) return cached;
+
+        bool exists;
+        try
+        {
+            await using var probe = connection.CreateCommand();
+            probe.CommandType = CommandType.Text;
+            probe.CommandText = "SELECT CASE WHEN OBJECT_ID(@name, N'P') IS NULL THEN 0 ELSE 1 END";
+            Add(probe, "@name", shim);
+            var raw = await probe.ExecuteScalarAsync(cancellationToken);
+            exists = raw is not null && raw != DBNull.Value && Convert.ToInt32(raw) == 1;
+        }
+        catch
+        {
+            // A failed probe must not take the screen down. Assume absent and
+            // use the monolith, which was working before 134 existed.
+            exists = false;
+        }
+
+        ShimAvailability[shim] = exists;
+        return exists;
+    }
+
     private async Task<PracticeRepositoryResult> ExecuteAsync(string procedure, string entityType, string action, int? id,
         string search, string status, string payload, string enteredBy, CancellationToken cancellationToken)
     {
@@ -237,6 +306,20 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 await SaveCustomReleaseSourceStructureAsync(connection, payload, enteredBy, cancellationToken);
                 return new(true, "Saved successfully.");
             }
+            // 'evidence-obligations-typed' is the 7-type taxonomy read-path
+            // that the View Obligations screen calls in addition to (or
+            // instead of) the legacy 'evidence-obligations' branch.  It
+            // dispatches to dbo.sp_pm_view_obligations_typed installed by
+            // database/122_view_obligations_typed_proc.sql -- the standalone
+            // sub-proc that projects TypeCode + per-type detail JSON columns
+            // + combined evidence (legacy + M:M links).
+            if (procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("evidence-obligations-typed", StringComparison.OrdinalIgnoreCase))
+            {
+                var directTables = await QueryObligationsTypedAsync(connection, search ?? "", payload, cancellationToken);
+                CaptureSqlDiagnostic(procedure, entityType, action, id, search, status, payload, directTables);
+                return new(true, "Success", directTables);
+            }
             // Rule 6 — provisioning the auto-created Organisation GRAC Admin
             // is a separate step from the org save so that failures do not
             // roll back the org creation. The gateway (Web) invokes this
@@ -325,7 +408,15 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 return new(true, "Success", directTables);
             }
             await using var command = connection.CreateCommand();
-            command.CommandText = procedure;
+            // Migrations 133/134: users and teams gained personnel type / team
+            // sourcing fields. Their logic lives in dedicated procedures because
+            // dbo.pm_manage_practice_repository is 2,000-plus lines and
+            // CREATE OR ALTER can only replace it whole. The shims take the same
+            // seven parameters, so only the NAME changes here -- every access and
+            // scope check above this line still runs, unchanged, for these
+            // entity types. Non-SAVE actions are delegated back to the monolith
+            // inside the shim, so RETIRE keeps its single generic implementation.
+            command.CommandText = await ResolveProcedureAsync(connection, procedure, entityType, cancellationToken);
             command.CommandType = CommandType.StoredProcedure;
             Add(command, "@p_entity_type", entityType ?? "");
             Add(command, "@p_action", action ?? "");
@@ -412,10 +503,29 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             logger.LogWarning(ex, "Rejected duplicate PracticeManagement data for {EntityType} {Action}", entityType, action);
             return new(false, "A record with the same unique value already exists.");
         }
-        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is >= 51010 and <= 51099)
+        // Application validation raised by our own procedures with THROW.
+        //
+        // The window used to stop at 51099, which silently excluded every
+        // role / menu-permission / user code (51100-51152) and everything
+        // migrations 133 and 208 added (52300-52322). Those failures fell
+        // through to the generic handler below and reached the user as
+        // "The practice database operation failed. SQL error 51152.
+        // Reference: ..." — a correlation id where a sentence explaining
+        // what to fix already existed. 51000-52999 is the application block.
+        //
+        // IsUserFacingValidation keeps the internal ones out. Procedures that
+        // assert their own preconditions prefix the message with their name
+        // ("sp_resolve_obligation_adopt: instance not found.") — the whole
+        // 524xx-526xx block reads like that. Those are contract violations by
+        // a caller, not something the person at the screen can act on, so they
+        // fall through to the generic handler below and get a correlation id,
+        // which is what they had before this widening.
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+            when (ex.Number is >= 51000 and <= 52999 && IsUserFacingValidation(ex.Message))
         {
-            logger.LogWarning(ex, "Rejected invalid PracticeManagement data for {EntityType} {Action}", entityType, action);
-            return new(false, ex.Message);
+            logger.LogWarning(ex, "Rejected invalid PracticeManagement data for {EntityType} {Action}. SqlNumber={SqlNumber}",
+                entityType, action, ex.Number);
+            return new(false, ex.Message, null, ValidationFieldFor(entityType, ex.Number));
         }
         catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 207 or 208 or 515 or 547 or 245 or 8114)
         {
@@ -469,6 +579,138 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             return new(false, $"The practice operation could not be completed. Reference: {correlationId}");
         }
     }
+
+    /// <summary>
+    /// Maps a stored-procedure validation THROW to the payload key it is about,
+    /// so the Web UI can mark the offending input rather than printing the
+    /// message above the whole form.
+    ///
+    /// Codes are the ones declared in database/002_practice_management_procedures.sql
+    /// (organization setup entities), 133_org_party_and_team_type.sql and
+    /// 208_default_password_provisioning.sql. Anything absent returns null and
+    /// the message is shown at form level, exactly as before — an unmapped
+    /// code degrades presentation, never correctness.
+    /// </summary>
+    /// <summary>
+    /// True when a stored-procedure THROW is written for the person at the
+    /// screen. False for the internal-invariant style — "sp_x: y is required"
+    /// — which names an object the user has never heard of and describes a
+    /// caller bug they cannot fix.
+    /// </summary>
+    private static bool IsUserFacingValidation(string message)
+    {
+        var colon = message.IndexOf(':');
+        if (colon <= 0) return true;
+        var prefix = message.AsSpan(0, colon).Trim();
+        // A procedure name: no spaces, and one of the known object prefixes.
+        return prefix.Contains(' ')
+            || !(prefix.StartsWith("sp_", StringComparison.OrdinalIgnoreCase)
+                 || prefix.StartsWith("pm_", StringComparison.OrdinalIgnoreCase)
+                 || prefix.StartsWith("dbo.", StringComparison.OrdinalIgnoreCase)
+                 || prefix.StartsWith("grac_practice.", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <remarks>
+    /// Keyed on entity type as well as code because the monolith reuses
+    /// numbers across entities — 51140/51141/51142 mean Organization / Role
+    /// Name / duplicate Role Name for roles, and Organization / Process Name /
+    /// Process Owner for processes. A code-only map would mark the wrong input
+    /// on one of the two.
+    /// </remarks>
+    private static string? ValidationFieldFor(string entityType, int sqlErrorNumber) => entityType.ToLowerInvariant() switch
+    {
+        "users" => sqlErrorNumber switch
+        {
+            51047 => "organizationId",
+            51048 => "employeeCode",
+            51049 => "employeeName",
+            51050 => "departmentId",
+            51051 => "businessFunctionId",
+            51054 or 51055 => "reportingOfficerId",
+            51056 => "locationId",
+            51148 or 51149 => "email",
+            51150 or 51151 => "roleId",
+            52300 => "partyType",
+            52301 or 52302 => "providerVendorId",
+            52303 => "engagementEndDate",
+            // 51152 (password missing on create) is deliberately unmapped —
+            // the Users form has no password input to mark. It reaches the
+            // user at form level, where it reads as the deployment problem it
+            // now is: the Web gateway did not substitute the default hash.
+            _ => null
+        },
+        "roles" => sqlErrorNumber switch
+        {
+            51140 => "organizationId",
+            51141 or 51142 => "roleName",
+            51150 => "roleCode",
+            _ => null
+        },
+        "role-menu-permissions" => sqlErrorNumber switch
+        {
+            51143 or 51145 => "roleId",
+            51144 or 51146 or 51147 => "menuId",
+            _ => null
+        },
+        "teams" => sqlErrorNumber switch
+        {
+            51068 => "organizationId",
+            51069 => "name",
+            51070 => "teamManagerId",
+            51071 => "parentDepartmentId",
+            52310 => "teamType",
+            52311 or 52312 => "vendorId",
+            _ => null
+        },
+        "dependency-vendors" => sqlErrorNumber switch
+        {
+            51100 => "organizationId",
+            51101 => "name",
+            51102 => "serviceCategoryId",
+            51103 => "relationshipOwnerId",
+            51104 => "criticalityId",
+            _ => null
+        },
+        "dependency-applications" => sqlErrorNumber switch
+        {
+            51110 => "organizationId",
+            51111 => "name",
+            51112 => "businessOwnerId",
+            51113 => "technicalOwnerId",
+            51114 => "vendorId",
+            51115 => "hostingTypeId",
+            51116 => "criticalityId",
+            _ => null
+        },
+        "dependency-tools" => sqlErrorNumber switch
+        {
+            51120 => "organizationId",
+            51121 => "name",
+            51122 => "businessOwnerId",
+            51123 => "vendorId",
+            51124 => "licenseTypeId",
+            51125 => "criticalityId",
+            _ => null
+        },
+        "dependency-assets" => sqlErrorNumber switch
+        {
+            51130 => "organizationId",
+            51131 => "name",
+            51132 => "assetCategoryId",
+            51133 => "ownerId",
+            51134 => "locationId",
+            51135 => "criticalityId",
+            _ => null
+        },
+        "dependency-processes" => sqlErrorNumber switch
+        {
+            51140 => "organizationId",
+            51141 => "name",
+            51142 => "processOwnerId",
+            _ => null
+        },
+        _ => null
+    };
 
     private static async Task<List<List<Dictionary<string, object?>>>> ReadTablesAsync(DbCommand command, CancellationToken cancellationToken)
     {
@@ -624,6 +866,34 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                   AND (@organization_id IS NULL OR s.organization_id=@organization_id)
                 GROUP BY s.organization_id, s.release_id, COALESCE(s.artifact_id,r.artifact_id)
             ),
+            -- Statement-level implementation roll-up. A statement carries no
+            -- implementation field of its own; it inherits from the practice
+            -- instances of every practice mapped to it:
+            --   framework_statement -> organization_statement_practice_mapping
+            --   -> organization_requirement -> practice -> practice_instance.
+            -- Instances are counted rather than practices, so a practice holding
+            -- one Implemented and one Partially Implemented instance can never
+            -- read as done.
+            statement_implementation AS (
+                SELECT
+                    m.organization_id,
+                    m.framework_statement_id,
+                    COUNT(DISTINCT pi.practice_instance_id) InstanceCount,
+                    COUNT(DISTINCT CASE WHEN ism.status_code=N'Implemented' THEN pi.practice_instance_id END) ImplementedInstanceCount
+                FROM grac_practice.organization_statement_practice_mapping m
+                JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
+                    AND q.status='Active'
+                JOIN grac_practice.practice p ON p.organization_requirement_id=q.organization_requirement_id
+                    AND p.organization_id=m.organization_id
+                    AND p.status='Active'
+                JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                    AND pi.organization_id=m.organization_id
+                    AND pi.status='Active'
+                LEFT JOIN grac_practice.implementation_status_master ism ON ism.implementation_status_id=pi.implementation_status_id
+                WHERE m.status='Active'
+                  AND EXISTS(SELECT 1 FROM subscribed s2 WHERE s2.organization_id=m.organization_id)
+                GROUP BY m.organization_id,m.framework_statement_id
+            ),
             -- Statement-level counts. Repository statements (grac_new.framework_statement,
             -- Active, attached to an Active node of the same release) drive the count;
             -- organization applicability is a LEFT JOIN enrichment only. A repository
@@ -637,6 +907,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     sub.release_id,
                     COUNT(DISTINCT fs.framework_statement_id) TotalStatementsCount,
                     COUNT(DISTINCT CASE WHEN aps.status_name=N'Applicable' THEN fs.framework_statement_id END) ApplicableStatementsCount,
+                    -- Implemented is a strict subset of Applicable: the statement must
+                    -- be marked Applicable, must have at least one practice instance,
+                    -- and every one of those instances must be 'Implemented'.
+                    COUNT(DISTINCT CASE WHEN aps.status_name=N'Applicable'
+                                         AND si.InstanceCount>0
+                                         AND si.InstanceCount=si.ImplementedInstanceCount
+                                        THEN fs.framework_statement_id END) ImplementedStatementsCount,
                     COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,N'Not Updated')=N'Not Updated' THEN fs.framework_statement_id END) NotUpdatedStatementsCount,
                     COUNT(DISTINCT CASE WHEN aps.status_name IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN fs.framework_statement_id END) NotApplicableStatementsCount
                 FROM subscribed sub
@@ -650,6 +927,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     AND ofs.framework_statement_id=fs.framework_statement_id
                     AND ofs.status='Active'
                 LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=ofs.applicability_status_id
+                LEFT JOIN statement_implementation si ON si.organization_id=sub.organization_id
+                    AND si.framework_statement_id=fs.framework_statement_id
                 GROUP BY sub.organization_id,sub.release_id
             )
             SELECT
@@ -671,6 +950,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 COALESCE(a.artifact_code + N' ' + r.version_no,a.artifact_name + N' ' + r.version_no,r.version_no) FrameworkRelease,
                 COALESCE(osc.TotalStatementsCount,0) TotalStatementsCount,
                 COALESCE(osc.ApplicableStatementsCount,0) ApplicableStatementsCount,
+                COALESCE(osc.ImplementedStatementsCount,0) ImplementedStatementsCount,
                 COALESCE(osc.NotUpdatedStatementsCount,0) NotUpdatedStatementsCount,
                 COALESCE(osc.NotApplicableStatementsCount,0) NotApplicableStatementsCount
             FROM subscribed sub
@@ -713,6 +993,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     N'Organization / ' + s.custom_release_name FrameworkRelease,
                     0 TotalStatementsCount,
                     0 ApplicableStatementsCount,
+                    0 ImplementedStatementsCount,
                     0 NotUpdatedStatementsCount,
                     0 NotApplicableStatementsCount
                 FROM grac_practice.repository_subscription s
@@ -1144,6 +1425,53 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
     }
 
     // --- Custom Release Source Structure ---
+    // Dispatches to dbo.sp_pm_view_obligations_typed (installed by
+    // database/122_view_obligations_typed_proc.sql) with parameters
+    // extracted from the encrypted JSON payload.  Same context contract
+    // as the legacy 'evidence-obligations' branch: pass at least one of
+    // organizationRequirementId, practiceId, practiceInstanceId.
+    // Result set matches the SP: FrameworkReleaseId, FrameworkRelease,
+    // ObligationId, ObligationName, ObligationTypeId, TypeCode, TypeName,
+    // ExecutionFrequency, ObligationRetention, ApprovalAuthority,
+    // Responsibility, StateRulesJson, ExecutionSpecsJson, AssuranceSpecsJson,
+    // EventResponsesJson, ConstraintRulesJson, RetentionSpecsJson,
+    // EvidenceJson (all *Json fields are JSON string arrays, default '[]').
+    private static async Task<List<List<Dictionary<string, object?>>>> QueryObligationsTypedAsync(
+        DbConnection connection, string search, string payload, CancellationToken cancellationToken)
+    {
+        var organizationRequirementId = JsonInt(payload, "organizationRequirementId");
+        var practiceId = JsonInt(payload, "practiceId");
+        var practiceInstanceId = JsonInt(payload, "practiceInstanceId");
+        var pageNumber = JsonInt(payload, "pageNumber") ?? 1;
+        var pageSize = JsonInt(payload, "pageSize") ?? 200;
+        if (pageNumber < 1) pageNumber = 1;
+        if (pageSize < 1) pageSize = 200;
+        if (pageSize > 500) pageSize = 500;
+        var offset = (pageNumber - 1) * pageSize;
+
+        if (organizationRequirementId is null && practiceId is null && practiceInstanceId is null)
+            return [new List<Dictionary<string, object?>>()];
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "dbo.sp_pm_view_obligations_typed";
+        command.CommandType = CommandType.StoredProcedure;
+        AddNullable(command, "@p_organization_requirement_id", organizationRequirementId);
+        AddNullable(command, "@p_practice_id", practiceId);
+        AddNullable(command, "@p_practice_instance_id", practiceInstanceId);
+        Add(command, "@p_search", search ?? "");
+        Add(command, "@p_offset", offset);
+        Add(command, "@p_page_size", pageSize);
+        return await ReadTablesAsync(command, cancellationToken);
+    }
+
+    private static void AddNullable(DbCommand command, string name, int? value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value.HasValue ? (object)value.Value : DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
+
     private static async Task<List<List<Dictionary<string, object?>>>> QueryCustomReleaseSourceStructureAsync(
         DbConnection connection, string payload, CancellationToken cancellationToken)
     {
@@ -2880,6 +3208,25 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         catch (JsonException) { return null; }
     }
 
+    // Reads a JSON array of strings (used by the unified Calendar filters:
+    // sourceModules[], statuses[], criticalities[], definitionCodes[]).
+    // Returns [] on missing, wrong type, or parse failure.
+    private static string[] JsonStringArray(string payload, string propertyName)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            if (!document.RootElement.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
+                return [];
+            return property.EnumerateArray()
+                .Select(el => el.ValueKind == JsonValueKind.String ? el.GetString() : null)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!.Trim())
+                .ToArray();
+        }
+        catch (JsonException) { return []; }
+    }
+
     private static string? JsonSecuritySubject(string payload)
     {
         try
@@ -3293,6 +3640,57 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         var rangeFrom = DateTime.TryParse(rangeFromText, out var rf) ? rf : DateTime.UtcNow.AddMonths(-3);
         var rangeTo = DateTime.TryParse(rangeToText, out var rt) ? rt : DateTime.UtcNow.AddMonths(12);
 
+        // ------------------------------------------------------------------
+        // Unified Calendar filters (frontend passes these in the payload).
+        // Any empty array means "no filter on this axis" -- everything passes.
+        //
+        //   sourceModules[]   -- PracticeInstance / AssurancePlan / AssurancePlanItem
+        //                        / AssuranceExecution / AssuranceObservation / AssuranceGap
+        //   statuses[]        -- module-agnostic buckets (Upcoming/InProgress/Overdue/...)
+        //                        matched case-insensitively against each event's Status
+        //   criticalities[]   -- High / Medium / Low (only PI events carry this today,
+        //                        others get "Medium" by convention)
+        //   definitionIds[]   -- restrict Plan Item / Execution / Observation / Gap
+        //                        to a set of org_assurance_definition ids
+        //   ownerRoleId       -- restrict events whose owner role matches (assurance
+        //                        modules; PI is bypassed since it has no role snapshot)
+        //   ownerEmployeeId   -- same, employee side
+        //   search            -- case-insensitive substring match on Title
+        // ------------------------------------------------------------------
+        var sourceModuleFilter = new HashSet<string>(
+            JsonStringArray(payload, "sourceModules"), StringComparer.OrdinalIgnoreCase);
+        var statusFilter = new HashSet<string>(
+            JsonStringArray(payload, "statuses"), StringComparer.OrdinalIgnoreCase);
+        var criticalityFilter = new HashSet<string>(
+            JsonStringArray(payload, "criticalities"), StringComparer.OrdinalIgnoreCase);
+        var definitionIdFilter = JsonIntArray(payload, "definitionIds").ToHashSet();
+        var ownerRoleIdFilter = JsonInt(payload, "ownerRoleId");
+        var ownerEmployeeIdFilter = JsonInt(payload, "ownerEmployeeId");
+        var searchFilter = JsonText(payload, "search")?.Trim();
+        var searchFilterLower = string.IsNullOrEmpty(searchFilter) ? null : searchFilter.ToLowerInvariant();
+
+        bool WantsModule(string module) =>
+            sourceModuleFilter.Count == 0 || sourceModuleFilter.Contains(module);
+        var wantsPracticeInstance = WantsModule("PracticeInstance");
+
+        // Helper: derive a UI-friendly StatusKind bucket from the raw status.
+        // The frontend uses this to pick a border/badge color independent of
+        // the source module color.
+        static string DeriveStatusKind(string? status, DateTime? endsOn, bool isTerminal)
+        {
+            var s = (status ?? "").Trim().ToLowerInvariant();
+            if (isTerminal || s is "closed" or "resolved" or "verified" or "approved" or "completed")
+                return "success";
+            if (s is "cancelled" or "rejected" or "retired") return "neutral";
+            if (s is "skipped") return "neutral";
+            if (s is "moved" or "added") return "info";
+            if (s is "past") return "neutral";
+            if (endsOn.HasValue && endsOn.Value < DateTime.UtcNow.Date) return "danger"; // overdue
+            if (s is "inreview" or "inprogress" or "in_progress" or "in progress" or "submitted" or "remediationsubmitted")
+                return "warning";
+            return "info"; // Upcoming / Open / Planned / Draft
+        }
+
         // 1. Fetch schedule rules with frequency info
         await using var ruleCmd = connection.CreateCommand();
         ruleCmd.CommandText = """
@@ -3570,6 +3968,541 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                                     : current.AddMonths(freqValue > 0 ? freqValue : 1);
                 }
             }
+        }
+
+        // ================================================================
+        // 4b-4f. Assurance-module events (Plans / Plan Items / Executions /
+        //         Observations / Assurance-sourced Custom Gaps).
+        //
+        // Each block:
+        //   * short-circuits if the source module is filtered out
+        //   * runs one SELECT scoped to org + date-range overlap
+        //   * emits into the same `events` list with a unified event shape
+        //   * wrapped in try/catch so a missing table on an out-of-date env
+        //     silently degrades (the PI experience keeps working)
+        //
+        // Overlap semantics for range events (Plans / Plan Items / Executions):
+        //   include a row when its [startDt, endDt] intersects [rangeFrom, rangeTo]
+        //   i.e. startDt <= rangeTo AND (endDt IS NULL OR endDt >= rangeFrom)
+        // ================================================================
+        var isAssuranceRoleOwnerFilterActive =
+            ownerRoleIdFilter.HasValue || ownerEmployeeIdFilter.HasValue;
+
+        // Local helper: check org isolation happens in SQL; here we just guard
+        // organizationId being null (no org selected -- show all accessible).
+        object OrgParam() => organizationId.HasValue ? organizationId.Value : DBNull.Value;
+
+        // ----------- 4b. Assurance Plans (period_from .. period_to) --------
+        if (WantsModule("AssurancePlan"))
+        {
+            try
+            {
+                await using var planCmd = connection.CreateCommand();
+                planCmd.CommandText = """
+                    SELECT p.org_assurance_plan_id, p.organization_id,
+                           p.plan_code, p.plan_name, p.plan_type,
+                           p.period_from, p.period_to,
+                           p.owner_role_id, p.owner_role_name,
+                           p.owner_employee_id, p.owner_display_name,
+                           s.status_code, s.status_name, s.is_terminal
+                    FROM grac_practice.org_assurance_plan p
+                    JOIN grac_practice.org_assurance_plan_status_master s
+                         ON s.org_assurance_plan_status_id = p.status_id
+                    WHERE p.is_active = 1
+                      AND (@organization_id IS NULL OR p.organization_id = @organization_id)
+                      AND (p.period_from IS NULL OR p.period_from <= @range_to)
+                      AND (p.period_to   IS NULL OR p.period_to   >= @range_from)
+                      AND (@owner_role_id     IS NULL OR p.owner_role_id     = @owner_role_id)
+                      AND (@owner_employee_id IS NULL OR p.owner_employee_id = @owner_employee_id)
+                    """;
+                Add(planCmd, "@organization_id",   OrgParam());
+                Add(planCmd, "@range_from",        rangeFrom.Date);
+                Add(planCmd, "@range_to",          rangeTo.Date);
+                Add(planCmd, "@owner_role_id",     ownerRoleIdFilter.HasValue     ? ownerRoleIdFilter.Value     : DBNull.Value);
+                Add(planCmd, "@owner_employee_id", ownerEmployeeIdFilter.HasValue ? ownerEmployeeIdFilter.Value : DBNull.Value);
+                await using var pr = await planCmd.ExecuteReaderAsync(cancellationToken);
+                while (await pr.ReadAsync(cancellationToken))
+                {
+                    var planId    = pr.GetInt64(pr.GetOrdinal("org_assurance_plan_id"));
+                    var startDt   = pr.IsDBNull(pr.GetOrdinal("period_from")) ? (DateTime?)null : pr.GetDateTime(pr.GetOrdinal("period_from"));
+                    var endDt     = pr.IsDBNull(pr.GetOrdinal("period_to"))   ? (DateTime?)null : pr.GetDateTime(pr.GetOrdinal("period_to"));
+                    if (!startDt.HasValue) continue; // headless plans skip the calendar
+                    var status    = pr.IsDBNull(pr.GetOrdinal("status_code")) ? "Draft" : pr.GetString(pr.GetOrdinal("status_code"));
+                    var isTerm    = !pr.IsDBNull(pr.GetOrdinal("is_terminal")) && pr.GetBoolean(pr.GetOrdinal("is_terminal"));
+                    events.Add(new Dictionary<string, object?>
+                    {
+                        ["SourceModule"]     = "AssurancePlan",
+                        ["SourceRefType"]    = "AssurancePlan",
+                        ["SourceRefId"]      = planId,
+                        ["OrganizationId"]   = pr.IsDBNull(pr.GetOrdinal("organization_id")) ? (object?)null : pr.GetInt64(pr.GetOrdinal("organization_id")),
+                        ["Date"]             = startDt.Value.Date,   // legacy key -- start
+                        ["StartDate"]        = startDt.Value.Date,
+                        ["EndDate"]          = endDt.HasValue ? endDt.Value.Date : (object?)null,
+                        ["IsRange"]          = endDt.HasValue && endDt.Value.Date > startDt.Value.Date,
+                        ["Title"]            = pr.GetString(pr.GetOrdinal("plan_name")),
+                        ["PracticeInstance"] = pr.GetString(pr.GetOrdinal("plan_name")), // legacy display
+                        ["Subtitle"]         = $"Assurance Plan · {pr.GetString(pr.GetOrdinal("plan_type"))}",
+                        ["EntityLabel"]      = pr.GetString(pr.GetOrdinal("plan_code")),
+                        ["DefinitionCode"]   = (object?)null,
+                        ["DefinitionId"]     = (object?)null,
+                        ["Criticality"]      = "Medium",
+                        ["AssuranceMode"]    = (object?)null,
+                        ["Owner"]            = pr.IsDBNull(pr.GetOrdinal("owner_display_name")) ? "" : pr.GetString(pr.GetOrdinal("owner_display_name")),
+                        ["OwnerRoleId"]      = pr.IsDBNull(pr.GetOrdinal("owner_role_id"))     ? (object?)null : pr.GetInt64(pr.GetOrdinal("owner_role_id")),
+                        ["OwnerRoleName"]    = pr.IsDBNull(pr.GetOrdinal("owner_role_name"))   ? (object?)null : pr.GetString(pr.GetOrdinal("owner_role_name")),
+                        ["OwnerEmployeeId"]  = pr.IsDBNull(pr.GetOrdinal("owner_employee_id")) ? (object?)null : pr.GetInt64(pr.GetOrdinal("owner_employee_id")),
+                        ["OwnerDisplayName"] = pr.IsDBNull(pr.GetOrdinal("owner_display_name")) ? (object?)null : pr.GetString(pr.GetOrdinal("owner_display_name")),
+                        ["Status"]           = status,
+                        ["StatusKind"]       = DeriveStatusKind(status, endDt, isTerm),
+                        ["FrequencyName"]    = "Plan Window",
+                        ["IsOverride"]       = false,
+                        ["OriginalDate"]     = (object?)null,
+                        ["OverrideType"]     = (object?)null,
+                        ["DeepLink"]         = $"/Practice/Manage/org-assurance-plans?planId={planId}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Calendar: Assurance Plans query failed (org={OrgId}). Skipping this source.", organizationId);
+            }
+        }
+
+        // ----------- 4c. Assurance Plan Items (scheduled_from..to) --------
+        if (WantsModule("AssurancePlanItem"))
+        {
+            try
+            {
+                await using var itemCmd = connection.CreateCommand();
+                itemCmd.CommandText = """
+                    SELECT i.org_assurance_plan_item_id, i.org_assurance_plan_id,
+                           i.organization_id, i.org_assurance_definition_id,
+                           i.definition_code, i.definition_name,
+                           i.item_order, i.scheduled_from, i.scheduled_to,
+                           i.assigned_auditor_role_id, i.assigned_auditor_role_name,
+                           i.assigned_auditor_employee_id, i.assigned_auditor_name,
+                           p.plan_name, p.plan_code,
+                           s.status_code AS plan_status_code, s.is_terminal AS plan_is_terminal
+                    FROM grac_practice.org_assurance_plan_item i
+                    JOIN grac_practice.org_assurance_plan p
+                         ON p.org_assurance_plan_id = i.org_assurance_plan_id
+                    JOIN grac_practice.org_assurance_plan_status_master s
+                         ON s.org_assurance_plan_status_id = p.status_id
+                    WHERE i.is_active = 1
+                      AND (@organization_id IS NULL OR i.organization_id = @organization_id)
+                      AND (i.scheduled_from IS NULL OR i.scheduled_from <= @range_to)
+                      AND (i.scheduled_to   IS NULL OR i.scheduled_to   >= @range_from)
+                      AND (@owner_role_id     IS NULL OR i.assigned_auditor_role_id     = @owner_role_id)
+                      AND (@owner_employee_id IS NULL OR i.assigned_auditor_employee_id = @owner_employee_id)
+                    """;
+                Add(itemCmd, "@organization_id",   OrgParam());
+                Add(itemCmd, "@range_from",        rangeFrom.Date);
+                Add(itemCmd, "@range_to",          rangeTo.Date);
+                Add(itemCmd, "@owner_role_id",     ownerRoleIdFilter.HasValue     ? ownerRoleIdFilter.Value     : DBNull.Value);
+                Add(itemCmd, "@owner_employee_id", ownerEmployeeIdFilter.HasValue ? ownerEmployeeIdFilter.Value : DBNull.Value);
+                await using var ir = await itemCmd.ExecuteReaderAsync(cancellationToken);
+                while (await ir.ReadAsync(cancellationToken))
+                {
+                    var itemId = ir.GetInt64(ir.GetOrdinal("org_assurance_plan_item_id"));
+                    var planId = ir.GetInt64(ir.GetOrdinal("org_assurance_plan_id"));
+                    var startDt = ir.IsDBNull(ir.GetOrdinal("scheduled_from")) ? (DateTime?)null : ir.GetDateTime(ir.GetOrdinal("scheduled_from"));
+                    var endDt   = ir.IsDBNull(ir.GetOrdinal("scheduled_to"))   ? (DateTime?)null : ir.GetDateTime(ir.GetOrdinal("scheduled_to"));
+                    if (!startDt.HasValue && !endDt.HasValue) continue;
+                    var effectiveStart = startDt ?? endDt!.Value;
+                    var status = ir.IsDBNull(ir.GetOrdinal("plan_status_code")) ? "Draft" : ir.GetString(ir.GetOrdinal("plan_status_code"));
+                    var isTerm = !ir.IsDBNull(ir.GetOrdinal("plan_is_terminal")) && ir.GetBoolean(ir.GetOrdinal("plan_is_terminal"));
+                    if (definitionIdFilter.Count > 0)
+                    {
+                        var defId = ir.IsDBNull(ir.GetOrdinal("org_assurance_definition_id")) ? 0L : ir.GetInt64(ir.GetOrdinal("org_assurance_definition_id"));
+                        if (!definitionIdFilter.Contains((int)defId)) continue;
+                    }
+                    var defName = ir.IsDBNull(ir.GetOrdinal("definition_name")) ? "" : ir.GetString(ir.GetOrdinal("definition_name"));
+                    var planName = ir.IsDBNull(ir.GetOrdinal("plan_name")) ? "" : ir.GetString(ir.GetOrdinal("plan_name"));
+                    events.Add(new Dictionary<string, object?>
+                    {
+                        ["SourceModule"]     = "AssurancePlanItem",
+                        ["SourceRefType"]    = "AssurancePlanItem",
+                        ["SourceRefId"]      = itemId,
+                        ["OrganizationId"]   = ir.IsDBNull(ir.GetOrdinal("organization_id")) ? (object?)null : ir.GetInt64(ir.GetOrdinal("organization_id")),
+                        ["Date"]             = effectiveStart.Date,
+                        ["StartDate"]        = effectiveStart.Date,
+                        ["EndDate"]          = endDt.HasValue ? endDt.Value.Date : (object?)null,
+                        ["IsRange"]          = startDt.HasValue && endDt.HasValue && endDt.Value.Date > startDt.Value.Date,
+                        ["Title"]            = defName,
+                        ["PracticeInstance"] = defName,
+                        ["Subtitle"]         = $"Plan Item · {planName}",
+                        ["EntityLabel"]      = planName,
+                        ["DefinitionCode"]   = ir.IsDBNull(ir.GetOrdinal("definition_code")) ? (object?)null : ir.GetString(ir.GetOrdinal("definition_code")),
+                        ["DefinitionId"]     = ir.IsDBNull(ir.GetOrdinal("org_assurance_definition_id")) ? (object?)null : ir.GetInt64(ir.GetOrdinal("org_assurance_definition_id")),
+                        ["Criticality"]      = "Medium",
+                        ["AssuranceMode"]    = (object?)null,
+                        ["Owner"]            = ir.IsDBNull(ir.GetOrdinal("assigned_auditor_name")) ? "" : ir.GetString(ir.GetOrdinal("assigned_auditor_name")),
+                        ["OwnerRoleId"]      = ir.IsDBNull(ir.GetOrdinal("assigned_auditor_role_id"))       ? (object?)null : ir.GetInt64(ir.GetOrdinal("assigned_auditor_role_id")),
+                        ["OwnerRoleName"]    = ir.IsDBNull(ir.GetOrdinal("assigned_auditor_role_name"))     ? (object?)null : ir.GetString(ir.GetOrdinal("assigned_auditor_role_name")),
+                        ["OwnerEmployeeId"]  = ir.IsDBNull(ir.GetOrdinal("assigned_auditor_employee_id"))   ? (object?)null : ir.GetInt64(ir.GetOrdinal("assigned_auditor_employee_id")),
+                        ["OwnerDisplayName"] = ir.IsDBNull(ir.GetOrdinal("assigned_auditor_name"))          ? (object?)null : ir.GetString(ir.GetOrdinal("assigned_auditor_name")),
+                        ["Status"]           = status,
+                        ["StatusKind"]       = DeriveStatusKind(status, endDt, isTerm),
+                        ["FrequencyName"]    = "Scheduled",
+                        ["IsOverride"]       = false,
+                        ["OriginalDate"]     = (object?)null,
+                        ["OverrideType"]     = (object?)null,
+                        ["DeepLink"]         = $"/Practice/Manage/org-assurance-plans?planId={planId}&planItemId={itemId}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Calendar: Assurance Plan Items query failed (org={OrgId}). Skipping.", organizationId);
+            }
+        }
+
+        // ----------- 4d. Assurance Executions (planned_start..planned_end) -
+        if (WantsModule("AssuranceExecution"))
+        {
+            try
+            {
+                await using var exCmd = connection.CreateCommand();
+                exCmd.CommandText = """
+                    SELECT e.org_assurance_execution_id, e.organization_id,
+                           e.org_assurance_definition_id, e.definition_code, e.definition_name,
+                           e.execution_code, e.execution_name,
+                           e.planned_start_dt, e.planned_end_dt,
+                           e.actual_start_dt, e.actual_end_dt,
+                           e.owner_role_id, e.owner_role_name,
+                           e.owner_employee_id, e.owner_display_name,
+                           s.status_code, s.status_name, s.is_terminal
+                    FROM grac_practice.org_assurance_execution e
+                    JOIN grac_practice.org_assurance_execution_status_master s
+                         ON s.org_assurance_execution_status_id = e.execution_status_id
+                    WHERE e.is_active = 1
+                      AND (@organization_id IS NULL OR e.organization_id = @organization_id)
+                      AND (e.planned_start_dt IS NULL OR e.planned_start_dt <= @range_to)
+                      AND (e.planned_end_dt   IS NULL OR e.planned_end_dt   >= @range_from)
+                      AND (@owner_role_id     IS NULL OR e.owner_role_id     = @owner_role_id)
+                      AND (@owner_employee_id IS NULL OR e.owner_employee_id = @owner_employee_id)
+                    """;
+                Add(exCmd, "@organization_id",   OrgParam());
+                Add(exCmd, "@range_from",        rangeFrom.Date);
+                Add(exCmd, "@range_to",          rangeTo.Date);
+                Add(exCmd, "@owner_role_id",     ownerRoleIdFilter.HasValue     ? ownerRoleIdFilter.Value     : DBNull.Value);
+                Add(exCmd, "@owner_employee_id", ownerEmployeeIdFilter.HasValue ? ownerEmployeeIdFilter.Value : DBNull.Value);
+                await using var er = await exCmd.ExecuteReaderAsync(cancellationToken);
+                while (await er.ReadAsync(cancellationToken))
+                {
+                    var exId  = er.GetInt64(er.GetOrdinal("org_assurance_execution_id"));
+                    var start = er.IsDBNull(er.GetOrdinal("planned_start_dt")) ? (DateTime?)null : er.GetDateTime(er.GetOrdinal("planned_start_dt"));
+                    var end   = er.IsDBNull(er.GetOrdinal("planned_end_dt"))   ? (DateTime?)null : er.GetDateTime(er.GetOrdinal("planned_end_dt"));
+                    if (!start.HasValue && !end.HasValue) continue;
+                    var effectiveStart = start ?? end!.Value;
+                    var status = er.GetString(er.GetOrdinal("status_code"));
+                    var isTerm = !er.IsDBNull(er.GetOrdinal("is_terminal")) && er.GetBoolean(er.GetOrdinal("is_terminal"));
+                    if (definitionIdFilter.Count > 0)
+                    {
+                        var defId = er.IsDBNull(er.GetOrdinal("org_assurance_definition_id")) ? 0L : er.GetInt64(er.GetOrdinal("org_assurance_definition_id"));
+                        if (!definitionIdFilter.Contains((int)defId)) continue;
+                    }
+                    var execName = er.GetString(er.GetOrdinal("execution_name"));
+                    var execCode = er.GetString(er.GetOrdinal("execution_code"));
+                    events.Add(new Dictionary<string, object?>
+                    {
+                        ["SourceModule"]     = "AssuranceExecution",
+                        ["SourceRefType"]    = "AssuranceExecution",
+                        ["SourceRefId"]      = exId,
+                        ["OrganizationId"]   = er.GetInt64(er.GetOrdinal("organization_id")),
+                        ["Date"]             = effectiveStart.Date,
+                        ["StartDate"]        = effectiveStart.Date,
+                        ["EndDate"]          = end.HasValue ? end.Value.Date : (object?)null,
+                        ["IsRange"]          = start.HasValue && end.HasValue && end.Value.Date > start.Value.Date,
+                        ["Title"]            = execName,
+                        ["PracticeInstance"] = execName,
+                        ["Subtitle"]         = $"Execution · {er.GetString(er.GetOrdinal("status_name"))}",
+                        ["EntityLabel"]      = execCode,
+                        ["DefinitionCode"]   = er.IsDBNull(er.GetOrdinal("definition_code")) ? (object?)null : er.GetString(er.GetOrdinal("definition_code")),
+                        ["DefinitionId"]     = er.IsDBNull(er.GetOrdinal("org_assurance_definition_id")) ? (object?)null : er.GetInt64(er.GetOrdinal("org_assurance_definition_id")),
+                        ["Criticality"]      = "Medium",
+                        ["AssuranceMode"]    = (object?)null,
+                        ["Owner"]            = er.IsDBNull(er.GetOrdinal("owner_display_name")) ? "" : er.GetString(er.GetOrdinal("owner_display_name")),
+                        ["OwnerRoleId"]      = er.IsDBNull(er.GetOrdinal("owner_role_id"))     ? (object?)null : er.GetInt64(er.GetOrdinal("owner_role_id")),
+                        ["OwnerRoleName"]    = er.IsDBNull(er.GetOrdinal("owner_role_name"))   ? (object?)null : er.GetString(er.GetOrdinal("owner_role_name")),
+                        ["OwnerEmployeeId"]  = er.IsDBNull(er.GetOrdinal("owner_employee_id")) ? (object?)null : er.GetInt64(er.GetOrdinal("owner_employee_id")),
+                        ["OwnerDisplayName"] = er.IsDBNull(er.GetOrdinal("owner_display_name"))? (object?)null : er.GetString(er.GetOrdinal("owner_display_name")),
+                        ["Status"]           = status,
+                        ["StatusKind"]       = DeriveStatusKind(status, end, isTerm),
+                        ["FrequencyName"]    = "Planned Run",
+                        ["IsOverride"]       = false,
+                        ["OriginalDate"]     = (object?)null,
+                        ["OverrideType"]     = (object?)null,
+                        ["DeepLink"]         = $"/Practice/Manage/org-assurance-executions?executionId={exId}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Calendar: Assurance Executions query failed (org={OrgId}). Skipping.", organizationId);
+            }
+        }
+
+        // ----------- 4e. Assurance Observations (due_date) -----------------
+        if (WantsModule("AssuranceObservation"))
+        {
+            try
+            {
+                await using var obCmd = connection.CreateCommand();
+                obCmd.CommandText = """
+                    SELECT o.org_assurance_observation_id, o.organization_id,
+                           o.org_assurance_execution_id,
+                           o.observation_title, o.observation_description,
+                           o.due_date,
+                           o.severity_code, o.severity_name,
+                           o.assigned_owner_role_id, o.assigned_owner_role_name,
+                           o.assigned_owner_employee_id, o.assigned_owner_display_name,
+                           s.status_code, s.status_name, s.is_terminal,
+                           e.definition_code, e.definition_name, e.org_assurance_definition_id
+                    FROM grac_practice.org_assurance_observation o
+                    JOIN grac_practice.org_assurance_observation_status_master s
+                         ON s.org_assurance_observation_status_id = o.observation_status_id
+                    LEFT JOIN grac_practice.org_assurance_execution e
+                         ON e.org_assurance_execution_id = o.org_assurance_execution_id
+                    WHERE o.is_active = 1
+                      AND (@organization_id IS NULL OR o.organization_id = @organization_id)
+                      AND o.due_date IS NOT NULL
+                      AND o.due_date >= @range_from AND o.due_date <= @range_to
+                      AND (@owner_role_id     IS NULL OR o.assigned_owner_role_id     = @owner_role_id)
+                      AND (@owner_employee_id IS NULL OR o.assigned_owner_employee_id = @owner_employee_id)
+                    """;
+                Add(obCmd, "@organization_id",   OrgParam());
+                Add(obCmd, "@range_from",        rangeFrom.Date);
+                Add(obCmd, "@range_to",          rangeTo.Date);
+                Add(obCmd, "@owner_role_id",     ownerRoleIdFilter.HasValue     ? ownerRoleIdFilter.Value     : DBNull.Value);
+                Add(obCmd, "@owner_employee_id", ownerEmployeeIdFilter.HasValue ? ownerEmployeeIdFilter.Value : DBNull.Value);
+                await using var or = await obCmd.ExecuteReaderAsync(cancellationToken);
+                while (await or.ReadAsync(cancellationToken))
+                {
+                    var obId = or.GetInt64(or.GetOrdinal("org_assurance_observation_id"));
+                    var due  = or.GetDateTime(or.GetOrdinal("due_date"));
+                    var status = or.GetString(or.GetOrdinal("status_code"));
+                    var isTerm = !or.IsDBNull(or.GetOrdinal("is_terminal")) && or.GetBoolean(or.GetOrdinal("is_terminal"));
+                    if (definitionIdFilter.Count > 0)
+                    {
+                        var defId = or.IsDBNull(or.GetOrdinal("org_assurance_definition_id")) ? 0L : or.GetInt64(or.GetOrdinal("org_assurance_definition_id"));
+                        if (!definitionIdFilter.Contains((int)defId)) continue;
+                    }
+                    var title = or.IsDBNull(or.GetOrdinal("observation_title")) ? "Observation" : or.GetString(or.GetOrdinal("observation_title"));
+                    var severity = or.IsDBNull(or.GetOrdinal("severity_name")) ? "Medium" : or.GetString(or.GetOrdinal("severity_name"));
+                    var normalizedSeverity = severity.Equals("Critical", StringComparison.OrdinalIgnoreCase) ? "Critical"
+                                           : severity.Equals("High",     StringComparison.OrdinalIgnoreCase) ? "High"
+                                           : severity.Equals("Low",      StringComparison.OrdinalIgnoreCase) ? "Low" : "Medium";
+                    events.Add(new Dictionary<string, object?>
+                    {
+                        ["SourceModule"]     = "AssuranceObservation",
+                        ["SourceRefType"]    = "AssuranceObservation",
+                        ["SourceRefId"]      = obId,
+                        ["OrganizationId"]   = or.GetInt64(or.GetOrdinal("organization_id")),
+                        ["Date"]             = due.Date,
+                        ["StartDate"]        = due.Date,
+                        ["EndDate"]          = (object?)null,
+                        ["IsRange"]          = false,
+                        ["Title"]            = title,
+                        ["PracticeInstance"] = title,
+                        ["Subtitle"]         = $"Observation · {or.GetString(or.GetOrdinal("status_name"))}",
+                        ["EntityLabel"]      = or.IsDBNull(or.GetOrdinal("definition_name")) ? (object?)null : or.GetString(or.GetOrdinal("definition_name")),
+                        ["DefinitionCode"]   = or.IsDBNull(or.GetOrdinal("definition_code")) ? (object?)null : or.GetString(or.GetOrdinal("definition_code")),
+                        ["DefinitionId"]     = or.IsDBNull(or.GetOrdinal("org_assurance_definition_id")) ? (object?)null : or.GetInt64(or.GetOrdinal("org_assurance_definition_id")),
+                        ["Criticality"]      = normalizedSeverity,
+                        ["AssuranceMode"]    = (object?)null,
+                        ["Owner"]            = or.IsDBNull(or.GetOrdinal("assigned_owner_display_name")) ? "" : or.GetString(or.GetOrdinal("assigned_owner_display_name")),
+                        ["OwnerRoleId"]      = or.IsDBNull(or.GetOrdinal("assigned_owner_role_id"))     ? (object?)null : or.GetInt64(or.GetOrdinal("assigned_owner_role_id")),
+                        ["OwnerRoleName"]    = or.IsDBNull(or.GetOrdinal("assigned_owner_role_name"))   ? (object?)null : or.GetString(or.GetOrdinal("assigned_owner_role_name")),
+                        ["OwnerEmployeeId"]  = or.IsDBNull(or.GetOrdinal("assigned_owner_employee_id")) ? (object?)null : or.GetInt64(or.GetOrdinal("assigned_owner_employee_id")),
+                        ["OwnerDisplayName"] = or.IsDBNull(or.GetOrdinal("assigned_owner_display_name"))? (object?)null : or.GetString(or.GetOrdinal("assigned_owner_display_name")),
+                        ["Status"]           = status,
+                        ["StatusKind"]       = DeriveStatusKind(status, due, isTerm),
+                        ["FrequencyName"]    = "Due",
+                        ["IsOverride"]       = false,
+                        ["OriginalDate"]     = (object?)null,
+                        ["OverrideType"]     = (object?)null,
+                        ["DeepLink"]         = $"/Practice/Manage/org-assurance-observations?observationId={obId}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Calendar: Observations query failed (org={OrgId}). Skipping.", organizationId);
+            }
+        }
+
+        // ----------- 4f. Custom Gaps sourced from Assurance -----------------
+        if (WantsModule("AssuranceGap"))
+        {
+            try
+            {
+                await using var gapCmd = connection.CreateCommand();
+                // Column names match custom_gap actuals (054 base + 109 extend):
+                //   * title (not gap_title -- gap_title is the retired
+                //     org_assurance_gap module's field)
+                //   * due_date OR target_resolution_date carries the deadline;
+                //     we COALESCE so either wins if only one is populated
+                //   * execution_name (not execution_context_name)
+                //   * custom_gap has no is_active column in the base 054 schema,
+                //     so we filter by status <> 'Cancelled' instead
+                gapCmd.CommandText = """
+                    SELECT g.custom_gap_id, g.organization_id,
+                           g.title, g.severity_code, g.severity_name,
+                           g.status,
+                           COALESCE(g.target_resolution_date, g.due_date) AS deadline_date,
+                           g.owner_role_id, g.owner_role_name,
+                           g.owner_employee_id, g.owner_display_name,
+                           g.gap_source_module_code, g.source_reference_type, g.source_reference_id,
+                           g.execution_name
+                    FROM grac_practice.custom_gap g
+                    WHERE g.status <> N'Cancelled'
+                      AND g.gap_source_module_code = N'Assurance'
+                      AND (@organization_id IS NULL OR g.organization_id = @organization_id)
+                      AND COALESCE(g.target_resolution_date, g.due_date) IS NOT NULL
+                      AND COALESCE(g.target_resolution_date, g.due_date) >= @range_from
+                      AND COALESCE(g.target_resolution_date, g.due_date) <= @range_to
+                      AND (@owner_role_id     IS NULL OR g.owner_role_id     = @owner_role_id)
+                      AND (@owner_employee_id IS NULL OR g.owner_employee_id = @owner_employee_id)
+                    """;
+                Add(gapCmd, "@organization_id",   OrgParam());
+                Add(gapCmd, "@range_from",        rangeFrom.Date);
+                Add(gapCmd, "@range_to",          rangeTo.Date);
+                Add(gapCmd, "@owner_role_id",     ownerRoleIdFilter.HasValue     ? ownerRoleIdFilter.Value     : DBNull.Value);
+                Add(gapCmd, "@owner_employee_id", ownerEmployeeIdFilter.HasValue ? ownerEmployeeIdFilter.Value : DBNull.Value);
+                await using var gr = await gapCmd.ExecuteReaderAsync(cancellationToken);
+                while (await gr.ReadAsync(cancellationToken))
+                {
+                    var gapId = gr.GetInt64(gr.GetOrdinal("custom_gap_id"));
+                    var target = gr.GetDateTime(gr.GetOrdinal("deadline_date"));
+                    var status = gr.IsDBNull(gr.GetOrdinal("status")) ? "Open" : gr.GetString(gr.GetOrdinal("status"));
+                    var isTerm = status.Equals("Closed", StringComparison.OrdinalIgnoreCase)
+                              || status.Equals("Verified", StringComparison.OrdinalIgnoreCase);
+                    var severity = gr.IsDBNull(gr.GetOrdinal("severity_name")) ? "Medium" : gr.GetString(gr.GetOrdinal("severity_name"));
+                    var normalizedSeverity = severity.Equals("Critical", StringComparison.OrdinalIgnoreCase) ? "Critical"
+                                           : severity.Equals("High",     StringComparison.OrdinalIgnoreCase) ? "High"
+                                           : severity.Equals("Low",      StringComparison.OrdinalIgnoreCase) ? "Low" : "Medium";
+                    // custom_gap.title (from base 054 schema) -- NOT gap_title
+                    // (that belonged to the retired org_assurance_gap module).
+                    var title = gr.IsDBNull(gr.GetOrdinal("title")) ? "Assurance Gap" : gr.GetString(gr.GetOrdinal("title"));
+                    events.Add(new Dictionary<string, object?>
+                    {
+                        ["SourceModule"]     = "AssuranceGap",
+                        ["SourceRefType"]    = "AssuranceGap",
+                        ["SourceRefId"]      = gapId,
+                        ["OrganizationId"]   = gr.GetInt64(gr.GetOrdinal("organization_id")),
+                        ["Date"]             = target.Date,
+                        ["StartDate"]        = target.Date,
+                        ["EndDate"]          = (object?)null,
+                        ["IsRange"]          = false,
+                        ["Title"]            = title,
+                        ["PracticeInstance"] = title,
+                        ["Subtitle"]         = $"Gap · {status}",
+                        ["EntityLabel"]      = gr.IsDBNull(gr.GetOrdinal("execution_name")) ? (object?)null : gr.GetString(gr.GetOrdinal("execution_name")),
+                        ["DefinitionCode"]   = (object?)null,
+                        ["DefinitionId"]     = (object?)null,
+                        ["Criticality"]      = normalizedSeverity,
+                        ["AssuranceMode"]    = (object?)null,
+                        ["Owner"]            = gr.IsDBNull(gr.GetOrdinal("owner_display_name")) ? "" : gr.GetString(gr.GetOrdinal("owner_display_name")),
+                        ["OwnerRoleId"]      = gr.IsDBNull(gr.GetOrdinal("owner_role_id"))     ? (object?)null : gr.GetInt64(gr.GetOrdinal("owner_role_id")),
+                        ["OwnerRoleName"]    = gr.IsDBNull(gr.GetOrdinal("owner_role_name"))   ? (object?)null : gr.GetString(gr.GetOrdinal("owner_role_name")),
+                        ["OwnerEmployeeId"]  = gr.IsDBNull(gr.GetOrdinal("owner_employee_id")) ? (object?)null : gr.GetInt64(gr.GetOrdinal("owner_employee_id")),
+                        ["OwnerDisplayName"] = gr.IsDBNull(gr.GetOrdinal("owner_display_name"))? (object?)null : gr.GetString(gr.GetOrdinal("owner_display_name")),
+                        ["Status"]           = status,
+                        ["StatusKind"]       = DeriveStatusKind(status, target, isTerm),
+                        ["FrequencyName"]    = "Target",
+                        ["IsOverride"]       = false,
+                        ["OriginalDate"]     = (object?)null,
+                        ["OverrideType"]     = (object?)null,
+                        ["DeepLink"]         = $"/Practice/Index/gaps?tab=assurance&customGapId={gapId}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Calendar: Assurance-sourced Gaps query failed (org={OrgId}). Skipping.", organizationId);
+            }
+        }
+
+        // ================================================================
+        // Post-processing: normalize existing PI events into the unified
+        // shape (so the frontend has one code path), then apply the
+        // client-side filters that couldn't be pushed into SQL (source-module
+        // filter on PI, plus status/criticality/search on the merged list).
+        // ================================================================
+        for (var idx = 0; idx < events.Count; idx++)
+        {
+            var e = events[idx];
+            if (!e.ContainsKey("SourceModule"))
+            {
+                // Legacy PI-derived events -- backfill the unified keys.
+                e["SourceModule"]     = "PracticeInstance";
+                e["SourceRefType"]    = e.ContainsKey("PracticeInstanceId") ? "PracticeInstance" : "AssuranceScheduleRule";
+                e["SourceRefId"]      = e.TryGetValue("PracticeInstanceId", out var pid) && pid is not null
+                                        ? pid : (e.TryGetValue("RuleId", out var rid) ? rid : null);
+                e["StartDate"]        = e.TryGetValue("Date", out var dt) ? dt : null;
+                e["EndDate"]          = (object?)null;
+                e["IsRange"]          = false;
+                var titleVal = e.TryGetValue("PracticeInstance", out var pi) ? pi?.ToString() ?? "" : "";
+                e["Title"]            = titleVal;
+                e["Subtitle"]         = e.TryGetValue("FrequencyName", out var fn) ? $"Practice Instance · {fn}" : "Practice Instance";
+                e["EntityLabel"]      = (object?)null;
+                e["DefinitionCode"]   = (object?)null;
+                e["DefinitionId"]     = (object?)null;
+                e["OwnerRoleId"]      = (object?)null;
+                e["OwnerRoleName"]    = (object?)null;
+                e["OwnerEmployeeId"]  = (object?)null;
+                e["OwnerDisplayName"] = e.TryGetValue("Owner", out var ov) ? ov : null;
+                var statusStr = e.TryGetValue("Status", out var st) ? st?.ToString() : null;
+                e["StatusKind"]       = DeriveStatusKind(statusStr, null, false);
+                if (e.TryGetValue("RuleId", out var ruleId) && ruleId is not null)
+                    e["DeepLink"] = $"/Practice/Calendar?ruleId={ruleId}";
+                else if (e.TryGetValue("PracticeInstanceId", out var piid) && piid is not null)
+                    e["DeepLink"] = $"/Practice/Manage/practice-instances?practiceInstanceId={piid}";
+                else
+                    e["DeepLink"] = (object?)null;
+            }
+        }
+
+        // Merged-list filters (applied AFTER SQL so PI + Assurance events
+        // are treated uniformly).
+        if (statusFilter.Count > 0 || criticalityFilter.Count > 0 || searchFilterLower is not null
+            || (!wantsPracticeInstance) || isAssuranceRoleOwnerFilterActive)
+        {
+            events = events.Where(e =>
+            {
+                var mod = e.TryGetValue("SourceModule", out var m) ? m?.ToString() : null;
+                if (!string.IsNullOrEmpty(mod) && !WantsModule(mod)) return false;
+
+                if (statusFilter.Count > 0)
+                {
+                    var s = e.TryGetValue("Status", out var st) ? st?.ToString() ?? "" : "";
+                    if (!statusFilter.Contains(s)) return false;
+                }
+                if (criticalityFilter.Count > 0)
+                {
+                    var c = e.TryGetValue("Criticality", out var cv) ? cv?.ToString() ?? "" : "";
+                    if (!criticalityFilter.Contains(c)) return false;
+                }
+                if (searchFilterLower is not null)
+                {
+                    var title = e.TryGetValue("Title", out var tv) ? tv?.ToString() ?? "" : "";
+                    var owner = e.TryGetValue("Owner", out var ov) ? ov?.ToString() ?? "" : "";
+                    var entity = e.TryGetValue("EntityLabel", out var el) ? el?.ToString() ?? "" : "";
+                    if (title.IndexOf(searchFilterLower, StringComparison.OrdinalIgnoreCase) < 0
+                        && owner.IndexOf(searchFilterLower, StringComparison.OrdinalIgnoreCase) < 0
+                        && entity.IndexOf(searchFilterLower, StringComparison.OrdinalIgnoreCase) < 0)
+                        return false;
+                }
+                // PI-side owner filter: PI events don't have role snapshots
+                // so if the user picked a role/employee filter, PI events are
+                // excluded (they can't match). This is intentional -- the
+                // filter clearly targets the Assurance module.
+                if (isAssuranceRoleOwnerFilterActive && "PracticeInstance".Equals(mod, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                return true;
+            }).ToList();
         }
 
         // 5. Fetch calendar config

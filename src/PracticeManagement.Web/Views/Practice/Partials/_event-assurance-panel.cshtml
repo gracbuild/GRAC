@@ -1,0 +1,582 @@
+@*
+    Event Driven Assurance panel.
+
+    Body only -- no page heading, no organization selector, no feature-flag
+    gate. The host screen owns all three and passes the selected organization
+    in. Today the only host is the Event Driven Assurance tab of Task Center
+    (Oversight); this was extracted rather than duplicated so there is exactly
+    one implementation of the event checklist behaviour.
+
+    Exposes window.__eventAssurance:
+        init(getOrgId)  wire once; getOrgId is a function returning the host's
+                        current organization id
+        load()          (re)load the grid for that organization
+        count()         rows currently shown, for the host's tab badge
+
+    WHY THIS READS THE EVENT ENGINE DIRECTLY AND IS NOT A practice_task
+    -------------------------------------------------------------------
+    Materialising event instances as practice_task rows would put the same
+    work in two tables, each with its own status, and every completion would
+    have to be mirrored both ways. event_instance stays the single record of
+    an event; Task Center is a place to look, not a second store.
+*@
+
+<div class="pm-toolbar" data-event-toolbar>
+    <select id="eaSubjectFilter">
+        <option value="">All subjects</option>
+        <option value="EMPLOYEE">People</option>
+        <option value="ASSET">Assets</option>
+    </select>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;">
+        <input type="checkbox" id="eaOverdueOnly" /> Overdue only
+    </label>
+    <button class="pm-button primary" id="eaRaiseBtn" type="button"><i class="fa-solid fa-bolt"></i> Raise Event</button>
+    <button class="pm-button" id="eaGapsBtn" type="button"><i class="fa-solid fa-triangle-exclamation"></i> Coverage Gaps</button>
+</div>
+
+<div id="eaMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+<div class="pm-table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Event</th><th>Subject</th><th>Scope</th><th>Checklist</th>
+                <th style="width:110px;">Progress</th><th style="width:110px;">Due</th>
+                <th style="width:110px;">Status</th><th style="width:90px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="eaBody"><tr><td colspan="8" class="pm-empty">Select an organization to load event assurance.</td></tr></tbody>
+    </table>
+</div>
+
+@* ---------------- Raise event dialog ---------------- *@
+<dialog id="eaRaiseDialog" style="border:none; border-radius:8px; padding:0; max-width:560px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="eaRaiseForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Raise Lifecycle Event</h2>
+            <button type="button" id="eaRaiseClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="eaRaiseMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Action *
+            <select id="eaAction" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="ONBOARD">Person -- Onboarding</option>
+                <option value="OFFBOARD">Person -- Offboarding</option>
+                <option value="COMMISSION">Asset -- Commissioning</option>
+                <option value="DECOMMISSION">Asset -- Decommissioning</option>
+            </select>
+        </label>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span id="eaSubjectLabel">Employee *</span>
+            <select id="eaSubject" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        </label>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Effective date *
+            <input id="eaEffectiveDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <p style="font-size:11px; color:#64748b; margin:6px 0 0 0;">
+            Due dates are calculated from the effective date, not from today. A backdated
+            event therefore produces checklists that are already overdue &mdash; which is correct.
+        </p>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="eaRaiseCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="eaRaiseSubmit" class="pm-button primary">Raise</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------------- Checklist drawer ---------------- *@
+<dialog id="eaItemDialog" style="border:none; border-radius:8px; padding:0; max-width:840px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+            <div>
+                <h2 style="margin:0; font-size:18px;" id="eaDrawerTitle">Checklist</h2>
+                <p style="margin:4px 0 0 0; font-size:12px; color:#64748b;" id="eaDrawerMeta"></p>
+            </div>
+            <button type="button" id="eaItemClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="eaItemMessage" style="display:none; margin:10px 0; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        <div class="pm-table-wrap" style="max-height:52vh; overflow:auto; margin-top:12px;">
+            <table>
+                <thead><tr><th style="width:40px;">#</th><th>Item</th><th style="width:150px;">Result</th><th style="width:200px;">Evidence URL</th><th style="width:180px;">Remarks</th></tr></thead>
+                <tbody id="eaItemBody"></tbody>
+            </table>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:16px;">
+            <button type="button" id="eaTraceBtn" class="pm-button"><i class="fa-solid fa-magnifying-glass"></i> Why these items?</button>
+            <div style="display:flex; gap:8px;">
+                <button type="button" id="eaItemCancel" class="pm-button">Close</button>
+                <button type="button" id="eaCompleteBtn" class="pm-button primary">Complete Checklist</button>
+            </div>
+        </div>
+    </div>
+</dialog>
+
+@* ---------------- Trace / gaps dialog ---------------- *@
+<dialog id="eaTraceDialog" style="border:none; border-radius:8px; padding:0; max-width:900px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;" id="eaTraceTitle">Resolution Trace</h2>
+            <button type="button" id="eaTraceClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;">
+            Every obligation considered for this event, included and excluded, with the reason.
+        </p>
+        <div class="pm-table-wrap" style="max-height:56vh; overflow:auto;">
+            <table>
+                <thead><tr><th>Decision</th><th>Obligation</th><th>Event</th><th>Scope</th><th>Reason</th><th>When</th></tr></thead>
+                <tbody id="eaTraceBody"></tbody>
+            </table>
+        </div>
+    </div>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    if (window.__eventAssurance) return;
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const RESULTS = ['Pending', 'Passed', 'Failed', 'NotApplicable'];
+
+    let getOrgId = function () { return null; };
+    let currentInstance = null;
+    let rowCount = 0;
+    let wired = false;
+
+    function esc(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function msg(id, text, kind) {
+        const el = document.getElementById(id); if (!el) return;
+        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+        el.style.display = 'block'; el.textContent = text;
+        if (kind === 'error')   { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
+        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
+        else                    { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+    }
+    function orgId() { return getOrgId(); }
+
+    // ------------------------------------------------------------------
+    function init(orgAccessor) {
+        getOrgId = orgAccessor || getOrgId;
+        if (wired) return;
+        wired = true;
+        document.getElementById('eaSubjectFilter').addEventListener('change', load);
+        document.getElementById('eaOverdueOnly').addEventListener('change', load);
+        document.getElementById('eaRaiseBtn').addEventListener('click', openRaise);
+        document.getElementById('eaGapsBtn').addEventListener('click', openGaps);
+        wireRaiseDialog();
+        wireItemDialog();
+    }
+
+    async function load() {
+        const org = orgId();
+        const body = document.getElementById('eaBody');
+        if (!org) { body.innerHTML = '<tr><td colspan="8" class="pm-empty">Select an organization.</td></tr>'; rowCount = 0; return; }
+        body.innerHTML = '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>';
+
+        const subject = document.getElementById('eaSubjectFilter').value;
+        const overdue = document.getElementById('eaOverdueOnly').checked;
+        let url = U('/practice/api/workflow/scope/inbox') + '?organizationId=' + encodeURIComponent(org);
+        if (subject) url += '&subjectEntity=' + encodeURIComponent(subject);
+        if (overdue) url += '&overdueOnly=true';
+
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const b = await r.json();
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="pm-empty">' + esc(b.error || 'Load failed') + '</td></tr>'; rowCount = 0; return; }
+            const rows = (b && b.rows) || [];
+            rowCount = rows.length;
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="8" class="pm-empty">Nothing open. Raise an event to get started.</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            for (const row of rows) {
+                const tr = document.createElement('tr');
+                if (row.isOverdue) tr.style.background = '#fef2f2';
+                const scope = row.scopeRoleName || row.scopeAssetCategoryName || '-';
+                tr.insertAdjacentHTML('beforeend',
+                      '<td>' + esc(row.eventName) + '</td>'
+                    + '<td>' + esc(row.subjectLabel || '') + '</td>'
+                    + '<td>' + esc(scope) + '</td>'
+                    + '<td>' + esc(row.checklistName || '') + '</td>'
+                    + '<td>' + row.itemsDone + ' / ' + row.itemCount + '</td>'
+                    + '<td>' + dueCell(row) + '</td>'
+                    + '<td><span class="pm-badge">' + esc(row.instanceStatus) + '</span></td>');
+                const td = document.createElement('td');
+                const btn = document.createElement('button');
+                btn.className = 'pm-button';
+                btn.textContent = 'Open';
+                btn.addEventListener('click', function () { openInstance(row.eventInstanceId); });
+                td.appendChild(btn);
+                tr.appendChild(td);
+                body.appendChild(tr);
+            }
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Failed: ' + esc(err.message) + '</td></tr>';
+            rowCount = 0;
+        }
+        document.dispatchEvent(new CustomEvent('event-assurance:loaded', { detail: { count: rowCount } }));
+    }
+
+    function dueCell(row) {
+        if (!row.dueDate) return '<span style="color:#94a3b8;">-</span>';
+        const d = String(row.dueDate).substring(0, 10);
+        if (!row.isOverdue) return esc(d);
+        return '<span style="color:#b91c1c; font-weight:600;">' + esc(d) + ' (+' + (row.daysOverdue || 0) + 'd)</span>';
+    }
+
+    // ------------------------------------------------------------------
+    function isPeople(action) { return action === 'ONBOARD' || action === 'OFFBOARD'; }
+
+    async function openRaise() {
+        if (!orgId()) { msg('eaMessage', 'Select an organization first.', 'error'); return; }
+        msg('eaRaiseMessage', null);
+        document.getElementById('eaEffectiveDate').value = new Date().toISOString().substring(0, 10);
+        const dlg = document.getElementById('eaRaiseDialog');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+        await loadSubjects();
+    }
+
+    async function loadSubjects() {
+        const action = document.getElementById('eaAction').value;
+        const sel = document.getElementById('eaSubject');
+        document.getElementById('eaSubjectLabel').textContent = isPeople(action) ? 'Employee *' : 'Asset *';
+        sel.innerHTML = '<option value="">Loading...</option>';
+
+        const url = isPeople(action)
+            ? U('/practice/api/organizations/' + encodeURIComponent(orgId()) + '/employees')
+            : U('/practice-management-gateway/dependency-assets?organizationId=' + encodeURIComponent(orgId()));
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { sel.innerHTML = '<option value="">(could not load)</option>'; return; }
+            const j = await r.json();
+            const rows = j.data || j.Data || j.rows || j.Rows || (Array.isArray(j) ? j : []);
+            sel.innerHTML = '<option value="">(select)</option>';
+            for (const row of rows) {
+                const opt = document.createElement('option');
+                opt.value = String(isPeople(action) ? (row.employeeId || row.EmployeeId) : (row.assetId || row.AssetId));
+                opt.textContent = isPeople(action)
+                    ? ((row.employeeName || row.EmployeeName || '') + ' (' + (row.employeeCode || row.EmployeeCode || '') + ')')
+                    : (row.assetName || row.AssetName || '');
+                sel.appendChild(opt);
+            }
+        } catch (_) { sel.innerHTML = '<option value="">(could not load)</option>'; }
+    }
+
+    function wireRaiseDialog() {
+        const close = function () {
+            const d = document.getElementById('eaRaiseDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+        };
+        document.getElementById('eaRaiseClose').addEventListener('click', close);
+        document.getElementById('eaRaiseCancel').addEventListener('click', close);
+        document.getElementById('eaAction').addEventListener('change', loadSubjects);
+
+        document.getElementById('eaRaiseForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submit = document.getElementById('eaRaiseSubmit');
+            const action = document.getElementById('eaAction').value;
+            const subjectId = document.getElementById('eaSubject').value;
+            const effective = document.getElementById('eaEffectiveDate').value;
+            if (!subjectId || !effective) { msg('eaRaiseMessage', 'Subject and effective date are required.', 'error'); return; }
+            submit.disabled = true;
+
+            const people = isPeople(action);
+            const url = U(people ? '/practice/api/workflow/scope/raise/people'
+                                 : '/practice/api/workflow/scope/raise/asset');
+            const payload = people
+                ? { organizationId: Number(orgId()), employeeId: Number(subjectId), lifecycleAction: action, effectiveDate: effective, triggerSource: 'Manual' }
+                : { organizationId: Number(orgId()), assetId: Number(subjectId),    lifecycleAction: action, effectiveDate: effective, triggerSource: 'Manual' };
+
+            try {
+                const r = await fetch(url, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (!r.ok) { msg('eaRaiseMessage', b.error || 'Raise failed', 'error'); submit.disabled = false; return; }
+                // raisedCount 0 is a success with nothing mapped -- say so
+                // plainly rather than showing a green tick for no work.
+                if (!b.raisedCount) {
+                    msg('eaRaiseMessage', b.message || 'Event recorded, but no obligation is mapped for this scope.', 'info');
+                    submit.disabled = false;
+                    await load();
+                    return;
+                }
+                msg('eaRaiseMessage', b.raisedCount + ' checklist item(s) raised.', 'ok');
+                setTimeout(function () { close(); submit.disabled = false; load(); }, 700);
+            } catch (err) {
+                msg('eaRaiseMessage', 'Network error: ' + err.message, 'error');
+                submit.disabled = false;
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------
+    async function openInstance(instanceId) {
+        msg('eaItemMessage', null);
+        const url = U('/practice/api/workflow/scope/instances/' + encodeURIComponent(instanceId))
+            + '?organizationId=' + encodeURIComponent(orgId());
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { msg('eaMessage', 'Could not open checklist.', 'error'); return; }
+            currentInstance = await r.json();
+        } catch (err) { msg('eaMessage', 'Network error: ' + err.message, 'error'); return; }
+
+        const h = currentInstance.header;
+        document.getElementById('eaDrawerTitle').textContent = h.checklistName || 'Checklist';
+        document.getElementById('eaDrawerMeta').textContent =
+            [h.eventName, h.subjectLabel, h.scopeRoleName || h.scopeAssetCategoryName,
+             h.dueDate ? 'due ' + String(h.dueDate).substring(0, 10) : null].filter(Boolean).join('  ·  ');
+
+        renderItems();
+        const dlg = document.getElementById('eaItemDialog');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+
+    function renderItems() {
+        const body = document.getElementById('eaItemBody');
+        body.innerHTML = '';
+        const items = (currentInstance && currentInstance.items) || [];
+        if (!items.length) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">'
+                + 'This instance has no line items. Open "Why these items?" to see why.</td></tr>';
+            return;
+        }
+        items.forEach(function (it) {
+            const tr = document.createElement('tr');
+            const isObligation = it.itemOrigin === 'OBLIGATION';
+
+            tr.insertAdjacentHTML('beforeend',
+                  '<td>' + it.itemSequence + '</td>'
+                + '<td>' + esc(it.itemText)
+                    + (it.isMandatory ? ' <span style="color:#b91c1c;">*</span>' : '')
+                    + (isObligation ? ' <span style="padding:1px 6px; border-radius:8px; font-size:10px; background:#e0e7ff; color:#3730a3;">obligation</span>' : '')
+                    + (it.responsibleRole ? '<br><span style="font-size:11px; color:#94a3b8;">' + esc(it.responsibleRole) + '</span>' : '')
+                    + (it.naJustification ? '<br><span style="font-size:11px; color:#78350f;">N/A: ' + esc(it.naJustification) + '</span>' : '')
+                  + '</td>');
+
+            const tdResult = document.createElement('td');
+            const sel = document.createElement('select');
+            sel.style.cssText = 'width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;';
+            RESULTS.forEach(function (v) {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = v === 'NotApplicable' ? 'Not Applicable' : v;
+                sel.appendChild(o);
+            });
+            sel.value = it.itemStatus;
+            tdResult.appendChild(sel);
+            tr.appendChild(tdResult);
+
+            const tdEvidence = document.createElement('td');
+            const ev = document.createElement('input');
+            ev.type = 'url'; ev.value = it.evidenceUrl || '';
+            ev.placeholder = it.evidenceRequired ? 'required' : '';
+            ev.style.cssText = 'width:100%; padding:4px 6px; border:1px solid '
+                + (it.evidenceRequired && !it.evidenceUrl ? '#fca5a5' : '#cbd5e1') + '; border-radius:4px;';
+            tdEvidence.appendChild(ev);
+            tr.appendChild(tdEvidence);
+
+            const tdRemarks = document.createElement('td');
+            const rm = document.createElement('input');
+            rm.type = 'text'; rm.value = it.remarks || '';
+            rm.style.cssText = 'width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;';
+            tdRemarks.appendChild(rm);
+            tr.appendChild(tdRemarks);
+
+            const save = function () { saveItem(it, sel.value, ev.value, rm.value); };
+            sel.addEventListener('change', save);
+            ev.addEventListener('blur', save);
+            rm.addEventListener('blur', save);
+
+            body.appendChild(tr);
+        });
+    }
+
+    async function saveItem(item, status, evidenceUrl, remarks) {
+        if (item.itemStatus === status
+            && (item.evidenceUrl || '') === evidenceUrl
+            && (item.remarks || '') === remarks) return;
+
+        let na = item.naJustification || null;
+        if (status === 'NotApplicable' && item.itemOrigin === 'OBLIGATION' && !na) {
+            na = window.prompt('Why is this obligation not applicable for this subject?\nAn auditor will read this.', '');
+            if (na === null || !na.trim()) {
+                msg('eaItemMessage', 'Not Applicable needs a justification; nothing was saved.', 'error');
+                renderItems();
+                return;
+            }
+            na = na.trim();
+        }
+
+        // Two item stores, two endpoints. event_instance_item_id and
+        // event_instance_obligation_id are separate identity sequences and can
+        // collide, so the origin decides where this write goes.
+        const obligation = item.itemOrigin === 'OBLIGATION';
+        const url = U(obligation ? '/practice/api/workflow/scope/instance-obligations'
+                                 : '/practice/api/workflow/event-instance-items');
+        const payload = obligation
+            ? { organizationId: Number(orgId()), eventInstanceObligationId: item.itemId, itemStatus: status,
+                evidenceUrl: evidenceUrl || null, remarks: remarks || null,
+                naJustification: status === 'NotApplicable' ? na : null }
+            : { eventInstanceItemId: item.itemId, itemStatus: status,
+                evidenceUrl: evidenceUrl || null, remarks: remarks || null };
+
+        try {
+            const r = await fetch(url, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify(payload)
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (!r.ok) { msg('eaItemMessage', b.error || 'Save failed', 'error'); renderItems(); return; }
+            item.itemStatus = status; item.evidenceUrl = evidenceUrl; item.remarks = remarks;
+            item.naJustification = status === 'NotApplicable' ? na : null;
+            msg('eaItemMessage', 'Saved.', 'ok');
+            setTimeout(function () { msg('eaItemMessage', null); }, 1200);
+        } catch (err) {
+            msg('eaItemMessage', 'Network error: ' + err.message, 'error');
+        }
+    }
+
+    function wireItemDialog() {
+        const close = function () {
+            const d = document.getElementById('eaItemDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+            load();
+        };
+        document.getElementById('eaItemClose').addEventListener('click', close);
+        document.getElementById('eaItemCancel').addEventListener('click', close);
+
+        document.getElementById('eaCompleteBtn').addEventListener('click', async function () {
+            if (!currentInstance || !currentInstance.header) return;
+
+            const items = currentInstance.items || [];
+            if (!items.length) { msg('eaItemMessage', 'This instance has no items, so there is nothing to complete.', 'error'); return; }
+            const outstanding = items.filter(function (i) {
+                return i.isMandatory && ['Passed', 'Failed', 'NotApplicable'].indexOf(i.itemStatus) < 0;
+            });
+            if (outstanding.length) {
+                msg('eaItemMessage', outstanding.length + ' mandatory item(s) still pending: #'
+                    + outstanding.map(function (i) { return i.itemSequence; }).join(', '), 'error');
+                return;
+            }
+
+            const id = currentInstance.header.eventInstanceId;
+            const btn = document.getElementById('eaCompleteBtn');
+            btn.disabled = true;
+            try {
+                const r = await fetch(U('/practice/api/workflow/event-instances/' + encodeURIComponent(id) + '/complete'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify({ eventInstanceId: id, comments: null })
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (!r.ok) {
+                    msg('eaItemMessage', 'Complete failed (HTTP ' + r.status + '): ' + (b.error || 'no detail returned'), 'error');
+                    btn.disabled = false; return;
+                }
+
+                // Do not trust the 200 -- re-read and report the status the
+                // database actually holds.
+                const verify = await fetch(
+                    U('/practice/api/workflow/scope/instances/' + encodeURIComponent(id))
+                    + '?organizationId=' + encodeURIComponent(orgId()), { credentials: 'same-origin' });
+                const after = verify.ok ? await verify.json() : null;
+                const status = after && after.header ? after.header.instanceStatus : null;
+
+                if (status === 'Completed' || status === 'Failed') {
+                    msg('eaItemMessage', 'Checklist closed as ' + status + '.', status === 'Completed' ? 'ok' : 'error');
+                    currentInstance = after;
+                    setTimeout(close, 900);
+                } else {
+                    msg('eaItemMessage', 'The server accepted the request but the instance is still "'
+                        + (status || 'unknown') + '". Nothing was closed.', 'error');
+                    if (after) { currentInstance = after; renderItems(); }
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                msg('eaItemMessage', 'Network error: ' + err.message, 'error');
+                btn.disabled = false;
+            }
+        });
+
+        document.getElementById('eaTraceBtn').addEventListener('click', function () {
+            if (!currentInstance || !currentInstance.header) return;
+            const h = currentInstance.header;
+            openTrace('Resolution Trace -- ' + (h.subjectLabel || ''),
+                U('/practice/api/workflow/scope/trace')
+                + '?organizationId=' + encodeURIComponent(orgId())
+                + '&subjectEntity=' + encodeURIComponent(h.subjectEntity || '')
+                + '&subjectRecordId=' + encodeURIComponent(h.subjectRecordId || 0), false);
+        });
+
+        document.getElementById('eaTraceClose').addEventListener('click', function () {
+            const d = document.getElementById('eaTraceDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+        });
+    }
+
+    // ------------------------------------------------------------------
+    function openGaps() {
+        if (!orgId()) { msg('eaMessage', 'Select an organization first.', 'error'); return; }
+        openTrace('Coverage Gaps',
+            U('/practice/api/workflow/scope/trace') + '?organizationId=' + encodeURIComponent(orgId()) + '&gapsOnly=true', true);
+    }
+
+    async function openTrace(title, url, gapsMode) {
+        document.getElementById('eaTraceTitle').textContent = title;
+        const body = document.getElementById('eaTraceBody');
+        body.innerHTML = '<tr><td colspan="6" class="pm-empty">Loading...</td></tr>';
+
+        const dlg = document.getElementById('eaTraceDialog');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const b = await r.json();
+            const rows = gapsMode ? (b.gaps || []) : (b.rows || []);
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="6" class="pm-empty">'
+                    + (gapsMode ? 'No coverage gaps recorded.' : 'No trace rows.') + '</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            for (const t of rows) {
+                const scope = t.scopeRoleName || t.scopeAssetCategoryName || '-';
+                const tr = document.createElement('tr');
+                tr.innerHTML = gapsMode
+                    ? [ '<td>' + decisionBadge('Excluded') + '</td>', '<td>-</td>',
+                        '<td>' + esc(t.eventCode) + '</td>', '<td>' + esc(scope) + '</td>',
+                        '<td>' + esc(t.reasonCode) + ' &times;' + t.occurrenceCount + '</td>',
+                        '<td>' + esc(String(t.lastSeenDt).substring(0, 10)) + '</td>' ].join('')
+                    : [ '<td>' + decisionBadge(t.decision) + '</td>',
+                        '<td>' + esc(t.obligationLabel || t.checklistName || '-') + '</td>',
+                        '<td>' + esc(t.eventCode) + '</td>', '<td>' + esc(scope) + '</td>',
+                        '<td>' + esc(t.reasonCode)
+                            + (t.reasonDetail ? '<br><span style="font-size:11px; color:#94a3b8;">' + esc(t.reasonDetail) + '</span>' : '') + '</td>',
+                        '<td>' + esc(String(t.enteredDt).substring(0, 10)) + '</td>' ].join('');
+                body.appendChild(tr);
+            }
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Failed: ' + esc(err.message) + '</td></tr>';
+        }
+    }
+
+    function decisionBadge(d) {
+        const ok = d === 'Included';
+        return '<span style="padding:3px 9px; border-radius:10px; font-size:11px; background:'
+            + (ok ? '#dcfce7' : '#fee2e2') + '; color:' + (ok ? '#166534' : '#7f1d1d') + ';">' + esc(d) + '</span>';
+    }
+
+    window.__eventAssurance = { init: init, load: load, count: function () { return rowCount; } };
+})();
+</script>

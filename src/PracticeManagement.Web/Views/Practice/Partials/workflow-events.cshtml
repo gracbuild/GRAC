@@ -1,0 +1,222 @@
+@*
+    Events (BRD Sec 8) -- lifecycle events organizations wish to observe.
+    Screen key: `workflow-events`
+    Feature flag: `screen.workflow-events`
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="evUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-bolt pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="evUnavailableTitle">Events is not yet enabled for this organization.</h2>
+        <p id="evUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-events</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="evRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="evFilterOrganization"><option value="">All organizations</option></select>
+        <select id="evFilterCategory">
+            <option value="">All categories</option>
+            <option>People</option><option>Asset</option><option>Tool</option>
+            <option>Application</option><option>Vendor</option><option>Custom</option>
+        </select>
+        <input id="evSearch" type="text" placeholder="Search event name / code..." />
+        <button class="pm-button icon" id="evRefreshBtn" type="button"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="evAddBtn" type="button"><i class="fa-solid fa-plus"></i> Add Event</button>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Category</th><th>Code</th><th>Name</th><th>Trigger Source</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="evBody"><tr><td colspan="6" class="pm-empty">Select an organization to load events.</td></tr></tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="events">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+<dialog id="evDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="evForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="evDialogTitle" style="margin:0; font-size:18px;">Add Event</h2>
+            <button type="button" id="evClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="evMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="evEditId" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Code *
+                <input id="evCode" type="text" maxlength="60" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Entity Category
+                <select id="evCategory" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="">(select)</option>
+                    <option>People</option><option>Asset</option><option>Tool</option>
+                    <option>Application</option><option>Vendor</option><option>Custom</option>
+                </select>
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Name *
+            <input id="evName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
+            <textarea id="evDescription" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Trigger Source
+                <select id="evTriggerSource" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="Manual" selected>Manual</option>
+                    <option>API</option><option>HRMS</option><option>ERP</option>
+                    <option>ITSM</option><option>CMDB</option>
+                    <option>Webhook</option><option>MessageQueue</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
+                <select id="evStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="Active" selected>Active</option><option value="Draft">Draft</option><option value="Inactive">Inactive</option>
+                </select>
+            </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="evCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="evSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-events';
+    let orgId = null, page = 1;
+    const PAGE_SIZE = 25;
+    let searchDebounce = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) return window.__wfCommon.unavailable('evUnavailable','evUnavailableTitle','evUnavailableBody','No organizations available.','');
+        document.getElementById('evRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('evFilterOrganization', orgs);
+        document.getElementById('evFilterOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('evFilterCategory').addEventListener('change', function () { page = 1; reload(); });
+        document.getElementById('evRefreshBtn').addEventListener('click', reload);
+        document.getElementById('evSearch').addEventListener('input', function () {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(function () { page = 1; reload(); }, 300);
+        });
+        document.getElementById('evAddBtn').addEventListener('click', function () { openDialog(null); });
+        window.__wfCommon.wirePager('events', function (delta) { page = Math.max(1, page + delta); reload(); });
+        wireDialog();
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        orgId = document.getElementById('evFilterOrganization').value || null;
+        if (!orgId) { setBody('<tr><td colspan="6" class="pm-empty">Select an organization to load events.</td></tr>'); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) { document.getElementById('evRoot').hidden = true; document.getElementById('evUnavailable').hidden = false; return; }
+        page = 1; await reload();
+    }
+
+    async function reload() {
+        if (!orgId) return;
+        const cat = document.getElementById('evFilterCategory').value;
+        const q   = document.getElementById('evSearch').value.trim();
+        const url = U('/practice/api/workflow/events?organizationId=') + encodeURIComponent(orgId)
+                  + '&page=' + page + '&pageSize=' + PAGE_SIZE
+                  + (cat ? '&entityCategory=' + encodeURIComponent(cat) : '')
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        setBody('<tr><td colspan="6" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows = (payload && payload.rows) || [];
+            const body = document.getElementById('evBody'); body.innerHTML = '';
+            if (!rows.length) { setBody('<tr><td colspan="6" class="pm-empty">No events yet.</td></tr>'); }
+            else {
+                for (const ev of rows) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = [
+                        '<td>' + window.__wfCommon.escape(ev.entityCategory || '') + '</td>',
+                        '<td>' + window.__wfCommon.escape(ev.eventCode) + '</td>',
+                        '<td>' + window.__wfCommon.escape(ev.eventName) + '</td>',
+                        '<td>' + window.__wfCommon.escape(ev.triggerSource || '') + '</td>',
+                        '<td>' + window.__wfCommon.badge(ev.status) + '</td>',
+                        '<td><button type="button" class="pm-button" data-edit-id="' + ev.eventDefinitionId + '"><i class="fa-solid fa-pen"></i></button></td>'
+                    ].join('');
+                    body.appendChild(tr);
+                }
+                body.querySelectorAll('[data-edit-id]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        const id = Number(btn.getAttribute('data-edit-id'));
+                        const row = rows.find(function (x) { return x.eventDefinitionId === id; });
+                        if (row) openDialog(row);
+                    });
+                });
+            }
+            window.__wfCommon.updatePager('events', payload);
+        } catch (err) { setBody('<tr><td colspan="6" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
+    }
+    function setBody(html) { document.getElementById('evBody').innerHTML = html; }
+
+    function openDialog(row) {
+        const dlg = document.getElementById('evDialog'); if (!dlg) return;
+        document.getElementById('evDialogTitle').textContent = row ? 'Edit Event' : 'Add Event';
+        document.getElementById('evEditId').value        = row ? row.eventDefinitionId : '';
+        document.getElementById('evCode').value          = row ? row.eventCode : '';
+        document.getElementById('evName').value          = row ? row.eventName : '';
+        document.getElementById('evCategory').value      = row ? (row.entityCategory || '') : '';
+        document.getElementById('evDescription').value   = row ? (row.description || '') : '';
+        document.getElementById('evTriggerSource').value = row ? (row.triggerSource || 'Manual') : 'Manual';
+        document.getElementById('evStatus').value        = row ? row.status : 'Active';
+        window.__wfCommon.setMessage('evMessage', null);
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+    function closeDialog() { const d = document.getElementById('evDialog'); if (d && d.close) d.close(); else if (d) d.removeAttribute('open'); }
+    function wireDialog() {
+        document.getElementById('evClose').addEventListener('click', closeDialog);
+        document.getElementById('evCancel').addEventListener('click', closeDialog);
+        document.getElementById('evForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submit = document.getElementById('evSubmit'); submit.disabled = true;
+            const editId = document.getElementById('evEditId').value;
+            const payload = {
+                eventDefinitionId: editId ? Number(editId) : null,
+                organizationId:    Number(orgId),
+                eventCode:         document.getElementById('evCode').value.trim(),
+                eventName:         document.getElementById('evName').value.trim(),
+                description:       document.getElementById('evDescription').value.trim() || null,
+                entityCategory:    document.getElementById('evCategory').value || null,
+                triggerSource:     document.getElementById('evTriggerSource').value,
+                status:            document.getElementById('evStatus').value
+            };
+            try {
+                const r = await fetch(U('/practice/api/workflow/events'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) { window.__wfCommon.setMessage('evMessage', 'Saved.', 'ok'); setTimeout(function () { closeDialog(); reload(); }, 400); }
+                else     { window.__wfCommon.setMessage('evMessage', b.error || 'Save failed', 'error'); submit.disabled = false; }
+            } catch (err) { window.__wfCommon.setMessage('evMessage', 'Network error: ' + err.message, 'error'); submit.disabled = false; }
+        });
+    }
+})();
+</script>

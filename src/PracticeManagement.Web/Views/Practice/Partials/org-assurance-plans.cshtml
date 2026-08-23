@@ -1,0 +1,983 @@
+@*
+    Assurance Plans (BRD Part 2 Sec 8) -- Phase 2 Stage 3.
+
+    Screen key : `org-assurance-plans`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Assurance Plans (migration 091)
+    Feature    : screen.org-assurance-plans
+    Backend    :
+        GET    /practice/api/org-assurance/plan-statuses
+        GET    /practice/api/org-assurance/plan-types
+        GET    /practice/api/org-assurance/plans?organizationId=&statusCode=&planType=&search=&page=&pageSize=
+        POST   /practice/api/org-assurance/plans
+        GET    /practice/api/org-assurance/plans/{id}?organizationId=
+        DELETE /practice/api/org-assurance/plans/{id}?organizationId=
+        POST   /practice/api/org-assurance/plans/{id}/{submit|approve|activate|close}
+        GET    /practice/api/org-assurance/plans/{id}/items?organizationId=
+        POST   /practice/api/org-assurance/plan-items
+        DELETE /practice/api/org-assurance/plans/{planId}/items/{itemId}?organizationId=
+        GET    /practice/api/org-assurance/definitions?organizationId=&pageSize=200
+        GET    /practice/api/organizations/{orgId}/employees
+
+    UX:
+      * Two-panel layout: LEFT = plans list; RIGHT = items in the
+        selected plan.
+      * 3-dots row menus (Edit / Delete / Submit / Approve / Activate /
+        Close) driven by lifecycle status.
+      * Dialog-based Add/Edit for both plans and items.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaPlUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-calendar-days pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaPlUnavailableTitle">Assurance Plans are not available.</h2>
+        <p id="oaPlUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaPlRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaPlFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaPlFilterStatus"><option value="">All statuses</option></select>
+        <select id="oaPlFilterType"><option value="">All types</option></select>
+        <input id="oaPlSearch" type="text" placeholder="Search plan name / code..." />
+        <button class="pm-button icon" id="oaPlRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaPlAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Plan
+        </button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:minmax(400px, 480px) 1fr; gap:12px; margin-top:12px;">
+        <div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Period</th>
+                            <th style="text-align:right;">#Items</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaPlPlanBody">
+                        <tr><td colspan="7" class="pm-empty">Select an organization to load plans.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pm-pager" data-pager="oa-plans">
+                <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                <span data-pg="label">Page 1</span>
+                <button class="pm-button" data-pg="next" type="button">Next</button>
+                <span data-pg="total" class="pm-pager-total">0 total</span>
+            </div>
+        </div>
+
+        <div>
+            <div class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <span style="font-weight:600;" id="oaPlSelectedName">Select a plan to view its items.</span>
+                    <span class="pm-badge" id="oaPlSelectedCode" hidden></span>
+                </div>
+                <div>
+                    <button class="pm-button primary" id="oaPlAddItemBtn" type="button" disabled>
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Item
+                    </button>
+                </div>
+            </div>
+
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:70px;">Order</th>
+                            <th>Definition</th>
+                            <th>Scheduled</th>
+                            <th>Auditor</th>
+                            <th>Team / Department</th>
+                            <th style="width:70px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaPlItemBody">
+                        <tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* ---------- Plan dialog ---------- *@
+<dialog id="oaPlPlanDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaPlPlanForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaPlPlanDialogTitle" style="margin:0; font-size:18px;">Add Plan</h2>
+            <button type="button" id="oaPlPlanClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaPlPlanMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="oaPlPlanEditId" />
+
+        @* 121 -- Owner moved to its own 2-col picker row below.
+           minmax(0,1fr) so long option text can't force a horizontal scrollbar. *@
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Code <span style="color:#b91c1c;">*</span></span>
+                <input id="oaPlPlanCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Type <span style="color:#b91c1c;">*</span></span>
+                <select id="oaPlPlanType" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; width:100%; box-sizing:border-box;"></select>
+            </label>
+        </div>
+        @* 121 hybrid role+employee Owner picker. *@
+        <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0; margin-top:10px;">
+            <span>Owner</span>
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                <select id="oaPlPlanOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                    <option value="">Loading roles...</option>
+                </select>
+                <select id="oaPlPlanOwner" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                    <option value="">-- pick a role first --</option>
+                </select>
+            </div>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Name <span style="color:#b91c1c;">*</span></span>
+            <input id="oaPlPlanName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Period From</span>
+                <input id="oaPlPlanFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Period To</span>
+                <input id="oaPlPlanTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Description</span>
+            <textarea id="oaPlPlanDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaPlPlanCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaPlPlanSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- Item dialog ---------- *@
+<dialog id="oaPlItemDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaPlItemForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaPlItemDialogTitle" style="margin:0; font-size:18px;">Add Plan Item</h2>
+            <button type="button" id="oaPlItemClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaPlItemMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="oaPlItemEditId" />
+
+        <div style="display:grid; grid-template-columns:1fr 100px; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Assurance Definition <span style="color:#b91c1c;">*</span></span>
+                <select id="oaPlItemDefinition" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Order</span>
+                <input id="oaPlItemOrder" type="number" min="1" step="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Scheduled From</span>
+                <input id="oaPlItemFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Scheduled To</span>
+                <input id="oaPlItemTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        @* 121 hybrid role+employee Auditor picker.
+           minmax(0,1fr) + min-width:0 so long role/holder names can't overflow. *@
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start; margin-top:10px;">
+            <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Assigned Auditor</span>
+                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                    <select id="oaPlItemAuditorRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Role">
+                        <option value="">Loading roles...</option>
+                    </select>
+                    <select id="oaPlItemAuditor" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Employee (current holder)">
+                        <option value="">-- pick a role first --</option>
+                    </select>
+                </div>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Assigned Team</span>
+                <input id="oaPlItemTeam" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+            </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Assigned Department</span>
+                <input id="oaPlItemDept" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Assigned Branch</span>
+                <input id="oaPlItemBranch" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Notes</span>
+            <textarea id="oaPlItemNotes" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaPlItemCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaPlItemSubmit" class="pm-button primary">Save Item</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API      = '/practice/api/org-assurance';
+    const FEATURE  = 'screen.org-assurance-plans';
+    const U        = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId       : '',
+        status      : '',
+        planType    : '',
+        search      : '',
+        page        : 1,
+        pageSize    : 25,
+        total       : 0,
+        selectedPlanId : null,
+        selectedPlan   : null,
+        plansById   : {},
+        statuses    : [],
+        planTypes   : [],
+        definitions : []
+        // 121: employees[] removed -- picker maintains its own per-role holder cache.
+    };
+
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    async function boot() {
+        wf.wirePager('oa-plans', function (delta) {
+            const next = state.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.page = next; reloadPlans();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaPlUnavailable', 'oaPlUnavailableTitle', 'oaPlUnavailableBody',
+                'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaPlFilterOrg', orgs);
+        state.orgId = document.getElementById('oaPlFilterOrg').value || '';
+
+        const enabled = await wf.checkFeature(FEATURE, state.orgId);
+        if (!enabled) {
+            wf.unavailable('oaPlUnavailable', 'oaPlUnavailableTitle', 'oaPlUnavailableBody',
+                'Assurance Plans are not available for this organization.',
+                'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaPlRoot').hidden = false;
+
+        try { await Promise.all([loadStatuses(), loadPlanTypes()]); } catch (_) {}
+        // 121: employees no longer preloaded -- role-holder picker fetches
+        // roles + holders lazily when the plan/item dialog opens. Also
+        // invalidate any stale role/holder caches so a new org fetches fresh.
+        if (window.__roleHolderPicker && typeof window.__roleHolderPicker.invalidateCaches === 'function') {
+            window.__roleHolderPicker.invalidateCaches();
+        }
+        await loadDefinitions(state.orgId);
+        wireControls();
+        reloadPlans();
+    }
+
+    // -----------------------------------------------------------------
+    // Wiring
+    // -----------------------------------------------------------------
+    function wireControls() {
+        document.getElementById('oaPlFilterOrg').addEventListener('change', async function (e) {
+            state.orgId          = e.target.value || '';
+            state.page           = 1;
+            state.selectedPlanId = null;
+            state.selectedPlan   = null;
+            renderSelectedPlanHeader();
+            document.getElementById('oaPlAddItemBtn').disabled = true;
+            document.getElementById('oaPlItemBody').innerHTML  = '<tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>';
+            // 121: employees no longer preloaded -- role-holder picker fetches
+        // roles + holders lazily when the plan/item dialog opens. Also
+        // invalidate any stale role/holder caches so a new org fetches fresh.
+        if (window.__roleHolderPicker && typeof window.__roleHolderPicker.invalidateCaches === 'function') {
+            window.__roleHolderPicker.invalidateCaches();
+        }
+        await loadDefinitions(state.orgId);
+            reloadPlans();
+        });
+        document.getElementById('oaPlFilterStatus').addEventListener('change', function (e) {
+            state.status = e.target.value || ''; state.page = 1; reloadPlans();
+        });
+        document.getElementById('oaPlFilterType').addEventListener('change', function (e) {
+            state.planType = e.target.value || ''; state.page = 1; reloadPlans();
+        });
+        document.getElementById('oaPlSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || ''; state.page = 1;
+            clearTimeout(window.__oaPlSearchTimer);
+            window.__oaPlSearchTimer = setTimeout(reloadPlans, 250);
+        });
+        document.getElementById('oaPlRefreshBtn').addEventListener('click', function () { reloadPlans(); reloadItems(); });
+        document.getElementById('oaPlAddBtn').addEventListener('click',    function () { openPlanDialog(null); });
+        document.getElementById('oaPlAddItemBtn').addEventListener('click',function () { openItemDialog(null); });
+
+        document.getElementById('oaPlPlanClose').addEventListener('click', closePlanDialog);
+        document.getElementById('oaPlPlanCancel').addEventListener('click', closePlanDialog);
+        document.getElementById('oaPlPlanForm').addEventListener('submit', function (e) { e.preventDefault(); savePlan(); });
+
+        document.getElementById('oaPlItemClose').addEventListener('click', closeItemDialog);
+        document.getElementById('oaPlItemCancel').addEventListener('click', closeItemDialog);
+        document.getElementById('oaPlItemForm').addEventListener('submit', function (e) { e.preventDefault(); saveItem(); });
+
+        wireRowMenus();
+    }
+
+    // -----------------------------------------------------------------
+    // Lookups
+    // -----------------------------------------------------------------
+    async function loadStatuses() {
+        const r = await fetch(U(API + '/plan-statuses'), { credentials: 'same-origin' });
+        if (!r.ok) return;
+        const b = await r.json();
+        state.statuses = (b && (b.data || b.Data)) || [];
+        const sel = document.getElementById('oaPlFilterStatus');
+        for (const s of state.statuses) {
+            const opt = document.createElement('option');
+            opt.value = s.statusCode || s.StatusCode;
+            opt.textContent = s.statusName || s.StatusName;
+            sel.appendChild(opt);
+        }
+    }
+    async function loadPlanTypes() {
+        const r = await fetch(U(API + '/plan-types'), { credentials: 'same-origin' });
+        if (!r.ok) return;
+        const b = await r.json();
+        state.planTypes = (b && (b.data || b.Data)) || [];
+        const filter = document.getElementById('oaPlFilterType');
+        for (const t of state.planTypes) {
+            const opt = document.createElement('option');
+            opt.value = t.planTypeCode || t.PlanTypeCode;
+            opt.textContent = t.planTypeName || t.PlanTypeName;
+            filter.appendChild(opt);
+        }
+    }
+    async function loadDefinitions(orgId) {
+        if (!orgId) { state.definitions = []; return; }
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', orgId);
+            qs.set('page', '1'); qs.set('pageSize', '500');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { state.definitions = []; return; }
+            const payload = await r.json();
+            state.definitions = payload.rows || payload.Rows || [];
+        } catch (_) { state.definitions = []; }
+    }
+    // 121 -- loadEmployees retired.
+    // Owner + Auditor pickers use window.__roleHolderPicker which fetches
+    // roles + per-role holders lazily on dialog open.
+
+    // -----------------------------------------------------------------
+    // Plans list
+    // -----------------------------------------------------------------
+    async function reloadPlans() {
+        const body = document.getElementById('oaPlPlanBody');
+        if (!state.orgId) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Select an organization to load plans.</td></tr>';
+            wf.updatePager('oa-plans', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.status)   qs.set('statusCode', state.status);
+            if (state.planType) qs.set('planType',   state.planType);
+            if (state.search)   qs.set('search',     state.search);
+            qs.set('page',     String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/plans?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.total = Number(payload.totalCount || payload.TotalCount || 0);
+            const rows  = payload.rows || payload.Rows || [];
+            renderPlansRows(rows);
+            wf.updatePager('oa-plans', {
+                pageNumber : state.page,
+                totalCount : state.total,
+                pageSize   : state.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderPlansRows(rows) {
+        const body = document.getElementById('oaPlPlanBody');
+        state.plansById = {};
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No plans yet. Click "Add Plan" to create one.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(function (row) {
+            const id     = row.planId  || row.PlanId;
+            const code   = row.planCode|| row.PlanCode || '';
+            const name   = row.planName|| row.PlanName || '';
+            const type   = planTypeName(row.planType || row.PlanType || '');
+            const period = periodLabel(row.periodFrom || row.PeriodFrom, row.periodTo || row.PeriodTo);
+            const items  = row.itemCount || row.ItemCount || 0;
+            const stCode = row.statusCode || row.StatusCode || '';
+            const stName = row.statusName || row.StatusName || '';
+            if (id != null) state.plansById[String(id)] = row;
+            const isSelected = state.selectedPlanId != null && String(state.selectedPlanId) === String(id);
+            return '<tr data-id="' + id + '" data-status="' + wf.escape(stCode) + '"'
+                 + (isSelected ? ' style="background:#eff6ff;"' : '')
+                 + '><td>' + wf.escape(code) + '</td>'
+                 + '<td>' + wf.escape(name) + '</td>'
+                 + '<td>' + wf.escape(type) + '</td>'
+                 + '<td>' + wf.escape(period) + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(String(items)) + '</td>'
+                 + '<td>' + wf.badge(stName) + '</td>'
+                 + '<td>' + trigger(id, 'plan') + '</td>'
+                 + '</tr>';
+        }).join('');
+
+        body.querySelectorAll('tr[data-id]').forEach(function (tr) {
+            tr.addEventListener('click', function (e) {
+                if (e.target.closest('.pm-action-trigger')) return;
+                if (e.target.closest('.pm-action-menu'))    return;
+                const id = tr.getAttribute('data-id');
+                if (!id) return;
+                selectPlan(Number(id));
+            });
+        });
+    }
+
+    function selectPlan(planId) {
+        state.selectedPlanId = planId;
+        state.selectedPlan   = state.plansById[String(planId)] || null;
+        document.querySelectorAll('#oaPlPlanBody tr').forEach(function (tr) {
+            tr.style.background = (tr.getAttribute('data-id') === String(planId)) ? '#eff6ff' : '';
+        });
+        renderSelectedPlanHeader();
+        document.getElementById('oaPlAddItemBtn').disabled = false;
+        reloadItems();
+    }
+
+    function renderSelectedPlanHeader() {
+        const name = document.getElementById('oaPlSelectedName');
+        const code = document.getElementById('oaPlSelectedCode');
+        if (!state.selectedPlan) {
+            name.textContent = 'Select a plan to view its items.';
+            code.hidden = true;
+            return;
+        }
+        name.textContent = state.selectedPlan.planName || state.selectedPlan.PlanName || '';
+        code.textContent = state.selectedPlan.planCode || state.selectedPlan.PlanCode || '';
+        code.hidden = false;
+    }
+
+    async function reloadItems() {
+        const body = document.getElementById('oaPlItemBody');
+        if (!state.selectedPlanId || !state.orgId) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>';
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="6" class="pm-empty">Loading...</td></tr>';
+        try {
+            const url = U(API + '/plans/' + state.selectedPlanId + '/items?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="6" class="pm-empty">No items yet. Click "Add Item" to add one.</td></tr>';
+                return;
+            }
+            body.innerHTML = rows.map(function (row) {
+                const id       = row.planItemId  || row.PlanItemId;
+                const order    = row.itemOrder ?? row.ItemOrder ?? '';
+                const defName  = row.definitionName || row.DefinitionName || '';
+                const defCode  = row.definitionCode || row.DefinitionCode || '';
+                const from     = onlyDate(row.scheduledFrom || row.ScheduledFrom);
+                const to       = onlyDate(row.scheduledTo   || row.ScheduledTo);
+                const sched    = from || to ? (from + (to ? ' — ' + to : '')) : '';
+                // 121 hybrid role+employee auditor -- composite label with graceful fallback.
+                const auRole   = row.assignedAuditorRoleName || row.AssignedAuditorRoleName || '';
+                const auEmp    = row.assignedAuditorName     || row.AssignedAuditorName     || '';
+                const auditor  = (auRole && auEmp) ? (auRole + ' (' + auEmp + ')')
+                               : (auRole || auEmp);
+                const team     = row.assignedTeamName       || row.AssignedTeamName       || '';
+                const dept     = row.assignedDepartmentName || row.AssignedDepartmentName || '';
+                const teamDept = [team, dept].filter(Boolean).join(' / ');
+                return '<tr data-id="' + id + '">'
+                     + '<td>' + wf.escape(String(order)) + '</td>'
+                     + '<td>' + wf.escape(defName) + (defCode ? ' <span style="color:#94a3b8;">(' + wf.escape(defCode) + ')</span>' : '') + '</td>'
+                     + '<td>' + wf.escape(sched) + '</td>'
+                     + '<td>' + wf.escape(auditor) + '</td>'
+                     + '<td>' + wf.escape(teamDept) + '</td>'
+                     + '<td>' + trigger(id, 'item') + '</td>'
+                     + '</tr>';
+            }).join('');
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Plan dialog
+    // -----------------------------------------------------------------
+    function fillTypeSelect() {
+        const sel = document.getElementById('oaPlPlanType');
+        sel.innerHTML = '';
+        state.planTypes.forEach(function (t) {
+            const opt = document.createElement('option');
+            opt.value = t.planTypeCode || t.PlanTypeCode;
+            opt.textContent = t.planTypeName || t.PlanTypeName;
+            sel.appendChild(opt);
+        });
+    }
+    // 121 -- fillOwnerSelect retired.
+    // Plan Owner now uses window.__roleHolderPicker (attached in openPlanDialog).
+
+    async function openPlanDialog(id) {
+        clearPlanMessage();
+        fillTypeSelect();
+        if (id) {
+            try {
+                const r = await fetch(U(API + '/plans/' + id + '?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+                if (!r.ok) { alert('Failed to load plan (HTTP ' + r.status + ').'); return; }
+                const b = await r.json();
+                const d = (b && (b.data || b.Data)) || null;
+                if (!d) { alert('Plan not found.'); return; }
+                document.getElementById('oaPlPlanDialogTitle').textContent = 'Edit Plan';
+                document.getElementById('oaPlPlanEditId').value      = String(d.planId || d.PlanId || '');
+                document.getElementById('oaPlPlanCode').value        = d.planCode || d.PlanCode || '';
+                document.getElementById('oaPlPlanCode').disabled     = true;
+                document.getElementById('oaPlPlanType').value        = d.planType || d.PlanType || '';
+                document.getElementById('oaPlPlanName').value        = d.planName || d.PlanName || '';
+                document.getElementById('oaPlPlanFrom').value        = onlyDate(d.periodFrom || d.PeriodFrom);
+                document.getElementById('oaPlPlanTo').value          = onlyDate(d.periodTo   || d.PeriodTo);
+                document.getElementById('oaPlPlanDescription').value = d.description || d.Description || '';
+                // 121 hybrid Owner -- seed picker with plan's current snapshot.
+                if (state.orgId && window.__roleHolderPicker) {
+                    try {
+                        await window.__roleHolderPicker.attach({
+                            organizationId    : Number(state.orgId),
+                            roleSelectId      : 'oaPlPlanOwnerRole',
+                            employeeSelectId  : 'oaPlPlanOwner',
+                            initialRoleId     : d.ownerRoleId       || d.OwnerRoleId,
+                            initialRoleName   : d.ownerRoleName     || d.OwnerRoleName,
+                            initialEmployeeId : d.ownerEmployeeId   || d.OwnerEmployeeId,
+                            initialEmployeeName: d.ownerDisplayName || d.OwnerDisplayName,
+                            allowEmpty        : true
+                        });
+                    } catch (_) { /* soft-fail */ }
+                }
+            } catch (err) { alert('Failed: ' + (err.message || err)); return; }
+        } else {
+            document.getElementById('oaPlPlanDialogTitle').textContent = 'Add Plan';
+            document.getElementById('oaPlPlanForm').reset();
+            document.getElementById('oaPlPlanEditId').value  = '';
+            document.getElementById('oaPlPlanCode').disabled = false;
+            // 121 hybrid Owner -- fresh dialog, no initial snapshot.
+            if (state.orgId && window.__roleHolderPicker) {
+                try {
+                    await window.__roleHolderPicker.attach({
+                        organizationId  : Number(state.orgId),
+                        roleSelectId    : 'oaPlPlanOwnerRole',
+                        employeeSelectId: 'oaPlPlanOwner',
+                        allowEmpty      : true
+                    });
+                } catch (_) { /* soft-fail */ }
+            }
+        }
+        document.getElementById('oaPlPlanDialog').showModal();
+    }
+    function closePlanDialog() { document.getElementById('oaPlPlanDialog').close(); }
+
+    async function savePlan() {
+        const idStr = document.getElementById('oaPlPlanEditId').value;
+        // 121 hybrid Owner -- read picker state; SP auto-resolves the missing side.
+        const ownerState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaPlPlanOwnerRole', 'oaPlPlanOwner')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+
+        const body = {
+            organizationId    : Number(state.orgId),
+            planId            : idStr ? Number(idStr) : null,
+            planCode          : document.getElementById('oaPlPlanCode').value.trim(),
+            planName          : document.getElementById('oaPlPlanName').value.trim(),
+            planType          : document.getElementById('oaPlPlanType').value,
+            periodFrom        : document.getElementById('oaPlPlanFrom').value || null,
+            periodTo          : document.getElementById('oaPlPlanTo').value || null,
+            ownerRoleId       : ownerState.roleId       || null,
+            ownerRoleName     : ownerState.roleName     || null,
+            ownerEmployeeId   : ownerState.employeeId   || null,
+            ownerDisplayName  : ownerState.employeeName || null,
+            description       : document.getElementById('oaPlPlanDescription').value || null,
+            actor             : null
+        };
+        try {
+            const r = await fetch(U(API + '/plans'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { showPlanMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            closePlanDialog();
+            reloadPlans();
+        } catch (err) { showPlanMessage('error', err.message || String(err)); }
+    }
+
+    async function deletePlan(id) {
+        if (!confirm('Delete this plan (and its items)?')) return;
+        try {
+            const url = U(API + '/plans/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            if (String(state.selectedPlanId) === String(id)) {
+                state.selectedPlanId = null; state.selectedPlan = null;
+                renderSelectedPlanHeader();
+                document.getElementById('oaPlAddItemBtn').disabled = true;
+                document.getElementById('oaPlItemBody').innerHTML  = '<tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>';
+            }
+            reloadPlans();
+        } catch (err) { alert('Delete failed: ' + (err.message || err)); }
+    }
+
+    async function transition(id, action) {
+        try {
+            const url = U(API + '/plans/' + id + '/' + action);
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organizationId: Number(state.orgId), planId: Number(id), actor: null })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            reloadPlans();
+        } catch (err) { alert('Failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Item dialog
+    // -----------------------------------------------------------------
+    function fillDefinitionSelect(selectedId) {
+        const sel = document.getElementById('oaPlItemDefinition');
+        sel.innerHTML = '';
+        const ph = document.createElement('option'); ph.value = '';
+        ph.textContent = state.definitions.length ? '-- select a definition --' : '(no definitions in this organization)';
+        sel.appendChild(ph);
+        state.definitions.forEach(function (d) {
+            const id   = d.definitionId  || d.DefinitionId;
+            const code = d.definitionCode|| d.DefinitionCode || '';
+            const name = d.definitionName|| d.DefinitionName || '';
+            const opt = document.createElement('option');
+            opt.value = String(id);
+            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            opt.setAttribute('data-code', code);
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        });
+        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
+    }
+    // 121 -- fillAuditorSelect retired.
+    // Plan-item Auditor now uses window.__roleHolderPicker (see attachAuditorPicker).
+
+    async function openItemDialog(id) {
+        if (!state.selectedPlanId) { alert('Select a plan first.'); return; }
+        clearItemMessage();
+        fillDefinitionSelect();
+        // 121: fillAuditorSelect retired -- picker attached below (see attachAuditorPicker).
+        if (id) {
+            // Look up row from currently rendered items table via reloadItems-cached fetch.
+            try {
+                const url = U(API + '/plans/' + state.selectedPlanId + '/items?organizationId=' + encodeURIComponent(state.orgId));
+                const r = await fetch(url, { credentials: 'same-origin' });
+                const b = await r.json();
+                const arr = (b && (b.data || b.Data)) || [];
+                const row = arr.find(function (x) { return String(x.planItemId || x.PlanItemId) === String(id); });
+                if (!row) { alert('Item not found.'); return; }
+                document.getElementById('oaPlItemDialogTitle').textContent = 'Edit Plan Item';
+                document.getElementById('oaPlItemEditId').value = String(row.planItemId || row.PlanItemId || '');
+                fillDefinitionSelect(row.definitionId || row.DefinitionId);
+                document.getElementById('oaPlItemOrder').value  = String(row.itemOrder ?? row.ItemOrder ?? 0);
+                document.getElementById('oaPlItemFrom').value   = onlyDate(row.scheduledFrom || row.ScheduledFrom);
+                document.getElementById('oaPlItemTo').value     = onlyDate(row.scheduledTo   || row.ScheduledTo);
+                // 121 hybrid Auditor -- seed picker with item's current snapshot.
+                await attachAuditorPicker(
+                    row.assignedAuditorRoleId       || row.AssignedAuditorRoleId,
+                    row.assignedAuditorRoleName     || row.AssignedAuditorRoleName,
+                    row.assignedAuditorEmployeeId   || row.AssignedAuditorEmployeeId,
+                    row.assignedAuditorName         || row.AssignedAuditorName);
+                document.getElementById('oaPlItemTeam').value   = row.assignedTeamName       || row.AssignedTeamName       || '';
+                document.getElementById('oaPlItemDept').value   = row.assignedDepartmentName || row.AssignedDepartmentName || '';
+                document.getElementById('oaPlItemBranch').value = row.assignedBranchName     || row.AssignedBranchName     || '';
+                document.getElementById('oaPlItemNotes').value  = row.notes                  || row.Notes                  || '';
+            } catch (err) { alert('Failed: ' + (err.message || err)); return; }
+        } else {
+            document.getElementById('oaPlItemDialogTitle').textContent = 'Add Plan Item';
+            document.getElementById('oaPlItemForm').reset();
+            document.getElementById('oaPlItemEditId').value = '';
+            document.getElementById('oaPlItemOrder').value  = '1';
+            // 121 hybrid Auditor -- fresh dialog, no initial snapshot.
+            await attachAuditorPicker(null, null, null, null);
+        }
+        document.getElementById('oaPlItemDialog').showModal();
+    }
+
+    // 121 -- shared attach helper for the item Auditor picker so open/reset
+    // paths stay identical.
+    async function attachAuditorPicker(roleId, roleName, empId, empName) {
+        if (!state.orgId || !window.__roleHolderPicker) return;
+        try {
+            await window.__roleHolderPicker.attach({
+                organizationId    : Number(state.orgId),
+                roleSelectId      : 'oaPlItemAuditorRole',
+                employeeSelectId  : 'oaPlItemAuditor',
+                initialRoleId     : roleId,
+                initialRoleName   : roleName,
+                initialEmployeeId : empId,
+                initialEmployeeName: empName,
+                allowEmpty        : true
+            });
+        } catch (_) { /* soft-fail */ }
+    }
+    function closeItemDialog() { document.getElementById('oaPlItemDialog').close(); }
+
+    async function saveItem() {
+        const idStr = document.getElementById('oaPlItemEditId').value;
+        const defSel = document.getElementById('oaPlItemDefinition');
+        const defOpt = defSel.options[defSel.selectedIndex] || null;
+        if (!defSel.value) { showItemMessage('error', 'Pick an assurance definition.'); return; }
+
+        // 121 hybrid Auditor -- read picker state; SP auto-resolves the missing side.
+        const audState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaPlItemAuditorRole', 'oaPlItemAuditor')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+
+        const body = {
+            organizationId              : Number(state.orgId),
+            planId                      : Number(state.selectedPlanId),
+            planItemId                  : idStr ? Number(idStr) : null,
+            definitionId                : Number(defSel.value),
+            definitionCode              : defOpt ? (defOpt.getAttribute('data-code') || null) : null,
+            definitionName              : defOpt ? (defOpt.getAttribute('data-name') || null) : null,
+            itemOrder                   : Number(document.getElementById('oaPlItemOrder').value || 1),
+            scheduledFrom               : document.getElementById('oaPlItemFrom').value || null,
+            scheduledTo                 : document.getElementById('oaPlItemTo').value || null,
+            assignedAuditorRoleId       : audState.roleId       || null,
+            assignedAuditorRoleName     : audState.roleName     || null,
+            assignedAuditorEmployeeId   : audState.employeeId   || null,
+            assignedAuditorName         : audState.employeeName || null,
+            assignedTeamName            : document.getElementById('oaPlItemTeam').value.trim()   || null,
+            assignedDepartmentId        : null,
+            assignedDepartmentName      : document.getElementById('oaPlItemDept').value.trim()   || null,
+            assignedBranchId            : null,
+            assignedBranchName          : document.getElementById('oaPlItemBranch').value.trim() || null,
+            notes                       : document.getElementById('oaPlItemNotes').value || null,
+            actor                       : null
+        };
+        try {
+            const r = await fetch(U(API + '/plan-items'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { showItemMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            closeItemDialog();
+            reloadItems();
+            reloadPlans();   // #Items count
+        } catch (err) { showItemMessage('error', err.message || String(err)); }
+    }
+
+    async function deleteItem(id) {
+        if (!confirm('Remove this item from the plan?')) return;
+        try {
+            const url = U(API + '/plans/' + state.selectedPlanId + '/items/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            reloadItems();
+            reloadPlans();
+        } catch (err) { alert('Delete failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // 3-dot menus
+    // -----------------------------------------------------------------
+    function trigger(id, kind) {
+        return '<button type="button" class="pm-action-trigger"'
+             + ' data-id="' + id + '" data-kind="' + wf.escape(kind) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+    function buildMenu(id, kind, tr) {
+        if (kind === 'plan') {
+            const statusCode = tr.getAttribute('data-status') || '';
+            const items = [
+                { icon: 'fa-pen',   label: 'Edit',             action: function () { openPlanDialog(id); } },
+                { icon: 'fa-list-check', label: 'View Items',  action: function () { selectPlan(Number(id)); } }
+            ];
+            if (statusCode === 'Draft')     items.push({ icon: 'fa-paper-plane', label: 'Submit',   action: function () { transition(id, 'submit');   } });
+            if (statusCode === 'Submitted') items.push({ icon: 'fa-check',       label: 'Approve',  action: function () { transition(id, 'approve');  } });
+            if (statusCode === 'Approved')  items.push({ icon: 'fa-play',       label: 'Activate', action: function () { transition(id, 'activate'); } });
+            if (statusCode === 'Active')    items.push({ icon: 'fa-flag-checkered', label: 'Close', action: function () { transition(id, 'close');    } });
+            items.push({ icon: 'fa-trash', label: 'Delete', action: function () { deletePlan(id); } });
+            return items;
+        }
+        return [
+            { icon: 'fa-pen',   label: 'Edit',   action: function () { openItemDialog(id); } },
+            { icon: 'fa-trash', label: 'Remove', action: function () { deleteItem(id); } }
+        ];
+    }
+    function closeRowMenu() {
+        if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trg) {
+        if (!openMenuEl) return;
+        const r  = trg.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trg, items) {
+        closeRowMenu();
+        openMenuTrigger = trg;
+        trg.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[plans] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trg);
+    }
+    function wireRowMenus() {
+        function attach(bodyId) {
+            const body = document.getElementById(bodyId);
+            if (!body) return;
+            body.addEventListener('click', function (e) {
+                const trg = e.target.closest('.pm-action-trigger');
+                if (!trg || !body.contains(trg)) return;
+                e.preventDefault(); e.stopPropagation();
+                if (openMenuTrigger === trg) { closeRowMenu(); return; }
+                const id   = trg.getAttribute('data-id');
+                const kind = trg.getAttribute('data-kind') || '';
+                const tr   = trg.closest('tr');
+                openRowMenu(trg, buildMenu(id, kind, tr));
+            });
+        }
+        attach('oaPlPlanBody');
+        attach('oaPlItemBody');
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu'))    return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function showPlanMessage(kind, text) {
+        const el = document.getElementById('oaPlPlanMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent      = text;
+    }
+    function clearPlanMessage() {
+        const el = document.getElementById('oaPlPlanMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+    function showItemMessage(kind, text) {
+        const el = document.getElementById('oaPlItemMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent      = text;
+    }
+    function clearItemMessage() {
+        const el = document.getElementById('oaPlItemMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+    function planTypeName(code) {
+        const t = state.planTypes.find(function (x) { return (x.planTypeCode || x.PlanTypeCode) === code; });
+        return t ? (t.planTypeName || t.PlanTypeName) : code || '';
+    }
+    function periodLabel(from, to) {
+        const f = onlyDate(from); const t = onlyDate(to);
+        if (!f && !t) return '';
+        return f + (t ? ' — ' + t : '');
+    }
+    function onlyDate(v) {
+        if (!v) return '';
+        const s = String(v);
+        return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

@@ -1,0 +1,471 @@
+@*
+    Scoped Obligation Mapping (migrations 127 / 128)
+    Screen key: `workflow-scope-mapping`
+    Feature flag: `screen.workflow-scope-mapping`
+
+    Maps EVENT-DRIVEN OBLIGATIONS -- inherited from the releases the
+    organization subscribes to -- against an organisation role (people
+    onboarding / offboarding) or an asset category (commissioning /
+    decommissioning).
+
+    The first cut of this screen listed grac_practice.checklist rows. That
+    was the wrong substrate: a checklist is hand-authored in the Workflow
+    module and has no relationship to a practice or an obligation, so a
+    practice configured in GRAC-ADMIN as event-driven never appeared. It
+    now reads the obligations directly.
+
+    Deliberate UX call: EVERY event-driven obligation reaching the org is
+    listed, decided or not. A screen that shows only decided rows cannot
+    show a gap -- and the gap is what decides whether the module is trusted.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="smUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-diagram-project pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="smUnavailableTitle">Scoped Checklist Mapping is not yet enabled for this organization.</h2>
+        <p id="smUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-scope-mapping</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="smRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="smOrganization"><option value="">Loading...</option></select>
+        <select id="smDimension">
+            <option value="ORG_ROLE">Scope: Organisation Role</option>
+            <option value="ASSET_CATEGORY">Scope: Asset Category</option>
+        </select>
+        <select id="smScopeValue"><option value="">Select scope...</option></select>
+        <select id="smEvent"><option value="">All events</option></select>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;"
+               title="Show obligations from releases this organization does not subscribe to. Diagnosis only.">
+            <input type="checkbox" id="smIncludeUnsub" /> Include unsubscribed
+        </label>
+        <button class="pm-button icon" id="smRefreshBtn" type="button" title="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
+    </div>
+
+    <div id="smCoverage" style="display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 14px 0;"></div>
+    <div id="smMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:70px;">Applies</th>
+                    <th>Event</th>
+                    <th>Obligation</th>
+                    <th>Practice</th>
+                    <th style="width:200px;">Owner Role</th>
+                    <th style="width:100px;">Due (days)</th>
+                    <th style="width:130px;">State</th>
+                </tr>
+            </thead>
+            <tbody id="smBody">
+                <tr><td colspan="7" class="pm-empty">Select an organization and a scope value.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p style="font-size:12px; color:#64748b; margin-top:10px;">
+        Unticking an obligation records it as <strong>not applicable</strong> for this scope and asks
+        for a reason &mdash; it is a decision on the record, not a deletion. Rows shown greyed with
+        <em>not subscribed</em> come from a release this organization has not subscribed to and will
+        never fire.
+    </p>
+</section>
+
+@* ---------------- Not-applicable reason dialog ---------------- *@
+<dialog id="smNaDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="smNaForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Why is this not applicable?</h2>
+            <button type="button" id="smNaClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;" id="smNaObligation"></p>
+        <textarea id="smNaReason" rows="4" maxlength="1000" required
+                  style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;"
+                  placeholder="An auditor will read this. Be specific."></textarea>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+            <button type="button" id="smNaCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="smNaSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-scope-mapping';
+    const DIM_ROLE  = 'ORG_ROLE';
+    const DIM_ASSET = 'ASSET_CATEGORY';
+
+    let orgId = null;
+    let rows  = [];
+    let roleCache = null;
+    let naPending = null;   // { idx, checkbox }
+
+    // ------------------------------------------------------------------
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) {
+            return window.__wfCommon.unavailable('smUnavailable', 'smUnavailableTitle', 'smUnavailableBody',
+                'No organizations available.', '');
+        }
+        document.getElementById('smRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('smOrganization', orgs);
+
+        document.getElementById('smOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('smDimension').addEventListener('change', onDimensionChange);
+        document.getElementById('smScopeValue').addEventListener('change', reload);
+        document.getElementById('smEvent').addEventListener('change', render);
+        document.getElementById('smIncludeUnsub').addEventListener('change', reload);
+        document.getElementById('smRefreshBtn').addEventListener('click', function () {
+            roleCache = null; loadCoverage(); reload();
+        });
+        wireNaDialog();
+
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        orgId = document.getElementById('smOrganization').value || null;
+        roleCache = null;
+        if (!orgId) { setBody('<tr><td colspan="7" class="pm-empty">Select an organization.</td></tr>'); return; }
+
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) {
+            document.getElementById('smRoot').hidden = true;
+            document.getElementById('smUnavailable').hidden = false;
+            return;
+        }
+        await onDimensionChange();
+    }
+
+    function dimension() { return document.getElementById('smDimension').value; }
+
+    async function onDimensionChange() {
+        await loadScopeValues();
+        await loadCoverage();
+        await reload();
+    }
+
+    // ------------------------------------------------------------------
+    // Coverage doubles as the scope-value list -- it already returns every
+    // role / category with its decided counts, so this avoids a second
+    // round trip and the two lists cannot drift apart.
+    // ------------------------------------------------------------------
+    async function fetchCoverage() {
+        try {
+            const url = U('/practice/api/workflow/scope/obligation-coverage')
+                + '?organizationId=' + encodeURIComponent(orgId)
+                + '&scopeDimension=' + encodeURIComponent(dimension());
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) return [];
+            const b = await r.json();
+            return (b && b.rows) || [];
+        } catch (_) { return []; }
+    }
+
+    async function loadScopeValues() {
+        const sel = document.getElementById('smScopeValue');
+        sel.innerHTML = '<option value="">Loading...</option>';
+        if (!orgId) { sel.innerHTML = '<option value="">Select scope...</option>'; return; }
+
+        const cov = await fetchCoverage();
+        sel.innerHTML = '<option value="">Select scope...</option>';
+        for (const c of cov) {
+            const opt = document.createElement('option');
+            opt.value = String(c.scopeValueId);
+            // "decided / total · applicable apply" -- the two numbers answer
+            // two different questions and the label has to say which.
+            opt.textContent = c.scopeValueName
+                + '  (' + c.decidedObligations + '/' + c.totalObligations + ' decided'
+                + ', ' + (c.applicableObligations || 0) + ' apply)';
+            sel.appendChild(opt);
+        }
+        if (!cov.length) {
+            sel.innerHTML = '<option value="">(no ' + (dimension() === DIM_ROLE ? 'roles' : 'asset categories') + ' defined)</option>';
+        }
+    }
+
+    async function loadCoverage() {
+        const host = document.getElementById('smCoverage');
+        host.innerHTML = '';
+        if (!orgId) return;
+        const cov = await fetchCoverage();
+        // Worst coverage first: the strip exists to draw the eye to what is
+        // NOT decided.
+        cov.slice(0, 12).forEach(function (c) {
+            const total   = c.totalObligations || 0;
+            const decided = c.decidedObligations || 0;
+            const apply   = c.applicableObligations || 0;
+            const pct     = total ? Math.round(decided * 100 / total) : 0;
+
+            // The percentage is the GAP metric: how much has been triaged.
+            // "Fully triaged but nothing applies" is a real and legitimate
+            // state, and it must not look identical to "fully applicable" --
+            // that is exactly the reading that hid the problem before.
+            let bg, fg;
+            if (pct === 0)              { bg = '#fee2e2'; fg = '#7f1d1d'; }   // nothing decided
+            else if (pct < 100)         { bg = '#fef3c7'; fg = '#78350f'; }   // partly decided
+            else if (apply === 0)       { bg = '#e2e8f0'; fg = '#334155'; }   // all decided, none apply
+            else                        { bg = '#dcfce7'; fg = '#166534'; }   // all decided, some apply
+
+            const chip = document.createElement('span');
+            chip.style.cssText = 'padding:4px 10px; border-radius:12px; font-size:12px; cursor:pointer; background:'
+                + bg + '; color:' + fg + ';';
+            chip.textContent = c.scopeValueName + '  ' + pct + '%  ·  ' + apply + ' apply';
+            chip.title = decided + ' of ' + total + ' obligations decided; '
+                + apply + ' applicable, ' + (c.excludedObligations || 0) + ' excluded'
+                + (pct === 100 && apply === 0 ? '  (fully triaged, nothing applies)' : '');
+            chip.addEventListener('click', function () {
+                document.getElementById('smScopeValue').value = String(c.scopeValueId);
+                reload();
+            });
+            host.appendChild(chip);
+        });
+    }
+
+    // ------------------------------------------------------------------
+    async function reload() {
+        const scopeValue = document.getElementById('smScopeValue').value;
+        if (!orgId || !scopeValue) {
+            setBody('<tr><td colspan="7" class="pm-empty">Select a scope value to see its obligations.</td></tr>');
+            document.getElementById('smEvent').innerHTML = '<option value="">All events</option>';
+            return;
+        }
+        setBody('<tr><td colspan="7" class="pm-empty">Loading...</td></tr>');
+
+        const dim = dimension();
+        let url = U('/practice/api/workflow/scope/obligation-mappings')
+            + '?organizationId=' + encodeURIComponent(orgId)
+            + '&scopeDimension=' + encodeURIComponent(dim)
+            + (dim === DIM_ROLE
+                ? '&scopeRoleId=' + encodeURIComponent(scopeValue)
+                : '&scopeAssetCategoryId=' + encodeURIComponent(scopeValue));
+        if (document.getElementById('smIncludeUnsub').checked) url += '&includeUnsubscribed=true';
+
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const b = await r.json();
+            if (!r.ok) {
+                setBody('<tr><td colspan="7" class="pm-empty">' + window.__wfCommon.escape(b.error || 'Load failed') + '</td></tr>');
+                return;
+            }
+            rows = (b && b.rows) || [];
+            fillEventFilter();
+            render();
+        } catch (err) {
+            setBody('<tr><td colspan="7" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>');
+        }
+    }
+
+    // The event list is derived from the rows themselves -- no separate
+    // lookup, so the filter can never offer an event with no obligations.
+    function fillEventFilter() {
+        const sel = document.getElementById('smEvent');
+        const prev = sel.value;
+        const seen = new Map();
+        rows.forEach(function (m) { if (m.eventTypeCode) seen.set(m.eventTypeCode, m.eventTypeName || m.eventTypeCode); });
+        sel.innerHTML = '<option value="">All events</option>';
+        for (const [code, name] of seen) {
+            const opt = document.createElement('option');
+            opt.value = code; opt.textContent = name;
+            sel.appendChild(opt);
+        }
+        if (prev && seen.has(prev)) sel.value = prev;
+    }
+
+    function render() {
+        const body = document.getElementById('smBody');
+        const filter = document.getElementById('smEvent').value;
+        const shown = rows.filter(function (m) { return !filter || m.eventTypeCode === filter; });
+
+        body.innerHTML = '';
+        if (!shown.length) {
+            setBody('<tr><td colspan="7" class="pm-empty">'
+                + 'No event-driven obligations reach this organization for this scope. '
+                + 'Check that the obligation has a trigger configured in GRAC-ADMIN, that the practice is '
+                + 'marked Applicable, and that the release is subscribed.'
+                + '</td></tr>');
+            return;
+        }
+
+        shown.forEach(function (m) {
+            const idx = rows.indexOf(m);
+            const ticked = m.mappingState === 'Mapped';
+            const tr = document.createElement('tr');
+            if (!m.isSubscribed) tr.style.opacity = '.55';
+
+            const tdToggle = document.createElement('td');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = ticked;
+            cb.disabled = !m.isSubscribed;
+            cb.title = m.isSubscribed ? 'Applies to this scope' : 'Release not subscribed';
+            cb.addEventListener('change', function () { onToggle(idx, cb); });
+            tdToggle.appendChild(cb);
+            tr.appendChild(tdToggle);
+
+            tr.insertAdjacentHTML('beforeend',
+                  '<td>' + window.__wfCommon.escape(m.eventTypeName || m.eventTypeCode || '') + '</td>'
+                + '<td>' + window.__wfCommon.escape(m.obligationLabel || ('Obligation #' + m.obligationId))
+                    + (m.isSubscribed ? '' : ' <span style="color:#b91c1c; font-size:11px;">not subscribed</span>')
+                    + (m.rationale ? '<br><span style="font-size:11px; color:#94a3b8;">'
+                        + window.__wfCommon.escape(m.rationale) + '</span>' : '')
+                  + '</td>'
+                + '<td>' + window.__wfCommon.escape(m.practiceCode || m.requirementCode || '')
+                    + (m.practiceApplicability && m.practiceApplicability !== 'Applicable'
+                        ? '<br><span style="font-size:11px; color:#b45309;">'
+                          + window.__wfCommon.escape(m.practiceApplicability) + '</span>' : '')
+                  + '</td>');
+
+            const tdOwner = document.createElement('td');
+            tdOwner.innerHTML = '<select data-owner="' + idx + '" style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;"><option value="">(none)</option></select>';
+            tr.appendChild(tdOwner);
+
+            const tdDue = document.createElement('td');
+            tdDue.innerHTML = '<input data-due="' + idx + '" type="number" min="0" value="'
+                + (m.dueDays != null ? m.dueDays : '')
+                + '" style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;" />';
+            tr.appendChild(tdDue);
+
+            const tdState = document.createElement('td');
+            tdState.innerHTML = stateBadge(m.mappingState);
+            tr.appendChild(tdState);
+
+            body.appendChild(tr);
+
+            fillRoleSelect(tdOwner.querySelector('select'), m.ownerRoleId);
+            tdOwner.querySelector('select').addEventListener('change', function () { if (cb.checked) onToggle(idx, cb); });
+            tdDue.querySelector('input').addEventListener('change', function () { if (cb.checked) onToggle(idx, cb); });
+        });
+    }
+
+    function stateBadge(state) {
+        const map = {
+            'Mapped':        ['#dcfce7', '#166534', 'Applicable'],
+            'NotApplicable': ['#fef3c7', '#78350f', 'Not applicable'],
+            'Inactive':      ['#f1f5f9', '#475569', 'Inactive'],
+            'Unmapped':      ['#fee2e2', '#7f1d1d', 'Not decided']
+        };
+        const v = map[state] || map['Unmapped'];
+        return '<span style="padding:3px 9px; border-radius:10px; font-size:11px; background:'
+            + v[0] + '; color:' + v[1] + ';">' + v[2] + '</span>';
+    }
+
+    async function fillRoleSelect(sel, selectedId) {
+        if (!sel) return;
+        if (roleCache === null) {
+            try {
+                const r = await fetch(U('/practice/api/org-roles?organizationId=') + encodeURIComponent(orgId),
+                                      { credentials: 'same-origin' });
+                const j = r.ok ? await r.json() : {};
+                roleCache = j.data || j.Data || [];
+            } catch (_) { roleCache = []; }
+        }
+        for (const role of roleCache) {
+            const opt = document.createElement('option');
+            opt.value = String(role.roleId || role.RoleId);
+            opt.textContent = role.roleName || role.RoleName || '';
+            sel.appendChild(opt);
+        }
+        if (selectedId) sel.value = String(selectedId);
+    }
+
+    // ------------------------------------------------------------------
+    // Toggle. Unticking records an explicit "not applicable" decision with
+    // a reason rather than deleting the row -- an auditor asks why a check
+    // is missing, and that answer has to be a stored fact.
+    // ------------------------------------------------------------------
+    function onToggle(idx, checkbox) {
+        if (!checkbox.checked && rows[idx].mappingState === 'Mapped') {
+            naPending = { idx: idx, checkbox: checkbox };
+            document.getElementById('smNaObligation').textContent =
+                rows[idx].obligationLabel || ('Obligation #' + rows[idx].obligationId);
+            document.getElementById('smNaReason').value = '';
+            const d = document.getElementById('smNaDialog');
+            if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', 'open');
+            return;
+        }
+        save(idx, checkbox, checkbox.checked, null);
+    }
+
+    function wireNaDialog() {
+        const close = function () {
+            const d = document.getElementById('smNaDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+        };
+        const cancel = function () {
+            if (naPending) { naPending.checkbox.checked = true; naPending = null; }
+            close();
+        };
+        document.getElementById('smNaClose').addEventListener('click', cancel);
+        document.getElementById('smNaCancel').addEventListener('click', cancel);
+        document.getElementById('smNaForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const reason = document.getElementById('smNaReason').value.trim();
+            if (!reason || !naPending) return;
+            const p = naPending; naPending = null;
+            close();
+            save(p.idx, p.checkbox, false, reason);
+        });
+    }
+
+    async function save(idx, checkbox, isApplicable, rationale) {
+        const m = rows[idx];
+        const dim = dimension();
+        const scopeValue = document.getElementById('smScopeValue').value;
+        const ownerSel = document.querySelector('[data-owner="' + idx + '"]');
+        const dueInput = document.querySelector('[data-due="' + idx + '"]');
+
+        const payload = {
+            organizationId:       Number(orgId),
+            obligationId:         Number(m.obligationId),
+            eventTypeId:          Number(m.eventTypeId),
+            scopeDimension:       dim,
+            scopeRoleId:          dim === DIM_ROLE  ? Number(scopeValue) : null,
+            scopeAssetCategoryId: dim === DIM_ASSET ? Number(scopeValue) : null,
+            isApplicable:         !!isApplicable,
+            rationale:            rationale,
+            ownerRoleId:          ownerSel && ownerSel.value ? Number(ownerSel.value) : null,
+            dueDays:              dueInput && dueInput.value !== '' ? Number(dueInput.value) : null,
+            status:               'Active'
+        };
+
+        try {
+            const r = await fetch(U('/practice/api/workflow/scope/obligation-mappings'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify(payload)
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (!r.ok) {
+                window.__wfCommon.setMessage('smMessage', b.error || 'Save failed', 'error');
+                checkbox.checked = !checkbox.checked;
+                return;
+            }
+            window.__wfCommon.setMessage('smMessage', 'Saved.', 'ok');
+            setTimeout(function () { window.__wfCommon.setMessage('smMessage', null); }, 1500);
+            await loadCoverage();
+            await reload();
+        } catch (err) {
+            window.__wfCommon.setMessage('smMessage', 'Network error: ' + err.message, 'error');
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
+    function setBody(html) { document.getElementById('smBody').innerHTML = html; }
+})();
+</script>

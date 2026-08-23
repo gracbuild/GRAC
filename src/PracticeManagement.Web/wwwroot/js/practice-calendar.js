@@ -25,6 +25,56 @@
   let organizations = [];
   let selectedOrgId = "";
 
+  /* Unified Calendar filter state.
+     Persisted to localStorage per user so returning to the page restores
+     the same view. Backwards-compat with legacy calendars: if the stored
+     shape doesn't have `sourceModules`, defaults kick in. */
+  const LS_FILTERS_KEY = "pmCalFilters.v1";
+  const ALL_MODULES = [
+    "PracticeInstance", "AssurancePlan", "AssurancePlanItem",
+    "AssuranceExecution", "AssuranceObservation", "AssuranceGap"
+  ];
+  let filters = loadFilterState();
+  let definitionsCache = [];        // { id, code, name } list for the current org
+  let ownerRoleCache = [];          // roles for the current org
+  let ownerHolderCache = [];        // holders for the currently selected role
+
+  function loadFilterState() {
+    try {
+      const raw = localStorage.getItem(LS_FILTERS_KEY);
+      if (!raw) return defaultFilters();
+      const parsed = JSON.parse(raw);
+      return {
+        sourceModules  : Array.isArray(parsed.sourceModules) && parsed.sourceModules.length
+                         ? parsed.sourceModules : ALL_MODULES.slice(),
+        statuses       : Array.isArray(parsed.statuses)       ? parsed.statuses       : [],
+        criticalities  : Array.isArray(parsed.criticalities)  ? parsed.criticalities  : [],
+        ownerRoleId    : parsed.ownerRoleId    || null,
+        ownerRoleName  : parsed.ownerRoleName  || null,
+        ownerEmployeeId: parsed.ownerEmployeeId|| null,
+        ownerEmpName   : parsed.ownerEmpName   || null,
+        definitionId   : parsed.definitionId   || null,
+        search         : typeof parsed.search === "string" ? parsed.search : ""
+      };
+    } catch { return defaultFilters(); }
+  }
+  function defaultFilters() {
+    // User chose "all 6 modules ON by default" in the setup step.
+    return {
+      sourceModules  : ALL_MODULES.slice(),
+      statuses       : [],
+      criticalities  : [],
+      ownerRoleId    : null, ownerRoleName: null,
+      ownerEmployeeId: null, ownerEmpName : null,
+      definitionId   : null,
+      search         : ""
+    };
+  }
+  function saveFilterState() {
+    try { localStorage.setItem(LS_FILTERS_KEY, JSON.stringify(filters)); }
+    catch { /* quota / private-mode -- non-fatal */ }
+  }
+
   /* ── DOM refs ── */
   const grid = document.getElementById("calGrid");
   const titleEl = document.getElementById("calTitle");
@@ -52,12 +102,17 @@
       throw error;
     } finally { window.clearTimeout(timeout); }
     let result;
-    try { result = await response.json(); } catch { throw new Error("Invalid response from service."); }
+    // Same reasoning as practice.js fetchJson: a non-JSON body from a JSON
+    // endpoint is a server-side crash, so name the status rather than
+    // hiding it, and let a 403 speak for itself — the gateway's message
+    // says which grant is missing.
+    try { result = await response.json(); }
+    catch { throw new Error(`Invalid response from service (HTTP ${response.status}). Check the Practice Management Web log for this request.`); }
     if (response.status === 401) {
       window.location.assign(`${window.location.origin}${buildAppUrl("Login")}?returnUrl=${encodeURIComponent(window.location.pathname)}`);
       throw new Error("Session expired.");
     }
-    if (response.status === 403) throw new Error("You do not have permission.");
+    if (response.status === 403) throw new Error(result.message || result.Message || "You do not have permission.");
     if (response.status === 400) throw new Error(result.message || result.Message || "Invalid request.");
     if (!(result.success ?? result.Success)) throw new Error(result.message || result.Message || "Request failed.");
     return result;
@@ -71,6 +126,22 @@
       data: {}
     };
     if (selectedOrgId) payload.data.organizationId = Number(selectedOrgId);
+
+    // Unified filters -- server merges Practice Instance + 5 Assurance
+    // modules and honors these axes. Empty arrays mean "no restriction",
+    // so we only include filter keys that carry meaningful values (keeps
+    // request bodies small and log lines readable).
+    if (filters.sourceModules && filters.sourceModules.length && filters.sourceModules.length < ALL_MODULES.length)
+      payload.data.sourceModules = filters.sourceModules;
+    if (filters.statuses && filters.statuses.length)
+      payload.data.statuses = filters.statuses;
+    if (filters.criticalities && filters.criticalities.length)
+      payload.data.criticalities = filters.criticalities;
+    if (filters.ownerRoleId)     payload.data.ownerRoleId     = Number(filters.ownerRoleId);
+    if (filters.ownerEmployeeId) payload.data.ownerEmployeeId = Number(filters.ownerEmployeeId);
+    if (filters.definitionId)    payload.data.definitionIds   = [Number(filters.definitionId)];
+    if (filters.search && filters.search.trim())
+      payload.data.search = filters.search.trim();
     try {
       const result = await fetchJson(`${api}/assurance-calendar-events/query`, {
         method: "POST",
@@ -183,14 +254,23 @@
     const weeks = Math.ceil((startOffset + totalDays) / 7);
     const today = new Date();
 
-    // Build event map by date key
-    const eventMap = {};
+    // Split events into point-events (rendered as chips inside day cells)
+    // and range-events (rendered as spanning bars overlaid on the week
+    // row). Range = an event with an EndDate later than its StartDate.
+    const pointMap = {};
+    const rangeEvents = [];
     events.forEach(ev => {
-      const d = parseDate(ev.Date || ev.date);
-      if (!d) return;
-      const key = toDateKey(d);
-      if (!eventMap[key]) eventMap[key] = [];
-      eventMap[key].push(ev);
+      const start = parseDate(ev.StartDate || ev.startDate || ev.Date || ev.date);
+      if (!start) return;
+      const end = parseDate(ev.EndDate || ev.endDate);
+      const isRange = (ev.IsRange || ev.isRange) === true && end && end.getTime() > start.getTime();
+      if (isRange) {
+        rangeEvents.push({ ev, start, end });
+      } else {
+        const key = toDateKey(start);
+        if (!pointMap[key]) pointMap[key] = [];
+        pointMap[key].push(ev);
+      }
     });
 
     let html = '<div class="cal-header-row">';
@@ -199,13 +279,80 @@
 
     let dayCounter = 1 - startOffset;
     for (let w = 0; w < weeks; w++) {
-      html += '<div class="cal-week-row">';
+      // Compute this week's Sun..Sat range so we know which range-events
+      // intersect it. Then lay each intersecting event onto a "lane"
+      // (row inside the range-bar layer) using a simple greedy packing.
+      const weekStart = new Date(year, month, dayCounter);
+      const weekEnd = new Date(year, month, dayCounter + 6);
+      const weekEndInclusive = new Date(weekEnd);
+      weekEndInclusive.setHours(23, 59, 59, 999);
+      const barsThisWeek = rangeEvents
+        .filter(r => r.start <= weekEndInclusive && r.end >= weekStart)
+        .map(r => {
+          const clippedStart = r.start < weekStart ? weekStart : r.start;
+          const clippedEnd   = r.end   > weekEnd   ? weekEnd   : r.end;
+          const startCol = Math.round((clippedStart - weekStart) / 86400000); // 0..6
+          const endCol   = Math.round((clippedEnd   - weekStart) / 86400000); // 0..6
+          return {
+            ev: r.ev,
+            startCol,
+            endCol,
+            continuesLeft:  r.start < weekStart,
+            continuesRight: r.end   > weekEnd
+          };
+        })
+        .sort((a, b) => (a.startCol - b.startCol) || (b.endCol - a.endCol));
+
+      // Greedy lane packing so overlapping bars stack.
+      const lanes = []; // lanes[i] = array of bars in that lane
+      barsThisWeek.forEach(bar => {
+        let placed = false;
+        for (let i = 0; i < lanes.length; i++) {
+          const last = lanes[i][lanes[i].length - 1];
+          if (last.endCol < bar.startCol) {
+            lanes[i].push(bar);
+            bar.lane = i;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) { bar.lane = lanes.length; lanes.push([bar]); }
+      });
+
+      let rowClass = "cal-week-row";
+      if (lanes.length === 1) rowClass += " has-bars";
+      else if (lanes.length === 2) rowClass += " has-bars-2";
+      else if (lanes.length === 3) rowClass += " has-bars-3";
+      else if (lanes.length >= 4) rowClass += " has-bars-many";
+
+      html += `<div class="${rowClass}">`;
+
+      // Range bars: absolutely-positioned overlay across the 7-col grid.
+      if (barsThisWeek.length) {
+        html += `<div class="cal-range-bar-layer" style="grid-template-rows: repeat(${Math.min(lanes.length, 4)}, 18px);">`;
+        barsThisWeek.slice(0, 12).forEach((bar, idx) => {
+          const ev = bar.ev;
+          const src = (ev.SourceModule || ev.sourceModule || "PracticeInstance");
+          const kind = (ev.StatusKind || ev.statusKind || "info").toLowerCase();
+          const title = ev.Title || ev.title || ev.PracticeInstance || "";
+          const subtitle = ev.Subtitle || ev.subtitle || "";
+          const tooltip = subtitle ? `${title} — ${subtitle}` : title;
+          let barCls = `cal-range-bar source-${src} status-kind-${kind}`;
+          if (bar.continuesLeft)  barCls += " cal-range-bar-continues-left";
+          if (bar.continuesRight) barCls += " cal-range-bar-continues-right";
+          const laneRow = Math.min(bar.lane, 3) + 1;   // 1-indexed
+          const gridCol = `${bar.startCol + 1} / ${bar.endCol + 2}`; // grid-column end is exclusive
+          html += `<div class="${barCls}" data-range-event-idx="${idx}" data-week-index="${w}" style="grid-row:${laneRow}; grid-column:${gridCol};" title="${escapeAttr(tooltip)}" aria-label="${escapeAttr(tooltip)}">${escapeHtml(title)}</div>`;
+        });
+        html += '</div>';
+      }
+
       for (let d = 0; d < 7; d++) {
         const cellDate = new Date(year, month, dayCounter);
         const isOutside = cellDate.getMonth() !== month;
         const isToday = sameDay(cellDate, today);
         const key = toDateKey(cellDate);
-        const dayEvents = eventMap[key] || [];
+        const dayEvents = pointMap[key] || [];
 
         let cls = "cal-day-cell";
         if (isOutside) cls += " outside-month";
@@ -214,21 +361,19 @@
         html += `<div class="${cls}" data-date="${key}">`;
         html += `<span class="cal-day-number">${cellDate.getDate()}</span>`;
 
-        // Chip-based rendering: only the first letter is shown, the full
-        // task label lives in the native `title` tooltip. Small circular
-        // chips let us fit far more items per day than the old text
-        // pills, so we lift maxShow accordingly.
         if (dayEvents.length) {
           html += '<div class="cal-event-chips">';
           const chipMax = 6;
           dayEvents.slice(0, chipMax).forEach((ev, idx) => {
             const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
             const status = (ev.Status || ev.status || "upcoming").toLowerCase();
-            const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
-            const freq = ev.FrequencyName || ev.frequencyName || "";
+            const src = ev.SourceModule || ev.sourceModule || "PracticeInstance";
+            const kind = (ev.StatusKind || ev.statusKind || "info").toLowerCase();
+            const label = ev.Title || ev.title || ev.PracticeInstance || ev.practiceInstance || "Assurance";
+            const subtitle = ev.Subtitle || ev.subtitle || ev.FrequencyName || ev.frequencyName || "";
             const initial = chipInitial(label);
-            const tooltip = freq ? `${label} — ${freq}` : label;
-            html += `<div class="cal-event cal-event-chip criticality-${crit} status-${status}" data-event-idx="${idx}" data-date="${key}" title="${escapeAttr(tooltip)}" aria-label="${escapeAttr(tooltip)}">${escapeHtml(initial)}</div>`;
+            const tooltip = subtitle ? `${label} — ${subtitle}` : label;
+            html += `<div class="cal-event cal-event-chip source-${src} criticality-${crit} status-${status} status-kind-${kind}" data-event-idx="${idx}" data-date="${key}" title="${escapeAttr(tooltip)}" aria-label="${escapeAttr(tooltip)}">${escapeHtml(initial)}</div>`;
           });
           if (dayEvents.length > chipMax) {
             html += `<div class="cal-event-more" data-date="${key}">+${dayEvents.length - chipMax}</div>`;
@@ -243,7 +388,26 @@
 
     grid.className = "cal-grid cal-month-view";
     grid.innerHTML = html;
+    // Stash the range map so the event listener can find bars by index/week.
+    window.__pmCalRangeWeeks = grid.__rangeWeeks = grid.__rangeWeeks; // no-op
+    grid.__rangeWeeks = null; // range bars carry data attrs -- no separate map needed
     attachEventListeners();
+    // Bars aren't in .cal-event, wire them here (rebound on every render).
+    grid.querySelectorAll(".cal-range-bar").forEach(el => {
+      el.addEventListener("click", e => {
+        e.stopPropagation();
+        const wIdx = Number(el.dataset.weekIndex);
+        const rIdx = Number(el.dataset.rangeEventIdx);
+        // Recompute the same barsThisWeek slice we used at render time so
+        // the click delivers the exact same event object.
+        const weekStartClk = new Date(year, month, 1 - startOffset + wIdx * 7);
+        const weekEndClk   = new Date(year, month, 1 - startOffset + wIdx * 7 + 6);
+        const weekEndIncl  = new Date(weekEndClk); weekEndIncl.setHours(23,59,59,999);
+        const bars = rangeEvents
+          .filter(r => r.start <= weekEndIncl && r.end >= weekStartClk);
+        if (bars[rIdx]) showSidePanel(bars[rIdx].ev);
+      });
+    });
   }
 
   // ── small helpers for chip rendering ─────────────────────────────────
@@ -397,30 +561,61 @@
 
   /* ── Side Panel ── */
   function showSidePanel(ev) {
-    sidePanelTitle.textContent = ev.PracticeInstance || ev.practiceInstance || "Event Details";
+    const title = ev.Title || ev.title || ev.PracticeInstance || ev.practiceInstance || "Event Details";
+    sidePanelTitle.textContent = title;
     const status = ev.Status || ev.status || "Upcoming";
     const statusLower = status.toLowerCase();
+    const src = ev.SourceModule || ev.sourceModule || "PracticeInstance";
+    const srcLabel = ({
+      PracticeInstance:      "Practice Instance",
+      AssurancePlan:         "Assurance Plan",
+      AssurancePlanItem:     "Plan Item",
+      AssuranceExecution:    "Execution",
+      AssuranceObservation:  "Observation",
+      AssuranceGap:          "Gap"
+    })[src] || src;
+    const subtitle = ev.Subtitle || ev.subtitle || "";
+    const startDate = parseDate(ev.StartDate || ev.startDate || ev.Date || ev.date);
+    const endDate = parseDate(ev.EndDate || ev.endDate);
+    const entity = ev.EntityLabel || ev.entityLabel || "";
+    const defCode = ev.DefinitionCode || ev.definitionCode || "";
+    const ownerRole = ev.OwnerRoleName || ev.ownerRoleName || "";
+    const ownerEmp = ev.OwnerDisplayName || ev.ownerDisplayName || ev.Owner || ev.owner || "";
+    const ownerLabel = ownerRole && ownerEmp
+        ? `${ownerRole} (${ownerEmp})`
+        : (ownerRole || ownerEmp || "—");
 
-    let html = `
-      <div class="cal-detail-row"><span class="cal-detail-label">Date</span><span class="cal-detail-value">${formatDate(parseDate(ev.Date || ev.date))}</span></div>
-      <div class="cal-detail-row"><span class="cal-detail-label">Frequency</span><span class="cal-detail-value">${ev.FrequencyName || ev.frequencyName || "—"}</span></div>
-      <div class="cal-detail-row"><span class="cal-detail-label">Criticality</span><span class="cal-detail-value">${ev.Criticality || ev.criticality || "—"}</span></div>
-      <div class="cal-detail-row"><span class="cal-detail-label">Mode</span><span class="cal-detail-value">${ev.AssuranceMode || ev.assuranceMode || "—"}</span></div>
-      <div class="cal-detail-row"><span class="cal-detail-label">Owner</span><span class="cal-detail-value">${ev.Owner || ev.owner || "—"}</span></div>
-      <div class="cal-detail-row"><span class="cal-detail-label">Status</span><span class="cal-detail-value"><span class="cal-status-dot ${statusLower}"></span>${status}</span></div>`;
+    let html = `<div class="cal-side-source-badge source-${src}"><i class="fa-solid fa-tag" aria-hidden="true"></i>${escapeHtml(srcLabel)}</div>`;
+    if (subtitle) html += `<div style="color:var(--grac-muted, #758095); font-size:12px; margin-bottom:10px;">${escapeHtml(subtitle)}</div>`;
+    html += `<div class="cal-detail-row"><span class="cal-detail-label">Date</span><span class="cal-detail-value">${formatDate(startDate)}${endDate && endDate.getTime() !== (startDate ? startDate.getTime() : 0) ? " → " + formatDate(endDate) : ""}</span></div>`;
+    if (ev.FrequencyName || ev.frequencyName) html += `<div class="cal-detail-row"><span class="cal-detail-label">Cadence</span><span class="cal-detail-value">${escapeHtml(ev.FrequencyName || ev.frequencyName)}</span></div>`;
+    if (defCode) html += `<div class="cal-detail-row"><span class="cal-detail-label">Definition</span><span class="cal-detail-value">${escapeHtml(defCode)}</span></div>`;
+    if (entity) html += `<div class="cal-detail-row"><span class="cal-detail-label">Context</span><span class="cal-detail-value">${escapeHtml(entity)}</span></div>`;
+    html += `<div class="cal-detail-row"><span class="cal-detail-label">Criticality</span><span class="cal-detail-value">${escapeHtml(ev.Criticality || ev.criticality || "—")}</span></div>`;
+    if (ev.AssuranceMode || ev.assuranceMode) html += `<div class="cal-detail-row"><span class="cal-detail-label">Mode</span><span class="cal-detail-value">${escapeHtml(ev.AssuranceMode || ev.assuranceMode)}</span></div>`;
+    html += `<div class="cal-detail-row"><span class="cal-detail-label">Owner</span><span class="cal-detail-value">${escapeHtml(ownerLabel)}</span></div>`;
+    html += `<div class="cal-detail-row"><span class="cal-detail-label">Status</span><span class="cal-detail-value"><span class="cal-status-dot ${statusLower}"></span>${escapeHtml(status)}</span></div>`;
 
     if (ev.IsOverride || ev.isOverride) {
-      html += `<div class="cal-detail-row"><span class="cal-detail-label">Override</span><span class="cal-detail-value">${ev.OverrideType || ev.overrideType || "Modified"}</span></div>`;
+      html += `<div class="cal-detail-row"><span class="cal-detail-label">Override</span><span class="cal-detail-value">${escapeHtml(ev.OverrideType || ev.overrideType || "Modified")}</span></div>`;
       if (ev.OriginalDate || ev.originalDate) {
         html += `<div class="cal-detail-row"><span class="cal-detail-label">Original Date</span><span class="cal-detail-value">${formatDate(parseDate(ev.OriginalDate || ev.originalDate))}</span></div>`;
       }
     }
 
-    if (canEdit && statusLower !== "past" && statusLower !== "skipped") {
-      html += `<div class="cal-side-actions">
-        <button class="pm-button small primary" id="calEditEvent" type="button"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit Schedule</button>
-      </div>`;
+    // Action row: for PI events keep the legacy Edit Schedule button.
+    // For every module (including PI when the deep link exists) show an
+    // "Open in Assurance" link so users can jump into the module page.
+    html += `<div class="cal-side-actions">`;
+    if (canEdit && src === "PracticeInstance" && statusLower !== "past" && statusLower !== "skipped") {
+      html += `<button class="pm-button small primary" id="calEditEvent" type="button"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit Schedule</button>`;
     }
+    const deep = ev.DeepLink || ev.deepLink;
+    if (deep) {
+      const openLabel = src === "PracticeInstance" ? "Open Practice Instance" : `Open ${srcLabel}`;
+      html += `<a class="cal-side-deep-link" href="${escapeAttr(buildAppUrl(deep.replace(/^\//, "")))}" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>${escapeHtml(openLabel)}</a>`;
+    }
+    html += `</div>`;
 
     sidePanelBody.innerHTML = html;
     sidePanel.hidden = false;
@@ -706,6 +901,196 @@
     else renderDay();
   }
 
+  /* ==================================================================
+     Unified Calendar filter wiring: chips, owner picker, definition
+     dropdown, search, reset. Every change persists to localStorage and
+     triggers a refresh (which re-fetches with the new payload).
+     ================================================================== */
+  function applyFilterStateToUI() {
+    // Chip active state (source modules, statuses, criticalities).
+    document.querySelectorAll('[data-cal-filter-group] [data-cal-chip-value]').forEach(btn => {
+      const group = btn.closest('[data-cal-filter-group]').dataset.calFilterGroup; // "sourceModules" / etc.
+      const value = btn.dataset.calChipValue;
+      const active = (filters[group] || []).includes(value);
+      btn.classList.toggle('active', active);
+    });
+    // Search text.
+    const searchEl = document.getElementById("calFilterSearch");
+    if (searchEl) searchEl.value = filters.search || "";
+    // Definition + owner selects get their values set once the async
+    // populate calls complete (see loadFilterDropdowns / attachOwnerPicker).
+  }
+
+  function toggleChip(btn) {
+    const group = btn.closest('[data-cal-filter-group]').dataset.calFilterGroup;
+    const value = btn.dataset.calChipValue;
+    const list = filters[group] || [];
+    const idx = list.indexOf(value);
+    if (idx >= 0) list.splice(idx, 1); else list.push(value);
+    filters[group] = list;
+    btn.classList.toggle('active');
+    saveFilterState();
+    refresh();
+  }
+
+  document.querySelectorAll('[data-cal-filter-group] [data-cal-chip-value]').forEach(btn => {
+    btn.addEventListener('click', () => toggleChip(btn));
+  });
+
+  // Owner picker (role + employee) -- self-contained inline picker since
+  // the Calendar page doesn't render _workflow-common.cshtml. Uses the
+  // same /practice/api/org-roles endpoints as the shared picker.
+  async function loadOwnerRoles(orgId) {
+    if (!orgId) return [];
+    try {
+      const r = await fetch(buildAppUrl(`practice/api/org-roles?organizationId=${encodeURIComponent(orgId)}`),
+        { credentials: "same-origin" });
+      if (!r.ok) return [];
+      const j = await r.json();
+      return j.data || j.Data || [];
+    } catch { return []; }
+  }
+  async function loadRoleHolders(orgId, roleId) {
+    if (!orgId || !roleId) return [];
+    try {
+      const r = await fetch(buildAppUrl(`practice/api/org-roles/${encodeURIComponent(roleId)}/holders?organizationId=${encodeURIComponent(orgId)}`),
+        { credentials: "same-origin" });
+      if (!r.ok) return [];
+      const j = await r.json();
+      return j.data || j.Data || [];
+    } catch { return []; }
+  }
+  function fillOwnerRoleSelect() {
+    const sel = document.getElementById("calFilterOwnerRole");
+    if (!sel) return;
+    sel.innerHTML = '<option value="">All roles</option>';
+    ownerRoleCache.forEach(r => {
+      const id   = r.roleId || r.RoleId || r.id;
+      const name = r.roleName || r.RoleName || r.name || `Role ${id}`;
+      const opt = document.createElement("option");
+      opt.value = String(id);
+      opt.textContent = name;
+      opt.setAttribute("data-name", name);
+      if (String(filters.ownerRoleId || "") === String(id)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+  function fillOwnerEmpSelect() {
+    const sel = document.getElementById("calFilterOwnerEmp");
+    if (!sel) return;
+    sel.innerHTML = filters.ownerRoleId
+      ? '<option value="">All holders</option>'
+      : '<option value="">-- pick a role first --</option>';
+    ownerHolderCache.forEach(h => {
+      const id   = h.employeeId || h.EmployeeId || h.id;
+      const name = h.employeeName || h.EmployeeName || h.name || `Employee ${id}`;
+      const opt = document.createElement("option");
+      opt.value = String(id);
+      opt.textContent = name;
+      opt.setAttribute("data-name", name);
+      if (String(filters.ownerEmployeeId || "") === String(id)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+  async function refreshOwnerPicker(alsoResetSelection) {
+    if (!selectedOrgId) {
+      ownerRoleCache = []; ownerHolderCache = [];
+      fillOwnerRoleSelect(); fillOwnerEmpSelect();
+      return;
+    }
+    ownerRoleCache = await loadOwnerRoles(selectedOrgId);
+    if (alsoResetSelection) {
+      filters.ownerRoleId = null; filters.ownerRoleName = null;
+      filters.ownerEmployeeId = null; filters.ownerEmpName = null;
+      ownerHolderCache = [];
+    } else if (filters.ownerRoleId) {
+      ownerHolderCache = await loadRoleHolders(selectedOrgId, filters.ownerRoleId);
+    } else {
+      ownerHolderCache = [];
+    }
+    fillOwnerRoleSelect();
+    fillOwnerEmpSelect();
+  }
+
+  document.getElementById("calFilterOwnerRole")?.addEventListener("change", async e => {
+    const opt = e.target.options[e.target.selectedIndex];
+    filters.ownerRoleId = e.target.value ? Number(e.target.value) : null;
+    filters.ownerRoleName = opt ? (opt.getAttribute("data-name") || null) : null;
+    // Reset employee side when role changes.
+    filters.ownerEmployeeId = null; filters.ownerEmpName = null;
+    ownerHolderCache = filters.ownerRoleId
+      ? await loadRoleHolders(selectedOrgId, filters.ownerRoleId)
+      : [];
+    fillOwnerEmpSelect();
+    saveFilterState();
+    refresh();
+  });
+  document.getElementById("calFilterOwnerEmp")?.addEventListener("change", e => {
+    const opt = e.target.options[e.target.selectedIndex];
+    filters.ownerEmployeeId = e.target.value ? Number(e.target.value) : null;
+    filters.ownerEmpName = opt ? (opt.getAttribute("data-name") || null) : null;
+    saveFilterState();
+    refresh();
+  });
+
+  // Definition dropdown -- fetched once per org, cached across refreshes.
+  async function loadDefinitionsForOrg(orgId) {
+    if (!orgId) return [];
+    try {
+      const r = await fetch(buildAppUrl(`practice/api/org-assurance/definitions?organizationId=${encodeURIComponent(orgId)}&page=1&pageSize=200`),
+        { credentials: "same-origin" });
+      if (!r.ok) return [];
+      const j = await r.json();
+      return j.rows || j.Rows || [];
+    } catch { return []; }
+  }
+  function fillDefinitionSelect() {
+    const sel = document.getElementById("calFilterDefinition");
+    if (!sel) return;
+    sel.innerHTML = '<option value="">All definitions</option>';
+    definitionsCache.forEach(d => {
+      const id   = d.definitionId || d.DefinitionId;
+      const name = d.definitionName || d.DefinitionName || "";
+      const code = d.definitionCode || d.DefinitionCode || "";
+      const opt = document.createElement("option");
+      opt.value = String(id);
+      opt.textContent = code ? `${name} (${code})` : name;
+      if (String(filters.definitionId || "") === String(id)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+  async function refreshDefinitionsFilter() {
+    definitionsCache = selectedOrgId ? await loadDefinitionsForOrg(selectedOrgId) : [];
+    fillDefinitionSelect();
+  }
+  document.getElementById("calFilterDefinition")?.addEventListener("change", e => {
+    filters.definitionId = e.target.value ? Number(e.target.value) : null;
+    saveFilterState();
+    refresh();
+  });
+
+  // Search input -- debounced so we don't refetch on every keystroke.
+  let searchDebounce = null;
+  document.getElementById("calFilterSearch")?.addEventListener("input", e => {
+    filters.search = e.target.value || "";
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      saveFilterState();
+      refresh();
+    }, 300);
+  });
+
+  // Reset button -- clears every filter to defaults + re-syncs the UI.
+  document.getElementById("calFilterReset")?.addEventListener("click", async () => {
+    filters = defaultFilters();
+    saveFilterState();
+    applyFilterStateToUI();
+    // Owner + Definition selects need to be re-populated too.
+    await refreshOwnerPicker(true);
+    fillDefinitionSelect();
+    refresh();
+  });
+
   /* ── Wire up events ── */
   document.getElementById("calPrev")?.addEventListener("click", () => navigate(-1));
   document.getElementById("calNext")?.addEventListener("click", () => navigate(1));
@@ -716,8 +1101,15 @@
     btn.addEventListener("click", () => setView(btn.dataset.calView));
   });
 
-  orgFilter?.addEventListener("change", () => {
+  orgFilter?.addEventListener("change", async () => {
     selectedOrgId = orgFilter.value;
+    // 122 unified: owner + definition dropdowns are per-org. Reset the
+    // selected role/employee/definition so we don't carry a filter from
+    // Org A into Org B (would silently show 0 events).
+    await refreshOwnerPicker(true);
+    filters.definitionId = null;
+    saveFilterState();
+    await refreshDefinitionsFilter();
     refresh();
   });
 
@@ -741,7 +1133,12 @@
 
   /* ── Init ── */
   (async () => {
-    // Step 1: populate the Organization filter + Generate Schedule modal
+    // Step 1: restore chip / search UI from saved filter state so the
+    // page loads showing exactly what the user last saw (defaults on
+    // first visit = all modules ON, no other constraints).
+    applyFilterStateToUI();
+
+    // Step 2: populate the Organization filter + Generate Schedule modal
     // dropdown from the shared `${api}/lookups` endpoint -- same API the
     // rest of Practice Management uses, so the calendar sees exactly the
     // set of orgs the user is entitled to. If lookups auto-selects a
@@ -749,7 +1146,16 @@
     // fetch, so we don't need a second round-trip.
     await loadOrganizationsFromLookups();
 
-    // Step 2: fetch events. loadCalendarEvents still checks the response
+    // Step 3: for the current org, populate the Owner (role+employee)
+    // and Definition dropdowns in parallel with the first events fetch.
+    // These calls are per-org and cheap; running them concurrently keeps
+    // TTI snappy.
+    await Promise.all([
+      refreshOwnerPicker(false),
+      refreshDefinitionsFilter()
+    ]);
+
+    // Step 4: fetch events. loadCalendarEvents still checks the response
     // for an embedded organizations result set (legacy path) and will
     // populate the dropdowns from there if lookups came back empty.
     await refresh();

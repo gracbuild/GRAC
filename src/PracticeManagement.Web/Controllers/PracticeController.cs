@@ -6,7 +6,11 @@ using PracticeManagement.Web.Services;
 
 namespace PracticeManagement.Web.Controllers;
 
-public sealed class PracticeController(PermissionPolicy permissionPolicy, PracticeMenuService menuService, IConfiguration configuration) : Controller
+public sealed class PracticeController(
+    PermissionPolicy permissionPolicy,
+    PracticeMenuService menuService,
+    IConfiguration configuration,
+    ILogger<PracticeController> logger) : Controller
 {
     private static readonly HashSet<string> OrganizationManagementAreas = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -111,7 +115,7 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
         var screen = PracticeScreen.All.FirstOrDefault(x => x.Key.Equals(areaKey, StringComparison.OrdinalIgnoreCase));
         if (screen is null) return NotFound();
         if (!string.IsNullOrWhiteSpace(requiredGroup) && !screen.Group.Equals(requiredGroup, StringComparison.OrdinalIgnoreCase)) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return ScreenAccessDenied(screen);
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))
             return View("Calendar", screen);
         return View("Manage", screen);
@@ -140,9 +144,14 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
             || screen.Group.Equals(PracticeScreen.GovernanceGroup, StringComparison.OrdinalIgnoreCase)
             || screen.Group.Equals(PracticeScreen.OrganizationGroup, StringComparison.OrdinalIgnoreCase)
             || screen.Group.Equals(PracticeScreen.OperationsGroup, StringComparison.OrdinalIgnoreCase)
-            || screen.Group.Equals(PracticeScreen.AdministrationGroup, StringComparison.OrdinalIgnoreCase);
+            || screen.Group.Equals(PracticeScreen.AdministrationGroup, StringComparison.OrdinalIgnoreCase)
+            // Workflow & Event-Driven Assurance Engine (BRD v1.0).
+            || screen.Group.Equals(PracticeScreen.WorkflowGroup, StringComparison.OrdinalIgnoreCase)
+            // Phase 2 Assurance Management (BRD Part 2) -- Organization Portal.
+            // NEW, INDEPENDENT module; screens live under nav-assurance (migration 071).
+            || screen.Group.Equals(PracticeScreen.OrganizationAssuranceGroup, StringComparison.OrdinalIgnoreCase);
         if (!allowedGroup) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return ScreenAccessDenied(screen);
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))
             return View("Calendar", screen);
         return View("Manage", screen);
@@ -211,6 +220,30 @@ public sealed class PracticeController(PermissionPolicy permissionPolicy, Practi
         return RouteData.Values["moduleKey"]?.ToString()?.Equals("OrganizationManagement", StringComparison.OrdinalIgnoreCase) == true
             ? "/OrganizationManagement"
             : "";
+    }
+
+    // =================================================================
+    // Replaces ControllerBase.Forbid() on the two screen-render paths.
+    //
+    // Forbid() delegates to HttpContext.ForbidAsync(), which needs an
+    // authentication scheme to hand the challenge to, and this
+    // application registers none -- Program.cs has AddSession and
+    // UseAuthorization but deliberately no AddAuthentication, because
+    // identity lives in the session rather than in a ClaimsPrincipal.
+    // So Forbid() threw "No authenticationScheme was specified, and
+    // there was no DefaultForbidScheme found", and a user without the
+    // screen's VIEW grant was shown the developer exception page in
+    // Development, or /Home/Error in every other environment, instead of
+    // being told what was missing.
+    //
+    // The status code stays 403; only the body changes.
+    // =================================================================
+    private IActionResult ScreenAccessDenied(PracticeScreen screen)
+    {
+        logger.LogWarning("PracticeManagement screen blocked by menu permission. Screen={ScreenKey} User={User}",
+            screen.Key, HttpContext.Session.GetString(PracticeSessionIdentity.UserKey));
+        Response.StatusCode = StatusCodes.Status403Forbidden;
+        return View("AccessDenied", screen);
     }
 
     private IActionResult RedirectToLogin()

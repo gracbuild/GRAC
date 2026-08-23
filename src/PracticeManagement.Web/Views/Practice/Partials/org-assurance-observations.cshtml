@@ -1,0 +1,1389 @@
+@*
+    Assurance Observations (BRD Part 2 Sec 11) -- Phase 2 Stage 4.
+
+    Screen key : `org-assurance-observations`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Observations (migration 103)
+    Feature    : screen.org-assurance-observations
+    Backend    :
+        GET  /practice/api/org-assurance/observation-severities|statuses|types
+        GET  /practice/api/org-assurance/observations?organizationId=&executionId=&entityId=&statusCode=&severityCode=&observationType=&search=&page=&pageSize=
+        GET  /practice/api/org-assurance/observations/{id}?organizationId=
+        POST /practice/api/org-assurance/observations                Create + update
+        DELETE /practice/api/org-assurance/observations/{id}?organizationId=&actor=
+        POST /practice/api/org-assurance/observations/{id}/submit-review|accept|reject|resolve|close
+        GET  /practice/api/org-assurance/observations/{id}/evidence?organizationId=
+        POST /practice/api/org-assurance/observation-evidence        Attach / update
+        DELETE /practice/api/org-assurance/observations/{obsId}/evidence/{evidenceId}?organizationId=&actor=
+        GET  /practice/api/org-assurance/observations/{id}/history?organizationId=
+        + supporting reads:
+        GET  /practice/api/org-assurance/executions?organizationId=
+        GET  /practice/api/org-assurance/executions/{id}/entities?organizationId=  (optional; used in Save dialog)
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaObHeading">@Model.Title</h1>
+        <p id="oaObSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaObBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Executions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaObUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-triangle-exclamation pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaObUnavailableTitle">Observations is not available.</h2>
+        <p id="oaObUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaObRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaObPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:300px;">
+            <span>Filter by Execution (optional)</span>
+            <select id="oaObPickExec" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">All executions</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Severity</span>
+            <select id="oaObFilterSev" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">All</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Status</span>
+            <select id="oaObFilterStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">All</option>
+            </select>
+        </label>
+        <input id="oaObSearch" type="text" placeholder="Search observation / execution / entity..." />
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button primary" id="oaObNewBtn" type="button">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> New Observation
+            </button>
+        </div>
+    </div>
+
+    <div id="oaObMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div style="display:grid; grid-template-columns:minmax(480px, 640px) 1fr; gap:12px; margin-top:12px;">
+        @* LEFT: observation list *@
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <h2 style="font-size:15px; margin:0; color:#0f172a;">Observations</h2>
+                <button class="pm-button icon" id="oaObRefreshBtn" type="button" title="Refresh">
+                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Observation</th>
+                            <th>Severity</th>
+                            <th>Status</th>
+                            <th style="text-align:right;">Evidence</th>
+                            <th style="width:44px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaObListBody">
+                        <tr><td colspan="5" class="pm-empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pm-pager" data-pager="oa-ob-list">
+                <button class="pm-button" data-pg="prev" type="button">Previous</button>
+                <span data-pg="label">Page 1</span>
+                <button class="pm-button" data-pg="next" type="button">Next</button>
+                <span data-pg="total" class="pm-pager-total">0 total</span>
+            </div>
+        </div>
+
+        @* RIGHT: selected observation detail + evidence + history *@
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <h2 style="font-size:15px; margin:0; color:#0f172a;" id="oaObDetailTitle">Observation Details</h2>
+                    <p style="font-size:12px; color:#64748b; margin:4px 0 0;" id="oaObDetailSubtitle">Select an observation from the list to view details, evidence and history.</p>
+                </div>
+            </div>
+
+            <div id="oaObDetailTiles" hidden style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
+
+            <div id="oaObTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid #e2e8f0; margin-bottom:8px;">
+                <button class="pm-tab active" data-tab="detail"   type="button">Details</button>
+                <button class="pm-tab"        data-tab="evidence" type="button">Evidence</button>
+                <button class="pm-tab"        data-tab="history"  type="button">History</button>
+            </div>
+
+            <div id="oaObTabDetail" hidden style="font-size:13px;">
+                <div id="oaObDetailBlock"></div>
+                @*
+                    BRD §15 — accepted observations raise Task Candidates
+                    (199), so the observation shows the work it produced and
+                    the §14 task-action status. Shared panel, mounted by
+                    renderRelatedTasks().
+                *@
+                <div id="oaObRelatedTasks" style="margin-top:14px;"></div>
+            </div>
+
+            <div id="oaObTabEvidence" hidden>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <div></div>
+                    <button class="pm-button" id="oaObAddEvidenceBtn" type="button">
+                        <i class="fa-solid fa-paperclip"></i> Attach Evidence
+                    </button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Label / Type</th>
+                                <th>File</th>
+                                <th>Collected</th>
+                                <th style="width:44px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="oaObEvidenceBody">
+                            <tr><td colspan="4" class="pm-empty">No evidence attached.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="oaObTabHistory" hidden>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Action</th>
+                                <th>From -&gt; To</th>
+                                <th>By</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="oaObHistoryBody">
+                            <tr><td colspan="5" class="pm-empty">No history.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* Shared across Gap / Risk / Observation — see the partial's header. *@
+<partial name="Partials/_related-tasks-panel" />
+
+@* --------------------- Observation Save Dialog --------------------- *@
+<div id="oaObSaveDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
+    <div style="background:#fff; width:560px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h2 id="oaObSaveDialogTitle" style="margin:0; font-size:16px;">New Observation</h2>
+            <button class="pm-button icon" id="oaObSaveClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div style="display:grid; gap:8px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Execution <span style="color:#dc2626;">*</span></span>
+                <select id="oaObFldExec" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="">Loading...</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Entity (optional)</span>
+                <select id="oaObFldEntity" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                    <option value="">(execution-level observation)</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Title <span style="color:#dc2626;">*</span></span>
+                <input id="oaObFldTitle" type="text" maxlength="300" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Description</span>
+                <textarea id="oaObFldDesc" rows="3"></textarea>
+            </label>
+            <div style="display:flex; gap:8px;">
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Type</span>
+                    <select id="oaObFldType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"></select>
+                </label>
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Severity</span>
+                    <select id="oaObFldSev" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"></select>
+                </label>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Source Question (free text)</span>
+                <input id="oaObFldQuestion" type="text" maxlength="500" placeholder="Q code or question text..." />
+            </label>
+            @* minmax(0,1fr) + min-width:0 on children so long option text
+               (e.g. "IT Head -- Control Owner") can't overflow the slot and
+               force a horizontal scrollbar on the dialog. *@
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px;">
+                <div style="min-width:0;">
+                    <div style="font-size:12px; color:#475569; margin-bottom:2px;">
+                        Owner Role
+                    </div>
+                    <select id="oaObFldOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                        <option value="">Loading roles...</option>
+                    </select>
+                    <div style="font-size:11px; color:#64748b; margin-top:6px; margin-bottom:2px;">
+                        Owner (current holder)
+                    </div>
+                    <select id="oaObFldOwnerEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                        <option value="">Pick role first</option>
+                    </select>
+                </div>
+                <div style="min-width:0;">
+                    <div style="font-size:12px; color:#475569; margin-bottom:2px;">
+                        Reviewer Role
+                    </div>
+                    <select id="oaObFldReviewerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                        <option value="">Loading roles...</option>
+                    </select>
+                    <div style="font-size:11px; color:#64748b; margin-top:6px; margin-bottom:2px;">
+                        Reviewer (current holder)
+                    </div>
+                    <select id="oaObFldReviewerEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                        <option value="">Pick role first</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Reported By</span>
+                    <input id="oaObFldReporter" type="text" maxlength="240" />
+                </label>
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Due Date</span>
+                    <input id="oaObFldDue" type="date" />
+                </label>
+            </div>
+        </div>
+
+        <div id="oaObSaveMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+        <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+            <button class="pm-button" id="oaObSaveCancel" type="button">Cancel</button>
+            <button class="pm-button primary" id="oaObSaveSubmit" type="button">Save</button>
+        </div>
+    </div>
+</div>
+
+@* --------------------- Evidence Save Dialog --------------------- *@
+<div id="oaObEvDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
+    <div style="background:#fff; width:520px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h2 style="margin:0; font-size:16px;">Attach Evidence</h2>
+            <button class="pm-button icon" id="oaObEvClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div style="display:grid; gap:8px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Label</span>
+                <input id="oaObEvLabel" type="text" maxlength="240" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Evidence Type Code / Name</span>
+                <div style="display:flex; gap:6px;">
+                    <input id="oaObEvTypeCode" type="text" maxlength="60" placeholder="e.g. Screenshot" style="flex:1;" />
+                    <input id="oaObEvTypeName" type="text" maxlength="200" placeholder="Human-readable name"  style="flex:2;" />
+                </div>
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Storage Location</span>
+                <input id="oaObEvStorageLoc" type="text" maxlength="120" placeholder="e.g. sharepoint / s3 / local" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Storage Locator (URL / path)</span>
+                <input id="oaObEvStorageLocator" type="text" maxlength="1000" />
+            </label>
+            <div style="display:flex; gap:8px;">
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>Original File Name</span>
+                    <input id="oaObEvFileName" type="text" maxlength="400" />
+                </label>
+                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                    <span>MIME Type</span>
+                    <input id="oaObEvMime" type="text" maxlength="200" />
+                </label>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Collected By</span>
+                <input id="oaObEvCollectedBy" type="text" maxlength="240" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Notes</span>
+                <textarea id="oaObEvNotes" rows="2"></textarea>
+            </label>
+        </div>
+
+        <div id="oaObEvMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+        <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+            <button class="pm-button" id="oaObEvCancel" type="button">Cancel</button>
+            <button class="pm-button primary" id="oaObEvSubmit" type="button">Save</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .pm-tab {
+        border:none; background:transparent; padding:6px 10px; font-size:13px;
+        color:#64748b; cursor:pointer; border-bottom:2px solid transparent;
+    }
+    .pm-tab.active { color:#0f172a; border-bottom-color:#0f172a; font-weight:600; }
+    .pm-severity-dot {
+        display:inline-block; width:8px; height:8px; border-radius:50%;
+        margin-right:6px; vertical-align:middle;
+    }
+</style>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId              : null,
+        allOrgs            : [],
+        filterExecutionId  : null,
+        filterSeverity     : '',
+        filterStatus       : '',
+        search             : '',
+
+        severities         : [],
+        statuses           : [],
+        types              : [],
+
+        executionsById     : {},
+
+        list               : { page: 1, pageSize: 25, total: 0, rows: [] },
+
+        selectedObsId      : null,
+        detail             : null,
+        detailTab          : 'detail',
+        evidence           : [],
+        history            : [],
+
+        // Save dialog state
+        editingId          : null,
+        entitiesCache      : {}    // executionId -> entities[]
+    };
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readExecutionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('executionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-executions';
+    }
+
+    async function boot() {
+        document.getElementById('oaObBackBtn').setAttribute('href', backHref());
+        document.getElementById('oaObRoot').hidden = false;
+
+        wf.wirePager('oa-ob-list', function (delta) {
+            const next = state.list.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.list.total / state.list.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.list.page = next; reloadList();
+        });
+
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaObPickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        state.filterExecutionId = readExecutionIdFromUrl();
+
+        orgSel.addEventListener('change', function () {
+            state.orgId = orgSel.value || null;
+            state.filterExecutionId = null;
+            document.getElementById('oaObPickExec').innerHTML = '<option value="">All executions</option>';
+            state.list = { page: 1, pageSize: 25, total: 0, rows: [] };
+            resetDetail();
+            populateExecutionFilter().then(reloadList);
+        });
+        document.getElementById('oaObPickExec').addEventListener('change', function (e) {
+            state.filterExecutionId = e.target.value ? Number(e.target.value) : null;
+            state.list.page = 1;
+            reloadList();
+        });
+        document.getElementById('oaObFilterSev').addEventListener('change', function (e) {
+            state.filterSeverity = e.target.value || '';
+            state.list.page = 1;
+            reloadList();
+        });
+        document.getElementById('oaObFilterStatus').addEventListener('change', function (e) {
+            state.filterStatus = e.target.value || '';
+            state.list.page = 1;
+            reloadList();
+        });
+        document.getElementById('oaObSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.list.page = 1;
+            clearTimeout(window.__oaObSearchTimer);
+            window.__oaObSearchTimer = setTimeout(reloadList, 250);
+        });
+
+        wireStaticButtons();
+        wireDetailTabs();
+        wireSaveDialog();
+        wireEvidenceDialog();
+
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+
+        // Load lookups + execution filter in parallel.
+        await Promise.all([loadLookups(), populateExecutionFilter()]);
+        if (state.filterExecutionId) {
+            const sel = document.getElementById('oaObPickExec');
+            if (sel && [...sel.options].some(function (o) { return o.value === String(state.filterExecutionId); }))
+                sel.value = String(state.filterExecutionId);
+        }
+        await reloadList();
+    }
+
+    function wireStaticButtons() {
+        document.getElementById('oaObRefreshBtn').addEventListener('click', function () {
+            reloadList();
+            if (state.selectedObsId) loadDetail(state.selectedObsId);
+        });
+        document.getElementById('oaObNewBtn').addEventListener('click', function () { openSave(null); });
+    }
+
+    function wireDetailTabs() {
+        document.querySelectorAll('.pm-tab').forEach(function (t) {
+            t.addEventListener('click', function () { switchTab(t.getAttribute('data-tab')); });
+        });
+    }
+
+    function switchTab(tab) {
+        state.detailTab = tab;
+        document.querySelectorAll('.pm-tab').forEach(function (el) {
+            el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+        });
+        ['detail','evidence','history'].forEach(function (t) {
+            const el = document.getElementById('oaObTab' + t.charAt(0).toUpperCase() + t.slice(1));
+            if (el) el.hidden = (t !== tab);
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Lookups
+    // -----------------------------------------------------------------
+    async function loadLookups() {
+        try {
+            const [sev, st, tp] = await Promise.all([
+                fetch(U(API + '/observation-severities'), { credentials: 'same-origin' }).then(function (r) { return r.json(); }),
+                fetch(U(API + '/observation-statuses'),   { credentials: 'same-origin' }).then(function (r) { return r.json(); }),
+                fetch(U(API + '/observation-types'),      { credentials: 'same-origin' }).then(function (r) { return r.json(); })
+            ]);
+            state.severities = sev.data || sev.Data || [];
+            state.statuses   = st.data  || st.Data  || [];
+            state.types      = tp.data  || tp.Data  || [];
+
+            const sevF = document.getElementById('oaObFilterSev');
+            sevF.innerHTML = '<option value="">All</option>';
+            state.severities.forEach(function (s) {
+                const opt = document.createElement('option');
+                opt.value = s.severityCode || s.SeverityCode;
+                opt.textContent = s.severityName || s.SeverityName;
+                sevF.appendChild(opt);
+            });
+            const stF = document.getElementById('oaObFilterStatus');
+            stF.innerHTML = '<option value="">All</option>';
+            state.statuses.forEach(function (s) {
+                const opt = document.createElement('option');
+                opt.value = s.statusCode || s.StatusCode;
+                opt.textContent = s.statusName || s.StatusName;
+                stF.appendChild(opt);
+            });
+
+            const sevDlg = document.getElementById('oaObFldSev');
+            sevDlg.innerHTML = '';
+            state.severities.forEach(function (s) {
+                const opt = document.createElement('option');
+                opt.value = s.severityCode || s.SeverityCode;
+                opt.textContent = s.severityName || s.SeverityName;
+                if ((s.severityCode || s.SeverityCode) === 'Medium') opt.selected = true;
+                sevDlg.appendChild(opt);
+            });
+            const typeDlg = document.getElementById('oaObFldType');
+            typeDlg.innerHTML = '';
+            state.types.forEach(function (t) {
+                const opt = document.createElement('option');
+                opt.value = t.typeCode || t.TypeCode;
+                opt.textContent = t.typeName || t.TypeName;
+                if ((t.typeCode || t.TypeCode) === 'Finding') opt.selected = true;
+                typeDlg.appendChild(opt);
+            });
+        } catch (err) {
+            setMessage('error', 'Failed to load lookups: ' + (err.message || err));
+        }
+    }
+
+    async function populateExecutionFilter() {
+        const sel = document.getElementById('oaObPickExec');
+        sel.innerHTML = '<option value="">All executions</option>';
+        if (!state.orgId) return;
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/executions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const payload = await r.json();
+            const rows = payload.rows || payload.Rows || [];
+            rows.forEach(function (row) {
+                const id  = row.executionId    || row.ExecutionId;
+                const cd  = row.executionCode  || row.ExecutionCode || '';
+                const nm  = row.executionName  || row.ExecutionName || '';
+                if (id != null) state.executionsById[String(id)] = row;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = nm + (cd ? ' (' + cd + ')' : '');
+                sel.appendChild(opt);
+            });
+        } catch (_) { /* ignore */ }
+    }
+
+    // -----------------------------------------------------------------
+    // List
+    // -----------------------------------------------------------------
+    async function reloadList() {
+        const body = document.getElementById('oaObListBody');
+        if (!state.orgId) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">Pick an organization.</td></tr>';
+            wf.updatePager('oa-ob-list', { pageNumber: 1, totalCount: 0 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="5" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.filterExecutionId) qs.set('executionId',  String(state.filterExecutionId));
+            if (state.filterSeverity)    qs.set('severityCode', state.filterSeverity);
+            if (state.filterStatus)      qs.set('statusCode',   state.filterStatus);
+            if (state.search)            qs.set('search',       state.search);
+            qs.set('page',     String(state.list.page));
+            qs.set('pageSize', String(state.list.pageSize));
+            const r = await fetch(U(API + '/observations?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="5" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.list.total = Number(payload.totalCount || payload.TotalCount || 0);
+            state.list.rows  = payload.rows || payload.Rows || [];
+            renderList();
+            wf.updatePager('oa-ob-list', {
+                pageNumber : state.list.page,
+                totalCount : state.list.total,
+                pageSize   : state.list.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function severityColor(code) {
+        const s = (state.severities || []).find(function (x) {
+            return (x.severityCode || x.SeverityCode) === code;
+        });
+        return s ? (s.colorHex || s.ColorHex || '#64748b') : '#64748b';
+    }
+
+    function renderList() {
+        const body = document.getElementById('oaObListBody');
+        if (!state.list.rows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">No observations. Use "New Observation" to add one.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.list.rows.map(function (row) {
+            const id     = row.observationId    || row.ObservationId;
+            const title  = row.observationTitle || row.ObservationTitle || '';
+            const code   = row.observationCode  || row.ObservationCode  || '';
+            const exec   = row.executionName    || row.ExecutionName    || '';
+            const ent    = row.entityName       || row.EntityName       || '';
+            const sev    = row.severityCode     || row.SeverityCode     || '';
+            const sevN   = row.severityName     || row.SeverityName     || sev;
+            const status = row.statusCode       || row.StatusCode       || '';
+            const evCnt  = Number(row.evidenceCount || row.EvidenceCount || 0);
+            const gapId  = row.gapId            || row.GapId;
+            const isSel  = state.selectedObsId && String(state.selectedObsId) === String(id);
+            // Clickable Gap badge -> Gap Center (Stage 4b: many-to-many).
+            // observation.gap_id is the "primary" gap (backward compat);
+            // the row may be linked to more. We navigate to Gap Center
+            // filtered by this observation so the user sees them all.
+            const gapBadge = gapId
+                ? ' <a class="pm-badge oa-ob-gap-link" data-obs-id="' + id + '" href="#" '
+                  + 'title="Open Gap Center filtered to this observation" '
+                  + 'style="background:#fee2e2; color:#991b1b; text-decoration:none;">Gaps &raquo;</a>'
+                : '';
+            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '') + '>'
+                 + '<td><div style="font-weight:600;">' + wf.escape(title) + gapBadge + '</div>'
+                 + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div>'
+                 + '<div style="font-size:11px; color:#64748b;">' + wf.escape(exec) + (ent ? ' &middot; ' + wf.escape(ent) : '') + '</div></td>'
+                 + '<td><span class="pm-severity-dot" style="background:' + severityColor(sev) + ';"></span>' + wf.escape(sevN) + '</td>'
+                 + '<td>' + wf.badge(status) + '</td>'
+                 + '<td style="text-align:right;">' + evCnt + '</td>'
+                 + '<td><button class="pm-action-trigger" data-id="' + id + '" aria-label="Row actions">'
+                 + '<i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i></button></td>'
+                 + '</tr>';
+        }).join('');
+
+        body.querySelectorAll('tr[data-id]').forEach(function (tr) {
+            tr.addEventListener('click', function (ev) {
+                if (ev.target.closest('.pm-action-trigger')) return;
+                const id = tr.getAttribute('data-id');
+                if (id) selectObservation(Number(id));
+            });
+        });
+        body.querySelectorAll('.pm-action-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                const id = Number(btn.getAttribute('data-id'));
+                const row = state.list.rows.find(function (r) {
+                    return String(r.observationId || r.ObservationId) === String(id);
+                });
+                openRowMenu(btn, id, row);
+            });
+        });
+        // Clickable Gaps badge -> Gap Center filtered to this observation.
+        body.querySelectorAll('.oa-ob-gap-link').forEach(function (a) {
+            a.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                ev.preventDefault();
+                const oid = a.getAttribute('data-obs-id');
+                if (oid) openGapCenterForObservation(oid);
+            });
+        });
+    }
+
+    function openGapCenterForObservation(observationId) {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        // Unified Gap Center (Assurance Gaps tab pre-selected via ?tab=assurance).
+        window.location.href = base + '/Practice/Index/gaps?observationId=' + encodeURIComponent(observationId) + '&tab=assurance';
+    }
+
+    // -----------------------------------------------------------------
+    // Row action menu
+    // -----------------------------------------------------------------
+    let openMenuEl = null, openMenuTrigger = null;
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    document.addEventListener('click', function (ev) {
+        if (openMenuEl && !openMenuEl.contains(ev.target) && ev.target !== openMenuTrigger) closeRowMenu();
+    });
+
+    function openRowMenu(trigger, id, row) {
+        closeRowMenu();
+        const status = row && (row.statusCode || row.StatusCode) || '';
+        const items = [
+            { icon: 'fa-eye',  label: 'View Details',
+                action: function () { selectObservation(id); } }
+        ];
+        if (status === 'Open' || status === 'InReview') {
+            items.push({ icon: 'fa-pen', label: 'Edit', action: function () { openSave(id); } });
+        }
+        if (status === 'Open') {
+            items.push({ icon: 'fa-paper-plane', label: 'Submit for Review', action: function () { doTransition(id, 'submit-review', 'Notes (optional):'); } });
+        }
+        if (status === 'InReview') {
+            items.push({ icon: 'fa-check',       label: 'Accept',            action: function () { doTransition(id, 'accept', 'Acceptance notes (optional):'); } });
+            items.push({ icon: 'fa-xmark',       label: 'Reject',            action: function () { doTransition(id, 'reject', 'Rejection reason:'); } });
+        }
+        if (status === 'Accepted') {
+            items.push({ icon: 'fa-square-check',label: 'Resolve',           action: function () { doTransition(id, 'resolve', 'Resolution notes:'); } });
+            // Stage 4b -- the accept SP auto-generates a gap, but if
+            // that ever failed (advisory) or the gap was later
+            // soft-deleted, the observation.gap_id goes NULL. Offer a
+            // manual regenerate.
+            const gapId = row && (row.gapId || row.GapId);
+            if (!gapId) {
+                items.push({ icon: 'fa-wand-magic-sparkles', label: 'Regenerate Gap',
+                    action: function () { regenerateGap(id); } });
+            } else {
+                items.push({ icon: 'fa-arrow-up-right-from-square', label: 'Open Linked Gaps',
+                    action: function () { openGapCenterForObservation(id); } });
+            }
+        }
+        if (status === 'Resolved') {
+            items.push({ icon: 'fa-box-archive', label: 'Close',             action: function () { doTransition(id, 'close', 'Closing notes (optional):'); } });
+        }
+        if (status === 'Open' || status === 'Rejected') {
+            items.push({ icon: 'fa-trash',       label: 'Delete',            action: function () { doDelete(id); } });
+        }
+
+        const menu = document.createElement('div');
+        menu.className = 'pm-action-menu';
+        menu.innerHTML = items.map(function (it, i) {
+            return '<button type="button" data-i="' + i + '"><i class="fa-solid ' + it.icon + '"></i> ' + wf.escape(it.label) + '</button>';
+        }).join('');
+        document.body.appendChild(menu);
+
+        const rect = trigger.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top  = (rect.bottom + 4) + 'px';
+        menu.style.left = Math.max(4, rect.right - menu.offsetWidth) + 'px';
+        menu.querySelectorAll('button').forEach(function (b) {
+            b.addEventListener('click', function () {
+                const idx = Number(b.getAttribute('data-i'));
+                closeRowMenu();
+                if (items[idx] && items[idx].action) items[idx].action();
+            });
+        });
+        openMenuEl = menu; openMenuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+    }
+
+    async function doTransition(id, action, prompt) {
+        const notes = window.prompt(prompt || 'Notes (optional):', '');
+        if (notes === null) return; // user cancelled
+        try {
+            const url  = U(API + '/observations/' + id + '/' + action);
+            const body = { organizationId: Number(state.orgId), observationId: Number(id), notes: notes || null };
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Observation "' + action + '" complete.');
+            await reloadList();
+            if (state.selectedObsId === Number(id)) await loadDetail(Number(id));
+        } catch (err) {
+            setMessage('error', 'Transition failed: ' + (err.message || err));
+        }
+    }
+
+    function openGap(gapId) {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        // Unified Gap Center -- open on the Assurance tab pre-focused on this gap.
+        window.location.href = base + '/Practice/Index/gaps?gapId=' + encodeURIComponent(gapId) + '&tab=assurance';
+    }
+
+    async function regenerateGap(observationId) {
+        try {
+            const url  = U(API + '/gaps/generate');
+            const body = { organizationId: Number(state.orgId), observationId: Number(observationId) };
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            const newGap = j && (j.gapId || j.GapId);
+            setMessage('ok', 'Gap regenerated' + (newGap ? ' (#' + newGap + ')' : '') + '.');
+            await reloadList();
+            if (state.selectedObsId === Number(observationId)) await loadDetail(Number(observationId));
+        } catch (err) {
+            setMessage('error', 'Regenerate failed: ' + (err.message || err));
+        }
+    }
+
+    async function doDelete(id) {
+        if (!window.confirm('Delete this observation? This cannot be undone.')) return;
+        try {
+            const qs = new URLSearchParams({ organizationId: String(state.orgId) });
+            const url = U(API + '/observations/' + id + '?' + qs.toString());
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            setMessage('ok', 'Observation deleted.');
+            if (state.selectedObsId === Number(id)) resetDetail();
+            await reloadList();
+        } catch (err) {
+            setMessage('error', 'Delete failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Detail
+    // -----------------------------------------------------------------
+    async function selectObservation(id) {
+        state.selectedObsId = id;
+        document.querySelectorAll('#oaObListBody tr').forEach(function (tr) {
+            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? '#eff6ff' : '';
+        });
+        await loadDetail(id);
+        await Promise.all([loadEvidence(id), loadHistory(id)]);
+    }
+
+    function resetDetail() {
+        state.selectedObsId = null; state.detail = null;
+        state.evidence = []; state.history = [];
+        document.getElementById('oaObDetailTitle').textContent = 'Observation Details';
+        document.getElementById('oaObDetailSubtitle').textContent =
+            'Select an observation from the list to view details, evidence and history.';
+        document.getElementById('oaObDetailTiles').hidden = true;
+        document.getElementById('oaObDetailTiles').innerHTML = '';
+        document.getElementById('oaObTabs').hidden = true;
+        ['detail','evidence','history'].forEach(function (t) {
+            const el = document.getElementById('oaObTab' + t.charAt(0).toUpperCase() + t.slice(1));
+            if (el) el.hidden = true;
+        });
+    }
+
+    async function loadDetail(id) {
+        try {
+            const url = U(API + '/observations/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            state.detail = (payload && (payload.data || payload.Data)) || null;
+            renderDetail();
+        } catch (err) {
+            setMessage('error', 'Failed to load observation: ' + (err.message || err));
+        }
+    }
+
+    function renderDetail() {
+        const d = state.detail;
+        if (!d) { resetDetail(); return; }
+        document.getElementById('oaObDetailTitle').textContent =
+            (d.observationTitle || d.ObservationTitle || '') + '  (' + (d.observationCode || d.ObservationCode || '') + ')';
+        document.getElementById('oaObDetailSubtitle').textContent =
+            (d.executionName || d.ExecutionName || '') +
+            ((d.entityName || d.EntityName) ? '  --  ' + (d.entityName || d.EntityName) : '');
+
+        const tiles = document.getElementById('oaObDetailTiles');
+        tiles.hidden = false;
+        // 116a: show role + employee as the owner/reviewer identity.
+        const ownerLabel = (function () {
+            const rn = d.ownerRoleName || d.OwnerRoleName;
+            const en = d.ownerDisplayName || d.OwnerDisplayName;
+            if (rn && en) return rn + ' (' + en + ')';
+            if (rn)       return rn + ' (role only)';
+            if (en)       return en;
+            return '(unassigned)';
+        })();
+        const reviewerLabel = (function () {
+            const rn = d.reviewerRoleName || d.ReviewerRoleName;
+            const en = d.reviewerDisplayName || d.ReviewerDisplayName;
+            if (rn && en) return rn + ' (' + en + ')';
+            if (rn)       return rn + ' (role only)';
+            if (en)       return en;
+            return '(unassigned)';
+        })();
+        tiles.innerHTML = tile('Severity',  (d.severityName || d.SeverityName || ''), severityColor(d.severityCode || d.SeverityCode))
+                        + tile('Type',       d.observationType || d.ObservationType || '')
+                        + tile('Status',     d.statusName || d.StatusName || '')
+                        + tile('Owner',      ownerLabel)
+                        + tile('Reviewer',   reviewerLabel)
+                        + tile('Due',        formatDate(d.dueDate || d.DueDate));
+
+        document.getElementById('oaObTabs').hidden = false;
+        switchTab(state.detailTab || 'detail');
+
+        const blk = document.getElementById('oaObDetailBlock');
+        blk.innerHTML =
+            row('Description',       (d.observationDescription || d.ObservationDescription || '(none)')) +
+            row('Reported By',       (d.reportedByDisplayName  || d.ReportedByDisplayName  || '(unset)')) +
+            row('Observed',          formatDateTime(d.observedDt || d.ObservedDt)) +
+            row('Source Question',   (d.sourceQuestionText || d.SourceQuestionText ||
+                                       d.sourceQuestionCode || d.SourceQuestionCode || '(none)')) +
+            row('Accepted / Rejected / Resolved / Closed',
+                [d.acceptedDt || d.AcceptedDt, d.rejectedDt || d.RejectedDt,
+                 d.resolvedDt || d.ResolvedDt, d.closedDt   || d.ClosedDt]
+                .map(formatDateTime).map(function (x) { return x || '-'; }).join(' / ')) +
+            row('Resolution Notes',  (d.resolutionNotes || d.ResolutionNotes || '(none)')) +
+            row('Rejection Reason',  (d.rejectionReason || d.RejectionReason || '(none)'));
+
+        renderRelatedTasks(d.orgAssuranceObservationId || d.OrgAssuranceObservationId
+                           || state.selectedObsId);
+    }
+
+    // BRD §15 / §14 — an accepted observation raises a Task Candidate
+    // (migration 199), so the observation must show what became of it.
+    // Rendered by the shared _related-tasks-panel partial, which Gap and
+    // Risk mount the same way; guarded on the global so this screen still
+    // renders if the partial is ever removed.
+    function renderRelatedTasks(observationId) {
+        const host = document.getElementById('oaObRelatedTasks');
+        if (!host) return;
+        if (!window.__gracRelatedTasks || !observationId) { host.innerHTML = ''; return; }
+
+        window.__gracRelatedTasks.mount(host, {
+            sourceTypeCode: 'ContinuousAssurance',
+            sourceRecordId: observationId,
+            organizationId: state.orgId
+        });
+    }
+
+    function row(label, value) {
+        return '<div style="display:flex; gap:8px; padding:4px 0; border-bottom:1px solid #f1f5f9;">'
+             + '<div style="min-width:180px; color:#64748b;">' + wf.escape(label) + '</div>'
+             + '<div style="flex:1; white-space:pre-wrap;">' + wf.escape(value || '') + '</div>'
+             + '</div>';
+    }
+    function tile(label, value, dotColor) {
+        const dot = dotColor
+            ? '<span class="pm-severity-dot" style="background:' + dotColor + ';"></span>'
+            : '';
+        return '<div style="border:1px solid #e2e8f0; border-radius:6px; padding:6px 10px; background:#f8fafc; min-width:120px;">'
+             + '<div style="font-size:11px; color:#64748b;">' + wf.escape(label) + '</div>'
+             + '<div style="font-size:14px; font-weight:600; color:#0f172a;">' + dot + wf.escape(value || '') + '</div>'
+             + '</div>';
+    }
+
+    // -----------------------------------------------------------------
+    // Evidence
+    // -----------------------------------------------------------------
+    async function loadEvidence(id) {
+        try {
+            const url = U(API + '/observations/' + id + '/evidence?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            state.evidence = payload.data || payload.Data || [];
+            renderEvidence();
+        } catch (err) {
+            document.getElementById('oaObEvidenceBody').innerHTML =
+                '<tr><td colspan="4" class="pm-empty">Failed to load evidence: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderEvidence() {
+        const body = document.getElementById('oaObEvidenceBody');
+        if (!state.evidence.length) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">No evidence attached.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.evidence.map(function (e) {
+            const id      = e.evidenceId       || e.EvidenceId;
+            const label   = e.evidenceLabel    || e.EvidenceLabel    || '';
+            const type    = e.evidenceTypeName || e.EvidenceTypeName || e.evidenceTypeCode || e.EvidenceTypeCode || '';
+            const file    = e.originalFileName || e.OriginalFileName || '';
+            const loc     = e.storageLocator   || e.StorageLocator   || '';
+            const url     = /^https?:/i.test(loc) ? loc : null;
+            const when    = formatDateTime(e.collectedDt || e.CollectedDt);
+            const by      = e.collectedByDisplayName || e.CollectedByDisplayName || '';
+            return '<tr>'
+                 + '<td><div style="font-weight:600;">' + wf.escape(label || '(no label)') + '</div>'
+                 + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(type) + '</div></td>'
+                 + '<td>' + (url ? '<a href="' + url + '" target="_blank" rel="noopener">' + wf.escape(file || url) + '</a>'
+                                 : wf.escape(file || loc || '')) + '</td>'
+                 + '<td>' + wf.escape(when) + (by ? '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(by) + '</div>' : '') + '</td>'
+                 + '<td><button class="pm-button icon" data-id="' + id + '" data-act="del-ev" title="Delete"><i class="fa-solid fa-trash"></i></button></td>'
+                 + '</tr>';
+        }).join('');
+        body.querySelectorAll('button[data-act="del-ev"]').forEach(function (b) {
+            b.addEventListener('click', function () { deleteEvidence(Number(b.getAttribute('data-id'))); });
+        });
+    }
+
+    async function deleteEvidence(evidenceId) {
+        if (!window.confirm('Delete this evidence?')) return;
+        try {
+            const qs = new URLSearchParams({ organizationId: String(state.orgId) });
+            const url = U(API + '/observations/' + state.selectedObsId + '/evidence/' + evidenceId + '?' + qs.toString());
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status));
+                return;
+            }
+            setMessage('ok', 'Evidence deleted.');
+            await loadEvidence(state.selectedObsId);
+            await reloadList();
+        } catch (err) {
+            setMessage('error', 'Delete failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // History
+    // -----------------------------------------------------------------
+    async function loadHistory(id) {
+        try {
+            const url = U(API + '/observations/' + id + '/history?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            state.history = payload.data || payload.Data || [];
+            renderHistory();
+        } catch (err) {
+            document.getElementById('oaObHistoryBody').innerHTML =
+                '<tr><td colspan="5" class="pm-empty">Failed to load history: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderHistory() {
+        const body = document.getElementById('oaObHistoryBody');
+        if (!state.history.length) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">No history yet.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.history.map(function (h) {
+            const when   = formatDateTime(h.enteredDt || h.EnteredDt);
+            const action = h.actionCode || h.ActionCode || '';
+            const from   = h.fromStatusName || h.FromStatusName || '';
+            const to     = h.toStatusName   || h.ToStatusName   || '';
+            const trans  = (from || to) ? (wf.escape(from) + ' &rarr; ' + wf.escape(to)) : '';
+            const by     = h.actorDisplayName || h.ActorDisplayName || h.enteredBy || h.EnteredBy || '';
+            const reason = h.reasonText || h.ReasonText || '';
+            return '<tr>'
+                 + '<td>' + wf.escape(when) + '</td>'
+                 + '<td>' + wf.badge(action) + '</td>'
+                 + '<td>' + trans + '</td>'
+                 + '<td>' + wf.escape(by) + '</td>'
+                 + '<td style="max-width:280px; white-space:pre-wrap;">' + wf.escape(reason) + '</td>'
+                 + '</tr>';
+        }).join('');
+    }
+
+    // -----------------------------------------------------------------
+    // Save dialog (create / edit)
+    // -----------------------------------------------------------------
+    function wireSaveDialog() {
+        document.getElementById('oaObSaveClose').addEventListener('click', closeSave);
+        document.getElementById('oaObSaveCancel').addEventListener('click', closeSave);
+        document.getElementById('oaObSaveSubmit').addEventListener('click', submitSave);
+        document.getElementById('oaObFldExec').addEventListener('change', function (e) {
+            const id = e.target.value ? Number(e.target.value) : null;
+            populateEntityDropdown(id);
+        });
+    }
+
+    async function openSave(editId) {
+        state.editingId = editId;
+        document.getElementById('oaObSaveDialogTitle').textContent = editId ? 'Edit Observation' : 'New Observation';
+        document.getElementById('oaObSaveMsg').hidden = true;
+        document.getElementById('oaObFldTitle').value    = '';
+        document.getElementById('oaObFldDesc').value     = '';
+        document.getElementById('oaObFldQuestion').value = '';
+        document.getElementById('oaObFldReporter').value = '';
+        document.getElementById('oaObFldDue').value      = '';
+
+        // Populate execution dropdown from cached filter picker + list rows.
+        const execSel = document.getElementById('oaObFldExec');
+        execSel.innerHTML = '<option value="">-- pick execution --</option>';
+        Object.values(state.executionsById).forEach(function (row) {
+            const id  = row.executionId    || row.ExecutionId;
+            const cd  = row.executionCode  || row.ExecutionCode || '';
+            const nm  = row.executionName  || row.ExecutionName || '';
+            const opt = document.createElement('option');
+            opt.value = String(id);
+            opt.textContent = nm + (cd ? ' (' + cd + ')' : '');
+            execSel.appendChild(opt);
+        });
+
+        let presetExec = state.filterExecutionId;
+        if (editId) {
+            const row = state.list.rows.find(function (r) {
+                return String(r.observationId || r.ObservationId) === String(editId);
+            });
+            if (row) {
+                presetExec = row.executionId || row.ExecutionId;
+                document.getElementById('oaObFldTitle').value    = row.observationTitle || row.ObservationTitle || '';
+                const sev = row.severityCode || row.SeverityCode || 'Medium';
+                document.getElementById('oaObFldSev').value = sev;
+                const type = row.observationType || row.ObservationType || 'Finding';
+                document.getElementById('oaObFldType').value = type;
+                // Full detail includes role_id/role_name for hybrid picker init.
+                loadDetailForDialog(editId);
+            }
+        }
+        if (presetExec) execSel.value = String(presetExec);
+        await populateEntityDropdown(execSel.value ? Number(execSel.value) : null);
+
+        // 116a/117 hybrid role+employee pickers -- attach on open,
+        // detail load below will re-attach with initial values.
+        if (state.orgId) {
+            await window.__roleHolderPicker.attach({
+                organizationId  : Number(state.orgId),
+                roleSelectId    : 'oaObFldOwnerRole',
+                employeeSelectId: 'oaObFldOwnerEmp',
+                allowEmpty      : true
+            });
+            await window.__roleHolderPicker.attach({
+                organizationId  : Number(state.orgId),
+                roleSelectId    : 'oaObFldReviewerRole',
+                employeeSelectId: 'oaObFldReviewerEmp',
+                allowEmpty      : true
+            });
+        }
+
+        document.getElementById('oaObSaveDialog').hidden = false;
+    }
+
+    async function loadDetailForDialog(id) {
+        try {
+            const url = U(API + '/observations/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const payload = await r.json();
+            const d = (payload && (payload.data || payload.Data)) || null;
+            if (!d) return;
+            document.getElementById('oaObFldDesc').value     = d.observationDescription || d.ObservationDescription || '';
+            document.getElementById('oaObFldReporter').value = d.reportedByDisplayName || d.ReportedByDisplayName || '';
+            document.getElementById('oaObFldQuestion').value = d.sourceQuestionText || d.SourceQuestionText || d.sourceQuestionCode || d.SourceQuestionCode || '';
+            const due = d.dueDate || d.DueDate;
+            document.getElementById('oaObFldDue').value = due ? String(due).slice(0, 10) : '';
+            // Entity preselection
+            const entId = d.entityId || d.EntityId;
+            const execId = d.executionId || d.ExecutionId;
+            if (entId && execId) {
+                await populateEntityDropdown(Number(execId));
+                document.getElementById('oaObFldEntity').value = String(entId);
+            }
+            // Hybrid role+employee pickers -- re-attach with the observation's snapshot.
+            if (state.orgId) {
+                await window.__roleHolderPicker.attach({
+                    organizationId    : Number(state.orgId),
+                    roleSelectId      : 'oaObFldOwnerRole',
+                    employeeSelectId  : 'oaObFldOwnerEmp',
+                    initialRoleId     : d.ownerRoleId || d.OwnerRoleId,
+                    initialRoleName   : d.ownerRoleName || d.OwnerRoleName,
+                    initialEmployeeId : d.ownerEmployeeId || d.OwnerEmployeeId,
+                    initialEmployeeName: d.ownerDisplayName || d.OwnerDisplayName,
+                    allowEmpty        : true
+                });
+                await window.__roleHolderPicker.attach({
+                    organizationId    : Number(state.orgId),
+                    roleSelectId      : 'oaObFldReviewerRole',
+                    employeeSelectId  : 'oaObFldReviewerEmp',
+                    initialRoleId     : d.reviewerRoleId || d.ReviewerRoleId,
+                    initialRoleName   : d.reviewerRoleName || d.ReviewerRoleName,
+                    initialEmployeeId : d.reviewerEmployeeId || d.ReviewerEmployeeId,
+                    initialEmployeeName: d.reviewerDisplayName || d.ReviewerDisplayName,
+                    allowEmpty        : true
+                });
+            }
+        } catch (_) { /* soft-fail */ }
+    }
+
+    async function populateEntityDropdown(executionId) {
+        const sel = document.getElementById('oaObFldEntity');
+        sel.innerHTML = '<option value="">(execution-level observation)</option>';
+        if (!executionId) return;
+        try {
+            let entities = state.entitiesCache[String(executionId)];
+            if (!entities) {
+                const qs = new URLSearchParams();
+                qs.set('organizationId', state.orgId);
+                qs.set('page', '1'); qs.set('pageSize', '500');
+                const r = await fetch(U(API + '/executions/' + executionId + '/entities?' + qs.toString()), { credentials: 'same-origin' });
+                if (!r.ok) return;
+                const payload = await r.json();
+                entities = payload.rows || payload.Rows || [];
+                state.entitiesCache[String(executionId)] = entities;
+            }
+            entities.forEach(function (e) {
+                const id = e.executionEntityId || e.ExecutionEntityId;
+                const dim = e.dimensionName || e.DimensionName || e.dimensionCode || e.DimensionCode || '';
+                const nm  = e.entityName || e.EntityName || '';
+                const cd  = e.entityCode || e.EntityCode || '';
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = dim + ' :: ' + nm + (cd ? ' (' + cd + ')' : '');
+                sel.appendChild(opt);
+            });
+        } catch (_) { /* ignore */ }
+    }
+
+    function closeSave() { document.getElementById('oaObSaveDialog').hidden = true; }
+
+    async function submitSave() {
+        const msgEl = document.getElementById('oaObSaveMsg');
+        msgEl.hidden = true;
+        const execId = document.getElementById('oaObFldExec').value;
+        if (!execId) { showDlgMsg(msgEl, 'error', 'Pick an execution.'); return; }
+        const title = (document.getElementById('oaObFldTitle').value || '').trim();
+        if (!title) { showDlgMsg(msgEl, 'error', 'Title is required.'); return; }
+
+        const entId = document.getElementById('oaObFldEntity').value;
+        // 116a hybrid ownership -- read both role and employee snapshots.
+        const owner    = window.__roleHolderPicker.readState('oaObFldOwnerRole',    'oaObFldOwnerEmp');
+        const reviewer = window.__roleHolderPicker.readState('oaObFldReviewerRole', 'oaObFldReviewerEmp');
+        const body = {
+            organizationId              : Number(state.orgId),
+            observationId               : state.editingId,
+            executionId                 : Number(execId),
+            executionEntityId           : entId ? Number(entId) : null,
+            observationTitle            : title,
+            observationDescription      : val('oaObFldDesc') || null,
+            observationType             : document.getElementById('oaObFldType').value,
+            severityCode                : document.getElementById('oaObFldSev').value,
+            sourceQuestionText          : val('oaObFldQuestion') || null,
+            assignedOwnerEmployeeId     : owner.employeeId,
+            assignedOwnerDisplayName    : owner.employeeName,
+            assignedOwnerRoleId         : owner.roleId,
+            assignedOwnerRoleName       : owner.roleName,
+            assignedReviewerEmployeeId  : reviewer.employeeId,
+            assignedReviewerDisplayName : reviewer.employeeName,
+            assignedReviewerRoleId      : reviewer.roleId,
+            assignedReviewerRoleName    : reviewer.roleName,
+            reportedByDisplayName       : val('oaObFldReporter') || null,
+            dueDate                     : val('oaObFldDue')      || null,
+            actor                       : null
+        };
+        try {
+            const url = U(API + '/observations');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                showDlgMsg(msgEl, 'error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            closeSave();
+            setMessage('ok', state.editingId ? 'Observation updated.' : 'Observation created.');
+            const newId = j && (j.observationId || j.ObservationId);
+            await reloadList();
+            if (newId) await selectObservation(Number(newId));
+        } catch (err) {
+            showDlgMsg(msgEl, 'error', 'Save failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Evidence dialog
+    // -----------------------------------------------------------------
+    function wireEvidenceDialog() {
+        document.getElementById('oaObAddEvidenceBtn').addEventListener('click', openEvidence);
+        document.getElementById('oaObEvClose').addEventListener('click', closeEvidence);
+        document.getElementById('oaObEvCancel').addEventListener('click', closeEvidence);
+        document.getElementById('oaObEvSubmit').addEventListener('click', submitEvidence);
+    }
+    function openEvidence() {
+        if (!state.selectedObsId) { setMessage('error', 'Select an observation first.'); return; }
+        document.getElementById('oaObEvMsg').hidden = true;
+        ['oaObEvLabel','oaObEvTypeCode','oaObEvTypeName','oaObEvStorageLoc','oaObEvStorageLocator',
+         'oaObEvFileName','oaObEvMime','oaObEvCollectedBy','oaObEvNotes'].forEach(function (id) {
+            const el = document.getElementById(id); if (el) el.value = '';
+        });
+        document.getElementById('oaObEvDialog').hidden = false;
+    }
+    function closeEvidence() { document.getElementById('oaObEvDialog').hidden = true; }
+    async function submitEvidence() {
+        const msgEl = document.getElementById('oaObEvMsg');
+        msgEl.hidden = true;
+        const body = {
+            organizationId         : Number(state.orgId),
+            observationId          : Number(state.selectedObsId),
+            evidenceId             : null,
+            evidenceLabel          : val('oaObEvLabel') || null,
+            evidenceTypeCode       : val('oaObEvTypeCode') || null,
+            evidenceTypeName       : val('oaObEvTypeName') || null,
+            storageLocation        : val('oaObEvStorageLoc') || null,
+            storageLocator         : val('oaObEvStorageLocator') || null,
+            originalFileName       : val('oaObEvFileName') || null,
+            mimeType               : val('oaObEvMime') || null,
+            collectedByDisplayName : val('oaObEvCollectedBy') || null,
+            notes                  : val('oaObEvNotes') || null,
+            actor                  : null
+        };
+        try {
+            const url = U(API + '/observation-evidence');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                showDlgMsg(msgEl, 'error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            closeEvidence();
+            setMessage('ok', 'Evidence attached.');
+            await loadEvidence(state.selectedObsId);
+            await reloadList();
+        } catch (err) {
+            showDlgMsg(msgEl, 'error', 'Save failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function val(id) { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; }
+    function showDlgMsg(el, kind, text) {
+        el.hidden = false; el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaObMessage');
+        el.hidden = false; el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    function formatDate(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return String(v);
+        return d.toISOString().slice(0, 10);
+    }
+    function formatDateTime(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return String(v);
+        return d.toISOString().replace('T', ' ').slice(0, 19);
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

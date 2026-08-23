@@ -1,0 +1,496 @@
+@*
+    Gap Detail  (Gap Centre v2 -- simplified lifecycle, migration 174)
+    Rendered from Manage.cshtml when Model.Key == "gap-detail".
+
+    Route: /Practice/Index/gap-detail?gapId=NNN
+
+    Layout (single column):
+      - Top toolbar: back link, state chip, compact stepper pills, refresh
+      - Action strip: only the actions still meaningful in the collapsed
+        model (Mark Invalid, Mark Duplicate). "Analyse" happens implicitly
+        via the Save Analysis button; auto-transition to Delegated fires
+        server-side after save succeeds.
+      - Tabs: Analysis, Metadata (History moved inside Metadata as a
+        compact timeline).
+      - Analysis tab: form + linked-artefacts chip strip that appears
+        below the form and shows the Task / Exception / Risk auto-created
+        when analysis was saved.
+      - Downstream tab / #dsAddModal / Left-side pane / Link Artefact
+        top button REMOVED (sir's full simplification). Task, Exception
+        and Risk all auto-create in their respective Centres from the
+        analysis decisions -- no manual linking needed.
+
+    Every write path stamps caller identity server-side (Web tier),
+    never trusts the browser field.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="gapDetailTitle">Gap Details</h1>
+        <p id="gapDetailSubtitle">Validate, analyse, delegate.</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="gapDetailRoot" hidden>
+
+    <div class="pm-toolbar gap-detail-toolbar">
+        <a class="pm-button" href="~/Practice/Index/gaps">
+            <i class="fa-solid fa-arrow-left"></i> Back to Gap Centre
+        </a>
+        @* Compact horizontal stepper -- current state is highlighted so a
+           standalone chip is redundant. JS labels states by display name
+           (state_code 'Delegated' shows as 'Analysed' per migration 175). *@
+        <div class="gap-stepper-compact" id="gapStepperCompact" aria-label="Gap lifecycle"></div>
+        <button class="pm-button icon" id="gapDetailRefresh" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    @* Available actions strip. JS populates with the transitions the
+       current state allows (Mark Invalid, Mark Duplicate, sometimes
+       nothing). Auto-hidden in terminal states. *@
+    <div class="gap-action-strip" id="gapActionStrip"></div>
+
+    @* Read-only banner (from 173). Kept identical. *@
+    <div id="gapTerminalInvalidBanner" class="gap-terminal-banner" hidden>
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <div>
+            <strong id="gapTerminalInvalidTitle">This gap is closed to further analysis.</strong>
+            <p id="gapTerminalInvalidText">
+                The gap was marked as Invalid or Duplicate during validation.
+                Analysis and downstream artefacts are not applicable. Data
+                below (if any) is kept read-only for audit.
+            </p>
+        </div>
+    </div>
+
+    @* Compact duplicate-parent strip. Full parent analysis is rendered
+       into the Analysis tab (below) since the current gap has no
+       analysis of its own; showing it in the disabled form fields
+       avoids duplicating the same data twice on the page. *@
+    <div id="gapDuplicateCard" class="gap-duplicate-strip" hidden>
+        <i class="fa-solid fa-clone" aria-hidden="true"></i>
+        <div>
+            <strong>Duplicate of <a id="gapDuplicateParentLink" href="#"></a></strong>
+            <p class="pm-hint">The analysis shown below is the parent gap's -- this gap has no analysis of its own.</p>
+        </div>
+    </div>
+
+    @* Invalid rationale card (also 177). Shown when the current gap is
+       Invalid; renders the reason captured at mark-invalid time. *@
+    <div id="gapInvalidReasonCard" class="gap-invalid-card" hidden>
+        <strong>Invalid rationale</strong>
+        <p id="gapInvalidReasonText"></p>
+    </div>
+
+    @* SLA banner (migration 184). Populated by gap-detail.js from the
+       gap header once loaded. Shows the auto-matched or overridden SLA
+       for this gap and exposes the Override action. Hidden when the gap
+       has no severity_code (nothing to match against). *@
+    <div id="gapSlaCard"
+         style="display:none; margin:12px 0; padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:#0f172a;">
+                <span id="gapSlaSourceBadge" class="pm-badge"
+                      style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">Auto</span>
+                <strong id="gapSlaMasterName">--</strong>
+                <span id="gapSlaDaysText" style="color:#475569;">-- days</span>
+                <span id="gapSlaDueText" style="color:#475569;"></span>
+                <span id="gapSlaPendingHint" style="color:#78350f; font-size:12px;" hidden>
+                    <i class="fa-solid fa-clock" aria-hidden="true"></i>
+                    Override request pending approval.
+                </span>
+            </div>
+            <button type="button" id="gapSlaOverrideBtn" class="pm-button">
+                <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Override SLA
+            </button>
+        </div>
+    </div>
+
+    <div class="pm-tabs" role="tablist" aria-label="Gap detail tabs">
+        <button role="tab" class="active" data-tab="analysis" aria-selected="true">Analysis</button>
+        <button role="tab" data-tab="metadata" aria-selected="false">Metadata &amp; History</button>
+    </div>
+
+    <div class="pm-tab-panel" data-panel="analysis">
+        <form id="gapAnalysisForm" novalidate>
+            <div class="pm-form-grid">
+                <label>
+                    <span>Detection Method</span>
+                    <select id="anDetectionMethodCode">
+                        <option value="">--</option>
+                        <option value="Manual">Manual</option>
+                        <option value="Assurance">Assurance observation</option>
+                        <option value="Audit">Audit finding</option>
+                        <option value="AutoScan">Automated scan</option>
+                        <option value="External">External report</option>
+                    </select>
+                </label>
+                <label>
+                    @* Severity is now auto-derived at gap creation time
+                       (post-187 for Implementation, always for
+                       Assurance, and post-189 for Custom via priority).
+                       Locked read-only in the analysis form so an
+                       analyst does not accidentally break the SLA
+                       auto-match by editing it. If a genuine
+                       reclassification is needed, do it via the source
+                       (practice_instance.criticality / observation /
+                       custom-gap priority). *@
+                    <span>Severity <small style="color:#94a3b8; font-weight:normal;">(auto)</small></span>
+                    @* Explicit disabled="disabled" -- Razor/HTML sanitisers
+                       sometimes strip boolean attributes when they carry
+                       no value. Belt-and-suspenders JS lock lives in
+                       gap-detail.js applyAnalysisToForm(). *@
+                    <select id="anSeverityCode"
+                            disabled="disabled"
+                            aria-disabled="true"
+                            style="background:#f1f5f9; color:#475569; cursor:not-allowed;"
+                            title="Severity is auto-derived from the gap source. Not editable here.">
+                        <option value="">--</option>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Business Impact</span>
+                    <select id="anBusinessImpactCode">
+                        <option value="">--</option>
+                        <option value="None">None</option>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Regulatory Impact</span>
+                    <select id="anRegulatoryImpactCode">
+                        <option value="">--</option>
+                        <option value="None">None</option>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Business Impact Summary</span>
+                    <textarea id="anBusinessImpactSummary" rows="2" maxlength="5000"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Regulatory Impact Summary</span>
+                    <textarea id="anRegulatoryImpactSummary" rows="2" maxlength="5000"></textarea>
+                </label>
+                <label>
+                    <span>RCA Required</span>
+                    <input type="checkbox" id="anRcaRequired" />
+                </label>
+                <label>
+                    <span>RCA Method</span>
+                    <select id="anRcaMethodCode">
+                        <option value="">--</option>
+                        <option value="FiveWhys">5 Whys</option>
+                        <option value="Fishbone">Fishbone</option>
+                        <option value="Freeform">Freeform narrative</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>RCA Summary</span>
+                    <textarea id="anRcaSummary" rows="3" maxlength="10000"></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Recommended Action Summary</span>
+                    <textarea id="anRecommendedActionSummary" rows="3" maxlength="10000"
+                              placeholder="Feeds the auto-created Task / Exception / Risk artefacts on save."></textarea>
+                </label>
+                @* Sir's decision model (migration 168). Both mandatory. *@
+                <label>
+                    <span>Remediation possible?<span class="pm-required">*</span>
+                        <span class="pm-hint">(Yes = auto-open a Task; No = auto-request an Exception)</span></span>
+                    <select id="anRemediationPossible" required>
+                        <option value="">-- select --</option>
+                        <option value="Y">Yes -- track as a task</option>
+                        <option value="N">No -- request an exception</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Is there a business Risk?<span class="pm-required">*</span>
+                        <span class="pm-hint">(Yes = auto-log a Risk candidate)</span></span>
+                    <select id="anBusinessRiskPresent" required>
+                        <option value="">-- select --</option>
+                        <option value="Y">Yes -- log a candidate</option>
+                        <option value="N">No</option>
+                    </select>
+                </label>
+            </div>
+            <p class="pm-form-message" id="anMessage" role="status" aria-live="polite"></p>
+            <div class="pm-toolbar" style="justify-content: flex-end;">
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-save"></i> Save Analysis
+                </button>
+            </div>
+        </form>
+
+        @* Linked artefacts chip strip -- one row per Task/Exception/Risk
+           auto-created for this gap. Populated by JS from
+           /gaps/{id}/linked-artefacts after every analysis save. *@
+        <div class="gap-linked-strip" id="gapLinkedArtefactsStrip" hidden>
+            <h3>Linked artefacts</h3>
+            <div class="gap-linked-chips" id="gapLinkedArtefactsChips"></div>
+        </div>
+    </div>
+
+    <div class="pm-tab-panel" data-panel="metadata" hidden>
+        <dl class="gap-detail-meta" id="gapDetailMetadata"></dl>
+
+        @*
+            BRD §15 — the source displays the tasks it generated, and §14's
+            task-action status line. Filled by renderRelatedTasks() in
+            gap-detail.js via the shared panel below; a gap with no task
+            work renders an explicit empty state rather than nothing.
+        *@
+        <div id="gapRelatedTasks" style="margin-top:14px;"></div>
+
+        <div class="gap-history-compact">
+            <h3>Lifecycle history</h3>
+            <ul id="gapHistoryList"><li class="pm-hint">Loading...</li></ul>
+        </div>
+    </div>
+</section>
+
+@* Shared across Gap / Risk / Observation — see the partial's header. *@
+<partial name="Partials/_related-tasks-panel" />
+
+@* ---- action-confirmation modal (Mark Invalid / Mark Duplicate) ---- *@
+<div class="pm-modal" id="gapActionModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="gapActionModalTitle">Confirm action</h2>
+            <button class="pm-modal-close" type="button" data-close-gap-action aria-label="Close">&times;</button>
+        </header>
+        <form id="gapActionForm">
+            <input type="hidden" id="gapActionCode" />
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full" id="gapActionRemarkWrap">
+                    <span>Remark <span id="gapActionRemarkHint" class="pm-hint"></span></span>
+                    <textarea id="gapActionRemark" rows="3" maxlength="5000"></textarea>
+                </label>
+                <label class="pm-form-grid-full" id="gapActionDuplicateWrap" hidden>
+                    <span>Duplicate of gap id <span class="pm-required">*</span></span>
+                    <input type="number" id="gapActionDuplicateOfId" />
+                </label>
+                <label class="pm-form-grid-full" id="gapActionInvalidWrap" hidden>
+                    <span>Invalid reason <span class="pm-required">*</span></span>
+                    <input type="text" id="gapActionInvalidReason" maxlength="1000" />
+                </label>
+            </div>
+            <p class="pm-form-message" id="gapActionMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-gap-action>Cancel</button>
+                <button type="submit" class="pm-button primary">Confirm</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    /* --- Gap Centre v2 detail (simplified) --- */
+    .gap-detail-toolbar { align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    /* Compact horizontal stepper -- shows only active states, current
+       state highlighted. Terminal-invalid states render red. */
+    .gap-stepper-compact {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 8px; background: #f7fafc; border-radius: 999px;
+        font-size: 11px; color: #4a5568;
+    }
+    .gap-stepper-compact .step {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 2px 8px; border-radius: 999px;
+    }
+    .gap-stepper-compact .step.past    { color: #22543d; }
+    .gap-stepper-compact .step.current { background: #bee3f8; color: #2c5282; font-weight: 700; }
+    .gap-stepper-compact .step.terminal-invalid { background: #fed7d7; color: #742a2a; font-weight: 700; }
+    .gap-stepper-compact .sep { color: #cbd5e0; }
+
+    .gap-action-strip {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        padding: 12px 16px; margin-bottom: 12px;
+        background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 6px;
+    }
+    .gap-action-strip:empty { display: none; }
+    .gap-action-strip::before {
+        content: "Actions:"; font-size: 11px; font-weight: 600;
+        color: #4a5568; text-transform: uppercase; letter-spacing: 0.02em;
+        align-self: center; margin-right: 8px;
+    }
+
+    .gap-detail-meta {
+        display: grid; grid-template-columns: 140px 1fr; row-gap: 6px; column-gap: 12px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+    }
+    .gap-detail-meta dt { color: #718096; font-weight: 600; margin: 0;
+                          text-transform: uppercase; font-size: 11px; align-self: center; }
+    .gap-detail-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+
+    /* History compact -- lives inside Metadata tab now. */
+    .gap-history-compact h3 { font-size: 12px; text-transform: uppercase; color: #718096;
+                              margin: 16px 0 8px 0; letter-spacing: 0.02em; }
+    .gap-history-compact ul { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+    .gap-history-compact li { padding: 6px 10px; border-bottom: 1px dashed #e2e8f0; }
+
+    /* Linked artefacts chips -- one card per Task/Exception/Risk. */
+    .gap-linked-strip { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    .gap-linked-strip[hidden] { display: none !important; }
+    .gap-linked-strip h3 { font-size: 12px; text-transform: uppercase; color: #718096;
+                           margin: 0 0 10px 0; letter-spacing: 0.02em; }
+    .gap-linked-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+    .gap-linked-chip {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: 10px 14px; border: 1px solid #cbd5e0; border-radius: 6px;
+        background: #fff; min-width: 220px; text-decoration: none; color: inherit;
+        transition: box-shadow 0.15s ease;
+    }
+    .gap-linked-chip:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: #3182ce; }
+    .gap-linked-chip .chip-type {
+        font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: #718096;
+    }
+    .gap-linked-chip.type-task      .chip-type { color: #2c5282; }
+    .gap-linked-chip.type-exception .chip-type { color: #744210; }
+    .gap-linked-chip.type-risk      .chip-type { color: #742a2a; }
+    .gap-linked-chip .chip-title  { font-size: 13px; font-weight: 600; color: #2d3748; }
+    .gap-linked-chip .chip-status {
+        display: inline-block; align-self: flex-start; padding: 2px 8px; border-radius: 999px;
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        background: #edf2f7; color: #4a5568;
+    }
+
+    .gap-state-chip {
+        display: inline-block; padding: 4px 10px; border-radius: 999px;
+        font-size: 12px; font-weight: 600;
+    }
+    .gap-state-chip.state-new { background: #edf2f7; color: #4a5568; }
+    .gap-state-chip.state-validation, .gap-state-chip.state-analysis { background: #fefcbf; color: #744210; }
+    .gap-state-chip.state-delegated { background: #c6f6d5; color: #22543d; }
+    .gap-state-chip.state-invalid, .gap-state-chip.state-duplicate { background: #fed7d7; color: #742a2a; }
+    /* Dormant states (retained for historical gaps) */
+    .gap-state-chip.state-resolutionplanning,
+    .gap-state-chip.state-execution,
+    .gap-state-chip.state-verification { background: #e9d8fd; color: #553c9a; }
+    .gap-state-chip.state-closed { background: #c6f6d5; color: #22543d; }
+
+    /* Read-only banner (from 173). */
+    .gap-terminal-banner {
+        display: flex; align-items: flex-start; gap: 12px;
+        background: #fff5f5; border: 1px solid #fc8181; color: #742a2a;
+        border-radius: 6px; padding: 12px 14px; margin: 12px 0;
+    }
+    .gap-terminal-banner[hidden] { display: none !important; }
+    .gap-terminal-banner i { font-size: 18px; padding-top: 2px; }
+    .gap-terminal-banner strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .gap-terminal-banner p { margin: 0; font-size: 12px; line-height: 1.5; }
+
+    /* Compact duplicate strip (from 177 -- simplified per sir).
+       Parent gap link + hint; the parent analysis populates the
+       (disabled) Analysis form fields below to avoid duplication. */
+    .gap-duplicate-strip {
+        display: flex; align-items: flex-start; gap: 12px;
+        margin: 12px 0; padding: 10px 14px;
+        border: 1px solid #b794f4; background: #faf5ff; color: #44337a;
+        border-radius: 6px;
+    }
+    .gap-duplicate-strip[hidden] { display: none !important; }
+    .gap-duplicate-strip i { font-size: 16px; padding-top: 2px; }
+    .gap-duplicate-strip strong { display: block; font-size: 13px; margin-bottom: 2px; }
+    .gap-duplicate-strip p { margin: 0; font-size: 12px; line-height: 1.4; }
+    .gap-duplicate-strip a { color: #44337a; font-weight: 700; text-decoration: underline; }
+
+    .gap-invalid-card {
+        margin: 12px 0; padding: 12px 14px;
+        border: 1px solid #fc8181; background: #fff5f5; border-radius: 6px;
+        color: #742a2a;
+    }
+    .gap-invalid-card[hidden] { display: none !important; }
+    .gap-invalid-card strong { display: block; font-size: 13px; margin-bottom: 4px;
+                                text-transform: uppercase; letter-spacing: 0.02em; }
+    .gap-invalid-card p { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+
+    /* Modal overlay (scoped to this partial). */
+    .pm-modal {
+        position: fixed; inset: 0; z-index: 1100;
+        display: flex; align-items: flex-start; justify-content: center;
+        background: rgba(15, 23, 42, 0.55);
+        padding: 40px 20px; overflow-y: auto;
+    }
+    .pm-modal[hidden] { display: none !important; }
+    .pm-modal-panel {
+        background: #fff; border-radius: 8px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+        padding: 20px; width: 100%; max-width: 560px;
+        max-height: calc(100vh - 80px); overflow-y: auto;
+    }
+    .pm-modal-panel > header {
+        display: flex; justify-content: space-between; align-items: center;
+        border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;
+    }
+    .pm-modal-panel > header h2 { margin: 0; font-size: 18px; color: #2d3748; }
+    .pm-modal-close {
+        background: transparent; border: 0; padding: 0;
+        font-size: 26px; line-height: 1; cursor: pointer; color: #718096;
+    }
+    .pm-modal-close:hover { color: #e53e3e; }
+    .pm-modal-footer {
+        display: flex; justify-content: flex-end; gap: 8px;
+        margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0;
+    }
+</style>
+
+@* SLA Override dialog (migration 184). Raises an SLA_CANDIDATE
+   exception request; goes to Exception Centre "SLA Candidate" tab. *@
+<dialog id="gapSlaOverrideDialog"
+        style="border:none; border-radius:8px; padding:0; max-width:520px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="gapSlaOverrideForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Request SLA Override</h2>
+            <button type="button" id="gapSlaOverrideClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <p style="margin:0 0 12px; color:#475569; font-size:13px;">
+            Override goes to the Exception Centre <strong>SLA Candidate</strong> tab.
+            The new SLA applies to this gap only if the request is approved.
+        </p>
+        <div id="gapSlaOverrideMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Current SLA (days)</span>
+                <input id="gapSlaOverrideCurrent" type="text" disabled
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#f1f5f9;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Requested SLA (days) <span style="color:#b91c1c;">*</span></span>
+                <input id="gapSlaOverrideRequested" type="number" min="0" step="1" required
+                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Reason <span style="color:#b91c1c;">*</span></span>
+            <textarea id="gapSlaOverrideReason" rows="3" maxlength="4000" required
+                      placeholder="Why is a different SLA needed for this gap?"
+                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="gapSlaOverrideCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="gapSlaOverrideSubmit" class="pm-button primary">Send Request</button>
+        </div>
+    </form>
+</dialog>
+
+<script src="~/js/GapLifecycle/gap-detail.js" asp-append-version="true"></script>

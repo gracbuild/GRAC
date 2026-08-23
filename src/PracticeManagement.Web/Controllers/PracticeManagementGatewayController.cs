@@ -36,7 +36,7 @@ public sealed class PracticeManagementGatewayController(
         // org's admin; the org-scope guard still applies for non-system admins.
         if (!permissionPolicy.IsAllowed(Roles(), "organization-setup", "ADD")
             && !permissionPolicy.IsAllowed(Roles(), "users", "ADD"))
-            return Forbid();
+            return PermissionDenied("organization-setup or users", "ADD");
         if (!IsSystemAdmin() && !AllowedOrganizationIds().Contains(request.OrganizationId))
             return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "You do not have access to the selected organization." });
 
@@ -121,6 +121,8 @@ public sealed class PracticeManagementGatewayController(
             success = true,
             employeeId = provisionResult.EmployeeId,
             alreadyExisted = provisionResult.AlreadyExisted,
+            menusGranted = provisionResult.MenusGranted,
+            flagsEnabled = provisionResult.FlagsEnabled,
             credentialsEmailed = emailResult.Delivered,
             emailCorrelationId = emailResult.CorrelationId,
             emailFailureReason = emailResult.FailureReason
@@ -165,7 +167,9 @@ public sealed class PracticeManagementGatewayController(
                 EmployeeId: TryReadLong(row, "EmployeeId") ?? TryReadLong(row, "employeeId") ?? 0,
                 RoleId: TryReadLong(row, "RoleId") ?? TryReadLong(row, "roleId") ?? 0,
                 Email: TryReadString(row, "Email") ?? TryReadString(row, "email") ?? "",
-                AlreadyExisted: TryReadBool(row, "AlreadyExisted") ?? TryReadBool(row, "alreadyExisted") ?? false);
+                AlreadyExisted: TryReadBool(row, "AlreadyExisted") ?? TryReadBool(row, "alreadyExisted") ?? false,
+                MenusGranted: TryReadLong(row, "MenusGranted") ?? TryReadLong(row, "menusGranted") ?? 0,
+                FlagsEnabled: TryReadLong(row, "FlagsEnabled") ?? TryReadLong(row, "flagsEnabled") ?? 0);
         }
         catch (JsonException)
         {
@@ -231,7 +235,12 @@ public sealed class PracticeManagementGatewayController(
         public string? OrganizationName { get; set; }
     }
 
-    private sealed record OrganizationAdminProvisionResult(long EmployeeId, long RoleId, string Email, bool AlreadyExisted);
+    // MenusGranted / FlagsEnabled come from migration 217's addition to
+    // pm_create_organization_admin. They are read defensively (absent
+    // columns fall back to 0) so the Web tier keeps working against a
+    // database where 217 has not been applied or has been rolled back.
+    private sealed record OrganizationAdminProvisionResult(
+        long EmployeeId, long RoleId, string Email, bool AlreadyExisted, long MenusGranted, long FlagsEnabled);
 
     [HttpGet("diagnostics/config")]
     public IActionResult ConfigDiagnostics()
@@ -255,7 +264,8 @@ public sealed class PracticeManagementGatewayController(
         CancellationToken cancellationToken = default)
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
-        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW"))
+            return PermissionDenied(PermissionArea(entityType), "VIEW");
         if (string.IsNullOrWhiteSpace(code) && (id.HasValue || organizationId.HasValue || practiceId.HasValue || practiceInstanceId.HasValue || organizationControlId.HasValue || organizationRequirementId.HasValue))
             return BadRequest(new { success = false, message = "Use encrypted navigation context for internal identifiers." });
         try { ApplyNavigationContext(Token(), entityType, code, ref organizationId, ref practiceId, ref practiceInstanceId, ref organizationControlId, ref organizationRequirementId); }
@@ -296,7 +306,8 @@ public sealed class PracticeManagementGatewayController(
     public async Task<IActionResult> QueryWithPayload(string entityType, [FromBody] BrowserCommand command, CancellationToken cancellationToken)
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
-        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW"))
+            return PermissionDenied(PermissionArea(entityType), "VIEW");
         JsonElement data;
         try { data = NormalizeQueryPayload(Token(), entityType, command); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
@@ -322,7 +333,8 @@ public sealed class PracticeManagementGatewayController(
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
         if (!HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment()) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW"))
+            return PermissionDenied(PermissionArea(entityType), "VIEW");
         JsonElement data;
         try { data = NormalizeQueryPayload(Token(), entityType, command); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
@@ -342,7 +354,7 @@ public sealed class PracticeManagementGatewayController(
     public IActionResult NavigationCode([FromBody] NavigationCodeRequest request)
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
-        if (!IsAllowedNavigation(request, Roles())) return Forbid();
+        if (!IsAllowedNavigation(request, Roles())) return PermissionDenied("the requested screen", "VIEW");
         var code = navigationContextProtector.Protect(Token(), new NavigationContext
         {
             SourceArea = request.SourceArea,
@@ -368,7 +380,8 @@ public sealed class PracticeManagementGatewayController(
         try { context = ResolveNavigationContext(Token(), code, targetArea); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
         if (context is null) return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." });
-        if (!permissionPolicy.IsAllowed(Roles(), context.TargetArea, "VIEW")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), context.TargetArea, "VIEW"))
+            return PermissionDenied(context.TargetArea, "VIEW");
         return Ok(new { success = true, filterType = context.FilterType, filterId = context.FilterId, organizationId = context.OrganizationId, releaseId = context.ReleaseId, organizationControlId = context.OrganizationControlId, organizationRequirementId = context.OrganizationRequirementId, displayCode = context.DisplayCode, displayName = context.DisplayName, displayStatus = context.DisplayStatus });
     }
 
@@ -378,7 +391,7 @@ public sealed class PracticeManagementGatewayController(
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
         var action = command.Id.GetValueOrDefault() > 0 ? "EDIT" : "ADD";
-        if (!CanSaveEntity(entityType, action)) return Forbid();
+        if (!CanSaveEntity(entityType, action)) return PermissionDenied(PermissionArea(entityType), action);
         JsonElement data;
         try
         {
@@ -386,7 +399,7 @@ public sealed class PracticeManagementGatewayController(
                 ? JsonSerializer.SerializeToElement(new { })
                 : command.Data;
             data = ApplyNavigationContext(Token(), entityType, command.ContextCode, data);
-            data = HashSensitivePayloadFields(entityType, data);
+            data = HashSensitivePayloadFields(entityType, data, isCreate: action == "ADD");
             data = AddOrganizationAccessContext(data);
             if (!ValidateRequestedOrganization(entityType, data, out var accessMessage))
                 return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = accessMessage });
@@ -394,6 +407,22 @@ public sealed class PracticeManagementGatewayController(
         catch (CryptographicException)
         {
             return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Server-side configuration guard -- today only DefaultUserPassword()
+            // raises this, when UserProvisioning:DefaultPassword is missing from
+            // the deployed appsettings. Without this catch the exception escapes
+            // to UseExceptionHandler("/Home/Error"), which answers a JSON fetch
+            // with an HTML error page: the browser logs a bare 500 and the
+            // screen says "The practice service returned an invalid response",
+            // neither of which names the missing setting. The message is written
+            // for the operator, so it is passed through rather than masked.
+            var correlationId = HttpContext.TraceIdentifier;
+            logger.LogError(ex, "PracticeManagement gateway save blocked by server configuration. Entity={EntityType} CorrelationId={CorrelationId}",
+                entityType, correlationId);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { success = false, message = $"{ex.Message} Reference: {correlationId}" });
         }
         return await InvokeAsync(() => client.ManageAsync(Token(), new SecureRepositoryRequest
         {
@@ -412,7 +441,8 @@ public sealed class PracticeManagementGatewayController(
     public async Task<IActionResult> RetireWithPayload(string entityType, [FromBody] BrowserCommand command, CancellationToken cancellationToken)
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
-        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "DELETE")) return Forbid();
+        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "DELETE"))
+            return PermissionDenied(PermissionArea(entityType), "DELETE");
         return await InvokeAsync(() => client.ManageAsync(Token(), new SecureRepositoryRequest
         {
             EntityType = entityType,
@@ -461,6 +491,42 @@ public sealed class PracticeManagementGatewayController(
     private string[] Roles() => (HttpContext.Session.GetString(PracticeSessionIdentity.RolesKey) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
 
     private bool IsSystemAdmin() => Roles().Any(role => role.Equals("PM_ADMIN", StringComparison.OrdinalIgnoreCase));
+
+    // =================================================================
+    // Why this exists instead of ControllerBase.Forbid()
+    //
+    // Forbid() delegates to HttpContext.ForbidAsync(), which needs an
+    // authentication scheme to hand the challenge to. This application
+    // has none: Program.cs registers AddSession + UseAuthorization and
+    // deliberately no AddAuthentication / UseAuthentication, because
+    // identity lives in the session, not in a ClaimsPrincipal. So every
+    // Forbid() on this controller threw
+    //     InvalidOperationException: No authenticationScheme was
+    //     specified, and there was no DefaultForbidScheme found.
+    // which left the route answering an HTML page -- the developer
+    // exception page in Development, /Home/Error elsewhere -- to a fetch
+    // that expects JSON. practice.js could not parse it and reported
+    // "The practice service returned an invalid response." for what was
+    // really a missing permission.
+    //
+    // The same route already answers the organization-scope denial with
+    // StatusCode(403, json) (see ValidateRequestedOrganization callers);
+    // this makes the permission denial answer in the same shape, and
+    // names the grant that is missing so it can be fixed rather than
+    // guessed at.
+    // =================================================================
+    private IActionResult PermissionDenied(string area, string action)
+    {
+        logger.LogWarning(
+            "PracticeManagement blocked by menu permission. Area={Area} Action={Action} User={User} Roles={Roles}",
+            area, action, HttpContext.Session.GetString(PracticeSessionIdentity.UserKey), string.Join(',', Roles()));
+        return StatusCode(StatusCodes.Status403Forbidden, new
+        {
+            success = false,
+            message = $"You do not have permission to {action.ToLowerInvariant()} {area}. "
+                    + "Ask an administrator to grant that menu permission to your role."
+        });
+    }
 
     private int[] AllowedOrganizationIds()
     {
@@ -519,16 +585,12 @@ public sealed class PracticeManagementGatewayController(
         "assurance-schedule-rules", "assurance-schedule-overrides", "assurance-calendar-config", "assurance-calendar-events"
     };
 
-    private static string PermissionArea(string entityType) =>
-        entityType.Equals("release-statements", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-release-statements", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
-        || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase)
-            ? "organization-controls"
-            : entityType;
+    // The mapping itself now lives in Security/PermissionAreaMap.cs,
+    // which is linked into PracticeManagement.Api so both tiers resolve
+    // the same area for the same entity type. It used to live here only,
+    // and the API checked the raw entity type — see the file header for
+    // the 403 that came out of that disagreement.
+    private static string PermissionArea(string entityType) => PermissionAreaMap.For(entityType);
 
     private bool CanSaveEntity(string entityType, string action)
     {
@@ -542,17 +604,52 @@ public sealed class PracticeManagementGatewayController(
         return permissionPolicy.IsAllowed(Roles(), area, action);
     }
 
-    private JsonElement HashSensitivePayloadFields(string entityType, JsonElement data)
+    // The Users form no longer collects a password (see migration 208). On a
+    // create we substitute the hash of the configured default so the account
+    // is provisioned with known-good credentials, and flag it so LoginController
+    // forces a change before the first session is issued. The plaintext default
+    // never leaves this tier — only the PBKDF2 hash reaches the API and DB.
+    //
+    // A `password` key is still honoured if one arrives: the endpoint is also
+    // reachable from tooling, and silently ignoring a supplied password would
+    // be worse than hashing it.
+    private JsonElement HashSensitivePayloadFields(string entityType, JsonElement data, bool isCreate)
     {
         if (!entityType.Equals("users", StringComparison.OrdinalIgnoreCase)) return data;
-        if (!data.TryGetProperty("password", out var passwordElement) || passwordElement.ValueKind != JsonValueKind.String) return data;
-        var password = passwordElement.GetString();
-        if (string.IsNullOrWhiteSpace(password)) return data;
+
+        var password = data.TryGetProperty("password", out var passwordElement)
+                       && passwordElement.ValueKind == JsonValueKind.String
+            ? passwordElement.GetString()
+            : null;
+        var suppliedPassword = !string.IsNullOrWhiteSpace(password);
+
+        // An edit with no password supplied leaves the stored hash alone —
+        // sp_org_user_save COALESCEs a missing hash to the existing one.
+        if (!suppliedPassword && !isCreate) return data;
 
         var node = JsonNode.Parse(data.GetRawText()) as JsonObject ?? [];
-        node["passwordHash"] = passwordHasher.Hash(password);
+        if (suppliedPassword)
+        {
+            node["passwordHash"] = passwordHasher.Hash(password!);
+        }
+        else
+        {
+            node["passwordHash"] = passwordHasher.Hash(DefaultUserPassword());
+            // Provisioned on the shared default — the owner must replace it
+            // at first sign-in. Only set on create; an edit must not re-arm
+            // the flag for someone who has already chosen their own password.
+            node["forcePasswordChange"] = 1;
+        }
         node.Remove("password");
         return JsonSerializer.SerializeToElement(node);
+    }
+
+    private string DefaultUserPassword()
+    {
+        var configured = configuration["UserProvisioning:DefaultPassword"];
+        if (!string.IsNullOrWhiteSpace(configured)) return configured;
+        throw new InvalidOperationException(
+            "UserProvisioning:DefaultPassword is not configured. New users cannot be provisioned without it.");
     }
 
     private NavigationContext? ResolveNavigationContext(string token, string code, string targetArea)
@@ -665,7 +762,10 @@ public sealed class PracticeManagementGatewayController(
             { FilterType: "FrameworkRelease", TargetArea: "organization-requirements" } => true,
             { FilterType: "FrameworkStatement", TargetArea: "organization-requirements" } => true,
             { FilterType: "OrganizationRequirement", TargetArea: "practices" or "practice-instances" } => true,
-            { FilterType: "Practice", TargetArea: "practice-instances" } => true,
+            { FilterType: "Practice", TargetArea: "practice-instances" or "practice-view" } => true,
+            // The Organization Practices grid does not always carry a practice
+            // id, so practice-view is also reachable on the requirement id.
+            { FilterType: "OrganizationRequirement", TargetArea: "practice-view" } => true,
             { FilterType: "PracticeInstance", TargetArea: "dependencies" or "evidence-configurations" or "assurance-attributes" or "vendor-attributes" or "risk-attributes" or "audit-attributes" or "task-attributes" or "resilience-attributes" } => true,
             _ => false
         };

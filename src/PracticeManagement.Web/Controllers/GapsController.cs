@@ -139,6 +139,129 @@ public sealed class GapsController(
     public Task<IActionResult> CustomClose(long id, CancellationToken cancellationToken)
         => ForwardBodyAsync(HttpMethod.Post, $"api/practice/gaps/custom/{id}/close", cancellationToken);
 
+    // -----------------------------------------------------------------
+    // Stage 4b / unified Gap Center -- catch-all proxies so every new
+    // custom_gap endpoint (get, save, delete, generate, lifecycle
+    // transitions, attach / detach / merge, actions CRUD, history)
+    // reaches the API tier without adding a per-endpoint method here.
+    //
+    // Specific routes above take precedence -- ASP.NET Core routing
+    // matches most-specific first, so `GET /custom` still hits
+    // CustomList and `POST /custom/{id}/close` still hits CustomClose.
+    // Only the extended surface falls through to the catch-alls below.
+    // -----------------------------------------------------------------
+    [HttpGet("custom/{**path}")]
+    public async Task<IActionResult> CustomProxyGet(string path, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+
+        // organizationId is required on every read; enforce here so a
+        // cross-org peek is refused before we touch the upstream API.
+        if (long.TryParse(Request.Query["organizationId"], out var orgId) && orgId > 0)
+        {
+            if (!HttpContext.IsOrganizationAllowed(orgId))
+                return StatusCode(StatusCodes.Status403Forbidden,
+                    new { error = "Caller is not authorised for the requested organization." });
+        }
+        else
+        {
+            return BadRequest(new { error = "organizationId is required." });
+        }
+
+        var client = BuildClient();
+        var qs     = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        try
+        {
+            var resp    = await client.GetAsync("api/practice/gaps/custom/" + path + qs, cancellationToken);
+            var payload = await resp.Content.ReadAsStringAsync(cancellationToken);
+            return new ContentResult
+            {
+                Content     = payload,
+                ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                StatusCode  = (int)resp.StatusCode
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "GapsController.CustomProxyGet failed for {Path}", path);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
+    [HttpPost("custom/{**path}")]
+    public async Task<IActionResult> CustomProxyPost(string path, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+
+        // Buffer body so we can inspect organizationId for authorisation
+        // while still forwarding the original bytes.
+        Request.EnableBuffering();
+        string bodyText;
+        using (var reader = new System.IO.StreamReader(Request.Body, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            bodyText = await reader.ReadToEndAsync(cancellationToken);
+            Request.Body.Position = 0;
+        }
+
+        if (!string.IsNullOrWhiteSpace(bodyText))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(bodyText);
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("organizationId", out var orgProp) &&
+                    orgProp.TryGetInt64(out var orgId) && orgId > 0)
+                {
+                    if (!HttpContext.IsOrganizationAllowed(orgId))
+                        return StatusCode(StatusCodes.Status403Forbidden,
+                            new { error = "Caller is not authorised for the requested organization." });
+                }
+            }
+            catch (System.Text.Json.JsonException) { /* not JSON -- let API decide */ }
+        }
+
+        return await ForwardBodyAsync(HttpMethod.Post, "api/practice/gaps/custom/" + path, cancellationToken);
+    }
+
+    [HttpDelete("custom/{**path}")]
+    public async Task<IActionResult> CustomProxyDelete(string path, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+
+        if (long.TryParse(Request.Query["organizationId"], out var orgId) && orgId > 0)
+        {
+            if (!HttpContext.IsOrganizationAllowed(orgId))
+                return StatusCode(StatusCodes.Status403Forbidden,
+                    new { error = "Caller is not authorised for the requested organization." });
+        }
+        else
+        {
+            return BadRequest(new { error = "organizationId is required." });
+        }
+
+        var client = BuildClient();
+        var qs     = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        try
+        {
+            var resp    = await client.DeleteAsync("api/practice/gaps/custom/" + path + qs, cancellationToken);
+            var payload = await resp.Content.ReadAsStringAsync(cancellationToken);
+            return new ContentResult
+            {
+                Content     = payload,
+                ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                StatusCode  = (int)resp.StatusCode
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "GapsController.CustomProxyDelete failed for {Path}", path);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
     private async Task<IActionResult> ForwardBodyAsync(HttpMethod method, string upstreamPath, CancellationToken cancellationToken)
     {
         var client = BuildClient();

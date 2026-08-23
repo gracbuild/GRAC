@@ -80,18 +80,28 @@
         </div>
     </div>
 
-    <!-- Assurance Gaps tab (placeholder) -->
+    <!-- Assurance Gaps tab — wired to sp_custom_gap_list?source_module=Assurance -->
     <div class="pm-tab-panel" data-panel="assurance" hidden>
+        <div id="assuranceObsFilterBanner" hidden
+             style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;
+                    background:#dbeafe; color:#1e40af; display:flex; justify-content:space-between; align-items:center;">
+            <span>Showing only gaps linked to Observation <strong id="assuranceObsFilterLabel">#?</strong>.</span>
+            <button class="pm-button" id="assuranceObsFilterClear" type="button">
+                <i class="fa-solid fa-xmark"></i> Clear filter
+            </button>
+        </div>
         <div class="pm-table-wrap">
             <table>
                 <thead>
                     <tr>
-                        <th>Finding</th><th>Assurance Activity</th><th>Practice Instance</th>
-                        <th>Severity</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Actions</th>
+                        <th>Gap</th><th>Execution / Entity</th>
+                        <th>Severity</th><th>Status</th>
+                        <th>Owner</th><th>Due Date</th>
+                        <th>Evidence</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="gapBody-assurance">
-                    <tr><td colspan="8" class="pm-empty">Assurance Gaps land in a later phase — they will surface unresolved findings from the assurance subsystem.</td></tr>
+                    <tr><td colspan="8" class="pm-empty">Select an organization to load Assurance Gaps.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -222,6 +232,23 @@
 
     let selectedOrgId = null;
     let activeTab     = 'implementation';
+    // Stage 4b -- Assurance-side filter via ?observationId= in URL.
+    let assuranceObservationFilter = (function () {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('observationId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    })();
+    // Optional ?tab=assurance switches straight to the Assurance tab.
+    (function () {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const t = q.get('tab');
+            if (t === 'assurance' || assuranceObservationFilter !== null) activeTab = 'assurance';
+        } catch (_) { /* ignore */ }
+    })();
     let pagesByTab    = { implementation: 1, assurance: 1, custom: 1 };
     const PAGE_SIZE   = 25;
     let searchDebounce = null;
@@ -337,25 +364,30 @@
     // powers our Implementation Gaps badge.
     // -----------------------------------------------------------------
     async function refreshCounts() {
-        if (!selectedOrgId) { setCounts(null, 0); return; }
-        // Kick off both count fetches in parallel; either failing is
-        // non-fatal (badge just shows 0 for that tab).
+        if (!selectedOrgId) { setCounts(null, 0, 0); return; }
+        // All three counts in parallel; failure is non-fatal.
         const results = await Promise.all([
             fetch(U('/practice/api/tasks/counts?organizationId=') + encodeURIComponent(selectedOrgId),
                   { credentials: 'same-origin' })
                 .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-            fetch(U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId) + '&pageSize=1',
+            fetch(U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&gapSourceModuleCode=Custom&pageSize=1',
+                  { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (b) { return (b && (b.totalCount || b.TotalCount)) || 0; })
+                .catch(function () { return 0; }),
+            fetch(U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&gapSourceModuleCode=Assurance&pageSize=1',
                   { credentials: 'same-origin' })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (b) { return (b && (b.totalCount || b.TotalCount)) || 0; })
                 .catch(function () { return 0; })
         ]);
-        setCounts(results[0], results[1]);
+        setCounts(results[0], results[1], results[2]);
     }
-    function setCounts(taskCounts, customGapCount) {
+    function setCounts(taskCounts, customGapCount, assuranceGapCount) {
         document.getElementById('gapTabCountImpl').textContent      = taskCounts ? (taskCounts.gapsCount || 0) : 0;
-        // Assurance Gaps still a placeholder feed.
-        document.getElementById('gapTabCountAssurance').textContent = 0;
+        document.getElementById('gapTabCountAssurance').textContent = assuranceGapCount || 0;
         document.getElementById('gapTabCountCustom').textContent    = customGapCount || 0;
     }
 
@@ -376,9 +408,103 @@
         closeRowMenu();
         if (!selectedOrgId) return;
         if (activeTab === 'implementation') return loadImplementationGaps();
+        if (activeTab === 'assurance')      return loadAssuranceGaps();
         if (activeTab === 'custom')         return loadCustomGaps();
-        // Assurance is a placeholder for this phase.
     }
+
+    // -----------------------------------------------------------------
+    // Assurance Gaps -- reads sp_custom_gap_list filtered by
+    // gap_source_module_code=Assurance.
+    // -----------------------------------------------------------------
+    async function loadAssuranceGaps() {
+        const q = document.getElementById('gapCenterSearch').value.trim();
+        const p = pagesByTab.assurance;
+        const params = new URLSearchParams();
+        params.set('organizationId',       String(selectedOrgId));
+        params.set('gapSourceModuleCode',  'Assurance');
+        params.set('page',                 String(p));
+        params.set('pageSize',             String(PAGE_SIZE));
+        if (q) params.set('search', q);
+        if (assuranceObservationFilter) params.set('observationId', String(assuranceObservationFilter));
+
+        // Reflect observation-filter banner.
+        const banner = document.getElementById('assuranceObsFilterBanner');
+        const label  = document.getElementById('assuranceObsFilterLabel');
+        if (banner && label) {
+            if (assuranceObservationFilter) {
+                banner.hidden = false;
+                label.textContent = '#' + assuranceObservationFilter;
+            } else {
+                banner.hidden = true;
+            }
+        }
+
+        setBody('assurance', '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>');
+        try {
+            const r = await fetch(U('/practice/api/gaps/custom?' + params.toString()),
+                                  { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderAssuranceGaps(await r.json());
+        } catch (err) {
+            setBody('assurance', '<tr><td colspan="8" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
+        }
+    }
+    function renderAssuranceGaps(payload) {
+        const body = document.getElementById('gapBody-assurance');
+        body.innerHTML = '';
+        const rows = (payload && (payload.rows || payload.Rows)) || [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">'
+                + (assuranceObservationFilter
+                    ? 'No gaps linked to Observation #' + assuranceObservationFilter + '.'
+                    : 'No Assurance Gaps yet. They will land here automatically when an assurance observation is Accepted.')
+                + '</td></tr>';
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                const r  = rows[i];
+                const id = r.customGapId || r.CustomGapId;
+                const title = r.title || r.Title || '';
+                const exec  = r.executionName || r.ExecutionName || '';
+                const ent   = r.entityName    || r.EntityName    || '';
+                const sev   = r.severityName  || r.SeverityName  || r.severityCode || r.SeverityCode || '';
+                const status = r.status || r.Status || '';
+                const owner  = r.ownerDisplayName || r.OwnerDisplayName || '';
+                const due    = r.dueDate || r.DueDate || r.targetResolutionDate || r.TargetResolutionDate;
+                const evi    = Number(r.linkedObservationCount || r.LinkedObservationCount || 0);
+                const obsCode = r.observationCode || r.ObservationCode || '';
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-record-id', String(id));
+                tr.innerHTML = [
+                    '<td><div style="font-weight:600;">' + escape(title) + '</div>' +
+                         (obsCode ? '<div style="font-size:11px;color:#94a3b8;">From: ' + escape(obsCode) + '</div>' : '') + '</td>',
+                    '<td>' + escape(exec) + (ent ? '<div style="font-size:11px;color:#94a3b8;">' + escape(ent) + '</div>' : '') + '</td>',
+                    '<td>' + formatBadge(sev) + '</td>',
+                    '<td>' + formatBadge(status) + '</td>',
+                    '<td>' + escape(owner) + '</td>',
+                    '<td>' + escape(due ? String(due).slice(0,10) : '') + '</td>',
+                    '<td style="text-align:right;">' + evi + '</td>',
+                    '<td>' + actionTrigger('assurance', i) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        }
+        updatePager('assurance', payload);
+    }
+
+    // Clear observation filter button.
+    (function () {
+        const btn = document.getElementById('assuranceObsFilterClear');
+        if (btn) btn.addEventListener('click', function () {
+            assuranceObservationFilter = null;
+            try {
+                const u = new URL(window.location.href);
+                u.searchParams.delete('observationId');
+                window.history.replaceState(null, '', u.toString());
+            } catch (_) {}
+            pagesByTab.assurance = 1;
+            reloadCurrentTab();
+        });
+    })();
 
     async function loadImplementationGaps() {
         const q = document.getElementById('gapCenterSearch').value.trim();
@@ -681,6 +807,18 @@
             const status = tr.getAttribute('data-gap-status') || '';
             const isClosed = (status === 'Closed' || status === 'Cancelled');
             return [
+                // Gap Centre v1.0 (AES) -- drill into the lifecycle detail
+                // page. Kept as an additional item so every existing action
+                // continues to work exactly as before.
+                { icon: 'fa-magnifying-glass',
+                  label: 'Analysis',
+                  action: function () {
+                      // Pass orgId + gapId; the detail page uses orgId to
+                      // populate the task combo for Link Existing mode.
+                      window.location.href = U('/Practice/Index/gap-detail')
+                          + '?gapId=' + encodeURIComponent(gapId)
+                          + '&orgId=' + encodeURIComponent(selectedOrgId || '');
+                  } },
                 { icon: 'fa-lock',
                   label: 'Close Gap',
                   disabled: isClosed, disabledReason: 'Gap is already ' + status.toLowerCase() + '.',
@@ -701,6 +839,25 @@
                   } }
             ];
         }
+        // Assurance tab: rows carry the custom_gap_id in data-record-id
+        // (set by renderAssuranceGaps). Provide the same lifecycle
+        // drill-down as Custom -- Assurance gaps live in the same
+        // custom_gap table (unified per migrations 109-114).
+        if (activeTab === 'assurance') {
+            const gapId = tr.getAttribute('data-record-id');
+            if (!gapId || gapId === 'null' || gapId === 'undefined') return [];
+            return [
+                { icon: 'fa-magnifying-glass',
+                  label: 'Analysis',
+                  action: function () {
+                      // Pass orgId + gapId; the detail page uses orgId to
+                      // populate the task combo for Link Existing mode.
+                      window.location.href = U('/Practice/Index/gap-detail')
+                          + '?gapId=' + encodeURIComponent(gapId)
+                          + '&orgId=' + encodeURIComponent(selectedOrgId || '');
+                  } }
+            ];
+        }
         if (activeTab !== 'implementation') return [];
         const id    = tr.getAttribute('data-instance-id');
         const code  = tr.getAttribute('data-instance-code') || '';
@@ -709,6 +866,34 @@
         const items = [
             { icon: 'fa-eye',  label: 'View Practice Instance',
                 action: function () { window.location.href = '/Practice/Index/practice-instances'; } },
+            // Materialize the custom_gap for this practice_instance (if
+            // one doesn't already exist), then navigate to the lifecycle
+            // detail page. Idempotent server-side -- repeated clicks
+            // hand back the same custom_gap_id.
+            { icon: 'fa-magnifying-glass', label: 'Analysis',
+                action: async function () {
+                    try {
+                        const r = await fetch(U('/practice/api/gap-lifecycle/materialize-from-instance'), {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                practiceInstanceId: Number(id),
+                                organizationId:     Number(selectedOrgId || 0)
+                            })
+                        });
+                        const b = await r.json().catch(function () { return {}; });
+                        if (!r.ok || !b.customGapId) {
+                            alert(b.error || 'Could not materialize gap (HTTP ' + r.status + ').');
+                            return;
+                        }
+                        window.location.href = U('/Practice/Index/gap-detail')
+                            + '?gapId=' + encodeURIComponent(b.customGapId)
+                            + '&orgId=' + encodeURIComponent(selectedOrgId || '');
+                    } catch (err) {
+                        alert('Network error: ' + err.message);
+                    }
+                } },
             { icon: 'fa-plus', label: 'Add Implementation Task',
                 action: function () {
                     if (window.__openAddImplTask) window.__openAddImplTask(id, code, name);

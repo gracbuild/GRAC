@@ -1,0 +1,41 @@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    ViewData["Title"] = "No permission";
+}
+@*
+    Rendered by PracticeController when the signed-in user has no VIEW
+    permission for the requested screen.
+
+    It exists because ControllerBase.Forbid() cannot be used here: the
+    application registers no authentication scheme (identity lives in the
+    session, see Program.cs), so Forbid() throws
+    "No authenticationScheme was specified" and the user is shown a stack
+    trace instead of an explanation. This view says what is missing and
+    who can grant it, and the action still answers HTTP 403.
+
+    Uses the same pm-page-heading / pm-panel primitives as Manage.cshtml
+    so it inherits the shell, sidebar and styling with no new CSS.
+*@
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>No permission</h1>
+    </div>
+    <div class="pm-actions">
+        <a class="pm-button" asp-controller="Practice" asp-action="Index"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
+    </div>
+</div>
+
+<section class="pm-panel">
+    <div class="pm-empty">
+        <p>
+            Your role does not have <strong>View</strong> permission for
+            <strong>@Model.Title</strong>.
+        </p>
+        <p>
+            An administrator can grant it from
+            <strong>Organization &rsaquo; Role Menu Permissions</strong>
+            by ticking View for the <code>@Model.Key</code> menu against your role.
+        </p>
+    </div>
+</section>

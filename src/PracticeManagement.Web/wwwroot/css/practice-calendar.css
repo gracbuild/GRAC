@@ -437,3 +437,245 @@
     .cal-day-cell { min-height: 60px; }
     .cal-side-panel { left: 10px; right: 10px; width: auto; max-width: none; }
 }
+
+/* ==================================================================
+   Unified Calendar extensions (Practice Instance + Assurance module)
+   ------------------------------------------------------------------
+   * Six source-module color tokens -- used on chips, day-cell pills,
+     legend swatches, and multi-day spanning bars alike.
+   * Overdue red border overlay applies on top of the module color.
+   * Filter panel + chip row visual language matches other GRAC
+     grids (small pill toggles with subtle active state).
+   ================================================================== */
+:root {
+    /* Source-module palette. Kept perceptually distinct so users can
+       decode the calendar without needing the legend after the first
+       glance. Values match the legend swatches below 1:1. */
+    --cal-src-pi:    #2465ca; /* Practice Instance -- reuses GRAC blue */
+    --cal-src-plan:  #0d9488; /* Assurance Plan    -- teal */
+    --cal-src-item:  #7c3aed; /* Plan Item         -- violet */
+    --cal-src-exec:  #ea580c; /* Execution         -- orange */
+    --cal-src-obs:   #db2777; /* Observation       -- pink */
+    --cal-src-gap:   #b91c1c; /* Gap               -- crimson */
+
+    --cal-overdue:   #dc2626;
+    --cal-warning:   #d97706;
+}
+
+/* --- Filter panel ------------------------------------------------- */
+.cal-filter-panel {
+    background: var(--grac-bg-dim, #f6f8fb);
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 0 0 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.cal-filter-row {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+}
+.cal-filter-group {
+    align-items: center;
+    display: flex;
+    gap: 6px;
+}
+.cal-filter-owner { gap: 4px; }
+.cal-filter-search { flex: 1 1 220px; min-width: 200px; }
+.cal-filter-label {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    min-width: 66px;
+}
+.cal-filter-select,
+.cal-filter-input {
+    background: #fff;
+    border: 1px solid #d5dce7;
+    border-radius: 6px;
+    color: var(--grac-ink, #172033);
+    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    height: 30px;
+    min-width: 140px;
+    padding: 4px 8px;
+}
+.cal-filter-input { flex: 1 1 auto; }
+.cal-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.cal-chip {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #d5dce7;
+    border-radius: 999px;
+    color: var(--grac-muted, #758095);
+    cursor: pointer;
+    display: inline-flex;
+    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    gap: 4px;
+    padding: 3px 10px;
+    transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.cal-chip:hover { background: #eef4fb; color: var(--grac-ink, #172033); }
+.cal-chip.active {
+    background: var(--grac-ink, #172033);
+    border-color: var(--grac-ink, #172033);
+    color: #fff;
+}
+.cal-chip .cal-chip-dot {
+    background: currentColor;
+    border-radius: 50%;
+    display: inline-block;
+    height: 8px;
+    width: 8px;
+    opacity: .85;
+}
+/* Source-module chip dots pick up the module color even when inactive. */
+.cal-chip.source-PracticeInstance     { color: var(--cal-src-pi); }
+.cal-chip.source-AssurancePlan        { color: var(--cal-src-plan); }
+.cal-chip.source-AssurancePlanItem    { color: var(--cal-src-item); }
+.cal-chip.source-AssuranceExecution   { color: var(--cal-src-exec); }
+.cal-chip.source-AssuranceObservation { color: var(--cal-src-obs); }
+.cal-chip.source-AssuranceGap         { color: var(--cal-src-gap); }
+.cal-chip.source-PracticeInstance.active     { background: var(--cal-src-pi);   border-color: var(--cal-src-pi);   color: #fff; }
+.cal-chip.source-AssurancePlan.active        { background: var(--cal-src-plan); border-color: var(--cal-src-plan); color: #fff; }
+.cal-chip.source-AssurancePlanItem.active    { background: var(--cal-src-item); border-color: var(--cal-src-item); color: #fff; }
+.cal-chip.source-AssuranceExecution.active   { background: var(--cal-src-exec); border-color: var(--cal-src-exec); color: #fff; }
+.cal-chip.source-AssuranceObservation.active { background: var(--cal-src-obs);  border-color: var(--cal-src-obs);  color: #fff; }
+.cal-chip.source-AssuranceGap.active         { background: var(--cal-src-gap);  border-color: var(--cal-src-gap);  color: #fff; }
+
+/* --- Legend ------------------------------------------------------- */
+.cal-legend { margin: 0 0 8px; padding: 0; }
+.cal-legend-sep {
+    border-left: 1px solid var(--grac-line, #e2e7f0);
+    height: 14px;
+    margin: 0 4px;
+}
+.cal-legend-swatch.source-PracticeInstance     { background: var(--cal-src-pi); }
+.cal-legend-swatch.source-AssurancePlan        { background: var(--cal-src-plan); }
+.cal-legend-swatch.source-AssurancePlanItem    { background: var(--cal-src-item); }
+.cal-legend-swatch.source-AssuranceExecution   { background: var(--cal-src-exec); }
+.cal-legend-swatch.source-AssuranceObservation { background: var(--cal-src-obs); }
+.cal-legend-swatch.source-AssuranceGap         { background: var(--cal-src-gap); }
+.cal-legend-swatch.status-Overdue { background: #fff; border: 2px solid var(--cal-overdue); }
+
+/* --- Chip color by source module (day cells) --------------------- */
+/* Module color WINS over the older criticality-* colors so mixed calendars
+   read as "what kind of thing is this?" first, criticality second. */
+.cal-event.cal-event-chip.source-PracticeInstance     { background: var(--cal-src-pi); }
+.cal-event.cal-event-chip.source-AssurancePlan        { background: var(--cal-src-plan); }
+.cal-event.cal-event-chip.source-AssurancePlanItem    { background: var(--cal-src-item); }
+.cal-event.cal-event-chip.source-AssuranceExecution   { background: var(--cal-src-exec); }
+.cal-event.cal-event-chip.source-AssuranceObservation { background: var(--cal-src-obs); }
+.cal-event.cal-event-chip.source-AssuranceGap         { background: var(--cal-src-gap); }
+/* Overdue: red ring around the chip regardless of module color. */
+.cal-event.cal-event-chip.status-kind-danger {
+    box-shadow: 0 0 0 2px var(--cal-overdue);
+}
+.cal-event.cal-event-chip.status-kind-warning {
+    box-shadow: 0 0 0 2px var(--cal-warning);
+}
+/* Terminal / neutral events get muted so active items stand out. */
+.cal-event.cal-event-chip.status-kind-success { opacity: .55; }
+.cal-event.cal-event-chip.status-kind-neutral { opacity: .45; }
+
+/* --- Multi-day spanning bars (month view) ------------------------ */
+/* A range event that touches this week gets rendered as a full-width
+   bar spanning cells [startCol .. endCol]. The bar sits at the top of
+   the week row, above the day cells' chip areas, and pushes chips
+   down via a small top-padding hack on .cal-day-cell when bars are
+   present (see .cal-week-row.has-bars > .cal-day-cell). */
+.cal-week-row { position: relative; }
+.cal-week-row.has-bars > .cal-day-cell {
+    padding-top: 22px;
+}
+.cal-week-row.has-bars-2 > .cal-day-cell { padding-top: 42px; }
+.cal-week-row.has-bars-3 > .cal-day-cell { padding-top: 62px; }
+.cal-week-row.has-bars-many > .cal-day-cell { padding-top: 82px; }
+.cal-range-bar-layer {
+    position: absolute;
+    inset: 2px 2px auto 2px;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    grid-auto-rows: 18px;
+    row-gap: 2px;
+    pointer-events: none;
+    z-index: 2;
+}
+.cal-range-bar {
+    align-items: center;
+    background: var(--cal-src-plan);
+    border-radius: 3px;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1;
+    margin: 0 1px;
+    overflow: hidden;
+    padding: 2px 6px;
+    pointer-events: auto;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cal-range-bar:hover { filter: brightness(1.08); box-shadow: 0 1px 4px rgba(15,23,42,.15); }
+.cal-range-bar.source-PracticeInstance     { background: var(--cal-src-pi); }
+.cal-range-bar.source-AssurancePlan        { background: var(--cal-src-plan); }
+.cal-range-bar.source-AssurancePlanItem    { background: var(--cal-src-item); }
+.cal-range-bar.source-AssuranceExecution   { background: var(--cal-src-exec); }
+.cal-range-bar.source-AssuranceObservation { background: var(--cal-src-obs); }
+.cal-range-bar.source-AssuranceGap         { background: var(--cal-src-gap); }
+.cal-range-bar.status-kind-danger  { box-shadow: inset 0 0 0 1px var(--cal-overdue), 0 0 0 1px var(--cal-overdue); }
+.cal-range-bar.status-kind-warning { box-shadow: inset 0 0 0 1px var(--cal-warning); }
+.cal-range-bar.status-kind-success { opacity: .55; }
+.cal-range-bar.status-kind-neutral { opacity: .45; }
+.cal-range-bar-continues-left  { border-top-left-radius: 0;  border-bottom-left-radius: 0; }
+.cal-range-bar-continues-right { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+/* --- Side panel: source module chip + deep-link button ---------- */
+.cal-side-source-badge {
+    align-items: center;
+    background: var(--cal-src-pi);
+    border-radius: 999px;
+    color: #fff;
+    display: inline-flex;
+    font-size: 10.5px;
+    font-weight: 700;
+    gap: 4px;
+    letter-spacing: .4px;
+    margin-bottom: 8px;
+    padding: 3px 10px;
+    text-transform: uppercase;
+}
+.cal-side-source-badge.source-AssurancePlan        { background: var(--cal-src-plan); }
+.cal-side-source-badge.source-AssurancePlanItem    { background: var(--cal-src-item); }
+.cal-side-source-badge.source-AssuranceExecution   { background: var(--cal-src-exec); }
+.cal-side-source-badge.source-AssuranceObservation { background: var(--cal-src-obs); }
+.cal-side-source-badge.source-AssuranceGap         { background: var(--cal-src-gap); }
+.cal-side-deep-link {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 6px;
+    color: var(--grac-blue, #2465ca);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 600;
+    gap: 6px;
+    padding: 6px 10px;
+    text-decoration: none;
+}
+.cal-side-deep-link:hover { background: #eef4fb; }

@@ -40,8 +40,23 @@
 <section class="pm-panel" id="taskCenterRoot" hidden>
 
     <div class="pm-tabs" role="tablist" aria-label="Task Center tabs">
+        @*
+            Assurance is split in two. The data-tab key for the original tab
+            stays "assurance" -- deep links, pagesByTab and taskBody-assurance
+            all key on it, and renaming it would break the Gap Center hand-off
+            for a label change.
+        *@
+        @*
+            Candidates come first because that is the order the work
+            actually flows in (BRD §4): a source identifies an action,
+            Task Centre validates owner + priority + SLA, and only then
+            does an Approved Task exist. Putting the gate after the
+            outputs would read backwards.
+        *@
+        <button role="tab" data-tab="candidates"                     aria-selected="false">Task Candidates <span class="pm-badge" id="tabCountCandidates">0</span></button>
         <button role="tab" data-tab="implementation" class="active" aria-selected="true">Implementation Tasks <span class="pm-badge" id="tabCountImpl">0</span></button>
-        <button role="tab" data-tab="assurance"                     aria-selected="false">Assurance Tasks <span class="pm-badge" id="tabCountAssurance">0</span></button>
+        <button role="tab" data-tab="assurance"                     aria-selected="false">Continuous Assurance <span class="pm-badge" id="tabCountAssurance">0</span></button>
+        <button role="tab" data-tab="event-driven"                  aria-selected="false">Event Driven Assurance <span class="pm-badge" id="tabCountEventDriven">0</span></button>
         <button role="tab" data-tab="custom"                        aria-selected="false">Custom Tasks <span class="pm-badge" id="tabCountCustom">0</span></button>
     </div>
 
@@ -60,6 +75,33 @@
 
     @* Gaps tab was moved out into its own Gap Center module (see gaps.cshtml + migration 050). *@
 
+    @*
+        Task Candidates tab (BRD §5). Identified actions awaiting
+        execution validation. Deliberately shows only what this stage
+        decides — owner, priority, derived SLA — and never severity or
+        impact, which stay with the source.
+    *@
+    <div class="pm-tab-panel" data-panel="candidates" hidden>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Candidate #</th><th>Action</th><th>Source</th>
+                        <th>Proposed Owner</th><th>Priority</th><th>Proposed Due</th>
+                        <th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="taskBody-candidates"><tr><td colspan="8" class="pm-empty">Select an organization to load candidates.</td></tr></tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="candidates">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </div>
+
     <!-- Implementation Tasks tab -->
     <div class="pm-tab-panel" data-panel="implementation">
         <div class="pm-table-wrap">
@@ -68,7 +110,7 @@
                     <tr>
                         <th>Task #</th><th>Task Name</th><th>Practice Instance</th><th>Practice</th>
                         <th>Assigned To</th><th>Priority</th><th>Target Date</th>
-                        <th>Workflow</th><th>Current Stage</th><th>Status</th><th>Actions</th>
+                        <th>SLA Status</th><th>Children</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="taskBody-implementation"><tr><td colspan="11" class="pm-empty">Select an organization to load tasks.</td></tr></tbody>
@@ -90,7 +132,7 @@
                     <tr>
                         <th>Task #</th><th>Assurance Activity</th><th>Practice Instance</th><th>Practice</th>
                         <th>Assigned To</th><th>Priority</th><th>Due Date</th>
-                        <th>Workflow</th><th>Current Stage</th><th>Status</th><th>Actions</th>
+                        <th>SLA Status</th><th>Children</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="taskBody-assurance"><tr><td colspan="11" class="pm-empty">No Assurance tasks yet. Auto-generation lands in a later phase.</td></tr></tbody>
@@ -104,6 +146,16 @@
         </div>
     </div>
 
+    @*
+        Event Driven Assurance tab. The panel is a partial so there is one
+        implementation of the event checklist behaviour, and it reads the
+        event engine directly rather than mirroring event_instance rows into
+        practice_task -- see the partial's header for why.
+    *@
+    <div class="pm-tab-panel" data-panel="event-driven" hidden>
+        <partial name="Partials/_event-assurance-panel" />
+    </div>
+
     <!-- Custom Tasks tab -->
     <div class="pm-tab-panel" data-panel="custom" hidden>
         <div class="pm-table-wrap">
@@ -112,7 +164,7 @@
                     <tr>
                         <th>Task #</th><th>Task Name</th><th>Related Entity</th><th>Related Record</th>
                         <th>Assigned To</th><th>Priority</th><th>Target Date</th>
-                        <th>Workflow</th><th>Current Stage</th><th>Status</th><th>Actions</th>
+                        <th>SLA Status</th><th>Children</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="taskBody-custom"><tr><td colspan="11" class="pm-empty">No custom tasks yet. Click + New Task to create one.</td></tr></tbody>
@@ -130,6 +182,22 @@
 
 @* Add Implementation Task modal — exposes window.__openAddImplTask *@
 <partial name="Partials/_add-implementation-task-modal" model="Model" />
+
+@*
+    Task detail view (BRD §16) — "operational and service-request-like".
+    Filled by renderTaskDetail() from a single GET /practice/api/tasks/{id},
+    which returns header + activity + evidence + children + Exception
+    Centre requests in one round trip.
+*@
+<dialog id="taskDetailDialog" style="border:none; border-radius:8px; padding:0; max-width:980px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px; max-height:82vh; overflow:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <h2 id="taskDetailTitle" style="margin:0; font-size:17px;">Task</h2>
+            <button type="button" id="taskDetailClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer; line-height:1;">&times;</button>
+        </div>
+        <div id="taskDetailBody"></div>
+    </div>
+</dialog>
 
 @* New Task dialog — locked to task_type_code = 'Custom' *@
 <dialog id="newTaskDialog" style="border:none; border-radius:8px; padding:0; max-width:620px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
@@ -205,9 +273,24 @@
     // after every inline layout script has run).
     const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
+    // Row-menu feature flags.
+    // These items had `alert('...will land in Phase X')` bodies -- they were
+    // reserved slots for future work with no active pages behind them, so
+    // clicking them was pure noise. Hidden here per the "no dead options"
+    // pass. Flip a flag to `true` when the target subsystem ships to bring
+    // the option back with zero further code changes.
+    const TASK_ROW_MENU_FLAGS = {
+        edit:                  false, // opens once the Task edit dialog / workflow subsystem lands
+        viewAssuranceActivity: false, // opens once the Assurance drill-down lands
+        viewWorkflowHistory:   false  // opens once workflow-history viewer lands
+    };
+
     let selectedOrgId = null;
     let activeTab     = 'implementation';   // was 'gaps' — Gaps moved to its own module
-    let pagesByTab    = { implementation: 1, assurance: 1, custom: 1 };
+    // 'event-driven' has no pager: sp_event_checklist_inbox_list returns the
+    // open set for the organization, not a page.
+    let pagesByTab    = { candidates: 1, implementation: 1, assurance: 1, custom: 1 };
+    const EVENT_TAB   = 'event-driven';
     const PAGE_SIZE   = 25;
     let searchDebounce = null;
     let openMenuEl      = null;
@@ -237,7 +320,19 @@
         });
         wirePagers();
         wireNewTaskDialog();
+        wireTaskDetailDialog();
         wireRowMenu();
+
+        // The Event Driven panel reads the organization from Task Center's own
+        // selector, so there is one organization control on the screen.
+        if (window.__eventAssurance) {
+            window.__eventAssurance.init(function () { return selectedOrgId; });
+            document.addEventListener('event-assurance:loaded', function (e) {
+                const badge = document.getElementById('tabCountEventDriven');
+                if (badge) badge.textContent = (e.detail && e.detail.count) || 0;
+            });
+        }
+        applyToolbarForTab();
 
         // Deep-link support for Gap Center → Task Center hand-off.
         //   Example: /Practice/Index/tasks#tab=implementation&search=INST-001
@@ -254,7 +349,7 @@
         const params = new URLSearchParams(raw);
         const tab = (params.get('tab') || '').toLowerCase();
         const q   = params.get('search') || '';
-        if (tab === 'implementation' || tab === 'assurance' || tab === 'custom') {
+        if (tab === 'candidates' || tab === 'implementation' || tab === 'assurance' || tab === 'custom' || tab === EVENT_TAB) {
             activeTab = tab;
             document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
                 const on = b.getAttribute('data-tab') === tab;
@@ -305,7 +400,7 @@
     async function onOrgChange() {
         closeRowMenu();
         selectedOrgId = document.getElementById('taskFilterOrganization').value || null;
-        pagesByTab = { implementation: 1, assurance: 1, custom: 1 };
+        pagesByTab = { candidates: 1, implementation: 1, assurance: 1, custom: 1 };
         // If the New Task dialog happens to be open, refresh its assignees.
         const dlg = document.getElementById('newTaskDialog');
         if (dlg && dlg.open && selectedOrgId) {
@@ -316,12 +411,18 @@
     }
 
     async function refreshCounts() {
-        if (!selectedOrgId) { setCounts(null); return; }
-        try {
-            const r = await fetch(U('/practice/api/tasks/counts?organizationId=') + encodeURIComponent(selectedOrgId), { credentials: 'same-origin' });
-            if (!r.ok) { setCounts(null); return; }
-            setCounts(await r.json());
-        } catch (_) { setCounts(null); }
+        if (!selectedOrgId) { setCounts(null); setCandidateCounts(null); return; }
+        const org = encodeURIComponent(selectedOrgId);
+        // Two independent endpoints (tasks, candidates) — fetched together
+        // so one failing does not blank the other's badge.
+        const [tasks, candidates] = await Promise.all([
+            fetch(U('/practice/api/tasks/counts?organizationId=') + org, { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+            fetch(U('/practice/api/task-candidates/counts?organizationId=') + org, { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+        ]);
+        setCounts(tasks);
+        setCandidateCounts(candidates);
     }
     function setCounts(c) {
         // gapsCount intentionally NOT surfaced here — Gap Center owns that
@@ -329,6 +430,13 @@
         document.getElementById('tabCountImpl').textContent      = c ? c.implementationCount : 0;
         document.getElementById('tabCountAssurance').textContent = c ? c.assuranceCount      : 0;
         document.getElementById('tabCountCustom').textContent    = c ? c.customCount         : 0;
+    }
+    // The Candidates badge counts OPEN candidates (New + Validated) —
+    // approved ones already appear as tasks in the other tabs, and
+    // discarded ones are history.
+    function setCandidateCounts(c) {
+        const badge = document.getElementById('tabCountCandidates');
+        if (badge) badge.textContent = c ? (c.openCount || 0) : 0;
     }
 
     function switchTab(tab) {
@@ -342,14 +450,110 @@
         document.querySelectorAll('.pm-tab-panel').forEach(function (p) {
             p.hidden = p.getAttribute('data-panel') !== tab;
         });
+        applyToolbarForTab();
         reloadCurrentTab();
+    }
+
+    // The Event Driven tab brings its own toolbar (subject filter, Raise
+    // Event, Coverage Gaps) inside the partial. The shared task toolbar --
+    // search and New Task -- does not apply to it: an event checklist is
+    // raised by an event, not typed in as a task.
+    function applyToolbarForTab() {
+        const isEvent = activeTab === EVENT_TAB;
+        const search = document.getElementById('taskCenterSearch');
+        const addBtn = document.getElementById('taskAddBtn');
+        if (search) search.hidden = isEvent;
+        // "+ New Task" creates a CUSTOM task, which by BRD §4B skips the
+        // candidate stage entirely — so it has no meaning while the
+        // Candidates tab is showing. Candidates are raised by their
+        // source, or from the source's own screen.
+        if (addBtn) addBtn.hidden = isEvent || activeTab === 'candidates';
     }
     async function reloadCurrentTab() {
         closeRowMenu();
         if (!selectedOrgId) return;
+        if (activeTab === 'candidates')     return loadCandidates();
         if (activeTab === 'implementation') return loadTasks('Implementation');
         if (activeTab === 'assurance')      return loadTasks('Assurance');
+        if (activeTab === EVENT_TAB)        return window.__eventAssurance
+                                                 ? window.__eventAssurance.load()
+                                                 : undefined;
         if (activeTab === 'custom')         return loadTasks('Custom');
+    }
+
+    // -----------------------------------------------------------------
+    // Task Candidates  (BRD §5)
+    // -----------------------------------------------------------------
+    async function loadCandidates() {
+        const q = document.getElementById('taskCenterSearch').value.trim();
+        const p = pagesByTab.candidates;
+        // 'OpenSet' = New + Validated. Approved candidates are visible as
+        // tasks; discarded ones are reachable through the source panel.
+        const url = U('/practice/api/task-candidates?organizationId=') + encodeURIComponent(selectedOrgId)
+                  + '&statusCode=OpenSet'
+                  + '&page=' + p + '&pageSize=' + PAGE_SIZE
+                  + (q ? '&search=' + encodeURIComponent(q) : '');
+        const body = document.getElementById('taskBody-candidates');
+        if (body) body.innerHTML = '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>';
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderCandidateRows(await r.json());
+        } catch (err) {
+            if (body) body.innerHTML = '<tr><td colspan="8" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>';
+        }
+    }
+
+    function renderCandidateRows(payload) {
+        const body = document.getElementById('taskBody-candidates');
+        if (!body) return;
+        body.innerHTML = '';
+        const rows = (payload && payload.rows) || [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">No candidates awaiting validation.</td></tr>';
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                const c = rows[i];
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-candidate-id',    String(c.taskCandidateId));
+                tr.setAttribute('data-candidate-state', c.statusCode || '');
+                tr.setAttribute('data-candidate-ready', c.isReadyToApprove ? '1' : '0');
+                tr.setAttribute('data-candidate-priority', c.proposedPriority || '');
+                tr.innerHTML = [
+                    '<td>' + escape(c.candidateNumber || ('TC-' + c.taskCandidateId)) + '</td>',
+                    '<td>' + escape(c.candidateTitle) + '</td>',
+                    '<td>' + escape((c.sourceReference || c.sourceTypeCode) + '') + '</td>',
+                    '<td>' + candidateOwnerCell(c) + '</td>',
+                    '<td>' + escape(c.proposedPriority) + '</td>',
+                    '<td>' + candidateDueCell(c) + '</td>',
+                    '<td>' + formatBadge(c.statusCode) + '</td>',
+                    '<td>' + actionTrigger('candidates', i) + '</td>'
+                ].join('');
+                body.appendChild(tr);
+            }
+        }
+        updatePager('candidates', payload);
+    }
+
+    // An unresolved owner is the single thing blocking approval, so it is
+    // called out rather than left blank (BRD §6 rung 7 — manual).
+    function candidateOwnerCell(c) {
+        if (!c.proposedOwnerEmployeeId)
+            return '<span style="color:#b45309;">Needs an owner</span>';
+        const src = c.ownerSourceCode && c.ownerSourceCode !== 'MANUAL' && c.ownerSourceCode !== 'EXPLICIT_SOURCE'
+            ? '<div style="font-size:11px; color:#64748b;">' + escape(ownerSourceLabel(c.ownerSourceCode)) + '</div>'
+            : '';
+        return escape(c.proposedOwnerName || c.proposedOwnerEmployeeId) + src;
+    }
+
+    function candidateDueCell(c) {
+        if (!c.proposedDueAt) return '';
+        const note = c.slaSourceCode === 'TYPE_DEFAULT'
+            ? '<div style="font-size:11px; color:#64748b;">task-type default</div>' : '';
+        return escape(fmtDate(c.proposedDueAt))
+             + (c.proposedSlaDays != null ? ' <span style="font-size:11px; color:#64748b;">('
+                 + escape(c.proposedSlaDays) + 'd)</span>' : '')
+             + note;
     }
 
     async function loadTasks(typeCode) {
@@ -387,16 +591,23 @@
                 tr.setAttribute('data-task-id',       String(r.taskId));
                 tr.setAttribute('data-task-state',    r.currentStatusCode || '');
                 tr.setAttribute('data-task-terminal', r.currentStatusIsTerminal ? '1' : '0');
+                // v2 attributes drive the row menu without a second fetch.
+                tr.setAttribute('data-task-child',    r.isChild ? '1' : '0');
+                tr.setAttribute('data-task-eligible', r.isEligibleForCompletion ? '1' : '0');
+                tr.setAttribute('data-task-priority', r.priority || '');
+                tr.setAttribute('data-task-due',      r.slaDueAt || '');
+                tr.setAttribute('data-task-ext',      r.extensionStatusCode || '');
+                tr.setAttribute('data-task-prio-req', r.priorityChangeStatusCode || '');
                 tr.innerHTML = [
-                    '<td>T-' + escape(r.organizationId) + '-' + escape(r.taskId) + '</td>',
-                    '<td>' + escape(r.subjectTitle) + '</td>',
+                    '<td>' + escape(r.taskNumber || ('T-' + r.organizationId + '-' + r.taskId)) + '</td>',
+                    '<td>' + escape(r.subjectTitle) + pendingBadges(r) + '</td>',
                     '<td>' + escape(r.linkedInstanceId ? 'Instance ' + r.linkedInstanceId : (r.subjectEntityType + ' ' + r.subjectEntityId)) + '</td>',
                     '<td>' + escape(r.linkedPracticeId ? 'Practice ' + r.linkedPracticeId : '') + '</td>',
-                    '<td>' + escape(r.assignedToEmployeeId || '') + '</td>',
+                    '<td>' + ownerCell(r) + '</td>',
                     '<td>' + escape(r.priority) + '</td>',
-                    '<td>' + escape(r.slaDueAt || '') + '</td>',
-                    '<td></td>',
-                    '<td></td>',
+                    '<td>' + dueCell(r) + '</td>',
+                    '<td>' + slaStatusBadge(r) + '</td>',
+                    '<td>' + childCell(r) + '</td>',
                     '<td>' + formatBadge(r.currentStatusName) + '</td>',
                     '<td>' + actionTrigger(tabKey, i) + '</td>'
                 ].join('');
@@ -413,6 +624,97 @@
              + '</button>';
     }
     function formatBadge(v) { return v ? '<span class="pm-badge">' + escape(v) + '</span>' : ''; }
+
+    // -----------------------------------------------------------------
+    // Task Centre v2 cell renderers  (BRD §7, §8, §11, §13, §17)
+    //
+    // Every one of these degrades to the pre-v2 output when the row does
+    // not carry the v2 field, so the grid still renders against a
+    // database where migrations 192-195 have not been applied yet.
+    // -----------------------------------------------------------------
+    const SLA_BADGE_STYLE = {
+        OnTrack:   { bg: '#dcfce7', fg: '#166534', label: 'On Track'  },
+        DueSoon:   { bg: '#fef9c3', fg: '#854d0e', label: 'Due Soon'  },
+        DueToday:  { bg: '#ffedd5', fg: '#9a3412', label: 'Due Today' },
+        Breached:  { bg: '#fee2e2', fg: '#991b1b', label: 'Breached'  },
+        Extended:  { bg: '#e0e7ff', fg: '#3730a3', label: 'Extended'  },
+        Completed: { bg: '#f1f5f9', fg: '#475569', label: 'Completed' },
+        NotSet:    { bg: '#f1f5f9', fg: '#64748b', label: 'No SLA'    }
+    };
+
+    function fmtDate(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toISOString().slice(0, 10);
+    }
+
+    function slaStatusBadge(r) {
+        const code = r.slaStatusCode;
+        if (!code) return r.isOverdue ? '<span class="pm-badge">Breached</span>' : '';
+        const s = SLA_BADGE_STYLE[code] || { bg: '#f1f5f9', fg: '#475569', label: code };
+        return '<span class="pm-badge" style="background:' + s.bg + '; color:' + s.fg + ';">'
+             + escape(s.label) + '</span>';
+    }
+
+    // BRD §8: the standard due date is never destroyed by an approved
+    // extension, so when one exists we show both — the effective date
+    // the task is now monitored against, and the original commitment.
+    function dueCell(r) {
+        const effective = fmtDate(r.slaDueAt);
+        if (!r.isExtended || !r.standardDueAt) return escape(effective);
+        return escape(effective)
+             + '<div style="font-size:11px; color:#64748b;">std ' + escape(fmtDate(r.standardDueAt)) + '</div>';
+    }
+
+    // BRD §12: "Completion of a Child Task does not complete the Parent
+    // Task." The badge shows remaining mandatory children so the owner
+    // can see at a glance why Complete is blocked.
+    function childCell(r) {
+        const total = r.childCount || 0;
+        if (r.isChild) {
+            return '<span style="font-size:11px; color:#64748b;">child of '
+                 + escape(r.parentTaskNumber || ('#' + r.parentTaskId)) + '</span>';
+        }
+        if (!total) return '';
+        const open = r.mandatoryChildOpenCount || 0;
+        const done = (r.mandatoryChildCount || 0) - open;
+        return escape(done + '/' + (r.mandatoryChildCount || 0))
+             + (open === 0 ? ' <span class="pm-badge" style="background:#dcfce7; color:#166534;">Ready</span>' : '');
+    }
+
+    function ownerCell(r) {
+        if (r.assignedToEmployeeName) {
+            const src = r.ownerSourceCode && r.ownerSourceCode !== 'EXPLICIT_SOURCE' && r.ownerSourceCode !== 'REASSIGNED'
+                ? '<div style="font-size:11px; color:#64748b;">' + escape(ownerSourceLabel(r.ownerSourceCode)) + '</div>'
+                : '';
+            return escape(r.assignedToEmployeeName) + src;
+        }
+        if (r.assignedToEmployeeId) return escape(r.assignedToEmployeeId);
+        return '<span style="color:#b45309;">Unassigned</span>';
+    }
+
+    function ownerSourceLabel(code) {
+        return ({
+            PRACTICE_OWNER: 'from Practice owner',
+            CONTROL_OWNER:  'from Control owner',
+            PROCESS_OWNER:  'from Process owner',
+            FUNCTION_OWNER: 'from Function owner',
+            ORG_DEFAULT:    'org default owner',
+            MANUAL:         'manual assignment'
+        })[code] || '';
+    }
+
+    // In-flight governance requests (BRD §7, §8) — the operator must be
+    // able to see that a decision is parked without opening the task.
+    function pendingBadges(r) {
+        let out = '';
+        if (r.extensionStatusCode === 'Pending')
+            out += ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">Extension pending</span>';
+        if (r.priorityChangeStatusCode === 'Pending')
+            out += ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">Priority '
+                 + escape(r.requestedPriority || '') + ' pending</span>';
+        return out;
+    }
     function wirePagers() {
         document.querySelectorAll('.pm-pager').forEach(function (nav) {
             const tab = nav.getAttribute('data-pager');
@@ -480,6 +782,11 @@
         positionRowMenu(trigger);
     }
     function buildRowMenu(tr) {
+        // Candidate rows are a different entity with a different verb set
+        // (validate / approve / discard, not assign / transition / close),
+        // so they get their own builder rather than a pile of branches.
+        if (tr.hasAttribute('data-candidate-id')) return buildCandidateRowMenu(tr);
+
         // Gap-row branch removed — Implementation gap rows now live in
         // Gap Center (Views/Practice/Partials/gaps.cshtml) which builds
         // its own 3-dot menu with View Practice Instance / Add
@@ -489,23 +796,79 @@
         const isTerminal = tr.getAttribute('data-task-terminal') === '1';
         const base = [
             { icon: 'fa-eye',              label: 'View',
-                action: function () { openTaskViewDrawer(taskId); } },
-            { icon: 'fa-pen',              label: 'Edit',
+                action: function () { openTaskViewDrawer(taskId); } }
+        ];
+        // Edit is gated behind the workflow subsystem -- shown only when
+        // TASK_ROW_MENU_FLAGS.edit flips to true (see top of file).
+        if (TASK_ROW_MENU_FLAGS.edit) {
+            base.push({ icon: 'fa-pen', label: 'Edit',
                 disabled: isTerminal, disabledReason: 'Task is closed.',
-                action: function () { alert('Edit will land alongside the workflow subsystem (Phase 2/3).'); } },
+                action: function () { /* wired when workflow subsystem lands */ } });
+        }
+        base.push(
             { icon: 'fa-arrows-turn-right',label: 'Update Status',
                 disabled: isTerminal, disabledReason: 'Task is closed.',
                 action: function () { openUpdateTaskStatus(taskId, currentState); } },
             { icon: 'fa-user-plus',        label: 'Assign / Reassign',
                 disabled: isTerminal, disabledReason: 'Task is closed.',
                 action: function () { openAssignTask(taskId); } }
-        ];
-        if (activeTab === 'assurance') {
+        );
+
+        // -------------------------------------------------------------
+        // Task Centre v2 governance actions.
+        //
+        // The disabled reasons deliberately quote the BRD rule rather
+        // than saying "not allowed": when the system refuses, the
+        // operator should learn WHY, because these are governance
+        // decisions, not UI limitations.
+        // -------------------------------------------------------------
+        const isChild    = tr.getAttribute('data-task-child') === '1';
+        const isEligible = tr.getAttribute('data-task-eligible') === '1';
+        const priority   = tr.getAttribute('data-task-priority') || '';
+        const dueAt      = tr.getAttribute('data-task-due') || '';
+        const extStatus  = tr.getAttribute('data-task-ext') || '';
+        const prioReq    = tr.getAttribute('data-task-prio-req') || '';
+
+        base.push(
+            { icon: 'fa-comment-dots', label: 'Add Update / Comment',
+                disabled: isTerminal, disabledReason: 'Task is closed.',
+                action: function () { openAddUpdate(taskId); } },
+
+            { icon: 'fa-flag', label: 'Change Priority',
+                disabled: isTerminal || isChild || prioReq === 'Pending',
+                disabledReason: isChild ? 'Child tasks inherit the parent priority — change it on the parent.'
+                              : prioReq === 'Pending' ? 'A priority reduction is already awaiting approval.'
+                              : 'Task is closed.',
+                action: function () { openChangePriority(taskId, priority); } },
+
+            { icon: 'fa-calendar-plus', label: 'Request SLA Extension',
+                disabled: isTerminal || isChild || extStatus === 'Pending',
+                disabledReason: isChild ? 'Child tasks inherit the parent SLA — raise the request on the parent.'
+                              : extStatus === 'Pending' ? 'An SLA extension is already awaiting approval.'
+                              : 'Task is closed.',
+                action: function () { openRequestExtension(taskId, dueAt); } },
+
+            { icon: 'fa-diagram-project', label: 'Add Child Task',
+                disabled: isTerminal || isChild,
+                disabledReason: isChild ? 'Child tasks cannot themselves have children.' : 'Task is closed.',
+                action: function () { openAddChildTask(taskId); } },
+
+            { icon: 'fa-circle-check', label: 'Complete Task',
+                disabled: isTerminal || !isEligible,
+                disabledReason: isTerminal ? 'Already completed.'
+                              : 'Mandatory child tasks are still open.',
+                action: function () { completeTaskAction(taskId); } }
+        );
+        // View Assurance Activity is gated behind the Phase-6 drill-down.
+        if (activeTab === 'assurance' && TASK_ROW_MENU_FLAGS.viewAssuranceActivity) {
             base.push({ icon: 'fa-shield-halved', label: 'View Assurance Activity',
-                action: function () { alert('Assurance drill-down lands with Phase 6.'); } });
+                action: function () { /* wired when Assurance drill-down lands */ } });
         }
-        base.push({ icon: 'fa-clock-rotate-left', label: 'View Workflow History',
-            action: function () { alert('Workflow history opens with Phase 2/3.'); } });
+        // View Workflow History is gated behind the workflow-history viewer.
+        if (TASK_ROW_MENU_FLAGS.viewWorkflowHistory) {
+            base.push({ icon: 'fa-clock-rotate-left', label: 'View Workflow History',
+                action: function () { /* wired when workflow-history viewer lands */ } });
+        }
         if (activeTab !== 'assurance') {
             base.push({ icon: 'fa-lock',
                 label: activeTab === 'custom' ? 'Close / Inactivate' : 'Close Task',
@@ -514,6 +877,113 @@
         }
         return base;
     }
+    // -----------------------------------------------------------------
+    // Task Candidate row menu + actions  (BRD §5)
+    // -----------------------------------------------------------------
+    function buildCandidateRowMenu(tr) {
+        const id      = tr.getAttribute('data-candidate-id');
+        const ready   = tr.getAttribute('data-candidate-ready') === '1';
+        const priority = tr.getAttribute('data-candidate-priority') || '';
+
+        return [
+            { icon: 'fa-eye', label: 'View',
+                action: function () { openCandidateView(id); } },
+
+            { icon: 'fa-user-check', label: 'Validate (owner / priority)',
+                action: function () { openValidateCandidate(id, priority); } },
+
+            { icon: 'fa-circle-check', label: 'Approve → create task',
+                disabled: !ready,
+                disabledReason: 'A confirmed owner is required before a candidate can become an accountable task.',
+                action: function () { approveCandidate(id); } },
+
+            { icon: 'fa-ban', label: 'Discard',
+                action: function () { discardCandidate(id); } }
+        ];
+    }
+
+    async function postCandidateAction(id, path, payload, okMessage) {
+        try {
+            const r = await fetch(U('/practice/api/task-candidates/') + encodeURIComponent(id) + path, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify(payload || {})
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (r.ok) {
+                if (okMessage) alert(typeof okMessage === 'function' ? okMessage(b) : okMessage);
+                reloadCurrentTab();
+                refreshCounts();
+                return true;
+            }
+            alert((b.error || 'Request failed') + (b.reasonCode ? '\n[' + b.reasonCode + ']' : ''));
+            return false;
+        } catch (err) {
+            alert('Network error: ' + err.message);
+            return false;
+        }
+    }
+
+    async function openCandidateView(id) {
+        try {
+            const r = await fetch(U('/practice/api/task-candidates/') + encodeURIComponent(id), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const d = await r.json();
+            const h = d && d.header;
+            if (!h) { alert('Candidate not found.'); return; }
+            alert((h.candidateNumber || ('Candidate #' + h.taskCandidateId))
+                + '\n\n' + (h.candidateTitle || '')
+                + '\n\nSource:   ' + (h.sourceReference || h.sourceTypeCode) + ' #' + h.sourceRecordId
+                + '\nStatus:   ' + h.statusCode
+                + '\nOwner:    ' + (h.proposedOwnerName || '— not resolved —')
+                + (h.ownerSourceCode ? ' (' + h.ownerSourceCode + ')' : '')
+                + '\nPriority: ' + h.proposedPriority
+                + '\nSLA:      ' + (h.proposedSlaDays != null ? h.proposedSlaDays + ' days' : '—')
+                + '  due ' + (fmtDate(h.proposedDueAt) || '—')
+                + (h.approvedTaskId ? '\n\nApproved as task ' + (h.approvedTaskNumber || h.approvedTaskId) : '')
+                + (h.discardReason ? '\n\nDiscarded: ' + h.discardReason : ''));
+        } catch (err) { alert('Load failed: ' + err.message); }
+    }
+
+    // BRD §5: the candidate stage confirms owner and priority, nothing
+    // more. Priority is freely settable here — the §7 asymmetry (increase
+    // free, reduction approved) only starts once a commitment exists.
+    async function openValidateCandidate(id, currentPriority) {
+        const emps = await fetchOrgEmployees(selectedOrgId).catch(function () { return []; });
+        const owner = prompt('Validate candidate #' + id
+            + '\n\nConfirm the owner. Options:\n'
+            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('\n')
+            + '\n\nEnter employee id (blank = leave unchanged):');
+        if (owner === null) return;
+
+        const priority = prompt('Proposed priority'
+            + '\nCurrent: ' + (currentPriority || 'Medium')
+            + '\n\nThe SLA is derived from this and cannot be typed in.'
+            + '\n\nEnter Low, Medium, High or Critical (blank = leave unchanged):');
+        if (priority === null) return;
+
+        const payload = {};
+        if (owner && Number(owner.trim()))  payload.proposedOwnerEmployeeId = Number(owner.trim());
+        if (priority && priority.trim())    payload.proposedPriority        = priority.trim();
+        if (!payload.proposedOwnerEmployeeId && !payload.proposedPriority) return;
+
+        await postCandidateAction(id, '/validate', payload, 'Candidate validated.');
+    }
+
+    async function approveCandidate(id) {
+        if (!confirm('Approve candidate #' + id + '?\n\nThis creates an Approved Task with the confirmed owner and priority, and derives the SLA from the organisation policy in force right now.')) return;
+        await postCandidateAction(id, '/approve', {}, function (b) {
+            return 'Task ' + (b.approvedTaskId || '?') + ' created from this candidate.';
+        });
+    }
+
+    async function discardCandidate(id) {
+        const reason = prompt('Discard candidate #' + id
+            + '\n\nThe source record is NOT closed or changed — only this proposed task is dropped.'
+            + '\n\nReason:');
+        if (!reason || !reason.trim()) return;
+        await postCandidateAction(id, '/discard', { discardReason: reason.trim() }, 'Candidate discarded.');
+    }
+
     function wireRowMenu() {
         const root = document.getElementById('taskCenterRoot');
         if (root) {
@@ -541,20 +1011,211 @@
     // -----------------------------------------------------------------
     // Row-menu action helpers
     // -----------------------------------------------------------------
+    // -----------------------------------------------------------------
+    // Task detail view  (BRD §16)
+    //
+    // Replaces the previous alert() stub. One call to
+    // GET /practice/api/tasks/{id} returns header + activity + evidence
+    // + children + governance requests, so the drawer never fans out
+    // into five round trips.
+    // -----------------------------------------------------------------
     async function openTaskViewDrawer(taskId) {
+        const dlg  = document.getElementById('taskDetailDialog');
+        const bodyEl = document.getElementById('taskDetailBody');
+        if (!dlg || !bodyEl) return;
+        bodyEl.innerHTML = '<p class="pm-empty">Loading task #' + escape(taskId) + '...</p>';
+        showDialog(dlg);
         try {
-            const r = await fetch(U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId), { credentials: 'same-origin' });
-            const body = await r.json();
-            const row  = body && body.rows && body.rows.find(function (x) { return String(x.taskId) === String(taskId); });
-            if (!row) { alert('Task #' + taskId + ' — details not available.'); return; }
-            alert('Task #' + row.taskId
-                + '\nType: '     + (row.taskTypeName || row.taskTypeCode)
-                + '\nSubject: '  + (row.subjectTitle || '')
-                + '\nStatus: '   + (row.currentStatusName || '')
-                + '\nAssignee: ' + (row.assignedToEmployeeId || '—')
-                + '\nPriority: ' + (row.priority || '')
-                + '\nSLA: '      + (row.slaDueAt || '—'));
-        } catch (err) { alert('Load failed: ' + err.message); }
+            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            renderTaskDetail(await r.json());
+        } catch (err) {
+            bodyEl.innerHTML = '<p class="pm-empty">Failed to load: ' + escape(err.message) + '</p>';
+        }
+    }
+
+    function detailField(label, value) {
+        return '<div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">'
+             + escape(label) + '</div><div style="font-weight:600; color:#0f172a;">'
+             + (value || '<span style="font-weight:400; color:#94a3b8;">&mdash;</span>') + '</div></div>';
+    }
+
+    function renderTaskDetail(d) {
+        const bodyEl = document.getElementById('taskDetailBody');
+        const h = d && d.header;
+        if (!h) { bodyEl.innerHTML = '<p class="pm-empty">Task not found.</p>'; return; }
+
+        document.getElementById('taskDetailTitle').textContent =
+            (h.taskNumber || ('Task #' + h.taskId)) + ' — ' + (h.subjectTitle || '');
+
+        const parts = [];
+
+        // ---- identity / origin (BRD §16) ----
+        parts.push('<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px;">');
+        parts.push(detailField('Type',     escape(h.taskTypeName || h.taskTypeCode)));
+        parts.push(detailField('Status',   escape(h.currentStatusName || '')));
+        parts.push(detailField('Priority', escape(h.priority || '')
+                   + (h.priorityChangeStatusCode === 'Pending'
+                      ? ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">'
+                        + escape(h.requestedPriority || '') + ' pending</span>' : '')));
+        parts.push(detailField('Owner',    ownerCell(h)));
+        parts.push(detailField('Origin',   h.sourceTypeCode
+                   ? escape(h.sourceTypeCode + ' #' + (h.sourceRecordId || '')) : ''));
+        parts.push(detailField('Parent',   h.parentTaskId
+                   ? '<a href="#" data-open-task="' + escape(h.parentTaskId) + '">'
+                     + escape(h.parentTaskNumber || ('#' + h.parentTaskId)) + '</a>' : ''));
+        parts.push('</div>');
+
+        // ---- SLA block (BRD §8, §13) ----
+        // Standard and extended are shown side by side precisely because
+        // the BRD insists the extension must not erase the original.
+        parts.push('<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px;">');
+        parts.push('<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;">');
+        parts.push(detailField('Standard SLA', h.standardSlaDays != null ? escape(h.standardSlaDays + ' days') : ''));
+        parts.push(detailField('Standard Due', escape(fmtDate(h.standardDueAt))));
+        parts.push(detailField('Approved Extended Due', escape(fmtDate(h.approvedExtendedDueAt))));
+        parts.push(detailField('SLA Status', slaStatusBadge(h)));
+        parts.push('</div>');
+        if (h.extensionStatusCode === 'Pending') {
+            parts.push('<div style="margin-top:8px; font-size:12px; color:#854d0e;">'
+                     + 'Extension to ' + escape(fmtDate(h.requestedDueAt))
+                     + ' is awaiting Exception Centre approval. The due date is unchanged until then.'
+                     + '</div>');
+        }
+        if (h.slaSourceCode === 'TYPE_DEFAULT') {
+            parts.push('<div style="margin-top:8px; font-size:12px; color:#64748b;">'
+                     + 'No organisation SLA policy matched this priority — the task-type default was used. '
+                     + 'Configure an SLA for this classification in Org SLA Configuration.'
+                     + '</div>');
+        }
+        parts.push('</div>');
+
+        // ---- description ----
+        if (h.subjectDescription) {
+            parts.push('<div style="margin-bottom:14px;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Action required</div>'
+                     + '<div style="white-space:pre-wrap; color:#0f172a;">' + escape(h.subjectDescription) + '</div></div>');
+        }
+
+        // ---- children (BRD §11, §12) ----
+        const children = d.children || [];
+        if (children.length) {
+            parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Child tasks ('
+                     + children.length + ')</h3><div class="pm-table-wrap"><table><thead><tr>'
+                     + '<th>Task #</th><th>Activity</th><th>Owner</th><th>Mandatory</th><th>Target</th><th>Status</th>'
+                     + '</tr></thead><tbody>');
+            for (const c of children) {
+                parts.push('<tr><td><a href="#" data-open-task="' + escape(c.taskId) + '">'
+                         + escape(c.taskNumber || ('#' + c.taskId)) + '</a></td>'
+                         + '<td>' + escape(c.subjectTitle) + '</td>'
+                         + '<td>' + escape(c.assignedToEmployeeName || c.assignedToEmployeeId || '') + '</td>'
+                         + '<td>' + (c.isMandatoryChild === false ? 'Optional' : 'Mandatory') + '</td>'
+                         + '<td>' + escape(fmtDate(c.childTargetDate)) + '</td>'
+                         + '<td>' + formatBadge(c.currentStatusName) + '</td></tr>');
+            }
+            parts.push('</tbody></table></div>');
+            if (!h.isEligibleForCompletion && !h.closedAt) {
+                parts.push('<p style="font-size:12px; color:#854d0e; margin:6px 0 0;">'
+                         + escape(h.mandatoryChildOpenCount) + ' mandatory child task(s) still open — '
+                         + 'the parent cannot be completed until they are done.</p>');
+            }
+        }
+
+        // ---- governance requests (BRD §7, §8) ----
+        const reqs = d.governanceRequests || [];
+        if (reqs.length) {
+            parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Exception Centre requests</h3>'
+                     + '<div class="pm-table-wrap"><table><thead><tr>'
+                     + '<th>Type</th><th>Asked for</th><th>Status</th><th>Requested by</th><th>Decision</th>'
+                     + '</tr></thead><tbody>');
+            for (const q of reqs) {
+                const asked = q.requestTypeCode === 'TASK_PRIORITY_REDUCTION'
+                    ? escape((q.priorityOriginal || '') + ' → ' + (q.priorityRequested || ''))
+                    : escape(fmtDate(q.dueAtOriginal) + ' → ' + fmtDate(q.dueAtRequested));
+                parts.push('<tr><td>' + escape(q.requestTypeCode === 'TASK_PRIORITY_REDUCTION' ? 'Priority reduction' : 'SLA extension') + '</td>'
+                         + '<td>' + asked + '</td>'
+                         + '<td>' + formatBadge(q.statusCode) + '</td>'
+                         + '<td>' + escape(q.requestedByName || '') + '</td>'
+                         + '<td>' + escape(q.approvedByName || q.rejectedByName || '') + '</td></tr>');
+            }
+            parts.push('</tbody></table></div>');
+        }
+
+        // ---- evidence (BRD §16) ----
+        const files = d.attachments || [];
+        parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Evidence</h3>');
+        if (files.length) {
+            parts.push('<ul style="margin:0 0 8px; padding-left:18px;">');
+            for (const f of files) {
+                parts.push('<li><a href="' + U('/practice/api/tasks/attachments/') + escape(f.taskAttachmentId) + '">'
+                         + escape(f.fileName) + '</a> <span style="color:#64748b; font-size:11px;">('
+                         + Math.max(1, Math.round((f.fileSizeBytes || 0) / 1024)) + ' KB'
+                         + (f.uploadedByName ? ', ' + escape(f.uploadedByName) : '') + ')</span></li>');
+            }
+            parts.push('</ul>');
+        } else {
+            parts.push('<p style="color:#94a3b8; font-size:12px; margin:0 0 8px;">No evidence attached yet.</p>');
+        }
+        if (!h.closedAt) {
+            parts.push('<div style="display:flex; gap:8px; align-items:center; margin-bottom:14px;">'
+                     + '<input type="file" id="taskEvidenceFile" style="font-size:12px;" />'
+                     + '<button type="button" class="pm-button" id="taskEvidenceUpload" data-task-id="'
+                     + escape(h.taskId) + '">Upload evidence</button></div>');
+        }
+
+        // ---- activity feed (BRD §16) ----
+        const acts = d.activity || [];
+        parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Activity</h3>');
+        if (!acts.length) {
+            parts.push('<p style="color:#94a3b8; font-size:12px;">No activity recorded yet.</p>');
+        } else {
+            parts.push('<ul style="list-style:none; margin:0; padding:0;">');
+            for (const a of acts) {
+                const change = (a.fromValue || a.toValue)
+                    ? ' <span style="color:#64748b;">' + escape(a.fromValue || '') + ' → ' + escape(a.toValue || '') + '</span>'
+                    : '';
+                parts.push('<li style="border-left:2px solid #e2e8f0; padding:4px 0 8px 10px; margin-bottom:2px;">'
+                         + '<div style="font-size:12px; font-weight:600; color:#0f172a;">'
+                         + escape(a.activityTypeCode) + change + '</div>'
+                         + (a.remark ? '<div style="font-size:12px; color:#334155; white-space:pre-wrap;">' + escape(a.remark) + '</div>' : '')
+                         + '<div style="font-size:11px; color:#94a3b8;">'
+                         + escape(a.actorDisplayName || 'system') + ' · ' + escape(fmtDate(a.enteredDt))
+                         + '</div></li>');
+            }
+            parts.push('</ul>');
+        }
+
+        bodyEl.innerHTML = parts.join('');
+        wireTaskDetailBody();
+    }
+
+    function wireTaskDetailBody() {
+        const bodyEl = document.getElementById('taskDetailBody');
+        if (!bodyEl) return;
+        bodyEl.querySelectorAll('[data-open-task]').forEach(function (a) {
+            a.addEventListener('click', function (e) {
+                e.preventDefault();
+                openTaskViewDrawer(a.getAttribute('data-open-task'));
+            });
+        });
+        const upload = document.getElementById('taskEvidenceUpload');
+        if (upload) upload.addEventListener('click', function () { uploadEvidence(upload.getAttribute('data-task-id')); });
+    }
+
+    async function uploadEvidence(taskId) {
+        const input = document.getElementById('taskEvidenceFile');
+        if (!input || !input.files || !input.files.length) { alert('Choose a file first.'); return; }
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        try {
+            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/attachments', {
+                method: 'POST', credentials: 'same-origin', body: fd
+            });
+            if (r.ok) { openTaskViewDrawer(taskId); }
+            else {
+                const b = await r.json().catch(function () { return {}; });
+                alert(b.error || ('Upload failed (HTTP ' + r.status + ')'));
+            }
+        } catch (err) { alert('Network error: ' + err.message); }
     }
     async function openUpdateTaskStatus(taskId, currentState) {
         const next = prompt('Update status for Task #' + taskId
@@ -600,6 +1261,164 @@
             if (r.ok) { reloadCurrentTab(); refreshCounts(); }
             else     { alert((b.error || 'Close failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
         } catch (err) { alert('Network error: ' + err.message); }
+    }
+
+    // -----------------------------------------------------------------
+    // Task Centre v2 row actions  (BRD §7, §8, §11, §12, §16)
+    //
+    // These use prompt()/confirm() to match the existing row actions in
+    // this file (Update Status, Assign, Close all do). Replacing the
+    // whole interaction style is a separate UI pass — mixing modal
+    // dialogs into a prompt()-based menu would be worse than either.
+    // -----------------------------------------------------------------
+    async function postTaskAction(taskId, path, payload, okMessage) {
+        try {
+            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + path, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify(payload || {})
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (r.ok) {
+                if (okMessage) alert(typeof okMessage === 'function' ? okMessage(b) : okMessage);
+                reloadCurrentTab();
+                refreshCounts();
+                return true;
+            }
+            // reasonCode carries the BRD rule that refused the action —
+            // surface it, because "why" matters more than "no".
+            alert((b.error || 'Request failed') + (b.reasonCode ? '\n[' + b.reasonCode + ']' : ''));
+            return false;
+        } catch (err) {
+            alert('Network error: ' + err.message);
+            return false;
+        }
+    }
+
+    async function openAddUpdate(taskId) {
+        const remark = prompt('Add an update or comment to Task #' + taskId + ':');
+        if (!remark || !remark.trim()) return;
+        await postTaskAction(taskId, '/activity',
+            { activityTypeCode: 'Update', remark: remark.trim() }, null);
+    }
+
+    // BRD §7: increases apply immediately; reductions need an approved
+    // Exception. The prompt spells that out so nobody is surprised when
+    // "High → Medium" does not take effect.
+    async function openChangePriority(taskId, current) {
+        const next = prompt('Change priority for Task #' + taskId
+            + '\nCurrent: ' + (current || '—')
+            + '\n\nAn INCREASE applies immediately and recalculates the SLA.'
+            + '\nA REDUCTION needs Exception Centre approval and changes nothing until approved.'
+            + '\n\nEnter new priority (Low, Medium, High, Critical):');
+        if (!next || !next.trim()) return;
+        const value = next.trim();
+        const rank  = { low: 1, medium: 2, high: 3, critical: 4 };
+        const isReduction = (rank[value.toLowerCase()] || 0) < (rank[String(current).toLowerCase()] || 0);
+
+        let reason = null;
+        if (isReduction) {
+            reason = prompt('A reduction weakens the original commitment, so Exception Centre must approve it.\n\nReason for reducing priority:');
+            if (!reason || !reason.trim()) { alert('A reason is required to request a priority reduction.'); return; }
+        }
+        await postTaskAction(taskId, '/priority',
+            { newPriority: value, reason: reason ? reason.trim() : null },
+            function (b) {
+                return b.statusCode === 'PendingApproval'
+                    ? 'Priority reduction sent to Exception Centre (request #' + (b.exceptionRequestId || '?') + ').\nThe task priority and SLA are unchanged until it is approved.'
+                    : 'Priority updated and the standard SLA recalculated.';
+            });
+    }
+
+    // BRD §8: an extension is a request, never an override. The date does
+    // not move until Exception Centre approves.
+    async function openRequestExtension(taskId, currentDue) {
+        const due = prompt('Request an SLA extension for Task #' + taskId
+            + '\nCurrent due date: ' + (fmtDate(currentDue) || '—')
+            + '\n\nThe standard SLA is retained; if approved, an Approved Extended Due Date is recorded.'
+            + '\nEarly completion never needs approval.'
+            + '\n\nRequested due date (YYYY-MM-DD):');
+        if (!due || !due.trim()) return;
+        const parsed = new Date(due.trim() + 'T00:00:00Z');
+        if (isNaN(parsed.getTime())) { alert('Enter the date as YYYY-MM-DD.'); return; }
+
+        const reason = prompt('Reason for the extension (complexity, dependencies, ...):');
+        if (!reason || !reason.trim()) { alert('A reason is required.'); return; }
+
+        const emps = await fetchOrgEmployees(selectedOrgId).catch(function () { return []; });
+        const requester = prompt('Requesting employee id.\nOptions:\n'
+            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('\n')
+            + '\n\nEnter employee id:');
+        if (!requester || !Number(requester.trim())) { alert('A requesting employee is required.'); return; }
+
+        await postTaskAction(taskId, '/sla-extension', {
+            requestedDueAt:         parsed.toISOString(),
+            extensionReason:        reason.trim(),
+            requestedByEmployeeId:  Number(requester.trim())
+        }, function (b) {
+            return 'SLA extension sent to Exception Centre (request #' + (b.exceptionRequestId || '?') + ').\nThe due date is unchanged until it is approved.';
+        });
+    }
+
+    // BRD §11: the child inherits priority and SLA — neither is asked for.
+    async function openAddChildTask(parentTaskId) {
+        const title = prompt('Add a child task under Task #' + parentTaskId
+            + '\n\nThe child inherits the parent priority, SLA and due date.'
+            + '\n\nChild task title:');
+        if (!title || !title.trim()) return;
+
+        const emps = await fetchOrgEmployees(selectedOrgId).catch(function () { return []; });
+        const owner = prompt('Owner for this child task (may differ from the parent).\nOptions:\n'
+            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('\n')
+            + '\n\nEnter employee id, or leave blank to resolve automatically:');
+
+        const mandatory = confirm('Is this child MANDATORY for parent completion?\n\nOK = mandatory (blocks parent completion)\nCancel = optional');
+
+        await postTaskAction(parentTaskId, '/children', {
+            subjectTitle:         title.trim(),
+            assignedToEmployeeId: owner && Number(owner.trim()) ? Number(owner.trim()) : null,
+            isMandatory:          mandatory
+        }, 'Child task created.');
+    }
+
+    // BRD §12: the parent owner confirms completion of the overall
+    // objective — completion is never implied by the last child closing.
+    async function completeTaskAction(taskId) {
+        try {
+            const e = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/eligibility',
+                                  { credentials: 'same-origin' });
+            if (e.ok) {
+                const el = await e.json();
+                if (el && el.isEligible === false) { alert('Cannot complete: ' + (el.reason || 'not eligible.')); return; }
+                if (el && el.childCount > 0 &&
+                    !confirm('All mandatory child tasks are complete.\n\nConfirm that the overall objective of this task is achieved?')) return;
+            }
+        } catch (_) { /* eligibility is advisory — the proc enforces it */ }
+
+        const remark = prompt('Completion remark for Task #' + taskId + ' (optional):') || null;
+        await postTaskAction(taskId, '/complete', { completionRemark: remark }, 'Task completed.');
+    }
+
+    function wireTaskDetailDialog() {
+        const dlg = document.getElementById('taskDetailDialog');
+        if (!dlg) return;
+        const closeB = document.getElementById('taskDetailClose');
+        if (closeB) closeB.addEventListener('click', function () { hideDialog(dlg); });
+        // Backdrop click closes, matching the New Task dialog's behaviour.
+        dlg.addEventListener('click', function (e) {
+            const r = dlg.getBoundingClientRect();
+            if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) hideDialog(dlg);
+        });
+    }
+
+    function showDialog(dlg) {
+        if (!dlg) return;
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else { dlg.setAttribute('open', 'open'); dlg.style.display = 'block'; }
+    }
+    function hideDialog(dlg) {
+        if (!dlg) return;
+        if (typeof dlg.close === 'function') dlg.close();
+        else { dlg.removeAttribute('open'); dlg.style.display = 'none'; }
     }
 
     // -----------------------------------------------------------------

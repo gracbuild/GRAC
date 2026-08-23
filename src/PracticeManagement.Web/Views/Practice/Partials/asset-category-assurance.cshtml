@@ -1,0 +1,186 @@
+@*
+    Asset Category Assurance
+    Screen key: `asset-category-assurance`
+    Feature flag: `screen.asset-category-assurance`
+
+    The asset counterpart of the Role Master checklist section. It is a screen
+    of its own rather than a section on an Asset Category form because
+    grac_practice.dependency_asset_category_master has no organization_id --
+    the category list is global master data shared by every organization,
+    while the checklist decision is per (organization, category). Putting the
+    decision on the global row would mean one organization's configuration
+    showing up in another's.
+
+    The editor itself is wwwroot/js/scope-checklist-editor.js, the same module
+    Role Master uses. Only the scope dimension differs.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="acaUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-boxes-stacked pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="acaUnavailableTitle">Asset Category Assurance is not yet enabled for this organization.</h2>
+        <p id="acaUnavailableBody">Ask a GRAC Admin to turn on <code>screen.asset-category-assurance</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="acaRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="acaOrganization"><option value="">Loading...</option></select>
+        <select id="acaCategory"><option value="">Select an asset category...</option></select>
+        <button class="pm-button icon" id="acaRefreshBtn" type="button" title="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
+    </div>
+
+    <div id="acaHost">
+        <div class="pm-empty">Choose an asset category to set what has to be done when one is commissioned or decommissioned.</div>
+    </div>
+</section>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.asset-category-assurance';
+    let orgId = null;
+
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) {
+            return window.__wfCommon.unavailable('acaUnavailable', 'acaUnavailableTitle', 'acaUnavailableBody',
+                'No organizations are available for your account.', '');
+        }
+        document.getElementById('acaRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('acaOrganization', orgs);
+
+        document.getElementById('acaOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('acaCategory').addEventListener('change', renderEditor);
+        document.getElementById('acaRefreshBtn').addEventListener('click', renderEditor);
+
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        orgId = document.getElementById('acaOrganization').value || null;
+        if (!orgId) return;
+
+        // The flag is per organization, so this has to be re-evaluated on every
+        // change -- and both panels toggled both ways. Only hiding on the
+        // disabled branch would leave the screen blank after switching from an
+        // organization that has it off back to one that has it on.
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        document.getElementById('acaRoot').hidden = !enabled;
+        document.getElementById('acaUnavailable').hidden = enabled;
+        if (!enabled) return;
+
+        await loadCategories();
+        renderEditor();
+    }
+
+    // The gateway wraps rows in several shapes depending on the entity: the
+    // payload can arrive as a JSON string, as { $values: [...] }, as an array
+    // of result tables, or as a plain row set. practice.js normalises this
+    // with unwrapApiValue/apiTables; this is the same logic, kept local so the
+    // partial does not depend on practice.js being loaded.
+    function unwrap(value) {
+        if (typeof value === 'string') {
+            const t = value.trim();
+            if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+                try { return unwrap(JSON.parse(t)); } catch (_) { return value; }
+            }
+        }
+        if (value && typeof value === 'object' && Array.isArray(value.$values)) return value.$values.map(unwrap);
+        if (Array.isArray(value)) return value.map(unwrap);
+        return value;
+    }
+
+    function rowsOf(body) {
+        const data = unwrap(body?.data ?? body?.Data ?? body ?? []);
+        if (!Array.isArray(data)) return [];
+        // Either one table of rows, or a list of tables. Flatten both.
+        return (data.length && Array.isArray(data[0])) ? data.flat() : data;
+    }
+
+    // Categories are global master data, so this list is the same for every
+    // organization. What differs is the decision recorded against each one.
+    //
+    // Source is the `lookups` entity, the same feed practice.js uses to fill
+    // the Asset Category dropdown on the Dependency Asset form -- one row per
+    // active grac_practice.dependency_asset_category_master, tagged
+    // LookupKey='asset-categories'.
+    //
+    // NOTE: no organizationId on this URL, deliberately. The gateway rejects
+    // any GET carrying a raw internal id without an encrypted navigation
+    // `code` -- "Use encrypted navigation context for internal identifiers",
+    // HTTP 400. lookups does not need one: the procedure scopes org-specific
+    // sets to the caller's allowed organizations itself, and asset categories
+    // are global anyway. (dependency-options is a different endpoint: it
+    // requires a dependencyTypeId and throws 51062 without one.)
+    async function loadCategories() {
+        const sel = document.getElementById('acaCategory');
+        const previous = sel.value;
+        sel.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const r = await fetch(U('/practice-management-gateway/lookups'), { credentials: 'same-origin' });
+            if (!r.ok) {
+                sel.innerHTML = '<option value="">(could not load categories -- HTTP ' + r.status + ')</option>';
+                return;
+            }
+            const rows = rowsOf(await r.json()).filter(function (x) {
+                return x && String(x.LookupKey ?? x.lookupKey ?? '') === 'asset-categories';
+            });
+
+            sel.innerHTML = '<option value="">Select an asset category...</option>';
+            for (const c of rows) {
+                const value = c.Value ?? c.value;
+                if (value === null || value === undefined || value === '') continue;
+                const opt = document.createElement('option');
+                opt.value = String(value);
+                opt.textContent = String(c.Label ?? c.label ?? value);
+                sel.appendChild(opt);
+            }
+            if (!rows.length) {
+                sel.innerHTML = '<option value="">(no asset categories defined)</option>';
+            }
+            if (previous) sel.value = previous;
+        } catch (err) {
+            sel.innerHTML = '<option value="">(could not load categories)</option>';
+            console.error('asset-category-assurance: category lookup failed', err);
+        }
+    }
+
+    function renderEditor() {
+        const host = document.getElementById('acaHost');
+        const categoryId = document.getElementById('acaCategory').value;
+        host.innerHTML = '';
+
+        if (!categoryId) {
+            host.innerHTML = '<div class="pm-empty">Choose an asset category to set what has to be done when one is commissioned or decommissioned.</div>';
+            return;
+        }
+        if (!window.__scopeChecklistEditor) {
+            host.innerHTML = '<div class="pm-empty">The checklist editor did not load. Refresh the page; if it persists, scope-checklist-editor.js is missing.</div>';
+            return;
+        }
+
+        window.__scopeChecklistEditor.render(host, {
+            organizationId: orgId,
+            scopeDimension: 'ASSET_CATEGORY',
+            scopeValueId:   categoryId,
+            title:          'Event Checklists for this Asset Category',
+            subtitle:       'What has to be done when an asset of this category is commissioned, and when it is retired.'
+        });
+    }
+})();
+</script>

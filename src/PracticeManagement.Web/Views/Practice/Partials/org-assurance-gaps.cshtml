@@ -1,0 +1,20 @@
+@*
+    RETIRED -- the parallel Assurance-only Gap Center was replaced by
+    the unified Gap Center (Views/Practice/Partials/gaps.cshtml ->
+    Assurance Gaps tab) in migrations 109 - 113. See
+    Models/PracticeScreen.cs and the Assurance tab in gaps.cshtml.
+    This file is intentionally emptied.
+
+    Anyone landing here from a stale bookmark can navigate to
+    /Practice/Index/gaps.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-panel">
+    <div class="pm-empty">
+        <p>
+            The Assurance Gap Center has moved. Assurance-source gaps now appear
+            in the unified <a href="@Url.Action("Index","Practice",new{screen="gaps"})">Gap Center &raquo; Assurance Gaps</a> tab.
+        </p>
+    </div>
+</div>

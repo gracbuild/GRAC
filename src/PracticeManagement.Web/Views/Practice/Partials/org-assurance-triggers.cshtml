@@ -1,0 +1,897 @@
+@*
+    Assurance Triggers (BRD Part 2 Sec 9) -- Phase 2 Stage 3.
+
+    Screen key : `org-assurance-triggers`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Triggers (migration 094)
+    Feature    : screen.org-assurance-triggers
+    Backend    :
+        GET    /practice/api/org-assurance/trigger-types
+        GET    /practice/api/org-assurance/schedule-frequencies
+        GET    /practice/api/org-assurance/event-codes
+        GET    /practice/api/org-assurance/continuous-sources
+        GET    /practice/api/org-assurance/definitions/{id}/triggers?organizationId=
+        POST   /practice/api/org-assurance/definitions/{id}/triggers
+        DELETE /practice/api/org-assurance/triggers/{id}?organizationId=
+
+    UX (same picker + summary-table + dialog pattern used by Workflow):
+      * Org + Definition picker with self-healing across orgs.
+      * Summary table of triggers -- row 3-dots (Edit / Remove).
+      * Add / Edit Trigger dialog with conditional field groups:
+          SCHEDULED    -> frequency, dates, time, day-of-week/month
+          EVENT_DRIVEN -> event_code, event source, event filter JSON
+          CONTINUOUS   -> source (API/RULE/DATA_FEED), endpoint, rule
+          MANUAL       -> just enable/disable + description
+      * Editable only when the current version is Draft.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="oaTgHeading">@Model.Title</h1>
+        <p id="oaTgSubtitle">@Model.Description</p>
+    </div>
+    <div>
+        <a class="pm-button" id="oaTgBackBtn" href="#">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Definitions
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaTgUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-bolt pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaTgUnavailableTitle">Triggers are not available.</h2>
+        <p id="oaTgUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaTgRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="oaTgPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+            <span>Assurance Definition</span>
+            <select id="oaTgPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="">Select an organization first</option>
+            </select>
+        </label>
+    </div>
+
+    <div id="oaTgBanner" hidden class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <span style="font-weight:600;" id="oaTgDefName">Definition</span>
+            <span class="pm-badge" id="oaTgDefStatus">Status</span>
+            <span style="color:#64748b;" id="oaTgDefVersion">Version</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="oaTgReloadBtn" type="button">Reload</button>
+            <button class="pm-button primary" id="oaTgAddBtn" type="button" disabled>
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Trigger
+            </button>
+        </div>
+    </div>
+
+    <div id="oaTgReadonlyBanner" hidden
+         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+        This version is not a Draft, so triggers are shown read-only.
+    </div>
+
+    <div id="oaTgMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th style="text-align:center; width:90px;">Enabled</th>
+                    <th>Details</th>
+                    <th style="width:70px;"></th>
+                </tr>
+            </thead>
+            <tbody id="oaTgBody">
+                <tr><td colspan="6" class="pm-empty">Pick a definition to configure triggers.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ---------- Add / Edit Trigger dialog ---------- *@
+<dialog id="oaTgDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaTgForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaTgDialogTitle" style="margin:0; font-size:18px;">Add Trigger</h2>
+            <button type="button" id="oaTgClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaTgDialogMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="oaTgEditId" />
+
+        @* Common fields *@
+        <div style="display:grid; grid-template-columns:1fr 1fr 130px; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Code <span style="color:#b91c1c;">*</span></span>
+                <input id="oaTgCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Name <span style="color:#b91c1c;">*</span></span>
+                <input id="oaTgName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Type <span style="color:#b91c1c;">*</span></span>
+                <select id="oaTgType" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            </label>
+        </div>
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#475569; margin-top:10px;">
+            <input id="oaTgEnabled" type="checkbox" checked /> Enabled
+        </label>
+
+        @* SCHEDULED fields *@
+        <div id="oaTgSchedFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+            <div style="font-weight:600; color:#0f172a; font-size:13px; margin-bottom:8px;">Schedule</div>
+            <div style="display:grid; grid-template-columns:1fr 140px 140px; gap:10px; align-items:start;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Frequency</span>
+                    <select id="oaTgSchedFreq" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Start Date</span>
+                    <input id="oaTgSchedFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>End Date</span>
+                    <input id="oaTgSchedTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:120px 130px 130px 130px; gap:10px; align-items:start; margin-top:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Time of Day</span>
+                    <input id="oaTgSchedTime" type="time" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Day of Week (WEEKLY)</span>
+                    <select id="oaTgSchedDow" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                        <option value="">-- any --</option>
+                        <option value="1">Monday</option><option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option><option value="4">Thursday</option>
+                        <option value="5">Friday</option><option value="6">Saturday</option>
+                        <option value="7">Sunday</option>
+                    </select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Day of Month (MONTHLY)</span>
+                    <input id="oaTgSchedDom" type="number" min="1" max="31" step="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Month of Year (ANNUAL)</span>
+                    <input id="oaTgSchedMoy" type="number" min="1" max="12" step="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+        </div>
+
+        @* EVENT_DRIVEN fields *@
+        <div id="oaTgEventFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+            <div style="font-weight:600; color:#0f172a; font-size:13px; margin-bottom:8px;">Event</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Event Code</span>
+                    <select id="oaTgEventCode" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Event Source</span>
+                    <input id="oaTgEventSource" type="text" maxlength="100" placeholder="e.g. Vendor, User, Asset, PolicyStore"
+                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+                <span>Event Filter (JSON, optional)</span>
+                <textarea id="oaTgEventFilter" rows="3" placeholder='{"minAmount":10000}'
+                          style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical; font-family:monospace;"></textarea>
+            </label>
+        </div>
+
+        @* CONTINUOUS fields *@
+        <div id="oaTgContFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+            <div style="font-weight:600; color:#0f172a; font-size:13px; margin-bottom:8px;">Continuous</div>
+            <div style="display:grid; grid-template-columns:200px 1fr 1fr; gap:10px; align-items:start;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Source</span>
+                    <select id="oaTgContSource" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Endpoint</span>
+                    <input id="oaTgContEndpoint" type="text" maxlength="500" placeholder="URL / connection / topic"
+                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <span>Rule Code</span>
+                    <input id="oaTgContRule" type="text" maxlength="80" placeholder="Rule identifier"
+                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+        </div>
+
+        @* Description *@
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:12px;">
+            <span>Description</span>
+            <textarea id="oaTgDescription" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaTgCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaTgSubmit" class="pm-button primary">Save Trigger</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        definitionId    : null,
+        orgId           : null,
+        allOrgs         : [],
+        definitionsById : {},
+        header          : null,
+        definition      : null,
+        triggerTypes    : [],
+        frequencies     : [],
+        eventCodes      : [],
+        continuousSources: [],
+        triggers        : [],
+        editingIndex    : -1
+    };
+
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function readDefinitionIdFromUrl() {
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const v = q.get('definitionId');
+            const n = v ? Number(v) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch (_) { return null; }
+    }
+    function backHref() {
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        return base + '/Practice/org-assurance-definitions';
+    }
+
+    async function boot() {
+        document.getElementById('oaTgBackBtn').setAttribute('href', backHref());
+        document.getElementById('oaTgRoot').hidden = false;
+
+        try {
+            await Promise.all([loadTypes(), loadFreqs(), loadEvents(), loadSources()]);
+        } catch (err) { setMessage('error', 'Failed to load lookups: ' + (err.message || err)); }
+
+        const orgs = await wf.loadOrgs();
+        state.allOrgs = orgs;
+        const orgSel = document.getElementById('oaTgPickOrg');
+        orgSel.innerHTML = '';
+        if (!orgs.length) {
+            orgSel.innerHTML = '<option value="">(no accessible orgs)</option>';
+            setMessage('error', 'Your account is not linked to any organizations.');
+            wireStaticButtons();
+            return;
+        }
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        state.definitionId = readDefinitionIdFromUrl();
+
+        orgSel.addEventListener('change', function () {
+            state.orgId        = orgSel.value || null;
+            state.definitionId = null;
+            state.definition   = null;
+            state.header       = null;
+            state.triggers     = [];
+            renderBanner(); renderReadonlyBannerIfNeeded(); renderTriggers();
+            document.getElementById('oaTgAddBtn').disabled = true;
+            document.getElementById('oaTgBanner').hidden   = true;
+            populateDefinitionPicker();
+        });
+        document.getElementById('oaTgPickDef').addEventListener('change', function (e) {
+            const id = e.target.value ? Number(e.target.value) : null;
+            if (id) selectDefinition(id);
+        });
+
+        wireStaticButtons();
+
+        state.orgId = orgs[0].value;
+        orgSel.value = state.orgId;
+        await populateDefinitionPicker();
+
+        if (state.definitionId) await selectDefinition(state.definitionId);
+    }
+
+    // -----------------------------------------------------------------
+    // Lookups
+    // -----------------------------------------------------------------
+    async function loadTypes()   { state.triggerTypes = await fetchList('/trigger-types'); }
+    async function loadFreqs()   { state.frequencies  = await fetchList('/schedule-frequencies'); }
+    async function loadEvents()  { state.eventCodes   = await fetchList('/event-codes'); }
+    async function loadSources() { state.continuousSources = await fetchList('/continuous-sources'); }
+
+    async function fetchList(path) {
+        const r = await fetch(U(API + path), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' loading ' + path);
+        const b = await r.json();
+        return (b && (b.data || b.Data)) || [];
+    }
+
+    // -----------------------------------------------------------------
+    // Picker + resolve
+    // -----------------------------------------------------------------
+    async function populateDefinitionPicker() {
+        const defSel = document.getElementById('oaTgPickDef');
+        defSel.innerHTML = '<option value="">Loading definitions...</option>';
+        defSel.disabled = true;
+        if (!state.orgId) { defSel.innerHTML = '<option value="">Select an organization first</option>'; return; }
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const payload = await r.json();
+            const rows    = payload.rows || payload.Rows || [];
+            defSel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = ''; ph.textContent = rows.length ? '-- select a definition --' : 'No definitions in this organization.';
+            defSel.appendChild(ph);
+            rows.forEach(function (row) {
+                const id = row.definitionId || row.DefinitionId;
+                const code = row.definitionCode || row.DefinitionCode || '';
+                const name = row.definitionName || row.DefinitionName || '';
+                const st = row.currentStatusName || row.CurrentStatusName || '';
+                if (id != null) state.definitionsById[String(id)] = row;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '') + (st ? '  –  ' + st : '');
+                defSel.appendChild(opt);
+            });
+            if (state.definitionId) defSel.value = String(state.definitionId);
+        } catch (err) {
+            defSel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
+        } finally { defSel.disabled = false; }
+    }
+
+    async function selectDefinition(definitionId) {
+        state.definitionId = definitionId;
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.set('definitionId', String(definitionId));
+            window.history.replaceState(null, '', u.toString());
+        } catch (_) {}
+
+        try { await resolveOrgForDefinition(definitionId); }
+        catch (err) { setMessage('error', 'Could not load definition #' + definitionId + ': ' + (err.message || err)); return; }
+
+        try { await loadTriggers(); }
+        catch (err) { setMessage('error', 'Failed to load triggers: ' + (err.message || err)); return; }
+
+        document.getElementById('oaTgBanner').hidden = false;
+        renderBanner();
+        renderReadonlyBannerIfNeeded();
+        renderTriggers();
+        document.getElementById('oaTgAddBtn').disabled = !state.header.isEditable;
+    }
+
+    async function resolveOrgForDefinition(definitionId) {
+        const cached = state.definitionsById[String(definitionId)];
+        const cachedOrg = cached && String(cached.organizationId || cached.OrganizationId || '');
+        const seen = new Set(); const orgsToTry = [];
+        function push(v) { if (v && !seen.has(v)) { seen.add(v); orgsToTry.push(v); } }
+        push(cachedOrg); push(state.orgId);
+        (state.allOrgs || []).forEach(function (o) { push(o.value); });
+
+        let lastStatus = null;
+        for (const oid of orgsToTry) {
+            const url = U(API + '/definitions/' + definitionId + '?organizationId=' + encodeURIComponent(oid));
+            let r; try { r = await fetch(url, { credentials: 'same-origin' }); } catch (_) { continue; }
+            if (r.ok) {
+                const b = await r.json().catch(function () { return null; });
+                const d = (b && (b.data || b.Data)) || null;
+                if (d) {
+                    if (state.orgId !== String(oid)) {
+                        state.orgId = String(oid);
+                        const orgSel = document.getElementById('oaTgPickOrg');
+                        if (orgSel && orgSel.value !== state.orgId) {
+                            orgSel.value = state.orgId;
+                            await populateDefinitionPicker();
+                            const defSel = document.getElementById('oaTgPickDef');
+                            if (defSel) defSel.value = String(definitionId);
+                        }
+                    }
+                    state.definition = d;
+                    return;
+                }
+            } else { lastStatus = r.status; }
+        }
+        throw new Error(lastStatus
+            ? ('HTTP ' + lastStatus + ' -- definition not found in any accessible organization.')
+            : 'Definition not found in any accessible organization.');
+    }
+
+    async function loadTriggers() {
+        if (!state.orgId || !state.definitionId) return;
+        const url = U(API + '/definitions/' + state.definitionId + '/triggers?organizationId=' + encodeURIComponent(state.orgId));
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' loading triggers');
+        const json = await r.json();
+        const hdr  = (json && (json.header || json.Header)) || {};
+        state.header = {
+            definitionId      : hdr.definitionId      || hdr.DefinitionId,
+            versionId         : hdr.versionId         || hdr.VersionId,
+            currentVersionId  : hdr.currentVersionId  || hdr.CurrentVersionId,
+            currentStatusCode : hdr.currentStatusCode || hdr.CurrentStatusCode,
+            isEditable        : !!(hdr.isEditable    ?? hdr.IsEditable)
+        };
+        const arr = (json && (json.triggers || json.Triggers)) || [];
+        state.triggers = arr.map(function (t) {
+            return {
+                triggerId              : t.triggerId              ?? t.TriggerId,
+                triggerCode            : t.triggerCode            ?? t.TriggerCode ?? '',
+                triggerName            : t.triggerName            ?? t.TriggerName ?? '',
+                triggerType            : t.triggerType            ?? t.TriggerType ?? 'MANUAL',
+                isEnabled              : !!(t.isEnabled           ?? t.IsEnabled),
+                description            : t.description            ?? t.Description ?? '',
+                scheduleFrequencyCode  : t.scheduleFrequencyCode  ?? t.ScheduleFrequencyCode ?? null,
+                scheduleFrequencyId    : t.scheduleFrequencyId    ?? t.ScheduleFrequencyId ?? null,
+                scheduleFrequencyName  : t.scheduleFrequencyName  ?? t.ScheduleFrequencyName ?? null,
+                scheduleStartDate      : t.scheduleStartDate      ?? t.ScheduleStartDate ?? null,
+                scheduleEndDate        : t.scheduleEndDate        ?? t.ScheduleEndDate ?? null,
+                scheduleTime           : t.scheduleTime           ?? t.ScheduleTime ?? null,
+                dayOfWeek              : t.dayOfWeek              ?? t.DayOfWeek ?? null,
+                dayOfMonth             : t.dayOfMonth             ?? t.DayOfMonth ?? null,
+                monthOfYear            : t.monthOfYear            ?? t.MonthOfYear ?? null,
+                nextRunAt              : t.nextRunAt              ?? t.NextRunAt ?? null,
+                lastRunAt              : t.lastRunAt              ?? t.LastRunAt ?? null,
+                eventCode              : t.eventCode              ?? t.EventCode ?? null,
+                eventName              : t.eventName              ?? t.EventName ?? null,
+                eventSource            : t.eventSource            ?? t.EventSource ?? null,
+                eventFilterJson        : t.eventFilterJson        ?? t.EventFilterJson ?? null,
+                continuousSourceCode   : t.continuousSourceCode   ?? t.ContinuousSourceCode ?? null,
+                continuousEndpoint     : t.continuousEndpoint     ?? t.ContinuousEndpoint ?? null,
+                continuousRuleCode     : t.continuousRuleCode     ?? t.ContinuousRuleCode ?? null
+            };
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Render
+    // -----------------------------------------------------------------
+    function renderBanner() {
+        const d = state.definition; const h = state.header;
+        if (!d || !h) {
+            document.getElementById('oaTgDefName').textContent    = '';
+            document.getElementById('oaTgDefStatus').textContent  = '';
+            document.getElementById('oaTgDefVersion').textContent = '';
+            document.getElementById('oaTgHeading').textContent    = 'Triggers';
+            document.getElementById('oaTgSubtitle').textContent   = 'Pick a definition to configure triggers.';
+            return;
+        }
+        document.getElementById('oaTgDefName').textContent =
+            (d.definitionName || d.DefinitionName || '(no name)') +
+            '  (' + (d.definitionCode || d.DefinitionCode || '') + ')';
+        document.getElementById('oaTgDefStatus').textContent  = d.currentStatusName || d.CurrentStatusName || '';
+        document.getElementById('oaTgDefVersion').textContent = 'v' +
+            (d.currentVersionNumber || d.CurrentVersionNumber || h.versionId || '?');
+        document.getElementById('oaTgHeading').textContent = 'Triggers: ' + (d.definitionName || d.DefinitionName || '');
+        document.getElementById('oaTgSubtitle').textContent =
+            'Configure Scheduled / Event Driven / Continuous / Manual triggers for this definition.';
+    }
+    function renderReadonlyBannerIfNeeded() {
+        document.getElementById('oaTgReadonlyBanner').hidden = state.header ? !!state.header.isEditable : true;
+    }
+
+    function renderTriggers() {
+        const body = document.getElementById('oaTgBody');
+        if (!state.definitionId || !state.header) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Pick a definition to configure triggers.</td></tr>';
+            return;
+        }
+        if (!state.triggers.length) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">' +
+                (state.header.isEditable
+                    ? 'No triggers yet. Click "Add Trigger" to add one.'
+                    : 'No triggers configured for this version.') + '</td></tr>';
+            return;
+        }
+        body.innerHTML = state.triggers.map(function (t, idx) {
+            const typeName = triggerTypeName(t.triggerType);
+            const enabled  = t.isEnabled
+                ? '<i class="fa-solid fa-check" style="color:#166534;" aria-hidden="true"></i>'
+                : '<i class="fa-solid fa-xmark" style="color:#b91c1c;" aria-hidden="true"></i>';
+            const details = detailSummary(t);
+            return '<tr data-idx="' + idx + '">'
+                + '<td>' + wf.escape(t.triggerCode) + '</td>'
+                + '<td>' + wf.escape(t.triggerName) + '</td>'
+                + '<td>' + wf.escape(typeName) + '</td>'
+                + '<td style="text-align:center;">' + enabled + '</td>'
+                + '<td>' + wf.escape(details) + '</td>'
+                + '<td>' + rowTrigger(idx) + '</td>'
+                + '</tr>';
+        }).join('');
+        wireRowMenu();
+        if (!state.header.isEditable) {
+            body.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
+        }
+    }
+
+    function triggerTypeName(code) {
+        const t = state.triggerTypes.find(function (x) { return (x.triggerTypeCode || x.TriggerTypeCode) === code; });
+        return t ? (t.triggerTypeName || t.TriggerTypeName) : code || '';
+    }
+    function detailSummary(t) {
+        if (t.triggerType === 'SCHEDULED') {
+            const parts = [];
+            if (t.scheduleFrequencyCode) parts.push(t.scheduleFrequencyCode);
+            if (t.scheduleStartDate)     parts.push('from ' + onlyDate(t.scheduleStartDate));
+            if (t.scheduleTime)          parts.push('at '   + onlyTime(t.scheduleTime));
+            return parts.join(' · ');
+        }
+        if (t.triggerType === 'EVENT_DRIVEN') {
+            const parts = [];
+            if (t.eventCode)   parts.push(t.eventCode);
+            if (t.eventSource) parts.push('src: ' + t.eventSource);
+            return parts.join(' · ');
+        }
+        if (t.triggerType === 'CONTINUOUS') {
+            const parts = [];
+            if (t.continuousSourceCode) parts.push(t.continuousSourceCode);
+            if (t.continuousEndpoint)   parts.push(t.continuousEndpoint);
+            return parts.join(' · ');
+        }
+        return 'On demand';
+    }
+
+    // -----------------------------------------------------------------
+    // Row 3-dot menu
+    // -----------------------------------------------------------------
+    function rowTrigger(idx) {
+        return '<button type="button" class="pm-action-trigger" data-idx="' + idx + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+    function closeRowMenu() {
+        if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trg) {
+        if (!openMenuEl) return;
+        const r  = trg.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trg, items) {
+        closeRowMenu();
+        openMenuTrigger = trg;
+        trg.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[triggers] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trg);
+    }
+    function wireRowMenu() {
+        const body = document.getElementById('oaTgBody');
+        if (!body) return;
+        body.onclick = function (e) {
+            const trg = e.target.closest('.pm-action-trigger');
+            if (!trg || !body.contains(trg)) return;
+            e.preventDefault(); e.stopPropagation();
+            if (openMenuTrigger === trg) { closeRowMenu(); return; }
+            const idx = Number(trg.getAttribute('data-idx'));
+            openRowMenu(trg, [
+                { icon: 'fa-pen',   label: 'Edit',   action: function () { openDialog(idx); } },
+                { icon: 'fa-trash', label: 'Remove', action: function () { deleteTrigger(idx); } }
+            ]);
+        };
+    }
+    document.addEventListener('click', function (e) {
+        if (!openMenuEl) return;
+        if (e.target.closest('.pm-action-menu'))    return;
+        if (e.target.closest('.pm-action-trigger')) return;
+        closeRowMenu();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+    window.addEventListener('resize', closeRowMenu);
+    window.addEventListener('scroll',  closeRowMenu, true);
+
+    // -----------------------------------------------------------------
+    // Dialog
+    // -----------------------------------------------------------------
+    function fillTypes() {
+        const sel = document.getElementById('oaTgType');
+        sel.innerHTML = '';
+        state.triggerTypes.forEach(function (t) {
+            const opt = document.createElement('option');
+            opt.value = t.triggerTypeCode || t.TriggerTypeCode;
+            opt.textContent = t.triggerTypeName || t.TriggerTypeName;
+            sel.appendChild(opt);
+        });
+    }
+    function fillFreqs(selected) {
+        const sel = document.getElementById('oaTgSchedFreq');
+        sel.innerHTML = '';
+        const ph = document.createElement('option'); ph.value = ''; ph.textContent = '-- select --';
+        sel.appendChild(ph);
+        state.frequencies.forEach(function (f) {
+            const opt = document.createElement('option');
+            opt.value = f.frequencyCode || f.FrequencyCode;
+            opt.textContent = f.frequencyName || f.FrequencyName;
+            sel.appendChild(opt);
+        });
+        if (selected) sel.value = String(selected);
+    }
+    function fillEvents(selected) {
+        const sel = document.getElementById('oaTgEventCode');
+        sel.innerHTML = '';
+        const ph = document.createElement('option'); ph.value = ''; ph.textContent = '-- select --';
+        sel.appendChild(ph);
+        state.eventCodes.forEach(function (e) {
+            const opt = document.createElement('option');
+            opt.value = e.eventCode || e.EventCode;
+            opt.textContent = e.eventName || e.EventName;
+            sel.appendChild(opt);
+        });
+        if (selected) sel.value = String(selected);
+    }
+    function fillSources(selected) {
+        const sel = document.getElementById('oaTgContSource');
+        sel.innerHTML = '';
+        const ph = document.createElement('option'); ph.value = ''; ph.textContent = '-- select --';
+        sel.appendChild(ph);
+        state.continuousSources.forEach(function (s) {
+            const opt = document.createElement('option');
+            opt.value = s.sourceCode || s.SourceCode;
+            opt.textContent = s.sourceName || s.SourceName;
+            sel.appendChild(opt);
+        });
+        if (selected) sel.value = String(selected);
+    }
+
+    function applyTypeVisibility() {
+        const type = document.getElementById('oaTgType').value || 'MANUAL';
+        document.getElementById('oaTgSchedFields').hidden = type !== 'SCHEDULED';
+        document.getElementById('oaTgEventFields').hidden = type !== 'EVENT_DRIVEN';
+        document.getElementById('oaTgContFields').hidden  = type !== 'CONTINUOUS';
+    }
+
+    function openDialog(idx) {
+        state.editingIndex = (idx == null || idx < 0) ? -1 : idx;
+        clearDialogMessage();
+
+        fillTypes();
+        fillFreqs();
+        fillEvents();
+        fillSources();
+
+        const isEdit = state.editingIndex >= 0;
+        const t = isEdit ? state.triggers[state.editingIndex] : blankTrigger();
+        document.getElementById('oaTgDialogTitle').textContent = isEdit ? 'Edit Trigger' : 'Add Trigger';
+
+        document.getElementById('oaTgEditId').value  = isEdit ? String(t.triggerId || '') : '';
+        document.getElementById('oaTgCode').value    = t.triggerCode || '';
+        document.getElementById('oaTgCode').disabled = isEdit;   // code is stable per version
+        document.getElementById('oaTgName').value    = t.triggerName || '';
+        document.getElementById('oaTgType').value    = t.triggerType || 'MANUAL';
+        document.getElementById('oaTgEnabled').checked = t.isEnabled !== false;
+        document.getElementById('oaTgDescription').value = t.description || '';
+
+        fillFreqs(t.scheduleFrequencyCode);
+        document.getElementById('oaTgSchedFrom').value = onlyDate(t.scheduleStartDate);
+        document.getElementById('oaTgSchedTo').value   = onlyDate(t.scheduleEndDate);
+        document.getElementById('oaTgSchedTime').value = onlyTime(t.scheduleTime);
+        document.getElementById('oaTgSchedDow').value  = t.dayOfWeek   != null ? String(t.dayOfWeek)   : '';
+        document.getElementById('oaTgSchedDom').value  = t.dayOfMonth  != null ? String(t.dayOfMonth)  : '';
+        document.getElementById('oaTgSchedMoy').value  = t.monthOfYear != null ? String(t.monthOfYear) : '';
+
+        fillEvents(t.eventCode);
+        document.getElementById('oaTgEventSource').value = t.eventSource      || '';
+        document.getElementById('oaTgEventFilter').value = t.eventFilterJson  || '';
+
+        fillSources(t.continuousSourceCode);
+        document.getElementById('oaTgContEndpoint').value = t.continuousEndpoint  || '';
+        document.getElementById('oaTgContRule').value     = t.continuousRuleCode  || '';
+
+        applyTypeVisibility();
+        document.getElementById('oaTgDialog').showModal();
+    }
+    function blankTrigger() {
+        return {
+            triggerCode: '', triggerName: '', triggerType: 'MANUAL', isEnabled: true,
+            description: '',
+            scheduleFrequencyCode: null, scheduleStartDate: null, scheduleEndDate: null,
+            scheduleTime: null, dayOfWeek: null, dayOfMonth: null, monthOfYear: null,
+            eventCode: null, eventSource: null, eventFilterJson: null,
+            continuousSourceCode: null, continuousEndpoint: null, continuousRuleCode: null
+        };
+    }
+    function closeDialog() { document.getElementById('oaTgDialog').close(); }
+
+    async function saveTrigger() {
+        const type = document.getElementById('oaTgType').value || 'MANUAL';
+        const code = document.getElementById('oaTgCode').value.trim();
+        const name = document.getElementById('oaTgName').value.trim();
+        if (!code) { showDialogMessage('error', 'Code is required.'); return; }
+        if (!name) { showDialogMessage('error', 'Name is required.'); return; }
+
+        const filterRaw = document.getElementById('oaTgEventFilter').value.trim();
+        if (type === 'EVENT_DRIVEN' && filterRaw) {
+            try { JSON.parse(filterRaw); }
+            catch (_) { showDialogMessage('error', 'Event filter must be valid JSON.'); return; }
+        }
+
+        const eventOpt = document.getElementById('oaTgEventCode').selectedOptions[0] || null;
+        const freqOpt  = document.getElementById('oaTgSchedFreq').selectedOptions[0] || null;
+
+        const body = {
+            organizationId : Number(state.orgId),
+            definitionId   : Number(state.definitionId),
+            triggerId      : state.editingIndex >= 0
+                             ? (state.triggers[state.editingIndex].triggerId || null)
+                             : null,
+            triggerCode    : code,
+            triggerName    : name,
+            triggerType    : type,
+            isEnabled      : document.getElementById('oaTgEnabled').checked,
+            description    : document.getElementById('oaTgDescription').value || null,
+
+            // Schedule
+            scheduleFrequencyCode : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedFreq').value || null) : null,
+            scheduleFrequencyId   : null,
+            scheduleFrequencyName : type === 'SCHEDULED' && freqOpt ? (freqOpt.textContent || null) : null,
+            scheduleStartDate     : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedFrom').value || null) : null,
+            scheduleEndDate       : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedTo').value   || null) : null,
+            scheduleTime          : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedTime').value || null) : null,
+            dayOfWeek             : type === 'SCHEDULED' ? intOrNull(document.getElementById('oaTgSchedDow').value)  : null,
+            dayOfMonth            : type === 'SCHEDULED' ? intOrNull(document.getElementById('oaTgSchedDom').value)  : null,
+            monthOfYear           : type === 'SCHEDULED' ? intOrNull(document.getElementById('oaTgSchedMoy').value)  : null,
+
+            // Event
+            eventCode        : type === 'EVENT_DRIVEN' ? (document.getElementById('oaTgEventCode').value || null) : null,
+            eventName        : type === 'EVENT_DRIVEN' && eventOpt ? (eventOpt.textContent || null) : null,
+            eventSource      : type === 'EVENT_DRIVEN' ? (document.getElementById('oaTgEventSource').value.trim() || null) : null,
+            eventFilterJson  : type === 'EVENT_DRIVEN' ? (filterRaw || null) : null,
+
+            // Continuous
+            continuousSourceCode : type === 'CONTINUOUS' ? (document.getElementById('oaTgContSource').value || null) : null,
+            continuousEndpoint   : type === 'CONTINUOUS' ? (document.getElementById('oaTgContEndpoint').value.trim() || null) : null,
+            continuousRuleCode   : type === 'CONTINUOUS' ? (document.getElementById('oaTgContRule').value.trim()     || null) : null,
+
+            actor: null
+        };
+        try {
+            const url = U(API + '/definitions/' + state.definitionId + '/triggers');
+            const r = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { showDialogMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            closeDialog();
+            await loadTriggers();
+            renderTriggers();
+        } catch (err) { showDialogMessage('error', err.message || String(err)); }
+    }
+
+    async function deleteTrigger(idx) {
+        const t = state.triggers[idx]; if (!t || !t.triggerId) return;
+        if (!confirm('Remove this trigger?')) return;
+        try {
+            const url = U(API + '/triggers/' + t.triggerId + '?organizationId=' + encodeURIComponent(state.orgId));
+            const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            await loadTriggers();
+            renderTriggers();
+        } catch (err) { alert('Delete failed: ' + (err.message || err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Static wiring
+    // -----------------------------------------------------------------
+    function wireStaticButtons() {
+        document.getElementById('oaTgAddBtn').addEventListener('click', function () {
+            if (!state.definitionId || !state.header) { setMessage('error', 'Pick a definition first.'); return; }
+            if (!state.header.isEditable) { setMessage('error', 'This version is not a Draft.'); return; }
+            openDialog(-1);
+        });
+        document.getElementById('oaTgClose').addEventListener('click', closeDialog);
+        document.getElementById('oaTgCancel').addEventListener('click', closeDialog);
+        document.getElementById('oaTgForm').addEventListener('submit', function (e) { e.preventDefault(); saveTrigger(); });
+        document.getElementById('oaTgType').addEventListener('change', applyTypeVisibility);
+
+        document.getElementById('oaTgReloadBtn').addEventListener('click', async function () {
+            if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick an organization and definition first.'); return; }
+            try {
+                await loadTriggers();
+                renderBanner(); renderReadonlyBannerIfNeeded(); renderTriggers();
+                document.getElementById('oaTgAddBtn').disabled = !state.header.isEditable;
+                setMessage('ok', 'Reloaded.');
+            } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); }
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function showDialogMessage(kind, text) {
+        const el = document.getElementById('oaTgDialogMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.textContent      = text;
+    }
+    function clearDialogMessage() {
+        const el = document.getElementById('oaTgDialogMessage');
+        el.style.display = 'none'; el.textContent = '';
+    }
+    function setMessage(kind, text) {
+        const el = document.getElementById('oaTgMessage');
+        el.hidden = false;
+        el.textContent = text;
+        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+    }
+    function intOrNull(v) { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
+    function onlyDate(v) {
+        if (!v) return '';
+        const s = String(v);
+        return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
+    }
+    function onlyTime(v) {
+        if (!v) return '';
+        const s = String(v);
+        // "HH:mm:ss" or ISO datetime
+        const t = s.indexOf('T') >= 0 ? s.slice(11) : s;
+        return t.slice(0, 5);
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

@@ -1,0 +1,679 @@
+@*
+    Event Checklist Inbox (migrations 123 / 124)
+    Screen key: `workflow-event-inbox`
+    Feature flag: `screen.workflow-event-inbox`
+
+    Three things on one screen:
+      1. Raise a lifecycle event (onboard / offboard / commission /
+         decommission) -- the manual path that proves the loop before any
+         HRMS or CMDB connector exists.
+      2. The inbox of resulting checklists, most overdue first.
+      3. Click a row -> the checklist opens in a drawer, items are
+         answered, the instance is completed.
+
+    Submission uses the EXISTING 067 endpoints
+    (/event-instance-items, /event-instances/{id}/complete) rather than
+    new ones, so there is exactly one write path for an item result.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="ebUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-inbox pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="ebUnavailableTitle">Event Checklist Inbox is not yet enabled for this organization.</h2>
+        <p id="ebUnavailableBody">Ask a GRAC Admin to turn on <code>screen.workflow-event-inbox</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="ebRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="ebOrganization"><option value="">Loading...</option></select>
+        <select id="ebSubjectFilter">
+            <option value="">All subjects</option>
+            <option value="EMPLOYEE">People</option>
+            <option value="ASSET">Assets</option>
+        </select>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;">
+            <input type="checkbox" id="ebOverdueOnly" /> Overdue only
+        </label>
+        <button class="pm-button icon" id="ebRefreshBtn" type="button" title="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="pm-button primary" id="ebRaiseBtn" type="button"><i class="fa-solid fa-bolt"></i> Raise Event</button>
+        <button class="pm-button" id="ebGapsBtn" type="button"><i class="fa-solid fa-triangle-exclamation"></i> Coverage Gaps</button>
+    </div>
+
+    <div id="ebMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Event</th><th>Subject</th><th>Scope</th><th>Checklist</th>
+                    <th style="width:110px;">Progress</th><th style="width:110px;">Due</th>
+                    <th style="width:110px;">Status</th><th style="width:90px;"></th>
+                </tr>
+            </thead>
+            <tbody id="ebBody"><tr><td colspan="8" class="pm-empty">Select an organization.</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+@* ---------------- Raise event dialog ---------------- *@
+<dialog id="ebRaiseDialog" style="border:none; border-radius:8px; padding:0; max-width:560px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="ebRaiseForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;">Raise Lifecycle Event</h2>
+            <button type="button" id="ebRaiseClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="ebRaiseMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Action *
+            <select id="ebAction" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <option value="ONBOARD">Person -- Onboarding</option>
+                <option value="OFFBOARD">Person -- Offboarding</option>
+                <option value="COMMISSION">Asset -- Commissioning</option>
+                <option value="DECOMMISSION">Asset -- Decommissioning</option>
+            </select>
+        </label>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span id="ebSubjectLabel">Employee *</span>
+            <select id="ebSubject" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        </label>
+
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Effective date *
+            <input id="ebEffectiveDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <p style="font-size:11px; color:#64748b; margin:6px 0 0 0;">
+            Due dates are calculated from the effective date, not from today. A backdated
+            event therefore produces checklists that are already overdue -- which is correct.
+        </p>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="ebRaiseCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="ebRaiseSubmit" class="pm-button primary">Raise</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------------- Checklist drawer ---------------- *@
+<dialog id="ebItemDialog" style="border:none; border-radius:8px; padding:0; max-width:840px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+            <div>
+                <h2 style="margin:0; font-size:18px;" id="ebDrawerTitle">Checklist</h2>
+                <p style="margin:4px 0 0 0; font-size:12px; color:#64748b;" id="ebDrawerMeta"></p>
+            </div>
+            <button type="button" id="ebItemClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="ebItemMessage" style="display:none; margin:10px 0; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        <div class="pm-table-wrap" style="max-height:52vh; overflow:auto; margin-top:12px;">
+            <table>
+                <thead><tr><th style="width:40px;">#</th><th>Item</th><th style="width:150px;">Result</th><th style="width:200px;">Evidence URL</th><th style="width:180px;">Remarks</th></tr></thead>
+                <tbody id="ebItemBody"></tbody>
+            </table>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:16px;">
+            <button type="button" id="ebTraceBtn" class="pm-button"><i class="fa-solid fa-magnifying-glass"></i> Why these items?</button>
+            <div style="display:flex; gap:8px;">
+                <button type="button" id="ebItemCancel" class="pm-button">Close</button>
+                <button type="button" id="ebCompleteBtn" class="pm-button primary">Complete Checklist</button>
+            </div>
+        </div>
+    </div>
+</dialog>
+
+@* ---------------- Trace / gaps dialog ---------------- *@
+<dialog id="ebTraceDialog" style="border:none; border-radius:8px; padding:0; max-width:900px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0; font-size:18px;" id="ebTraceTitle">Resolution Trace</h2>
+            <button type="button" id="ebTraceClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;">
+            Every checklist considered for this event, included and excluded, with the reason.
+        </p>
+        <div class="pm-table-wrap" style="max-height:56vh; overflow:auto;">
+            <table>
+                <thead><tr><th>Decision</th><th>Checklist</th><th>Event</th><th>Scope</th><th>Reason</th><th>When</th></tr></thead>
+                <tbody id="ebTraceBody"></tbody>
+            </table>
+        </div>
+    </div>
+</dialog>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script>
+(function () {
+    'use strict';
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const FEATURE = 'screen.workflow-event-inbox';
+    const RESULTS = ['Pending', 'Passed', 'Failed', 'NotApplicable'];
+
+    let orgId = null;
+    let currentInstance = null;
+
+    // ------------------------------------------------------------------
+    async function init() {
+        const orgs = await window.__wfCommon.loadOrgs();
+        if (!orgs.length) {
+            return window.__wfCommon.unavailable('ebUnavailable', 'ebUnavailableTitle', 'ebUnavailableBody',
+                'No organizations available.', '');
+        }
+        document.getElementById('ebRoot').hidden = false;
+        window.__wfCommon.populateOrgSelect('ebOrganization', orgs);
+
+        document.getElementById('ebOrganization').addEventListener('change', onOrgChange);
+        document.getElementById('ebSubjectFilter').addEventListener('change', reload);
+        document.getElementById('ebOverdueOnly').addEventListener('change', reload);
+        document.getElementById('ebRefreshBtn').addEventListener('click', reload);
+        document.getElementById('ebRaiseBtn').addEventListener('click', openRaise);
+        document.getElementById('ebGapsBtn').addEventListener('click', openGaps);
+        wireRaiseDialog();
+        wireItemDialog();
+
+        await onOrgChange();
+    }
+
+    async function onOrgChange() {
+        orgId = document.getElementById('ebOrganization').value || null;
+        if (!orgId) { setBody('<tr><td colspan="8" class="pm-empty">Select an organization.</td></tr>'); return; }
+        const enabled = await window.__wfCommon.checkFeature(FEATURE, orgId);
+        if (!enabled) {
+            document.getElementById('ebRoot').hidden = true;
+            document.getElementById('ebUnavailable').hidden = false;
+            return;
+        }
+        await reload();
+    }
+
+    // ------------------------------------------------------------------
+    // Inbox
+    // ------------------------------------------------------------------
+    async function reload() {
+        if (!orgId) return;
+        setBody('<tr><td colspan="8" class="pm-empty">Loading...</td></tr>');
+
+        const subject = document.getElementById('ebSubjectFilter').value;
+        const overdue = document.getElementById('ebOverdueOnly').checked;
+        let url = U('/practice/api/workflow/scope/inbox') + '?organizationId=' + encodeURIComponent(orgId);
+        if (subject) url += '&subjectEntity=' + encodeURIComponent(subject);
+        if (overdue) url += '&overdueOnly=true';
+
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const b = await r.json();
+            if (!r.ok) { setBody('<tr><td colspan="8" class="pm-empty">' + window.__wfCommon.escape(b.error || 'Load failed') + '</td></tr>'); return; }
+            const rows = (b && b.rows) || [];
+            if (!rows.length) { setBody('<tr><td colspan="8" class="pm-empty">Nothing open. Raise an event to get started.</td></tr>'); return; }
+
+            const body = document.getElementById('ebBody');
+            body.innerHTML = '';
+            for (const row of rows) {
+                const tr = document.createElement('tr');
+                if (row.isOverdue) tr.style.background = '#fef2f2';
+                const scope = row.scopeRoleName || row.scopeAssetCategoryName || '-';
+                tr.insertAdjacentHTML('beforeend',
+                      '<td>' + window.__wfCommon.escape(row.eventName) + '</td>'
+                    + '<td>' + window.__wfCommon.escape(row.subjectLabel || '') + '</td>'
+                    + '<td>' + window.__wfCommon.escape(scope) + '</td>'
+                    + '<td>' + window.__wfCommon.escape(row.checklistName || '') + '</td>'
+                    + '<td>' + row.itemsDone + ' / ' + row.itemCount + '</td>'
+                    + '<td>' + dueCell(row) + '</td>'
+                    + '<td>' + window.__wfCommon.badge(row.instanceStatus) + '</td>');
+                const td = document.createElement('td');
+                const btn = document.createElement('button');
+                btn.className = 'pm-button';
+                btn.textContent = 'Open';
+                btn.addEventListener('click', function () { openInstance(row.eventInstanceId); });
+                td.appendChild(btn);
+                tr.appendChild(td);
+                body.appendChild(tr);
+            }
+        } catch (err) {
+            setBody('<tr><td colspan="8" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>');
+        }
+    }
+
+    function dueCell(row) {
+        if (!row.dueDate) return '<span style="color:#94a3b8;">-</span>';
+        const d = String(row.dueDate).substring(0, 10);
+        if (!row.isOverdue) return window.__wfCommon.escape(d);
+        return '<span style="color:#b91c1c; font-weight:600;">' + window.__wfCommon.escape(d)
+             + ' (+' + (row.daysOverdue || 0) + 'd)</span>';
+    }
+
+    function setBody(html) { document.getElementById('ebBody').innerHTML = html; }
+
+    // ------------------------------------------------------------------
+    // Raise dialog
+    // ------------------------------------------------------------------
+    function isPeople(action) { return action === 'ONBOARD' || action === 'OFFBOARD'; }
+
+    async function openRaise() {
+        window.__wfCommon.setMessage('ebRaiseMessage', null);
+        document.getElementById('ebEffectiveDate').value = new Date().toISOString().substring(0, 10);
+        const dlg = document.getElementById('ebRaiseDialog');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+        await loadSubjects();
+    }
+
+    async function loadSubjects() {
+        const action = document.getElementById('ebAction').value;
+        const sel = document.getElementById('ebSubject');
+        document.getElementById('ebSubjectLabel').textContent = isPeople(action) ? 'Employee *' : 'Asset *';
+        sel.innerHTML = '<option value="">Loading...</option>';
+
+        // Employees come from the organizations proxy; assets from the
+        // generic gateway ({entityType} route), which is where every other
+        // dependency register is read from.
+        const url = isPeople(action)
+            ? U('/practice/api/organizations/' + encodeURIComponent(orgId) + '/employees')
+            : U('/practice-management-gateway/dependency-assets?organizationId=' + encodeURIComponent(orgId));
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { sel.innerHTML = '<option value="">(could not load)</option>'; return; }
+            const j = await r.json();
+            const rows = j.data || j.Data || j.rows || j.Rows || (Array.isArray(j) ? j : []);
+            sel.innerHTML = '<option value="">(select)</option>';
+            for (const row of rows) {
+                const opt = document.createElement('option');
+                opt.value = String(isPeople(action)
+                    ? (row.employeeId || row.EmployeeId)
+                    : (row.assetId || row.AssetId));
+                opt.textContent = isPeople(action)
+                    ? ((row.employeeName || row.EmployeeName || '') + ' (' + (row.employeeCode || row.EmployeeCode || '') + ')')
+                    : (row.assetName || row.AssetName || '');
+                sel.appendChild(opt);
+            }
+        } catch (_) {
+            sel.innerHTML = '<option value="">(could not load)</option>';
+        }
+    }
+
+    function wireRaiseDialog() {
+        const close = function () {
+            const d = document.getElementById('ebRaiseDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+        };
+        document.getElementById('ebRaiseClose').addEventListener('click', close);
+        document.getElementById('ebRaiseCancel').addEventListener('click', close);
+        document.getElementById('ebAction').addEventListener('change', loadSubjects);
+
+        document.getElementById('ebRaiseForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submit = document.getElementById('ebRaiseSubmit');
+            const action = document.getElementById('ebAction').value;
+            const subjectId = document.getElementById('ebSubject').value;
+            const effective = document.getElementById('ebEffectiveDate').value;
+            if (!subjectId || !effective) {
+                window.__wfCommon.setMessage('ebRaiseMessage', 'Subject and effective date are required.', 'error');
+                return;
+            }
+            submit.disabled = true;
+
+            const people = isPeople(action);
+            const url = U(people
+                ? '/practice/api/workflow/scope/raise/people'
+                : '/practice/api/workflow/scope/raise/asset');
+            const payload = people
+                ? { organizationId: Number(orgId), employeeId: Number(subjectId), lifecycleAction: action, effectiveDate: effective, triggerSource: 'Manual' }
+                : { organizationId: Number(orgId), assetId: Number(subjectId),    lifecycleAction: action, effectiveDate: effective, triggerSource: 'Manual' };
+
+            try {
+                const r = await fetch(url, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (!r.ok) {
+                    window.__wfCommon.setMessage('ebRaiseMessage', b.error || 'Raise failed', 'error');
+                    submit.disabled = false;
+                    return;
+                }
+                // raisedCount 0 is a success with nothing mapped -- say so
+                // plainly instead of showing a green tick for no work.
+                if (!b.raisedCount) {
+                    window.__wfCommon.setMessage('ebRaiseMessage',
+                        b.message || 'Event recorded, but no checklist is mapped for this scope.', 'info');
+                    submit.disabled = false;
+                    await reload();
+                    return;
+                }
+                window.__wfCommon.setMessage('ebRaiseMessage', b.raisedCount + ' checklist(s) raised.', 'ok');
+                setTimeout(function () { close(); submit.disabled = false; reload(); }, 700);
+            } catch (err) {
+                window.__wfCommon.setMessage('ebRaiseMessage', 'Network error: ' + err.message, 'error');
+                submit.disabled = false;
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Checklist drawer
+    // ------------------------------------------------------------------
+    async function openInstance(instanceId) {
+        window.__wfCommon.setMessage('ebItemMessage', null);
+        const url = U('/practice/api/workflow/scope/instances/' + encodeURIComponent(instanceId))
+            + '?organizationId=' + encodeURIComponent(orgId);
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            if (!r.ok) { window.__wfCommon.setMessage('ebMessage', 'Could not open checklist.', 'error'); return; }
+            currentInstance = await r.json();
+        } catch (err) {
+            window.__wfCommon.setMessage('ebMessage', 'Network error: ' + err.message, 'error');
+            return;
+        }
+
+        const h = currentInstance.header;
+        document.getElementById('ebDrawerTitle').textContent = h.checklistName || 'Checklist';
+        document.getElementById('ebDrawerMeta').textContent =
+            [h.eventName, h.subjectLabel, h.scopeRoleName || h.scopeAssetCategoryName,
+             h.dueDate ? 'due ' + String(h.dueDate).substring(0, 10) : null]
+            .filter(Boolean).join('  ·  ');
+
+        renderItems();
+        const dlg = document.getElementById('ebItemDialog');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    }
+
+    function renderItems() {
+        const body = document.getElementById('ebItemBody');
+        body.innerHTML = '';
+        const items = currentInstance.items || [];
+        if (!items.length) {
+            body.innerHTML = '<tr><td colspan="5" class="pm-empty">'
+                + 'This instance has no line items. Nothing was resolved for it &mdash; open '
+                + '"Why these items?" to see why.</td></tr>';
+            return;
+        }
+        items.forEach(function (it) {
+            const tr = document.createElement('tr');
+            const isObligation = it.itemOrigin === 'OBLIGATION';
+
+            tr.insertAdjacentHTML('beforeend',
+                  '<td>' + it.itemSequence + '</td>'
+                + '<td>' + window.__wfCommon.escape(it.itemText)
+                    + (it.isMandatory ? ' <span style="color:#b91c1c;">*</span>' : '')
+                    + (isObligation ? ' <span style="padding:1px 6px; border-radius:8px; font-size:10px;'
+                        + ' background:#e0e7ff; color:#3730a3;">obligation</span>' : '')
+                    + (it.responsibleRole ? '<br><span style="font-size:11px; color:#94a3b8;">'
+                        + window.__wfCommon.escape(it.responsibleRole) + '</span>' : '')
+                    + (it.naJustification ? '<br><span style="font-size:11px; color:#78350f;">N/A: '
+                        + window.__wfCommon.escape(it.naJustification) + '</span>' : '')
+                  + '</td>');
+
+            const tdResult = document.createElement('td');
+            const sel = document.createElement('select');
+            sel.style.cssText = 'width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;';
+            RESULTS.forEach(function (v) {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = v === 'NotApplicable' ? 'Not Applicable' : v;
+                sel.appendChild(o);
+            });
+            sel.value = it.itemStatus;
+            tdResult.appendChild(sel);
+            tr.appendChild(tdResult);
+
+            const tdEvidence = document.createElement('td');
+            const ev = document.createElement('input');
+            ev.type = 'url'; ev.value = it.evidenceUrl || '';
+            ev.placeholder = it.evidenceRequired ? 'required' : '';
+            ev.style.cssText = 'width:100%; padding:4px 6px; border:1px solid '
+                + (it.evidenceRequired && !it.evidenceUrl ? '#fca5a5' : '#cbd5e1') + '; border-radius:4px;';
+            tdEvidence.appendChild(ev);
+            tr.appendChild(tdEvidence);
+
+            const tdRemarks = document.createElement('td');
+            const rm = document.createElement('input');
+            rm.type = 'text'; rm.value = it.remarks || '';
+            rm.style.cssText = 'width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;';
+            tdRemarks.appendChild(rm);
+            tr.appendChild(tdRemarks);
+
+            // Save on blur / change -- no separate per-row save button. The
+            // 067 endpoint is an upsert, so this is safe to call repeatedly.
+            const save = function () { saveItem(it, sel.value, ev.value, rm.value); };
+            sel.addEventListener('change', save);
+            ev.addEventListener('blur', save);
+            rm.addEventListener('blur', save);
+
+            body.appendChild(tr);
+        });
+    }
+
+    async function saveItem(item, status, evidenceUrl, remarks) {
+        if (item.itemStatus === status
+            && (item.evidenceUrl || '') === evidenceUrl
+            && (item.remarks || '') === remarks) return;      // nothing changed
+
+        // Excluding an obligation needs a reason on the record -- same rule as
+        // the mapping screen, and the procedure rejects it without one.
+        let na = item.naJustification || null;
+        if (status === 'NotApplicable' && item.itemOrigin === 'OBLIGATION' && !na) {
+            na = window.prompt('Why is this obligation not applicable for this subject?\n'
+                             + 'An auditor will read this.', '');
+            if (na === null || !na.trim()) {
+                window.__wfCommon.setMessage('ebItemMessage',
+                    'Not Applicable needs a justification; nothing was saved.', 'error');
+                renderItems();      // revert the dropdown
+                return;
+            }
+            na = na.trim();
+        }
+
+        // Two item stores, two endpoints. event_instance_item_id and
+        // event_instance_obligation_id are separate identity sequences and can
+        // collide, so the origin decides where this write goes.
+        const obligation = item.itemOrigin === 'OBLIGATION';
+        const url = U(obligation
+            ? '/practice/api/workflow/scope/instance-obligations'
+            : '/practice/api/workflow/event-instance-items');
+        const payload = obligation
+            ? {
+                organizationId:            Number(orgId),
+                eventInstanceObligationId: item.itemId,
+                itemStatus:                status,
+                evidenceUrl:               evidenceUrl || null,
+                remarks:                   remarks || null,
+                naJustification:           status === 'NotApplicable' ? na : null
+              }
+            : {
+                eventInstanceItemId: item.itemId,
+                itemStatus:          status,
+                evidenceUrl:         evidenceUrl || null,
+                remarks:             remarks || null
+              };
+
+        try {
+            const r = await fetch(url, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin', body: JSON.stringify(payload)
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (!r.ok) {
+                window.__wfCommon.setMessage('ebItemMessage', b.error || 'Save failed', 'error');
+                renderItems();
+                return;
+            }
+            item.itemStatus      = status;
+            item.evidenceUrl     = evidenceUrl;
+            item.remarks         = remarks;
+            item.naJustification = status === 'NotApplicable' ? na : null;
+            window.__wfCommon.setMessage('ebItemMessage', 'Saved.', 'ok');
+            setTimeout(function () { window.__wfCommon.setMessage('ebItemMessage', null); }, 1200);
+        } catch (err) {
+            window.__wfCommon.setMessage('ebItemMessage', 'Network error: ' + err.message, 'error');
+        }
+    }
+
+    function wireItemDialog() {
+        const close = function () {
+            const d = document.getElementById('ebItemDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+            reload();
+        };
+        document.getElementById('ebItemClose').addEventListener('click', close);
+        document.getElementById('ebItemCancel').addEventListener('click', close);
+
+        document.getElementById('ebCompleteBtn').addEventListener('click', async function () {
+            if (!currentInstance || !currentInstance.header) return;
+
+            // Client-side mirror of the server gate (132): an instance with no
+            // items cannot be completed, and every mandatory item must be
+            // resolved. Block early with specifics rather than bouncing off a 400.
+            const items = currentInstance.items || [];
+            if (!items.length) {
+                window.__wfCommon.setMessage('ebItemMessage',
+                    'This instance has no items, so there is nothing to complete.', 'error');
+                return;
+            }
+            const outstanding = items.filter(function (i) {
+                return i.isMandatory && ['Passed', 'Failed', 'NotApplicable'].indexOf(i.itemStatus) < 0;
+            });
+            if (outstanding.length) {
+                window.__wfCommon.setMessage('ebItemMessage',
+                    outstanding.length + ' mandatory item(s) still pending: #'
+                    + outstanding.map(function (i) { return i.itemSequence; }).join(', '), 'error');
+                return;
+            }
+
+            const id = currentInstance.header.eventInstanceId;
+            const btn = document.getElementById('ebCompleteBtn');
+            btn.disabled = true;
+            try {
+                const r = await fetch(U('/practice/api/workflow/event-instances/' + encodeURIComponent(id) + '/complete'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify({ eventInstanceId: id, comments: null })
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (!r.ok) {
+                    // Show the HTTP status too. A silent failure here is what
+                    // made a stuck "In Progress" look like a status bug instead
+                    // of a rejected request.
+                    window.__wfCommon.setMessage('ebItemMessage',
+                        'Complete failed (HTTP ' + r.status + '): ' + (b.error || 'no detail returned'), 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Do not trust the 200 -- re-read the instance and report the
+                // status the database actually holds. If it is still open, say
+                // so plainly rather than closing the drawer on a false success.
+                const verify = await fetch(
+                    U('/practice/api/workflow/scope/instances/' + encodeURIComponent(id))
+                    + '?organizationId=' + encodeURIComponent(orgId),
+                    { credentials: 'same-origin' });
+                const after = verify.ok ? await verify.json() : null;
+                const status = after && after.header ? after.header.instanceStatus : null;
+
+                if (status === 'Completed' || status === 'Failed') {
+                    window.__wfCommon.setMessage('ebItemMessage',
+                        'Checklist closed as ' + status + '.', status === 'Completed' ? 'ok' : 'error');
+                    currentInstance = after;
+                    setTimeout(close, 900);
+                } else {
+                    window.__wfCommon.setMessage('ebItemMessage',
+                        'The server accepted the request but the instance is still "'
+                        + (status || 'unknown') + '". Nothing was closed. '
+                        + 'Run database\\diagnose_event_instance_complete.sql for this instance.', 'error');
+                    if (after) { currentInstance = after; renderItems(); }
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                window.__wfCommon.setMessage('ebItemMessage', 'Network error: ' + err.message, 'error');
+                btn.disabled = false;
+            }
+        });
+
+        document.getElementById('ebTraceBtn').addEventListener('click', function () {
+            if (!currentInstance || !currentInstance.header) return;
+            const h = currentInstance.header;
+            openTrace('Resolution Trace -- ' + (h.subjectLabel || ''),
+                U('/practice/api/workflow/scope/trace')
+                + '?organizationId=' + encodeURIComponent(orgId)
+                + '&subjectEntity=' + encodeURIComponent(h.subjectEntity || '')
+                + '&subjectRecordId=' + encodeURIComponent(h.subjectRecordId || 0), false);
+        });
+
+        const closeTrace = function () {
+            const d = document.getElementById('ebTraceDialog');
+            if (d && d.close) d.close(); else if (d) d.removeAttribute('open');
+        };
+        document.getElementById('ebTraceClose').addEventListener('click', closeTrace);
+    }
+
+    // ------------------------------------------------------------------
+    // Trace / coverage gaps
+    // ------------------------------------------------------------------
+    function openGaps() {
+        if (!orgId) return;
+        openTrace('Coverage Gaps',
+            U('/practice/api/workflow/scope/trace')
+            + '?organizationId=' + encodeURIComponent(orgId) + '&gapsOnly=true', true);
+    }
+
+    async function openTrace(title, url, gapsMode) {
+        document.getElementById('ebTraceTitle').textContent = title;
+        const body = document.getElementById('ebTraceBody');
+        body.innerHTML = '<tr><td colspan="6" class="pm-empty">Loading...</td></tr>';
+
+        const dlg = document.getElementById('ebTraceDialog');
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+
+        try {
+            const r = await fetch(url, { credentials: 'same-origin' });
+            const b = await r.json();
+            const rows = gapsMode ? (b.gaps || []) : (b.rows || []);
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="6" class="pm-empty">'
+                    + (gapsMode ? 'No coverage gaps recorded.' : 'No trace rows.') + '</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            for (const t of rows) {
+                const scope = t.scopeRoleName || t.scopeAssetCategoryName || '-';
+                const tr = document.createElement('tr');
+                tr.innerHTML = gapsMode
+                    ? [ '<td>' + decisionBadge('Excluded') + '</td>',
+                        '<td>-</td>',
+                        '<td>' + window.__wfCommon.escape(t.eventCode) + '</td>',
+                        '<td>' + window.__wfCommon.escape(scope) + '</td>',
+                        '<td>' + window.__wfCommon.escape(t.reasonCode) + ' &times;' + t.occurrenceCount + '</td>',
+                        '<td>' + window.__wfCommon.escape(String(t.lastSeenDt).substring(0, 10)) + '</td>' ].join('')
+                    : [ '<td>' + decisionBadge(t.decision) + '</td>',
+                        '<td>' + window.__wfCommon.escape(t.checklistName || '-') + '</td>',
+                        '<td>' + window.__wfCommon.escape(t.eventCode) + '</td>',
+                        '<td>' + window.__wfCommon.escape(scope) + '</td>',
+                        '<td>' + window.__wfCommon.escape(t.reasonCode)
+                            + (t.reasonDetail ? '<br><span style="font-size:11px; color:#94a3b8;">'
+                                + window.__wfCommon.escape(t.reasonDetail) + '</span>' : '') + '</td>',
+                        '<td>' + window.__wfCommon.escape(String(t.enteredDt).substring(0, 10)) + '</td>' ].join('');
+                body.appendChild(tr);
+            }
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Failed: '
+                + window.__wfCommon.escape(err.message) + '</td></tr>';
+        }
+    }
+
+    function decisionBadge(d) {
+        const ok = d === 'Included';
+        return '<span style="padding:3px 9px; border-radius:10px; font-size:11px; background:'
+            + (ok ? '#dcfce7' : '#fee2e2') + '; color:' + (ok ? '#166534' : '#7f1d1d') + ';">'
+            + window.__wfCommon.escape(d) + '</span>';
+    }
+})();
+</script>

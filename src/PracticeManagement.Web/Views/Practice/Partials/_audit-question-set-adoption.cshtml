@@ -1,0 +1,287 @@
+@*
+    Audit -> Question Set adoption (migration 277 / 278) -- Phase 2.
+
+    Rendered as the HeaderPartial of the Question Sets step in
+    org-audit-definition.cshtml, ABOVE the untouched
+    org-assurance-question-sets partial.
+
+    WHY IT IS A SEPARATE PANEL
+      org_assurance_question_set is organization-scoped: a set is a
+      reusable library artifact shared across audits. This panel is the
+      edge added by 277 -- which of those sets THIS audit version asks.
+      Keeping it separate means the library screen below stays exactly
+      what it always was, and adopting a set never edits it.
+
+    Backend:
+      GET  /practice/api/org-assurance/definitions/{id}/question-sets?organizationId=
+      POST /practice/api/org-assurance/definitions/{id}/question-sets
+
+    Context comes from the shell's audit picker via the
+    `audit-context-change` event -- this panel has no picker of its own,
+    which is the point of the shared context.
+
+    Editable only while the current version is Draft (header.isEditable),
+    the same rule every other config screen follows.
+
+    Id prefix `oaAdopt` -- distinct from oaDef / oaScope / qs and every
+    other hosted partial, so co-hosting stays collision-free.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<section class="pm-panel oa-adopt-panel" id="oaAdoptRoot">
+    <div class="pm-section-heading">
+        <h2>Question sets used by this audit</h2>
+        <p id="oaAdoptSubtitle">Pick an audit above to choose which question sets it asks.</p>
+    </div>
+
+    <div id="oaAdoptMessage" class="pm-message" style="display:none;"></div>
+
+    <div id="oaAdoptBody" hidden>
+        <div class="oa-adopt-grid">
+            <div>
+                <label class="oa-adopt-label" for="oaAdoptAvailable">Available in this organization</label>
+                <select id="oaAdoptAvailable" multiple size="6"></select>
+                <p class="oa-adopt-hint">Select one or more, then Add.</p>
+            </div>
+            <div class="oa-adopt-actions">
+                <button type="button" class="pm-button" id="oaAdoptAdd" title="Adopt the selected sets">
+                    <i class="fa-solid fa-arrow-right" aria-hidden="true"></i> Add
+                </button>
+                <button type="button" class="pm-button" id="oaAdoptRemove" title="Remove the selected sets">
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Remove
+                </button>
+            </div>
+            <div>
+                <label class="oa-adopt-label" for="oaAdoptSelected">Asked by this audit</label>
+                <select id="oaAdoptSelected" multiple size="6"></select>
+                <p class="oa-adopt-hint">Order follows this list. Use Up / Down to change it.</p>
+            </div>
+            <div class="oa-adopt-actions">
+                <button type="button" class="pm-button" id="oaAdoptUp" title="Move up">
+                    <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="pm-button" id="oaAdoptDown" title="Move down">
+                    <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="oa-adopt-footer">
+            <span id="oaAdoptState" class="oa-adopt-hint"></span>
+            <button type="button" class="pm-button primary" id="oaAdoptSave">
+                <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save question sets
+            </button>
+        </div>
+    </div>
+</section>
+
+<script>
+(function () {
+    'use strict';
+
+    const wf  = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId        : '',
+        definitionId : '',
+        editable     : false,
+        available    : [],   // [{questionSetId, setCode, setName, questionCount}]
+        adopted      : []    // same shape, in display order
+    };
+
+    const el = {
+        root      : document.getElementById('oaAdoptRoot'),
+        subtitle  : document.getElementById('oaAdoptSubtitle'),
+        message   : document.getElementById('oaAdoptMessage'),
+        body      : document.getElementById('oaAdoptBody'),
+        available : document.getElementById('oaAdoptAvailable'),
+        selected  : document.getElementById('oaAdoptSelected'),
+        add       : document.getElementById('oaAdoptAdd'),
+        remove    : document.getElementById('oaAdoptRemove'),
+        up        : document.getElementById('oaAdoptUp'),
+        down      : document.getElementById('oaAdoptDown'),
+        save      : document.getElementById('oaAdoptSave'),
+        stateText : document.getElementById('oaAdoptState')
+    };
+
+    // The shell owns the audit picker and broadcasts changes.
+    document.addEventListener('audit-context-change', function (e) {
+        const d = (e && e.detail) || {};
+        state.orgId        = d.orgId || '';
+        state.definitionId = d.definitionId || '';
+        reload();
+    });
+
+    el.add.addEventListener('click', function () { move(el.available, 'adopt'); });
+    el.remove.addEventListener('click', function () { move(el.selected, 'drop'); });
+    el.up.addEventListener('click', function () { nudge(-1); });
+    el.down.addEventListener('click', function () { nudge(1); });
+    el.save.addEventListener('click', save);
+
+    async function reload() {
+        clearMessage();
+        if (!state.orgId || !state.definitionId) {
+            el.body.hidden = true;
+            el.subtitle.textContent = 'Pick an audit above to choose which question sets it asks.';
+            return;
+        }
+
+        try {
+            const r = await fetch(
+                U(API + '/definitions/' + encodeURIComponent(state.definitionId)
+                  + '/question-sets?organizationId=' + encodeURIComponent(state.orgId)),
+                { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const body = await r.json();
+
+            const header = body.header || body.Header || {};
+            state.editable = !!(header.isEditable || header.IsEditable);
+
+            state.adopted = ((body.adopted || body.Adopted) || []).map(normalize);
+            const all     = ((body.available || body.Available) || []).map(normalize);
+            const taken   = new Set(state.adopted.map(function (a) { return String(a.questionSetId); }));
+            state.available = all.filter(function (a) { return !taken.has(String(a.questionSetId)); });
+
+            el.body.hidden = false;
+            el.subtitle.textContent = state.editable
+                ? 'These sets are asked by the current draft version of this audit.'
+                : 'Read-only: question sets can only be changed while the current version is Draft.';
+            setEnabled(state.editable);
+            render();
+        } catch (err) {
+            el.body.hidden = true;
+            showMessage('error', 'Could not load question sets: ' + (err.message || err));
+        }
+    }
+
+    function normalize(row) {
+        return {
+            questionSetId : row.questionSetId || row.QuestionSetId,
+            setCode       : row.setCode       || row.SetCode       || '',
+            setName       : row.setName       || row.SetName       || '',
+            questionCount : row.questionCount != null ? row.questionCount
+                          : (row.QuestionCount != null ? row.QuestionCount : null),
+            isMandatory   : row.isMandatory != null ? !!row.isMandatory
+                          : (row.IsMandatory != null ? !!row.IsMandatory : true)
+        };
+    }
+
+    function label(row) {
+        const count = row.questionCount == null ? '' : ' - ' + row.questionCount + ' question(s)';
+        return (row.setName || '(unnamed)') + (row.setCode ? ' (' + row.setCode + ')' : '') + count;
+    }
+
+    function render() {
+        fill(el.available, state.available);
+        fill(el.selected,  state.adopted);
+        el.stateText.textContent = state.adopted.length
+            ? state.adopted.length + ' set(s) asked by this audit'
+            : 'No question sets adopted yet';
+    }
+
+    function fill(sel, rows) {
+        sel.innerHTML = '';
+        rows.forEach(function (row) {
+            const opt = document.createElement('option');
+            opt.value = String(row.questionSetId);
+            opt.textContent = label(row);
+            sel.appendChild(opt);
+        });
+    }
+
+    function move(from, direction) {
+        if (!state.editable) return;
+        const ids = Array.prototype.filter.call(from.options, function (o) { return o.selected; })
+                                          .map(function (o) { return String(o.value); });
+        if (!ids.length) return;
+
+        if (direction === 'adopt') {
+            const moving = state.available.filter(function (a) { return ids.indexOf(String(a.questionSetId)) >= 0; });
+            state.available = state.available.filter(function (a) { return ids.indexOf(String(a.questionSetId)) < 0; });
+            state.adopted   = state.adopted.concat(moving);
+        } else {
+            const moving = state.adopted.filter(function (a) { return ids.indexOf(String(a.questionSetId)) >= 0; });
+            state.adopted   = state.adopted.filter(function (a) { return ids.indexOf(String(a.questionSetId)) < 0; });
+            state.available = state.available.concat(moving)
+                .sort(function (a, b) { return String(a.setName).localeCompare(String(b.setName)); });
+        }
+        render();
+    }
+
+    function nudge(delta) {
+        if (!state.editable) return;
+        const chosen = Array.prototype.filter.call(el.selected.options, function (o) { return o.selected; });
+        if (chosen.length !== 1) return;
+        const id = String(chosen[0].value);
+        const i  = state.adopted.findIndex(function (a) { return String(a.questionSetId) === id; });
+        const j  = i + delta;
+        if (i < 0 || j < 0 || j >= state.adopted.length) return;
+        const tmp = state.adopted[i];
+        state.adopted[i] = state.adopted[j];
+        state.adopted[j] = tmp;
+        render();
+        el.selected.value = id;
+    }
+
+    async function save() {
+        if (!state.editable) return;
+        if (!state.orgId || !state.definitionId) {
+            showMessage('error', 'Pick an audit first.');
+            return;
+        }
+        clearMessage();
+        el.save.disabled = true;
+        try {
+            const payload = {
+                organizationId : Number(state.orgId),
+                definitionId   : Number(state.definitionId),
+                items          : state.adopted.map(function (a, index) {
+                    return {
+                        questionSetId : Number(a.questionSetId),
+                        displayOrder  : index + 1,
+                        isMandatory   : a.isMandatory !== false
+                    };
+                })
+            };
+            const r = await fetch(
+                U(API + '/definitions/' + encodeURIComponent(state.definitionId) + '/question-sets'),
+                {
+                    method      : 'POST',
+                    credentials : 'same-origin',
+                    headers     : { 'Content-Type': 'application/json' },
+                    body        : JSON.stringify(payload)
+                });
+            const body = await safeJson(r);
+            if (!r.ok) throw new Error((body && (body.error || body.Error)) || ('HTTP ' + r.status));
+
+            showMessage('ok', 'Saved. This audit now asks ' + state.adopted.length + ' question set(s).');
+            // Let the shell repaint the step chips.
+            document.dispatchEvent(new CustomEvent('audit-setup-changed'));
+        } catch (err) {
+            showMessage('error', 'Save failed: ' + (err.message || err));
+        } finally {
+            el.save.disabled = false;
+        }
+    }
+
+    function setEnabled(on) {
+        [el.add, el.remove, el.up, el.down, el.save].forEach(function (b) { b.disabled = !on; });
+    }
+
+    function showMessage(kind, text) {
+        el.message.style.display    = 'block';
+        el.message.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
+        el.message.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.message.textContent      = text;
+    }
+    function clearMessage() {
+        el.message.style.display = 'none';
+        el.message.textContent   = '';
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

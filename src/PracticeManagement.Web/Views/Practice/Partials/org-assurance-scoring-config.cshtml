@@ -61,7 +61,7 @@
             </select>
         </label>
         <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
-            <span>Assurance Definition</span>
+            <span>Audit</span>
             <select id="oaScPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
                 <option value="">Select an organization first</option>
             </select>
@@ -509,7 +509,7 @@
             document.getElementById('oaScDefVersion').textContent = '';
             document.getElementById('oaScHeading').textContent    = 'Scoring Config';
             document.getElementById('oaScSubtitle').textContent   =
-                'Pick an organization and an assurance definition to configure scoring.';
+                'Pick an organization and an audit to configure scoring.';
             return;
         }
         document.getElementById('oaScDefName').textContent =
@@ -708,8 +708,9 @@
             const idx = Number(trg.getAttribute('data-idx'));
             openRowMenu(trg, [
                 { icon: 'fa-pen',   label: 'Edit',   action: function () { openBandDialog(idx); } },
-                { icon: 'fa-trash', label: 'Remove', action: function () {
-                    if (!confirm('Remove this band?')) return;
+                { icon: 'fa-trash', label: 'Remove', action: async function () {
+                    if (!await window.gracUi.confirm('Remove this band?',
+                          { type: 'warning', title: 'Remove band', confirmText: 'Remove' })) return;
                     state.bands.splice(idx, 1); renderBands();
                 } }
             ]);

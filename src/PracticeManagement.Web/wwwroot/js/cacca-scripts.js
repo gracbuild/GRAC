@@ -100,16 +100,19 @@ function CaccaHandleAPIError(
         responseStr = Res.responseStr;
         Response = JSON.parse(responseStr);
       } catch {}
+      var goToLogin = function () { window.location = DomainURL + "/Login"; };
       swal(
         {
-          title: Response.Title || "Authentication Error",
-          text: Response.Message || "Session expired. Please login again.",
+          title: (Response && Response.Title) || "Authentication Error",
+          text: (Response && Response.Message) || "Session expired. Please login again.",
           type: "warning",
+          timer: 2500,
         },
-        function () {
-          window.location = DomainURL + "/Login";
-        }
+        goToLogin
       );
+      // Auto-redirect to the login page even if the dialog closes on its
+      // timer or the user never clicks -- the session has ended.
+      setTimeout(goToLogin, 2600);
     } else if (Res.status == "INFO") {
       var responseStr = Decrypt(Res.responseStr, Token);
       var Response = JSON.parse(JSON.parse(responseStr).ResponseStr);
@@ -321,12 +324,16 @@ var SidebarPersistence = {
   bindEvents: function () {
     var self = this;
 
-    // Listen for AdminLTE pushmenu events
+    // Listen for AdminLTE pushmenu events. Persist ONLY a deliberate
+    // hamburger press (window.__pmSidebarUserToggle, set in _Layout on the
+    // button's pointerdown). AdminLTE fires these same events for its
+    // automatic width<=992 / resize collapse; persisting those used to pin
+    // the sidebar collapsed for every later page load until re-login.
     $(document).on(
       "collapsed.lte.pushmenu",
       '[data-widget="pushmenu"]',
       function () {
-        self.saveSidebarState(true);
+        if (window.__pmSidebarUserToggle) self.saveSidebarState(true);
       }
     );
 
@@ -334,7 +341,7 @@ var SidebarPersistence = {
       "shown.lte.pushmenu",
       '[data-widget="pushmenu"]',
       function () {
-        self.saveSidebarState(false);
+        if (window.__pmSidebarUserToggle) self.saveSidebarState(false);
       }
     );
   },
@@ -817,4 +824,43 @@ var CaccaOrganizationPersistence = {
 
     return selectedOrgId;
   },
+};
+
+// =====================================================================
+// Unified date display format (project-wide).
+//   Date only / midnight -> dd-MMM-yyyy         e.g. 15-Jan-2026
+//   With a real time      -> dd-MMM-yyyy HH:mm   e.g. 15-Jan-2026 14:30
+// DISPLAY ONLY. Parses the ISO/SQL string components directly (no
+// `new Date()`), so the stored date/time is shown verbatim with no
+// timezone shift. Non-date values are returned unchanged.
+// =====================================================================
+window.gracFormatDisplayDate = function (value) {
+  if (value === null || value === undefined || value === "") return value;
+  var s = String(value).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/);
+  if (!m) return value;
+  var mo = parseInt(m[2], 10);
+  if (mo < 1 || mo > 12) return value;
+  var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var out = m[3] + "-" + months[mo - 1] + "-" + m[1];
+  var hh = m[4], mi = m[5], ss = m[6];
+  if (hh !== undefined && !(hh === "00" && mi === "00" && (ss === undefined || ss === "00"))) {
+    out += " " + hh + ":" + mi;
+  }
+  return out;
+};
+// Format a JS Date object to the same date-only shape (dd-MMM-yyyy).
+window.gracFormatDisplayDateObj = function (d) {
+  if (!(d instanceof Date) || isNaN(d)) return "";
+  var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return String(d.getDate()).padStart(2, "0") + "-" + months[d.getMonth()] + "-" + d.getFullYear();
+};
+// Date-only display (dd-MMM-yyyy) from a raw value, ignoring any time part.
+// Use for sites that previously called toLocaleDateString() (date only).
+window.gracFormatDateOnly = function (value) {
+  if (value === null || value === undefined || value === "") return "";
+  var s = String(value).trim();
+  var datePart = s.length >= 10 ? s.slice(0, 10) : s;
+  var out = window.gracFormatDisplayDate(datePart);
+  return out === datePart ? s : out;
 };

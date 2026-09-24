@@ -36,7 +36,14 @@ public sealed record PracticeScreen(string Key, string Title, string Description
     // permissions added by migration 071. Distinct from
     // AssuranceManagementGroup above -- that group belongs to the
     // unrelated legacy assurance-* screens which stay untouched.
-    public const string OrganizationAssuranceGroup = "Organization Assurance";
+    //
+    // Renamed by migration 276: the group was "Organization Assurance"
+    // and the nav-assurance row read "Assurance". Both now read "Audit
+    // Management". Only the labels changed -- every screen key, route,
+    // menu_key and permission row is untouched, so existing audit data
+    // and grants are unaffected. The constant is the page eyebrow's
+    // source, so it has to match menu_master.module_type.
+    public const string AuditManagementGroup = "Audit Management";
 
     public static readonly PracticeScreen[] All =
     [
@@ -45,15 +52,16 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         new("organization-administration","Organization Administration","Organization profile, locations, departments, business functions, teams, committees, and employees for organization users","building-user",["Code","Name","Industry","EntityType","Country","Status"], OrganizationAdministrationGroup),
         new("organizations","Organization Onboarding","Legal entities and organization-level operating context","building",["Code","Name","Industry","EntityType","Country","Status"], OrganizationGroup),
         new("organization-metadata","Organization Metadata","Configurable metadata used for applicability discovery","sliders",["OrganizationId","MetadataName","DataType","ValueText","Status"], OrganizationGroup),
-        new("repository-subscriptions","Repository Subscriptions","Organization subscriptions to repository artifacts and releases","bookmark",["OrganizationId","AuthorityId","ArtifactId","ReleaseId","SubscriptionStatus","Status"], GovernanceGroup),
+        new("repository-subscriptions","Standards & Frameworks","Organization subscriptions to repository artifacts and releases","bookmark",["OrganizationId","AuthorityId","ArtifactId","ReleaseId","SubscriptionStatus","Status"], GovernanceGroup),
         new("locations","Location Management","Organization locations used for operating context, ownership, and responsibility mapping","location-dot",["Organization","Name","LocationType","LocationHead","Region","Status"], OrganizationGroup),
         new("departments","Department Management","Departments mapped to organizations","building-user",["Organization","Code","Name","HeadUser","Status"], OrganizationGroup),
         new("teams","Team Management","Organization teams mapped to departments and managed by employees. In-house or vendor-managed; accountability stays with the team manager either way","people-group",["Organization","Name","TeamType","Vendor","TeamManager","ParentDepartment","Status"], OrganizationGroup),
-        new("committees","Committee Management","Organization committees with chairperson, secretary, and review frequency","users-gear",["Organization","Name","Chairperson","Secretary","ReviewFrequency","Status"], OrganizationGroup),
+        new("committees","Committee Management","Organization committees with committee head and review frequency","users-gear",["Organization","Name","Chairperson","ReviewFrequency","Status"], OrganizationGroup),
         new("roles","Role Master","Organization-specific roles used for menu and action permissions","user-lock",["Organization","RoleCode","RoleName","Description","Status"], AdministrationGroup),
         new("role-menu-permissions","Role Menu Permission","Assign Practice Management menu permissions to an organization role","list-check",["Organization","RoleName","MenuName","CanView","CanAdd","CanEdit","CanDelete","CanApprove","Status"], AdministrationGroup),
         new("user-role-assignments","User Role Assignment","Assign one or more organization roles to organization users","user-gear",["EmployeeCode","EmployeeName","Email","RoleNames","Status"], AdministrationGroup),
         new("users","User Management","Users available for organization ownership and assignment. Employees and third-party personnel; a third party must name the provider that supplies them","users",["EmployeeCode","EmployeeName","PersonnelType","Email","RoleName","Provider","Designation","Status"], AdministrationGroup),
+        new("ownership-management","Ownership Management","Select a user and reassign every item they currently own to an active Functional User; a user cannot be deactivated until they still own items","user-gear",["Module","Item","CurrentOwner","NewOwner","Action"], AdministrationGroup),
         new("organization-dependencies","Organization Dependencies","Organization dependency objects for applications, tools, vendors, assets, and processes","diagram-project",["Name","Owner","Criticality","Status"], OrganizationDependenciesGroup),
         new("dependency-applications","Applications","Business applications supporting organization practices","window-restore",["Name","BusinessOwner","TechnicalOwner","Vendor","HostingType","Criticality","Status"], OperationsGroup),
         new("dependency-tools","Tools","Utility tools supporting execution of practices","screwdriver-wrench",["Name","BusinessOwner","Vendor","LicenseType","Criticality","Status"], OperationsGroup),
@@ -68,6 +76,16 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // below are unused (the partial owns its own layout) but are kept
         // meaningful so the screen registry stays self-describing.
         new("asset-category-assurance","Asset Category Assurance","Set what has to be done when an asset of a given category is commissioned or decommissioned.","boxes-stacked",["Applies","Event","Checklist","Items","OwnerRole","DueDays","State"], OperationsGroup),
+        // Event Profiles (migrations 329-332) -- the people-side counterpart
+        // of the screen above. Replaces "one role, one set of checklists"
+        // with a named population expressed in Location / Department / Role
+        // and whatever else is seeded into event_profile_dimension_master.
+        // The role-scoped path is NOT retired: it still resolves, and the
+        // Role Master section still configures it. Renders via
+        // Views/Practice/Partials/event-profiles.cshtml -- which also has to
+        // be listed in Manage.cshtml's own workflowScreens set, or the
+        // request falls through to the generic entity grid and 400s.
+        new("event-profiles","Event Profiles","Define user populations by Location, Department and Role, then set which onboarding and offboarding checklists apply to each.","users-gear",["ProfileName","Description","Criteria","Status","Checklists"], OrganizationGroup),
         new("dependency-processes","Processes","Business processes supporting organizational execution","arrows-spin",["Name","ProcessOwner","Version","NextReviewDate","Status"], OperationsGroup),
         new("user-assignments","User Assignment","Assign users to organization and department scope","user-check",["Organization","Department","User","Role","Status"], OrganizationOnboardingGroup),
         new("owner-mappings","Role / Owner Mapping","Map ownership roles to users for organization operations","user-shield",["Organization","Role","Owner","BackupOwner","Status"], OrganizationOnboardingGroup),
@@ -79,13 +97,37 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // releaseSummaryColumns (Level 1) or statementTreeColumns (Level 2) as soon
         // as it runs. They are kept in step with releaseSummaryColumns so the grid
         // does not flash a header with columns that were removed from Level 1.
-        new("organization-controls","Repository Subscriptions","Subscribed Framework Release summary with drill-down into Source Statements.","shield",["Framework / Release","Owner","Total Statements","Applicable Statements","Implemented Statements","Not Updated Statements","Not Applicable Statements"], GovernanceGroup),
+        // The five count columns are painted here with the same short labels
+        // practice.js uses under its "Governance Overview" group header, so the
+        // pre-hydration header does not flash wider columns than the real one.
+        new("organization-controls","Standards & Frameworks","Subscribed Framework Release summary with drill-down into Control Statements.","shield",["Framework / Release","Owner","Total","Not Applicable","Applicable","Implemented","Not Updated"], GovernanceGroup),
         // source-statements is an ALIAS of organization-controls -- same view, same
         // columns, same JS. It exists so the Source Statements menu has its own
         // sidebar-highlighting URL and lands users directly on the Level 2 statement
         // grid (auto-drilling into the first subscribed release).
-        new("source-statements","Source Statements","Source Statement grid for a subscribed Framework Release.","shield",["Code","Name","OriginType","SourceFrameworkRelease","ApplicabilityStatus","ApplicablePracticeCount","PrimaryOwner","Criticality"], GovernanceGroup),
-        new("organization-requirements","Practices","Organization-scoped practices and applicability decisions with expandable Practice Instances","list-check",["Code","Name","ApplicabilityStatus","PracticeOwner","PracticeInstanceCount"], GovernanceGroup),
+        // Pre-hydration header only; practice.js swaps in statementTreeColumns.
+        // Kept in step with it (minus Actions, which Manage.cshtml appends) so the
+        // grid does not flash a different column set before the script runs.
+        new("source-statements","Control Statements","Control Statement grid for a subscribed Framework Release.","shield",["Statement Reference","Statement Title","Applicability Status","Implementation Status","Practice Count"], GovernanceGroup),
+        // custom-source-statements: no menu_master row of its own (same convention as
+        // ownership-management / practice-instances / gap-detail) -- reached only by a
+        // link from the Standards & Frameworks screen (organization-controls), which is
+        // also the permission area ScreenPermissionArea() maps this key onto in
+        // PracticeController.cs. Renders through the workflow-layer dispatch in
+        // Manage.cshtml as its own self-contained partial, not through the generic
+        // grid/toolbar/practice.js layout, so the columns below are unused placeholders.
+        // Purpose-built for authoring a Custom Release's own Source Structure and Source
+        // Statements (Release -> Source Structure -> Source Statements), with no
+        // Organization selector, leaving the existing Organization+Release toolbar
+        // screen above completely untouched for subscribed-framework statements.
+        new("custom-source-statements","Add Source Statements","Author Source Structure and Source Statements for a Custom Release -- no Organization selection required.","shield",["Source Structure Node","Statement Reference","Statement Title","Applicability Status"], GovernanceGroup),
+        // Pre-hydration header and colspan source only: practice.js draws this
+        // grid through renderRequirementControlGroups / renderStatementPracticeRows,
+        // which write their own <th> row. ImplementationStatus is the practice-level
+        // roll-up over the practice's instances (PracticeImplementationStatus on the
+        // row), mirroring the Source Statement column above. Six entries plus the
+        // Actions column Manage.cshtml appends = the seven cells those renderers emit.
+        new("organization-requirements","Practices","Organization-scoped practices and applicability decisions with expandable Practice Instances","list-check",["Code","Name","ApplicabilityStatus","ImplementationStatus","PracticeOwner","PracticeInstanceCount"], GovernanceGroup),
         new("practices","Practice Management","Implementation approaches for applicable requirements","clipboard-check",["Code","Name","OriginType","ApplicabilityStatus","PracticeOwner","Status"], GovernanceGroup),
         // Resolve workspace (migrations 140/141). Not a menu screen: it is
         // reached from a row on the Resolve list, carrying the instance id.
@@ -95,7 +137,25 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // an encrypted navigation code carrying the practice id. Registered
         // here so PracticeController.ShowArea can resolve and permission it.
         new("practice-view","Practice","Practice details, its obligations, and Configure -- one Practice Instance per team.","clipboard-check",["Obligation","Type","Frequency","Responsible","Approval"], GovernanceGroup),
-        new("practice-instances","Practice Instances","Operational implementation units for practice intelligence","network-wired",["Code","Name","PrimaryOwner","Department","ExecutionFrequency","AssuranceFrequency","AssuranceMode","Criticality","ImplementationStatus","Status"], GovernanceGroup),
+        // RETIRED BY MIGRATION 288 -- and deliberately still registered.
+        //
+        // Its menu row is Inactive, so it is gone from the sidebar, but
+        // PracticeController.ShowArea resolves screens from THIS list, not
+        // from menu_master. Deleting the entry would 404 every existing
+        // deep link and bookmark the moment 288 ships; leaving it means
+        // the URL keeps working while the navigation stops offering it.
+        //
+        // Everything it used to do now lives in Operationalize:
+        //   create              Configure, per team              (139)
+        //   profile + retire    Operationalize workspace         (222)
+        //   restore, retired
+        //   visibility, and the
+        //   practice/requirement
+        //   drill-down          Operationalize                   (287)
+        //
+        // Do not add fields here. The edit form's inputs are all owned
+        // elsewhere -- see docs/practice-instance-form-slimming.md.
+        new("practice-instances","Practice Instances","Retired -- superseded by Operationalize. Route kept for existing links only.","network-wired",["Code","Name","PrimaryOwner","Department","ExecutionFrequency","AssuranceFrequency","AssuranceMode","Criticality","ImplementationStatus","Status"], GovernanceGroup),
         new("resolve","Operationalize","Operationalize practice instance dependency and evidence registers assigned to you","gears",["Name","OwningDepartment","PrimaryOwner","Frequency","Register","ResolvedDependencyName","ResolutionStatus","ResolutionOwner","LastUpdated"], OperationsGroup),
         new("workbench-applications","Applications","Application custodian queue for resolving configured Practice Instance application dependencies","window-restore",["Name","OwningDepartment","PrimaryOwner","Frequency","DependencyCategory","ResolvedDependencyName","ResolutionStatus","ResolutionOwner","LastUpdated"], DependencyWorkbenchGroup),
         new("workbench-tools","Tools","Tool custodian queue for resolving configured Practice Instance tool dependencies","screwdriver-wrench",["Name","OwningDepartment","PrimaryOwner","Frequency","DependencyCategory","ResolvedDependencyName","ResolutionStatus","ResolutionOwner","LastUpdated"], DependencyWorkbenchGroup),
@@ -128,11 +188,18 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Implementation. See conversation notes for full source list.
         new("gaps","Gap Center","Unified sources of work — Implementation, Assurance and Custom gaps in one place","triangle-exclamation",["Instance","Practice","Organization","ImplementationStatus","Owner","Criticality","ExistingTasks"], OversightGroup),
         // Document Upload + Acknowledgement module (migrations 146-149).
-        // Sits beside Task Center / Gap Center under Oversight. Columns
-        // are unused (the partial owns its own layout) but kept meaningful
-        // so the screen registry stays self-describing.
-        new("document-uploads","Document Uploads","Register controlled documents, distribute them, and route them through review and approval","file-lines",["Code","Name","Type","Version","Stage","Status","NextReview"], OversightGroup),
-        // Phase 2 companion to Document Uploads (migrations 150-152) --
+        // Renamed "Document Library" and moved under Governance by
+        // migration 358 (sidebar half in menu_master; Title/Group here
+        // is the page-heading/eyebrow half -- Manage.cshtml's `<h1>` and
+        // its `@Model.Group / @Model.Title` eyebrow read straight off
+        // this record, not off menu_master, so both had to move together).
+        // document-acknowledgements / my-acknowledgements were NOT
+        // renamed or moved -- they stay under Oversight/Document
+        // Management exactly as 155 left them. Columns are unused (the
+        // partial owns its own layout) but kept meaningful so the screen
+        // registry stays self-describing.
+        new("document-uploads","Document Library","Register controlled documents, distribute them, and route them through review and approval","file-lines",["Code","Name","Type","Version","Stage","Status","NextReview"], GovernanceGroup),
+        // Phase 2 companion to Document Library (migrations 150-152) --
         // admin batches for tracking user acknowledgement of published
         // documents. Renders via document-acknowledgements.cshtml.
         new("document-acknowledgements","Document Acknowledgements","Roll published documents into named batches and track who has acknowledged each","file-signature",["Name","Due","Docs","Users","AckCount","Progress","Status"], OversightGroup),
@@ -151,6 +218,33 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Exception Centre (migrations 161-163) -- time-boxed
         // acceptance of gaps. Auto-populated from gap analysis.
         new("exception-centre","Exception Centre","Approve or reject time-boxed exception requests raised from gap analysis","shield-halved",["Request","Gap","Status","EffectiveUntil"], OversightGroup),
+        // Exception analysis (migration 257) -- the stage between a raised
+        // request and the approval decision. Reached from Exception
+        // Centre's 3-dot menu with ?exceptionId=, the same way gap-detail
+        // is reached from Gap Centre. A "route" screen: no menu entry of
+        // its own, because it is always about one specific request.
+        new("exception-analysis","Exception Analysis","Analyse an exception request and submit it for approval","route",["Request","Justification","Risk","Tasks"], OversightGroup),
+        // Gap View (migration 325) -- read-only consolidated view of a
+        // Gap: its full details plus the Task, Exception and Risk raised
+        // against it, each a clickable card opening that artefact's own
+        // existing full view in a new tab. Reached from Gap Centre's
+        // 3-dot menu, or from gap-detail's own toolbar, with ?gapId=,
+        // the same way gap-detail is reached from Gap Centre. A "route"
+        // screen: no menu entry of its own, because it is always about
+        // one specific gap.
+        new("gap-view","Gap View","Read-only consolidated view of a Gap and the Task, Exception and Risk raised against it","route",["Task","Exception","Risk"], OversightGroup),
+        // Task View -- dedicated full-page replacement for the old
+        // "View" dialog/drawer on Task Center's row menu (#taskDetailDialog
+        // / openTaskViewDrawer). Reached from Task Center's row menu, or
+        // Gap View's Task card, with ?taskId=. A "route" screen: no menu
+        // entry of its own, because it is always about one specific task.
+        new("task-view","Task View","Read-only full view of a single task -- identity, SLA, related record, evidence and activity","route",["Type","Status","Priority","Owner","Related"], OversightGroup),
+        // Exception View -- dedicated read-only full view of an exception
+        // request in ANY status, complementing exception-analysis (the
+        // Pending-request analysis workflow, unchanged). Reached from
+        // Exception Centre's row menu, or Gap View's Exception card, with
+        // ?exceptionId=. A "route" screen: no menu entry of its own.
+        new("exception-view","Exception View","Read-only full view of an exception request -- reason, validity, approval and evidence","route",["Request","Status","Approval","Evidence"], OversightGroup),
         // Risk Centre (migrations 169-172, 176, 204-207) -- the full
         // module: candidates from any GRAC source, the mandatory initial
         // risk analysis, and the Risk Register both entry routes feed.
@@ -169,7 +263,12 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         new("practice-health","Practice Health Engine","Practice instance health calculated from assurance results, evidence, dependency, and findings","heart-pulse",["PracticeInstance","HealthScore","HealthStatus","Criticality","LastAssuredDate","OpenFindings"], AssuranceManagementGroup),
         new("audit-intelligence","Audit Intelligence View","Audit-oriented assurance intelligence for resolved practice instances","magnifying-glass-chart",["PracticeInstance","AuditableArea","LastAssuranceResult","EvidenceStatus","OpenFindings","AuditPriority"], AssuranceManagementGroup),
         new("risk-intelligence","Risk Intelligence View","Risk-oriented assurance intelligence for resolved practice instances","shield-halved",["PracticeInstance","RiskSignal","Criticality","HealthStatus","OpenFindings","RiskPriority"], AssuranceManagementGroup),
-        new("assurance-calendar","Assurance Calendar","Google Calendar-style view of assurance schedules generated from practice instance frequencies","calendar-days",["PracticeInstance","Frequency","NextDue","Status"], AssuranceManagementGroup)
+        // Sidebar placement: Oversight, not Assurance (migration 275).
+        // The screen, its route and its permission area are unchanged --
+        // only the group moved. This Group value drives the page eyebrow
+        // (Views/Practice/Calendar.cshtml), so it has to track the
+        // menu_master module_type or the eyebrow contradicts the sidebar.
+        new("assurance-calendar","Task Calendar","Calendar and per-schedule list of the Execution and Assurance obligation schedules, one row per configured schedule","calendar-days",["Obligation","Type","Frequency","Owner","Next Schedule Date"], OversightGroup)
         ,
         // ===== Workflow & Event-Driven Assurance Engine (BRD v1.0) =====
         // Every screen renders via Views/Practice/Partials/{key}.cshtml
@@ -194,65 +293,89 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         new("workflow-dashboard","Workflow Dashboard","Cross-workflow event and assurance KPIs (BRD Sec 16).","chart-line",["Metric","Value"], WorkflowGroup)
         ,
         // ===== Phase 2 Assurance Management (BRD Part 2) =====
+        // Presented as "Audit Management" since migration 276.
         // NEW, INDEPENDENT module. Menu row seeded under nav-assurance
         // (parent_menu_id) by migration 071. Consumes Admin (grac_new)
         // published assurance metadata via repository_subscription.
         // Stage 1 = Assurance Definitions + lifecycle only.
-        new("org-assurance-definitions","Assurance Definitions","Organization-level Assurance Definitions with lifecycle Draft / Under Review / Approved / Active / Retired (BRD Part 2 Sec 1).","file-shield",["Code","Name","Category","Owner","Version","Status"], OrganizationAssuranceGroup),
+        //
+        // The two container screens below are pure navigation: they own
+        // no data, no API and no business logic. Each renders the
+        // EXISTING screen partials as steps of one flow (see
+        // Partials/_audit-flow-shell.cshtml), so every screen still has
+        // exactly one implementation and every screen below remains
+        // reachable on its own route and its own menu row.
+        new("org-audit-definition","Audit Definition","Define an audit in one flow: audit details, then scope, then question sets.","file-shield",["Step","Screen"], AuditManagementGroup),
+        new("org-audit-configuration","Audit Configuration","Configure how a defined audit operates: evidence, workflow, scoring, triggers and scope resolution.","sliders",["Step","Screen"], AuditManagementGroup),
+        new("org-assurance-definitions","Audit Definitions","Organization-level Audit Definitions with lifecycle Draft / Under Review / Approved / Active / Retired (BRD Part 2 Sec 1).","file-shield",["Code","Name","Category","Owner","Version","Status"], AuditManagementGroup),
         // Scope Builder (BRD Part 2 Sec 2). Menu row seeded by
         // migration 075. Loads a definition via ?definitionId=X and
         // renders read-only when the current version is not Draft.
-        new("org-assurance-scope-builder","Scope Builder","Configure the assurance scope for a definition using groups + conditions across 17 dimensions with AND / OR / NOT operators (BRD Part 2 Sec 2).","diagram-project",["Group","Operator","Dimension","Condition","Values"], OrganizationAssuranceGroup),
+        new("org-assurance-scope-builder","Scope Builder","Configure the audit scope for an audit using groups + conditions across 17 dimensions with AND / OR / NOT operators (BRD Part 2 Sec 2).","diagram-project",["Group","Operator","Dimension","Condition","Values"], AuditManagementGroup),
         // Question Builder (BRD Part 2 Sec 4). Menu row seeded by
         // migration 078. Question sets are organization-level reusable
         // artifacts; each definition later ADOPTS one or more sets.
-        new("org-assurance-question-sets","Question Sets","Reusable Question Sets and their Questions -- with Admin-published question types, mandatory / weight / order / expected response (BRD Part 2 Sec 4).","clipboard-list",["Code","Name","Owner","Questions","Status"], OrganizationAssuranceGroup),
+        new("org-assurance-question-sets","Question Sets","Reusable Question Sets and their Questions -- with Admin-published question types, mandatory / weight / order / expected response (BRD Part 2 Sec 4).","clipboard-list",["Code","Name","Owner","Questions","Status"], AuditManagementGroup),
         // Evidence Configuration (BRD Part 2 Sec 5). Per-definition-
         // version evidence expectations. Menu row seeded by migration
         // 081; reuses PM evidence_type_master + collection_method_master.
-        new("org-assurance-evidence-config","Evidence Config","Configure the evidence expected for a definition -- type, collection method (existing / API / manual), mandatory flag, validity, expiry (BRD Part 2 Sec 5).","file-circle-check",["Label","Type","Method","Mandatory","Validity"], OrganizationAssuranceGroup),
+        new("org-assurance-evidence-config","Evidence Config","Configure the evidence expected for a definition -- type, collection method (existing / API / manual), mandatory flag, validity, expiry (BRD Part 2 Sec 5).","file-circle-check",["Label","Type","Method","Mandatory","Validity"], AuditManagementGroup),
         // Workflow Configuration (BRD Part 2 Sec 6). Per-definition-
         // version workflow with stages (Auditor / Reviewer / Approver /
         // Custom), assigned role / employee, SLA and escalation.
         // Menu row seeded by migration 085.
-        new("org-assurance-workflow-config","Workflow Config","Configure the workflow for a definition -- customize from an Admin template; stages with auditor / reviewer / approver, assignments, SLA, escalation (BRD Part 2 Sec 6).","sitemap",["Order","Stage","Type","Assigned","SLA"], OrganizationAssuranceGroup),
+        new("org-assurance-workflow-config","Workflow Config","Configure the workflow for a definition -- customize from an Admin template; stages with auditor / reviewer / approver, assignments, SLA, escalation (BRD Part 2 Sec 6).","sitemap",["Order","Stage","Type","Assigned","SLA"], AuditManagementGroup),
         // Scoring Configuration (BRD Part 2 Sec 7). Per-definition-
         // version scoring model + bands. Menu row seeded by migration
         // 088. Controlled representation -- no user formulas, no
         // dynamic SQL.
-        new("org-assurance-scoring-config","Scoring Config","Configure the scoring model for a definition -- Pass/Fail, Weighted, Risk Based, Maturity Based, Percentage or Custom; with thresholds and bands (BRD Part 2 Sec 7).","gauge",["ModelType","Bands","Pass","Warning","Fail"], OrganizationAssuranceGroup),
+        new("org-assurance-scoring-config","Scoring Config","Configure the scoring model for a definition -- Pass/Fail, Weighted, Risk Based, Maturity Based, Percentage or Custom; with thresholds and bands (BRD Part 2 Sec 7).","gauge",["ModelType","Bands","Pass","Warning","Fail"], AuditManagementGroup),
         // Assurance Plans (BRD Part 2 Sec 8). Stage 3. Annual /
         // Quarterly / Monthly / One-Time plans; items link to
         // assurance definitions with schedule + assignments.
         // Menu row seeded by migration 091.
-        new("org-assurance-plans","Assurance Plans","Annual / Quarterly / Monthly / One-Time Assurance Plans with items that schedule assurance definitions and assign owner / team / auditor / department / branch (BRD Part 2 Sec 8).","calendar-days",["Code","Name","Type","Period","Owner","Items","Status"], OrganizationAssuranceGroup),
+        new("org-assurance-plans","Audit Plans","Annual / Quarterly / Monthly / One-Time Audit Plans with items that schedule audits and assign owner / team / auditor / department / branch (BRD Part 2 Sec 8).","calendar-days",["Code","Name","Type","Period","Owner","Items","Status"], AuditManagementGroup),
         // Triggers (BRD Part 2 Sec 9). Stage 3. Per-definition-version
         // triggers of type SCHEDULED / EVENT_DRIVEN / CONTINUOUS /
         // MANUAL. Menu row seeded by migration 094.
-        new("org-assurance-triggers","Triggers","Configure Scheduled / Event Driven / Continuous / Manual triggers for a definition version. Scheduled uses Daily/Weekly/Monthly/Quarterly/Annual; Event Driven uses License Expiry / User Termination / Vendor Renewal / High Value Transaction / New Asset / Policy Change / Security Incident (BRD Part 2 Sec 9).","bolt",["Code","Name","Type","Enabled","Details"], OrganizationAssuranceGroup),
+        new("org-assurance-triggers","Triggers","Configure Scheduled / Event Driven / Continuous / Manual triggers for a definition version. Scheduled uses Daily/Weekly/Monthly/Quarterly/Annual; Event Driven uses License Expiry / User Termination / Vendor Renewal / High Value Transaction / New Asset / Policy Change / Security Incident (BRD Part 2 Sec 9).","bolt",["Code","Name","Type","Enabled","Details"], AuditManagementGroup),
         // Scope Resolution (BRD Part 2 Sec 3). Stage 3. Runs the
         // resolver over a definition version's scope and stores an
         // immutable snapshot for historical execution. Menu row seeded
         // by migration 097.
-        new("org-assurance-scope-resolution","Scope Resolution","Preview or view historical Scope Resolution snapshots for an assurance definition (BRD Part 2 Sec 3).","circle-nodes",["When","Purpose","Dimensions","Total"], OrganizationAssuranceGroup),
+        new("org-assurance-scope-resolution","Scope Resolution","Preview or view historical Scope Resolution snapshots for an audit (BRD Part 2 Sec 3).","circle-nodes",["When","Purpose","Dimensions","Total"], AuditManagementGroup),
         // Executions (BRD Part 2 Sec 9-10). Stage 3. Materializes a
         // definition + resolved scope + immutable config snapshot into
         // a live executable record. Menu row seeded by migration 100.
-        new("org-assurance-executions","Executions","Materialize and manage live assurance executions against resolved scope snapshots (BRD Part 2 Sec 9-10).","play-circle",["Execution","Definition","Status","Progress"], OrganizationAssuranceGroup),
+        new("org-assurance-executions","Executions","Materialize and manage live audit executions against resolved scope snapshots (BRD Part 2 Sec 9-10).","play-circle",["Execution","Definition","Status","Progress"], AuditManagementGroup),
         // Observations (BRD Part 2 Sec 11). Stage 4. Findings recorded
         // during an execution, evidence attachments, review + resolution
         // lifecycle. Menu row seeded by migration 103.
         // Assurance-source gaps now land in the UNIFIED Gap Center
         // (Practice/Index/gaps -> Assurance Gaps tab) instead of a
         // separate assurance-only page. See migrations 109 - 113.
-        new("org-assurance-observations","Observations","Findings recorded during assurance executions -- capture, evidence, review, resolve (BRD Part 2 Sec 11).","triangle-exclamation",["Observation","Severity","Status","Owner"], OrganizationAssuranceGroup),
+        new("org-assurance-observations","Observations","Findings recorded during audit executions -- capture, evidence, review, resolve (BRD Part 2 Sec 11).","triangle-exclamation",["Observation","Severity","Status","Owner"], AuditManagementGroup),
         // ===== Organization SLA Configuration (migrations 178/179/180) =====
         // Adopts SLA masters published by Control Management (grac_new)
         // into per-organization configurations with warning/escalation
         // day thresholds, notify roles (WARNING / ESCALATION), and
         // process bindings (GAP / TASK / OBSERVATION / EXCEPTION ...).
         // Screen sits under nav-governance (menu seed 180).
-        new("org-sla-config","SLA Configuration","Adopt Control Management SLA masters, configure warning + escalation day thresholds, pick notify roles, and bind the tuned SLA against processes (Gap / Task / Observation / Exception).","clock",["SLA","TotalDays","Warning","Escalation","Roles","Processes"], GovernanceGroup)
+        new("org-sla-config","SLA Configuration","Adopt Control Management SLA masters, configure warning + escalation day thresholds, pick notify roles, and bind the tuned SLA against processes (Gap / Task / Observation / Exception).","clock",["SLA","TotalDays","Warning","Escalation","Roles","Processes"], GovernanceGroup),
+        // Risk acceptance approval authority (migration 271).
+        //
+        // OrganizationGroup, not Oversight: this configures the
+        // ORGANISATION -- who may approve accepting a risk at each rating
+        // level -- and the Risk Centre reads it. It is reached from
+        // Organization -> Risk Acceptance Approval Authority, and the
+        // group here is what puts "Organization / ..." in the page
+        // eyebrow so the screen matches the sidebar it hangs off.
+        //
+        // The columns are the grid's real headers. They do NOT name the
+        // rating levels: those come per-organisation from risk_matrix_cell
+        // at runtime, so listing them here would be a second, stale copy
+        // of a vocabulary that is deliberately not fixed.
+        new("risk-acceptance-authority","Risk Acceptance Approval Authority","Set who may approve accepting a risk at each rating level, separately for the inherent score and the residual score after treatment. Levels not set here fall back to the organization's general risk approver.","user-shield",["Risk Level","Inherent Authority","Same as Inherent","Residual Authority"], OrganizationGroup)
     ];
 }
 

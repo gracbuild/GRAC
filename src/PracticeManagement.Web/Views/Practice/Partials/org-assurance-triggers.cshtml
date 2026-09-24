@@ -58,7 +58,7 @@
             </select>
         </label>
         <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
-            <span>Assurance Definition</span>
+            <span>Audit</span>
             <select id="oaTgPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
                 <option value="">Select an organization first</option>
             </select>
@@ -822,7 +822,8 @@
 
     async function deleteTrigger(idx) {
         const t = state.triggers[idx]; if (!t || !t.triggerId) return;
-        if (!confirm('Remove this trigger?')) return;
+        if (!await window.gracUi.confirm('Remove this trigger?',
+              { type: 'warning', title: 'Remove trigger', confirmText: 'Remove' })) return;
         try {
             const url = U(API + '/triggers/' + t.triggerId + '?organizationId=' + encodeURIComponent(state.orgId));
             const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
@@ -882,6 +883,7 @@
     function intOrNull(v) { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
     function onlyDate(v) {
         if (!v) return '';
+        if (typeof window.gracFormatDisplayDate === "function") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         const s = String(v);
         return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
     }

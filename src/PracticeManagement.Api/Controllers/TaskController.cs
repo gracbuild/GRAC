@@ -71,6 +71,24 @@ public sealed class TaskController(
         }
     }
 
+    // Migration 256: per-source counts for Task Centre's Source filter,
+    // matching what Gap Centre's filter already showed. Non-fatal --
+    // the service returns an empty list with an Error rather than
+    // throwing, so a missing migration costs the counts, not the page.
+    [HttpGet("source-counts")]
+    public async Task<IActionResult> SourceCounts(
+        [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        var result = await taskService.SourceCountsAsync(organizationId, cancellationToken);
+        return Ok(new
+        {
+            sources        = result.Sources,
+            totalCount     = result.TotalCount,
+            unsourcedCount = result.UnsourcedCount,
+            error          = result.Error
+        });
+    }
+
     [HttpGet]
     public async Task<IActionResult> List(
         [FromQuery] long? organizationId,
@@ -199,6 +217,86 @@ public sealed class TaskController(
         var request = body with { TaskId = id };
         var result = await taskService.AssignAsync(request, cancellationToken);
         return Respond(result);
+    }
+
+    // =================================================================
+    // Task edit — migration 269
+    //
+    // ONE endpoint for every editable field. /transition, /assign and
+    // /priority are NOT removed: they are still the right call for a
+    // single governed act from elsewhere in the product (Risk Treatment
+    // reassigns from its own row menu, Exception Centre approves a
+    // priority reduction), and sp_task_update composes the very same
+    // procedures. This is an additional door into the same rooms, not a
+    // second set of rules.
+    // =================================================================
+
+    /// <summary>
+    /// What the editor may offer for this task: which fields are
+    /// editable, whether a governed request is already pending, and the
+    /// status transitions that are legal right now.
+    ///
+    /// <para>The UI calls this before rendering the form so it cannot
+    /// offer a control whose save the database would refuse.</para>
+    /// </summary>
+    [HttpGet("{id:long}/edit-options")]
+    public async Task<IActionResult> EditOptions(long id, CancellationToken cancellationToken)
+    {
+        var options = await taskService.GetEditOptionsAsync(id, cancellationToken);
+        return options is null
+            ? NotFound(new { error = $"Task {id} was not found." })
+            : Ok(options);
+    }
+
+    /// <summary>
+    /// Save the edit form. PUT, not POST: this replaces the editable
+    /// state of one identified task and is idempotent — sending the same
+    /// body twice changes nothing the second time, because sp_task_update
+    /// diffs against current values before writing.
+    ///
+    /// <para><b>200 does not mean every field was applied.</b> Priority
+    /// reductions (§7) and due-date changes (§8) come back with
+    /// <c>outcome: "PendingApproval"</c> and the task is unchanged until
+    /// Exception Centre approves. The response carries a per-field list
+    /// precisely so the client cannot report a blanket "saved".</para>
+    ///
+    /// <para>409 Conflict covers both an illegal status transition and a
+    /// concurrent edit (someone else changed the task after this form was
+    /// loaded), which is what Conflict means in each case.</para>
+    /// </summary>
+    [HttpPut("{id:long}")]
+    public async Task<IActionResult> Update(long id, [FromBody] TaskUpdateRequest body, CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+
+        // Route id wins, as it does on every other command here.
+        var result = await taskService.UpdateAsync(body with { TaskId = id }, cancellationToken);
+
+        if (!result.Success)
+        {
+            var status = result.ReasonCode switch
+            {
+                "CONCURRENT_EDIT"         => StatusCodes.Status409Conflict,
+                "ILLEGAL_TRANSITION"      => StatusCodes.Status409Conflict,
+                "TASK_CLOSED"             => StatusCodes.Status409Conflict,
+                "CLOSE_VIA_EDIT_REFUSED"  => StatusCodes.Status409Conflict,
+                "PRIORITY_REQUEST_PENDING"=> StatusCodes.Status409Conflict,
+                "EXTENSION_PENDING"       => StatusCodes.Status409Conflict,
+                "CHILD_PRIORITY_LOCKED"   => StatusCodes.Status409Conflict,
+                "CHILD_SLA_LOCKED"        => StatusCodes.Status409Conflict,
+                "SQL_ERROR"               => StatusCodes.Status500InternalServerError,
+                _                         => StatusCodes.Status400BadRequest
+            };
+            return StatusCode(status, new { error = result.Error, reasonCode = result.ReasonCode });
+        }
+
+        return Ok(new
+        {
+            taskId           = result.TaskId,
+            changes          = result.Changes,
+            anyApplied       = result.AnyApplied,
+            pendingApproval  = result.AnyPendingApproval
+        });
     }
 
     [HttpPost("{id:long}/transition")]

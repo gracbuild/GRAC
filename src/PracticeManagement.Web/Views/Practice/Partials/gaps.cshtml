@@ -39,15 +39,17 @@
 
 <section class="pm-panel" id="gapCenterRoot" hidden>
 
-    <div class="pm-tabs" role="tablist" aria-label="Gap Center tabs">
-        <button role="tab" data-tab="implementation" class="active" aria-selected="true">Implementation Gaps <span class="pm-badge" id="gapTabCountImpl">0</span></button>
-        <button role="tab" data-tab="assurance"                       aria-selected="false">Assurance Gaps <span class="pm-badge" id="gapTabCountAssurance">0</span></button>
-        <button role="tab" data-tab="custom"                          aria-selected="false">Custom Gaps <span class="pm-badge" id="gapTabCountCustom">0</span></button>
-    </div>
-
+    @* Migration 255. The Implementation / Assurance / Custom tabs are
+       gone: they were three views of the same question ("what is not
+       where it should be"), split by where the gap came from, which is
+       an attribute of a gap rather than a kind of gap. One list now,
+       with Source as a column and a filter — see #gapFilterSource. *@
     <div class="pm-toolbar">
         <select id="gapFilterOrganization">
             <option value="">All organizations</option>
+        </select>
+        <select id="gapFilterSource" title="Filter by the module that raised the gap">
+            <option value="">All sources</option>
         </select>
         <input id="gapCenterSearch" type="text" placeholder="Search practice instance / practice / gap..." />
         <button class="pm-button icon" id="gapRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
@@ -58,89 +60,64 @@
         </button>
     </div>
 
-    <!-- Implementation Gaps tab -->
-    <div class="pm-tab-panel" data-panel="implementation">
-        <div class="pm-table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Practice Instance</th><th>Practice</th><th>Organization</th>
-                        <th>Implementation Status</th><th>Owner</th><th>Criticality</th>
-                        <th>Existing Tasks</th><th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="gapBody-implementation"><tr><td colspan="8" class="pm-empty">Select an organization to load Implementation Gaps.</td></tr></tbody>
-            </table>
-        </div>
-        <div class="pm-pager" data-pager="implementation">
-            <button class="pm-button" data-pg="prev" type="button">Previous</button>
-            <span data-pg="label">Page 1</span>
-            <button class="pm-button" data-pg="next" type="button">Next</button>
-            <span data-pg="total" class="pm-pager-total">0 total</span>
-        </div>
+    @* One grid for every source. The observation banner stays: it is a
+       cross-link target — Assurance Observations deep-links here with
+       ?observationId=, and the banner is what tells the operator the
+       list they are looking at is filtered. *@
+    <div id="assuranceObsFilterBanner" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;
+                background:#dbeafe; color:#1e40af; display:flex; justify-content:space-between; align-items:center;">
+        <span>Showing only gaps linked to Observation <strong id="assuranceObsFilterLabel">#?</strong>.</span>
+        <button class="pm-button" id="assuranceObsFilterClear" type="button">
+            <i class="fa-solid fa-xmark"></i> Clear filter
+        </button>
     </div>
 
-    <!-- Assurance Gaps tab — wired to sp_custom_gap_list?source_module=Assurance -->
-    <div class="pm-tab-panel" data-panel="assurance" hidden>
-        <div id="assuranceObsFilterBanner" hidden
-             style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;
-                    background:#dbeafe; color:#1e40af; display:flex; justify-content:space-between; align-items:center;">
-            <span>Showing only gaps linked to Observation <strong id="assuranceObsFilterLabel">#?</strong>.</span>
-            <button class="pm-button" id="assuranceObsFilterClear" type="button">
-                <i class="fa-solid fa-xmark"></i> Clear filter
-            </button>
-        </div>
-        <div class="pm-table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Gap</th><th>Execution / Entity</th>
-                        <th>Severity</th><th>Status</th>
-                        <th>Owner</th><th>Due Date</th>
-                        <th>Evidence</th><th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="gapBody-assurance">
-                    <tr><td colspan="8" class="pm-empty">Select an organization to load Assurance Gaps.</td></tr>
-                </tbody>
-            </table>
-        </div>
-        <div class="pm-pager" data-pager="assurance">
-            <button class="pm-button" data-pg="prev" type="button">Previous</button>
-            <span data-pg="label">Page 1</span>
-            <button class="pm-button" data-pg="next" type="button">Next</button>
-            <span data-pg="total" class="pm-pager-total">0 total</span>
-        </div>
+    <div class="pm-table-wrap">
+        <table>
+            @* Columns are the intersection the three tabs actually
+               shared, plus the four aggregated status columns (change
+               request, 2026-09-23). Where an origin has no answer the
+               cell is blank rather than filled with a stand-in: a
+               custom gap has no obligation count. Context and Due
+               Date were dropped from this grid on request -- both
+               data points still come back from the API (row-menu
+               logic and other screens may still use them), they are
+               just no longer rendered here. Source and Severity were
+               dropped from the grid on the same request -- Source is
+               still available as a filter (gapFilterSource below), and
+               both values still come back from the API for any other
+               caller. *@
+            <thead>
+                <tr>
+                    <th>Gap</th>
+                    <th>Status</th>
+                    <th>Practice Instance Status</th>
+                    <th>Task Status</th>
+                    <th>Risk Status</th>
+                    <th>Exception Status</th>
+                    <th>Owner</th>
+                    <th>Raised On</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="gapBody">
+                <tr><td colspan="9" class="pm-empty">Select an organization to load gaps.</td></tr>
+            </tbody>
+        </table>
     </div>
-
-    <!-- Custom Gaps tab -->
-    <div class="pm-tab-panel" data-panel="custom" hidden>
-        <div class="pm-table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Title</th><th>Priority</th><th>Owner</th>
-                        <th>Due Date</th><th>Status</th><th>Raised On</th><th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="gapBody-custom">
-                    <tr><td colspan="7" class="pm-empty">Select an organization to load Custom Gaps.</td></tr>
-                </tbody>
-            </table>
-        </div>
-        <div class="pm-pager" data-pager="custom">
-            <button class="pm-button" data-pg="prev" type="button">Previous</button>
-            <span data-pg="label">Page 1</span>
-            <button class="pm-button" data-pg="next" type="button">Next</button>
-            <span data-pg="total" class="pm-pager-total">0 total</span>
-        </div>
+    <div class="pm-pager" data-pager="all">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
     </div>
 
 </section>
 
 @* ---------- Add Custom Gap dialog ---------- *@
-<dialog id="newCustomGapDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="newCustomGapForm" method="dialog" style="margin:0; padding:20px 24px;">
+<dialog id="newCustomGapDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:94%; max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="newCustomGapForm" method="dialog" style="margin:0; padding:14px 24px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <h2 style="margin:0; font-size:18px;">Add Custom Gap</h2>
             <button type="button" id="newGapClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
@@ -150,19 +127,27 @@
             <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div>
             <div id="newGapOrgLabel" style="font-weight:600; color:#0f172a;">-</div>
         </div>
-        <div style="display:grid; grid-template-columns:1fr; gap:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Gap Type
-                <input id="newGapType" type="text" value="Custom" readonly
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#f1f5f9;" />
-            </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Title <span style="color:#b91c1c;">*</span>
-                <input id="newGapTitle" type="text" maxlength="250" required
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
-            </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
-                <textarea id="newGapDescription" rows="3" maxlength="4000"
-                          style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
-            </label>
+        <div style="display:grid; grid-template-columns:1fr; gap:8px;">
+            <div style="display:grid; grid-template-columns:170px 1fr; gap:10px; align-items:end;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Gap Type
+                    <input id="newGapType" type="text" value="Custom" readonly
+                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#f1f5f9;" />
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;"><span>Title <span style="color:#b91c1c;">*</span></span>
+                    <input id="newGapTitle" type="text" maxlength="250" required
+                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
+                    <textarea id="newGapDescription" rows="2" maxlength="4000"
+                              style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
+                    <textarea id="newGapRemarks" rows="2" maxlength="1000"
+                              style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+                </label>
+            </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                 <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
                     <select id="newGapPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
@@ -192,20 +177,86 @@
                            style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
                 </label>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
-                <textarea id="newGapRemarks" rows="2" maxlength="1000"
-                          style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
-            </label>
+            @* Migration 250: Detection Method + Severity captured at Add
+               time. For a Custom gap the analysis form no longer has to
+               fake "auto" values -- these two flow through the header and
+               pre-fill the analysis card the first time it opens. Both
+               dropdowns match the vocabularies the analysis form uses,
+               so a value picked here maps 1:1 to the analysis field. *@
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Detection Method
+                    <select id="newGapDetectionMethod" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="">--</option>
+                        <option value="Manual">Manual review</option>
+                        <option value="Assurance">Assurance observation</option>
+                        <option value="Audit">Audit finding</option>
+                        <option value="AutoScan">Automated scan</option>
+                        <option value="External">External report</option>
+                    </select>
+                </label>
+                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Severity
+                    <select id="newGapSeverity" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        <option value="">-- default from priority --</option>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+            </div>
+            @* Migration 382: map relevant Practice(s), reusing the same
+               cascading Practice Picker used by Risk Analysis. *@
+            <div style="margin-top:6px;">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <label style="font-size:12px; color:#475569; font-weight:600;">Mapped Practices <span style="color:#b91c1c;">*</span></label>
+                    <button type="button" id="newGapMapPracticeBtn" class="pm-button" style="padding:4px 10px; font-size:12px;">
+                        <i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Map practice
+                    </button>
+                </div>
+                <div id="newGapPracticeList" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
+                    <span class="pm-hint" style="font-size:12px; color:#94a3b8;">No practices mapped yet.</span>
+                </div>
+            </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
             <button type="button" id="newGapCancel" class="pm-button">Cancel</button>
             <button type="submit" id="newGapSubmit" class="pm-button primary">Create Gap</button>
         </div>
     </form>
 </dialog>
 
+@* Migration 382: Map-a-practice dialog for the Add Custom Gap form.
+   Reuses the shared cascading Practice Picker (practice-picker.js,
+   migration 282) exactly as Risk Centre's #riskMapPracticeModal does. *@
+<dialog id="gapMapPracticeModal" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; max-height:92vh; overflow:auto; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="padding:20px 24px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <h2 style="margin:0; font-size:18px;">Map a practice</h2>
+            <button type="button" data-close-gap-map aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <p class="pm-hint" style="font-size:12px; color:#64748b;">
+            Choose the framework, then narrow down to the practice. Each list loads only
+            what sits under the selection above it. Practices already mapped to this gap are not offered.
+        </p>
+        <div id="gapMapPickerHost"></div>
+        <p class="pm-form-message" id="gapMapPickerMessage" role="status" aria-live="polite"></p>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" class="pm-button" data-close-gap-map>Cancel</button>
+            <button type="button" class="pm-button primary" id="gapMapPickerConfirm">
+                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice
+            </button>
+        </div>
+    </div>
+</dialog>
+<script src="~/js/practice-picker.js" asp-append-version="true"></script>
+
 @* Reuse the existing Add Implementation Task modal — exposes window.__openAddImplTask *@
 <partial name="Partials/_add-implementation-task-modal" model="Model" />
+
+@* Shared pager (and escape/badge helpers) — exposes window.__wfCommon.
+   Self-guards on re-render, so rendering it here is safe even when the
+   host page has already pulled it in for another partial. *@
+<partial name="Partials/_workflow-common" />
 
 @* NOTE — see the equivalent comment in tasks.cshtml. Razor @section blocks
    are ignored inside partial views, so keep this script inline. *@
@@ -231,7 +282,11 @@
     const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
     let selectedOrgId = null;
-    let activeTab     = 'implementation';
+    // Migration 382: practices mapped in the Add Custom Gap dialog.
+    let selectedPractices = [];
+    let gapMapPicker = null;
+    // Migration 255: one list, so one page counter instead of pagesByTab.
+    let page          = 1;
     // Stage 4b -- Assurance-side filter via ?observationId= in URL.
     let assuranceObservationFilter = (function () {
         try {
@@ -241,15 +296,21 @@
             return Number.isFinite(n) && n > 0 ? n : null;
         } catch (_) { return null; }
     })();
-    // Optional ?tab=assurance switches straight to the Assurance tab.
-    (function () {
+    // Migration 255: ?tab=assurance used to switch tabs. There are no
+    // tabs now, so the same intent becomes a preset on the Source filter
+    // — every existing deep link keeps landing on the same rows.
+    let initialSource = (function () {
         try {
             const q = new URLSearchParams(window.location.search);
+            const s = q.get('source');
+            if (s) return s;
             const t = q.get('tab');
-            if (t === 'assurance' || assuranceObservationFilter !== null) activeTab = 'assurance';
+            if (t === 'assurance' || assuranceObservationFilter !== null) return 'Assurance';
+            if (t === 'custom')         return 'Custom';
+            if (t === 'implementation') return 'Implementation';
         } catch (_) { /* ignore */ }
+        return '';
     })();
-    let pagesByTab    = { implementation: 1, assurance: 1, custom: 1 };
     const PAGE_SIZE   = 25;
     let searchDebounce = null;
     let openMenuEl      = null;
@@ -271,10 +332,22 @@
         document.getElementById('gapRefreshBtn').addEventListener('click', reloadCurrentTab);
         document.getElementById('gapCenterSearch').addEventListener('input', function () {
             clearTimeout(searchDebounce);
-            searchDebounce = setTimeout(function () { pagesByTab[activeTab] = 1; reloadCurrentTab(); }, 300);
+            searchDebounce = setTimeout(function () { page = 1; reloadCurrentTab(); }, 300);
         });
-        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (btn) {
-            btn.addEventListener('click', function () { switchTab(btn.getAttribute('data-tab')); });
+        // Migration 255: the Source filter replaces the three tabs.
+        document.getElementById('gapFilterSource').addEventListener('change', function () {
+            page = 1;
+            reloadCurrentTab();
+        });
+        // The Clear button on the observation banner had no handler at
+        // all -- the banner rendered, the button did nothing. Wired here
+        // because 255 makes that banner part of the one list rather than
+        // a fixture of a tab nobody could leave.
+        const obsClear = document.getElementById('assuranceObsFilterClear');
+        if (obsClear) obsClear.addEventListener('click', function () {
+            assuranceObservationFilter = null;
+            page = 1;
+            reloadCurrentTab();
         });
         wirePagers();
         wireRowMenu();
@@ -333,16 +406,14 @@
     async function onOrgChange() {
         closeRowMenu();
         selectedOrgId = document.getElementById('gapFilterOrganization').value || null;
-        pagesByTab = { implementation: 1, assurance: 1, custom: 1 };
+        page = 1;
         const root    = document.getElementById('gapCenterRoot');
         const unavail = document.getElementById('gapCenterUnavailable');
         if (!selectedOrgId) {
             // Multi-org caller has not picked one yet — keep toolbar visible,
-            // clear grids, no feature-flag probe.
+            // clear the grid, no feature-flag probe.
             unavail.hidden = true;
-            setBody('implementation',
-                '<tr><td colspan="8" class="pm-empty">Select an organization to load Implementation Gaps.</td></tr>');
-            setCounts(null);
+            setBody('<tr><td colspan="9" class="pm-empty">Select an organization to load gaps.</td></tr>');
             return;
         }
         const enabled = await checkFeatureFlagFor(selectedOrgId);
@@ -353,262 +424,187 @@
         }
         unavail.hidden = true;
         root.hidden    = false;
-        await refreshCounts();
+        // Source options carry per-source counts, so this is also what
+        // replaced the three tab badges.
+        await loadSourceFilter();
         await reloadCurrentTab();
     }
 
     // -----------------------------------------------------------------
-    // Counts — reuse the Task Center counts endpoint. `gapsCount` is
-    // exactly the Implementation Gaps count (the source-of-truth SP
-    // is what Task Center's Gaps tab was already reading), so it also
-    // powers our Implementation Gaps badge.
+    // Migration 255 -- one list, Source as a column and a filter.
+    //
+    // Replaces refreshCounts/setCounts (three tab badges), switchTab, and
+    // the three loadX/renderX pairs. The three tabs were three views of
+    // one question split by where the gap came from, and "where it came
+    // from" is an attribute of a gap, not a kind of gap.
+    //
+    // The list is sp_gap_centre_list, which UNIONs custom_gap (every
+    // source module) with practice_gap rows nobody has materialized yet
+    // -- so an implementation gap is still visible before it has a
+    // custom_gap row, which is the whole reason that tab existed.
     // -----------------------------------------------------------------
-    async function refreshCounts() {
-        if (!selectedOrgId) { setCounts(null, 0, 0); return; }
-        // All three counts in parallel; failure is non-fatal.
-        const results = await Promise.all([
-            fetch(U('/practice/api/tasks/counts?organizationId=') + encodeURIComponent(selectedOrgId),
-                  { credentials: 'same-origin' })
-                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-            fetch(U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId)
-                  + '&gapSourceModuleCode=Custom&pageSize=1',
-                  { credentials: 'same-origin' })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (b) { return (b && (b.totalCount || b.TotalCount)) || 0; })
-                .catch(function () { return 0; }),
-            fetch(U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId)
-                  + '&gapSourceModuleCode=Assurance&pageSize=1',
-                  { credentials: 'same-origin' })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (b) { return (b && (b.totalCount || b.TotalCount)) || 0; })
-                .catch(function () { return 0; })
-        ]);
-        setCounts(results[0], results[1], results[2]);
-    }
-    function setCounts(taskCounts, customGapCount, assuranceGapCount) {
-        document.getElementById('gapTabCountImpl').textContent      = taskCounts ? (taskCounts.gapsCount || 0) : 0;
-        document.getElementById('gapTabCountAssurance').textContent = assuranceGapCount || 0;
-        document.getElementById('gapTabCountCustom').textContent    = customGapCount || 0;
+    const SOURCE_LABELS = {
+        Implementation: 'Implementation',
+        Assurance:      'Assurance',
+        Custom:         'Custom',
+        Exception:      'Exception',
+        Risk:           'Risk',
+        Audit:          'Audit'
+    };
+
+    // Populated from sp_gap_centre_source_counts, which returns the whole
+    // CHECK-constraint vocabulary including zeroes. A stable dropdown: an
+    // operator who filters to Audit and sees "0" has learned something;
+    // one who cannot find Audit in the list has not.
+    async function loadSourceFilter() {
+        const sel = document.getElementById('gapFilterSource');
+        if (!sel || !selectedOrgId) return;
+        const keep = sel.value || initialSource || '';
+        try {
+            const r = await fetch(
+                U('/practice/api/gaps/custom/centre/sources?organizationId=') + encodeURIComponent(selectedOrgId),
+                { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const rows = await r.json();
+            sel.innerHTML = '<option value="">All sources</option>';
+            (rows || []).forEach(function (row) {
+                const code = row.sourceModuleCode || row.SourceModuleCode || '';
+                const n    = row.gapCount || row.GapCount || 0;
+                if (!code) return;
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = (SOURCE_LABELS[code] || code) + ' (' + n + ')';
+                sel.appendChild(opt);
+            });
+            sel.value = keep;
+            if (sel.value !== keep) sel.value = '';   // preset no longer offered
+        } catch (_) {
+            // Non-fatal: the list still works unfiltered.
+        }
+        initialSource = '';
     }
 
-    function switchTab(tab) {
-        closeRowMenu();
-        activeTab = tab;
-        document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
-            const on = b.getAttribute('data-tab') === tab;
-            b.classList.toggle('active', on);
-            b.setAttribute('aria-selected', on ? 'true' : 'false');
-        });
-        document.querySelectorAll('.pm-tab-panel').forEach(function (p) {
-            p.hidden = p.getAttribute('data-panel') !== tab;
-        });
-        reloadCurrentTab();
-    }
     async function reloadCurrentTab() {
         closeRowMenu();
         if (!selectedOrgId) return;
-        if (activeTab === 'implementation') return loadImplementationGaps();
-        if (activeTab === 'assurance')      return loadAssuranceGaps();
-        if (activeTab === 'custom')         return loadCustomGaps();
+        return loadGaps();
     }
 
-    // -----------------------------------------------------------------
-    // Assurance Gaps -- reads sp_custom_gap_list filtered by
-    // gap_source_module_code=Assurance.
-    // -----------------------------------------------------------------
-    async function loadAssuranceGaps() {
-        const q = document.getElementById('gapCenterSearch').value.trim();
-        const p = pagesByTab.assurance;
+    async function loadGaps() {
+        const q      = document.getElementById('gapCenterSearch').value.trim();
+        const source = document.getElementById('gapFilterSource').value || '';
         const params = new URLSearchParams();
-        params.set('organizationId',       String(selectedOrgId));
-        params.set('gapSourceModuleCode',  'Assurance');
-        params.set('page',                 String(p));
-        params.set('pageSize',             String(PAGE_SIZE));
-        if (q) params.set('search', q);
+        params.set('organizationId', String(selectedOrgId));
+        params.set('page',           String(page));
+        params.set('pageSize',       String(PAGE_SIZE));
+        if (q)      params.set('search',           q);
+        if (source) params.set('sourceModuleCode', source);
+        // Assurance Observations deep-links here with ?observationId=.
+        // sp_gap_centre_list takes it and suppresses its practice_gap arm
+        // when set -- an instance gap has no observation link, so the
+        // alternative was returning unrelated rows under a banner
+        // claiming they were filtered.
         if (assuranceObservationFilter) params.set('observationId', String(assuranceObservationFilter));
 
-        // Reflect observation-filter banner.
         const banner = document.getElementById('assuranceObsFilterBanner');
         const label  = document.getElementById('assuranceObsFilterLabel');
         if (banner && label) {
-            if (assuranceObservationFilter) {
-                banner.hidden = false;
-                label.textContent = '#' + assuranceObservationFilter;
-            } else {
-                banner.hidden = true;
-            }
+            banner.hidden = !assuranceObservationFilter;
+            if (assuranceObservationFilter) label.textContent = '#' + assuranceObservationFilter;
         }
 
-        setBody('assurance', '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>');
+        setBody('<tr><td colspan="9" class="pm-empty">Loading...</td></tr>');
         try {
-            const r = await fetch(U('/practice/api/gaps/custom?' + params.toString()),
+            const r = await fetch(U('/practice/api/gaps/custom/centre?' + params.toString()),
                                   { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            renderAssuranceGaps(await r.json());
-        } catch (err) {
-            setBody('assurance', '<tr><td colspan="8" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
-        }
-    }
-    function renderAssuranceGaps(payload) {
-        const body = document.getElementById('gapBody-assurance');
-        body.innerHTML = '';
-        const rows = (payload && (payload.rows || payload.Rows)) || [];
-        if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="8" class="pm-empty">'
-                + (assuranceObservationFilter
-                    ? 'No gaps linked to Observation #' + assuranceObservationFilter + '.'
-                    : 'No Assurance Gaps yet. They will land here automatically when an assurance observation is Accepted.')
-                + '</td></tr>';
-        } else {
-            for (let i = 0; i < rows.length; i++) {
-                const r  = rows[i];
-                const id = r.customGapId || r.CustomGapId;
-                const title = r.title || r.Title || '';
-                const exec  = r.executionName || r.ExecutionName || '';
-                const ent   = r.entityName    || r.EntityName    || '';
-                const sev   = r.severityName  || r.SeverityName  || r.severityCode || r.SeverityCode || '';
-                const status = r.status || r.Status || '';
-                const owner  = r.ownerDisplayName || r.OwnerDisplayName || '';
-                const due    = r.dueDate || r.DueDate || r.targetResolutionDate || r.TargetResolutionDate;
-                const evi    = Number(r.linkedObservationCount || r.LinkedObservationCount || 0);
-                const obsCode = r.observationCode || r.ObservationCode || '';
-                const tr = document.createElement('tr');
-                tr.setAttribute('data-record-id', String(id));
-                tr.innerHTML = [
-                    '<td><div style="font-weight:600;">' + escape(title) + '</div>' +
-                         (obsCode ? '<div style="font-size:11px;color:#94a3b8;">From: ' + escape(obsCode) + '</div>' : '') + '</td>',
-                    '<td>' + escape(exec) + (ent ? '<div style="font-size:11px;color:#94a3b8;">' + escape(ent) + '</div>' : '') + '</td>',
-                    '<td>' + formatBadge(sev) + '</td>',
-                    '<td>' + formatBadge(status) + '</td>',
-                    '<td>' + escape(owner) + '</td>',
-                    '<td>' + escape(due ? String(due).slice(0,10) : '') + '</td>',
-                    '<td style="text-align:right;">' + evi + '</td>',
-                    '<td>' + actionTrigger('assurance', i) + '</td>'
-                ].join('');
-                body.appendChild(tr);
+            if (!r.ok) {
+                // Show what the server said, not just the status code. A
+                // bare "HTTP 500" sends people looking at the wrong layer;
+                // the API names the cause (e.g. an un-applied migration).
+                const b = await r.json().catch(function () { return {}; });
+                throw new Error(b.error || ('HTTP ' + r.status));
             }
+            renderGaps(await r.json());
+        } catch (err) {
+            setBody('<tr><td colspan="9" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
         }
-        updatePager('assurance', payload);
     }
 
-    // Clear observation filter button.
-    (function () {
-        const btn = document.getElementById('assuranceObsFilterClear');
-        if (btn) btn.addEventListener('click', function () {
-            assuranceObservationFilter = null;
-            try {
-                const u = new URL(window.location.href);
-                u.searchParams.delete('observationId');
-                window.history.replaceState(null, '', u.toString());
-            } catch (_) {}
-            pagesByTab.assurance = 1;
-            reloadCurrentTab();
+    // Rows are kept so the 3-dot menu can read the whole row object by
+    // index instead of round-tripping every field through data- attributes.
+    let currentRows = [];
+
+    function renderGaps(payload) {
+        const body = document.getElementById('gapBody');
+        if (!body) return;
+        currentRows = (payload && (payload.rows || payload.Rows)) || [];
+        body.innerHTML = '';
+        if (!currentRows.length) {
+            body.innerHTML = '<tr><td colspan="9" class="pm-empty">No gaps for this filter.</td></tr>';
+            updatePager(payload);
+            return;
+        }
+        currentRows.forEach(function (row, i) {
+            const tr    = document.createElement('tr');
+            tr.setAttribute('data-row-index', String(i));
+            // Row click-to-View (change request, 2026-09-22): only a
+            // materialized gap has a Gap View to open -- an un-materialized
+            // practice-instance row is not a gap yet (buildRowMenu's own
+            // "Analysis" branch for it goes through materializeThenGoto,
+            // not a plain navigation), so it gets no click target and no
+            // pointer cursor. See wireRowMenu() below for the click itself.
+            if (row.isMaterialized || row.IsMaterialized) tr.className = 'pm-row-clickable';
+            const linked = Number(row.linkedCount || row.LinkedCount || 0);
+            // What the count MEANS differs by origin, so the label does
+            // too -- obligations for an instance gap, observations for an
+            // assurance one. One unlabelled number in a shared column
+            // would have been two different facts wearing one hat.
+            const linkedNote = !linked ? ''
+                : (row.isMaterialized || row.IsMaterialized
+                    ? '<div style="font-size:11px; color:#64748b;">' + linked + ' observation' + (linked === 1 ? '' : 's') + '</div>'
+                    : '<div style="font-size:11px; color:#64748b;">' + linked + ' obligation' + (linked === 1 ? '' : 's') + '</div>');
+            tr.innerHTML = [
+                '<td><div>' + escape(row.title || row.Title || '') + '</div>' + linkedNote + sourceNote(row) + '</td>',
+                '<td>' + escape(row.statusText || row.StatusText || '') + '</td>',
+                '<td>' + statusOrDash(row.practiceInstanceStatusText || row.PracticeInstanceStatusText) + '</td>',
+                '<td>' + statusOrDash(row.taskStatusText || row.TaskStatusText) + '</td>',
+                '<td>' + statusOrDash(row.riskStatusText || row.RiskStatusText) + '</td>',
+                '<td>' + statusOrDash(row.exceptionStatusText || row.ExceptionStatusText) + '</td>',
+                '<td>' + escape(row.ownerText || row.OwnerText || '') + '</td>',
+                '<td>' + fmtDate(row.openedDt || row.OpenedDt) + '</td>',
+                '<td>' + actionTrigger(i) + '</td>'
+            ].join('');
+            body.appendChild(tr);
         });
-    })();
-
-    async function loadImplementationGaps() {
-        const q = document.getElementById('gapCenterSearch').value.trim();
-        const p = pagesByTab.implementation;
-        const url = U('/practice/api/instances/gaps?organizationId=') + encodeURIComponent(selectedOrgId)
-                  + '&page=' + p + '&pageSize=' + PAGE_SIZE
-                  + (q ? '&search=' + encodeURIComponent(q) : '');
-        setBody('implementation', '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>');
-        try {
-            const r = await fetch(url, { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            renderImplementationGaps(await r.json());
-        } catch (err) {
-            setBody('implementation', '<tr><td colspan="8" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
-        }
-    }
-    function renderImplementationGaps(payload) {
-        const body = document.getElementById('gapBody-implementation');
-        body.innerHTML = '';
-        const rows = (payload && payload.rows) || [];
-        if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="8" class="pm-empty">No Implementation Gaps for this organization — every Practice Instance is Implemented.</td></tr>';
-        } else {
-            for (let i = 0; i < rows.length; i++) {
-                const r  = rows[i];
-                const tr = document.createElement('tr');
-                tr.setAttribute('data-record-id',      String(r.practiceInstanceId));
-                tr.setAttribute('data-instance-id',    String(r.practiceInstanceId));
-                tr.setAttribute('data-instance-code',  r.instanceCode || '');
-                tr.setAttribute('data-instance-name',  r.instanceName || '');
-                tr.setAttribute('data-existing-count', String(r.existingTaskCount || 0));
-                tr.innerHTML = [
-                    '<td>' + escape(r.instanceCode) + ' &mdash; ' + escape(r.instanceName) + '</td>',
-                    '<td>' + escape((r.practiceCode || '') + (r.practiceName ? ' — ' + r.practiceName : '')) + '</td>',
-                    '<td>' + escape(r.organizationName || '') + '</td>',
-                    '<td>' + formatBadge(r.implementationStatus) + '</td>',
-                    '<td>' + escape(r.owner || '') + '</td>',
-                    '<td>' + escape(r.criticality || '') + '</td>',
-                    '<td>' + escape(String(r.existingTaskCount)) + '</td>',
-                    '<td>' + actionTrigger('implementation', i) + '</td>'
-                ].join('');
-                body.appendChild(tr);
-            }
-        }
-        updatePager('implementation', payload);
+        updatePager(payload);
     }
 
-    // -----------------------------------------------------------------
-    // Custom Gaps -- backed by /practice/api/gaps/custom.
-    // -----------------------------------------------------------------
-    async function loadCustomGaps() {
-        const q = document.getElementById('gapCenterSearch').value.trim();
-        const p = pagesByTab.custom;
-        const url = U('/practice/api/gaps/custom?organizationId=') + encodeURIComponent(selectedOrgId)
-                  + '&page=' + p + '&pageSize=' + PAGE_SIZE
-                  + (q ? '&search=' + encodeURIComponent(q) : '');
-        setBody('custom', '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>');
-        try {
-            const r = await fetch(url, { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            renderCustomGaps(await r.json());
-        } catch (err) {
-            setBody('custom', '<tr><td colspan="7" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>');
-        }
-    }
-    function renderCustomGaps(payload) {
-        const body = document.getElementById('gapBody-custom');
-        body.innerHTML = '';
-        const rows = (payload && payload.rows) || [];
-        if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No Custom Gaps yet. Click Add Gap to create one.</td></tr>';
-        } else {
-            for (let i = 0; i < rows.length; i++) {
-                const r  = rows[i];
-                const tr = document.createElement('tr');
-                tr.setAttribute('data-custom-gap-id', String(r.customGapId));
-                tr.setAttribute('data-gap-status',    r.status || '');
-                tr.innerHTML = [
-                    '<td>' + escape(r.title) + '</td>',
-                    '<td>' + escape(r.priority) + '</td>',
-                    '<td>' + escape(r.ownerEmployeeId != null ? String(r.ownerEmployeeId) : '') + '</td>',
-                    '<td>' + escape(r.dueDate ? String(r.dueDate).substring(0, 10) : '') + '</td>',
-                    '<td>' + formatBadge(r.status) + '</td>',
-                    '<td>' + escape(r.enteredDt ? String(r.enteredDt).substring(0, 10) : '') + '</td>',
-                    '<td>' + actionTrigger('custom', i) + '</td>'
-                ].join('');
-                body.appendChild(tr);
-            }
-        }
-        updatePager('custom', payload);
+    // An implementation gap with no custom_gap row behind it yet cannot
+    // be analysed until it is materialized. Saying so on the row is
+    // cheaper than letting somebody discover it from the menu. Moved into
+    // the Gap title cell (change request, 2026-09-23) when the Source
+    // column it used to live in was dropped from the grid.
+    function sourceNote(row) {
+        const isMat = row.isMaterialized || row.IsMaterialized;
+        return isMat ? '' : '<div style="font-size:11px; color:#64748b;">not yet analysed</div>';
     }
 
-    // -----------------------------------------------------------------
-    // Add Custom Gap dialog
-    // -----------------------------------------------------------------
-    function setGapMsg(text, kind) {
-        const el = document.getElementById('newGapMessage');
-        if (!el) return;
-        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
-        el.style.display = 'block'; el.textContent = text;
-        if (kind === 'error') { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
-        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
-        else { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+    // Practice Instance / Task / Risk / Exception Status (migration 371):
+    // each is NULL when the Gap has nothing of that kind linked. Same
+    // em-dash-on-empty convention task-actions.js already uses for an
+    // unset value, so an absent status reads as "nothing here" rather
+    // than a blank that could be mistaken for a loading gap.
+    function statusOrDash(v) {
+        return v ? escape(v) : '<span style="font-weight:400; color:#94a3b8;">&mdash;</span>';
     }
+
+    function fmtDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
+        if (!v) return '';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? escape(String(v).slice(0, 10)) : escape(d.toISOString().slice(0, 10));
+    }
+
     async function loadGapOwnerOptions(orgId) {
         const sel = document.getElementById('newGapOwner');
         sel.innerHTML = '<option value="">Loading employees...</option>';
@@ -635,6 +631,76 @@
             sel.innerHTML = '<option value="">Failed to load employees</option>';
         } finally { sel.disabled = false; }
     }
+    // Was called throughout the Add Gap dialog's own handlers below
+    // (openAddGapDialog, and the form's submit handler) but never
+    // defined -- clicking Add Gap threw "setGapMsg is not defined"
+    // before the dialog could even open. #newGapMessage is the
+    // dialog's own message banner (line ~117); _workflow-common.cshtml
+    // (included below, line ~209) already exposes the same ok/error/info
+    // banner logic as window.__wfCommon.setMessage(id, text, kind) --
+    // used the same way by wirePagers()/updatePager() just below -- so
+    // this reuses that instead of a third copy of the colour rules
+    // (gap-detail.js's showSlaMsg is the second).
+    function setGapMsg(text, kind) {
+        const wf = window.__wfCommon;
+        if (!wf) { console.error('__wfCommon missing - _workflow-common partial not rendered'); return; }
+        wf.setMessage('newGapMessage', text, kind);
+    }
+    // ---- Migration 382: mapped-practices helpers (reuse __practicePicker) ----
+    function gapEsc(v) {
+        return (window.__wfCommon && window.__wfCommon.escape) ? window.__wfCommon.escape(v) : String(v == null ? '' : v);
+    }
+    function renderGapPractices() {
+        const list = document.getElementById('newGapPracticeList');
+        if (!list) return;
+        if (!selectedPractices.length) {
+            list.innerHTML = '<span class="pm-hint" style="font-size:12px; color:#94a3b8;">No practices mapped yet.</span>';
+            return;
+        }
+        list.innerHTML = selectedPractices.map(function (pr) {
+            return '<span style="display:inline-flex; align-items:center; gap:6px; background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; border-radius:12px; padding:2px 10px; font-size:12px;">'
+                + gapEsc(pr.practiceName)
+                + ' <button type="button" data-remove-practice="' + pr.practiceId + '" aria-label="Remove practice" style="background:none; border:none; cursor:pointer; color:#3730a3; font-size:14px; line-height:1;">&times;</button></span>';
+        }).join('');
+    }
+    function closeGapMapPractice() {
+        const m = document.getElementById('gapMapPracticeModal');
+        if (!m) return;
+        if (typeof m.close === 'function' && m.open) m.close();
+        else { m.removeAttribute('open'); m.style.display = 'none'; }
+    }
+    function openGapMapPractice() {
+        const modal = document.getElementById('gapMapPracticeModal');
+        const host  = document.getElementById('gapMapPickerHost');
+        const msg   = document.getElementById('gapMapPickerMessage');
+        if (!modal || !host) return;
+        if (msg) { msg.textContent = ''; msg.className = 'pm-form-message'; }
+        const showMap = function () { if (typeof modal.showModal === 'function') modal.showModal(); else { modal.setAttribute('open','open'); modal.style.display='block'; } };
+        if (!window.__practicePicker) { host.innerHTML = '<span class="pm-hint">Practice picker unavailable - practice-picker.js did not load.</span>'; showMap(); return; }
+        if (!selectedOrgId) { host.innerHTML = '<span class="pm-hint">Select an organization first.</span>'; showMap(); return; }
+        // Fresh instance each open: exclude what is already mapped so the
+        // same practice cannot be added twice (same behaviour as Risk Analysis).
+        const excluded = selectedPractices.map(function (pr) { return pr.practiceId; });
+        try { if (gapMapPicker && gapMapPicker.destroy) gapMapPicker.destroy(); } catch (e) {}
+        gapMapPicker = window.__practicePicker.attach({
+            host: host,
+            organizationId: Number(selectedOrgId),
+            excludePracticeIds: excluded
+        });
+        showMap();
+    }
+    function confirmGapMapPractice() {
+        const msg = document.getElementById('gapMapPickerMessage');
+        const st  = (gapMapPicker && gapMapPicker.getState) ? gapMapPicker.getState() : null;
+        const pid = st && st.practiceId ? Number(st.practiceId) : null;
+        if (!pid) { if (msg) { msg.textContent = 'Select a practice first.'; msg.className = 'pm-form-message error'; } return; }
+        if (!selectedPractices.some(function (pr) { return pr.practiceId === pid; })) {
+            selectedPractices.push({ practiceId: pid, practiceName: st.practiceName || ('Practice #' + pid) });
+            renderGapPractices();
+        }
+        closeGapMapPractice();
+    }
+
     function openAddGapDialog() {
         if (!selectedOrgId) { alert('Select an organization first.'); return; }
         const dlg = document.getElementById('newCustomGapDialog');
@@ -652,6 +718,8 @@
                                     && orgSel.options[orgSel.selectedIndex].textContent)
                                    || ('Organization ' + selectedOrgId);
         loadGapOwnerOptions(selectedOrgId);
+        selectedPractices = [];
+        renderGapPractices();
         if (typeof dlg.showModal === 'function') dlg.showModal();
         else { dlg.setAttribute('open','open'); dlg.style.display='block'; }
         setTimeout(function () { const t = document.getElementById('newGapTitle'); if (t) t.focus(); }, 40);
@@ -670,19 +738,56 @@
         const form   = document.getElementById('newCustomGapForm');
         if (closeB) closeB.addEventListener('click', closeAddGapDialog);
         if (canB)   canB.addEventListener('click',   closeAddGapDialog);
+        // Backdrop-click-to-close. Was a coordinate check (e.clientX/
+        // e.clientY against the dialog's own rect) -- that misfires on
+        // ANY click event whose coordinates are not real, including a
+        // programmatic click a browser extension, clipboard-sync tool
+        // (common over RDP/Citrix), or assistive technology can dispatch
+        // on the focused field -- clientX/clientY default to 0 on such an
+        // event, which reads as "outside" this centred dialog, so
+        // pressing Ctrl+C while a field inside the dialog was focused
+        // could close the whole Add Custom Gap dialog out from under the
+        // user. event.target is the standard, coordinate-free way to
+        // detect a native <dialog> backdrop click: a real click on
+        // anything INSIDE the dialog (an input, a label, this dialog's
+        // own padding) always targets that descendant element -- only a
+        // genuine click on the backdrop targets the <dialog> node itself.
         dlg.addEventListener('click', function (e) {
-            const r = dlg.getBoundingClientRect();
-            if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeAddGapDialog();
+            if (e.target === dlg) closeAddGapDialog();
         });
+        // Migration 382: mapped-practices controls.
+        const mapBtn = document.getElementById('newGapMapPracticeBtn');
+        if (mapBtn) mapBtn.addEventListener('click', openGapMapPractice);
+        const list = document.getElementById('newGapPracticeList');
+        if (list) list.addEventListener('click', function (e) {
+            const rm = e.target.closest('[data-remove-practice]');
+            if (!rm) return;
+            const pid = Number(rm.getAttribute('data-remove-practice'));
+            selectedPractices = selectedPractices.filter(function (pr) { return pr.practiceId !== pid; });
+            renderGapPractices();
+        });
+        const mapModal = document.getElementById('gapMapPracticeModal');
+        if (mapModal) {
+            mapModal.querySelectorAll('[data-close-gap-map]').forEach(function (b) { b.addEventListener('click', closeGapMapPractice); });
+            mapModal.addEventListener('click', function (e) { if (e.target === mapModal) closeGapMapPractice(); });
+        }
+        const mapConfirm = document.getElementById('gapMapPickerConfirm');
+        if (mapConfirm) mapConfirm.addEventListener('click', confirmGapMapPractice);
         if (!form) return;
         form.addEventListener('submit', async function (e) {
             e.preventDefault();
             const title = document.getElementById('newGapTitle').value.trim();
             if (!title) { setGapMsg('Title is required.', 'error'); return; }
+            if (!selectedPractices.length) { setGapMsg('Map at least one Practice.', 'error'); return; }
             const submit = document.getElementById('newGapSubmit');
             submit.disabled = true; setGapMsg('Saving...');
             const owner = document.getElementById('newGapOwner').value;
             const due   = document.getElementById('newGapDueDate').value;
+            // Migration 250: detection method + severity flow through
+            // the Add-Gap payload. Empty -> null (proc keeps its
+            // priority-derived severity fallback).
+            const detMeth = document.getElementById('newGapDetectionMethod').value;
+            const sev     = document.getElementById('newGapSeverity').value;
             const payload = {
                 organizationId:  Number(selectedOrgId),
                 gapTypeCode:     'Custom',
@@ -692,7 +797,15 @@
                 ownerEmployeeId: owner ? Number(owner) : null,
                 dueDate:         due ? new Date(due + 'T00:00:00Z').toISOString() : null,
                 status:          document.getElementById('newGapStatus').value,
-                remarks:         document.getElementById('newGapRemarks').value.trim() || null
+                remarks:         document.getElementById('newGapRemarks').value.trim() || null,
+                severityCode:         sev     || null,
+                severityName:         sev     || null,
+                detectionMethodCode:  detMeth || null,
+                // Same label the analysis form's dropdown carries; kept
+                // for parity in downstream reports.
+                detectionMethodName:  detMeth || null,
+                // Migration 382: mapped practices saved with the gap.
+                practiceIds:          selectedPractices.map(function (p) { return p.practiceId; })
             };
             try {
                 const r = await fetch(U('/practice/api/gaps/custom'), {
@@ -702,10 +815,17 @@
                 const b = await r.json().catch(function () { return {}; });
                 if (r.ok) {
                     setGapMsg('Custom Gap #' + (b.customGapId || '?') + ' created.', 'ok');
-                    setTimeout(function () {
+                    setTimeout(async function () {
                         closeAddGapDialog();
-                        if (activeTab !== 'custom') switchTab('custom');
-                        else reloadCurrentTab();
+                        // Migration 255: no tab to switch to. The new gap
+                        // is a Custom-source row in the one list -- so
+                        // clear any Source filter that would hide it,
+                        // refresh the counts, and reload.
+                        const sel = document.getElementById('gapFilterSource');
+                        if (sel && sel.value && sel.value !== 'Custom') sel.value = 'Custom';
+                        page = 1;
+                        await loadSourceFilter();
+                        await reloadCurrentTab();
                     }, 700);
                 } else {
                     setGapMsg((b.error || 'Request failed'), 'error');
@@ -718,36 +838,52 @@
         });
     }
 
-    function actionTrigger(tab, index) {
-        return '<button type="button" class="pm-action-trigger" data-tab-action="' + escape(tab) + '" data-row-index="' + index + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
+    // Migration 255: no tab to name, so the trigger carries only the row
+    // index. buildRowMenu reads the row object itself and branches on
+    // Source / IsMaterialized instead of on which tab was open.
+    function actionTrigger(index) {
+        return '<button type="button" class="pm-action-trigger" data-row-index="' + index + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
              + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
              + '<span class="visually-hidden">Actions</span>'
              + '</button>';
     }
     function formatBadge(v) { return v ? '<span class="pm-badge">' + escape(v) + '</span>' : ''; }
-    function setBody(tab, html) {
-        const el = document.getElementById('gapBody-' + tab);
+    function setBody(html) {
+        const el = document.getElementById('gapBody');
         if (el) el.innerHTML = html;
     }
+    // -----------------------------------------------------------------
+    // Pager
+    //
+    // The label, the row range and the Prev/Next disabling live in
+    // _workflow-common.cshtml, which every other paged screen already
+    // uses. This screen keeps `page` as the single source of truth and
+    // only reports which way the user moved; the shared helper decides
+    // whether the button that moved them should have been enabled.
+    //
+    // The old local copy paged with a bare `page++` and no upper bound,
+    // so Next stayed clickable past the last page and landed the user on
+    // an empty grid. It also had no page size to work from, so it could
+    // only ever print "Page 3".
+    // -----------------------------------------------------------------
     function wirePagers() {
-        document.querySelectorAll('.pm-pager').forEach(function (nav) {
-            const tab = nav.getAttribute('data-pager');
-            if (!tab) return;
-            const prevBtn = nav.querySelector('[data-pg="prev"]');
-            const nextBtn = nav.querySelector('[data-pg="next"]');
-            if (prevBtn) prevBtn.addEventListener('click', function () {
-                if (pagesByTab[tab] > 1) { pagesByTab[tab]--; reloadCurrentTab(); }
-            });
-            if (nextBtn) nextBtn.addEventListener('click', function () {
-                pagesByTab[tab]++; reloadCurrentTab();
-            });
+        const wf = window.__wfCommon;
+        if (!wf) { console.error('__wfCommon missing - _workflow-common partial not rendered'); return; }
+        wf.wirePager('all', function (delta) {
+            const target = page + delta;
+            if (target < 1) return;
+            page = target;
+            reloadCurrentTab();
         });
     }
-    function updatePager(tab, payload) {
-        const nav = document.querySelector('.pm-pager[data-pager="' + tab + '"]');
-        if (!nav) return;
-        nav.querySelector('[data-pg="label"]').textContent = 'Page ' + (payload && payload.pageNumber || 1);
-        nav.querySelector('[data-pg="total"]').textContent = (payload && payload.totalCount || 0) + ' total';
+    function updatePager(payload) {
+        const wf = window.__wfCommon;
+        if (!wf) return;
+        const rows = (payload && (payload.rows || payload.Rows)) || [];
+        wf.updatePager('all', Object.assign({}, payload, {
+            pageSize: PAGE_SIZE,
+            rowCount: rows.length
+        }));
     }
     function escape(v) {
         if (v === null || v === undefined) return '';
@@ -759,9 +895,9 @@
     // -----------------------------------------------------------------
     // Row 3-dot menu
     //   Implementation Gaps →
-    //     * View Practice Instance
-    //     * Add Implementation Task
     //     * View Existing Tasks   (only if at least one exists)
+    // Add Implementation Task was removed from this menu; the task is
+    // raised from the practice instance itself, not from the gap list.
     // -----------------------------------------------------------------
     function closeRowMenu() {
         if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
@@ -801,129 +937,137 @@
         document.body.appendChild(openMenuEl);
         positionRowMenu(trigger);
     }
-    function buildRowMenu(tr) {
-        if (activeTab === 'custom') {
-            const gapId  = tr.getAttribute('data-custom-gap-id');
-            const status = tr.getAttribute('data-gap-status') || '';
-            const isClosed = (status === 'Closed' || status === 'Cancelled');
-            return [
-                // Gap Centre v1.0 (AES) -- drill into the lifecycle detail
-                // page. Kept as an additional item so every existing action
-                // continues to work exactly as before.
-                { icon: 'fa-magnifying-glass',
-                  label: 'Analysis',
-                  action: function () {
-                      // Pass orgId + gapId; the detail page uses orgId to
-                      // populate the task combo for Link Existing mode.
-                      window.location.href = U('/Practice/Index/gap-detail')
-                          + '?gapId=' + encodeURIComponent(gapId)
-                          + '&orgId=' + encodeURIComponent(selectedOrgId || '');
-                  } },
-                { icon: 'fa-lock',
-                  label: 'Close Gap',
-                  disabled: isClosed, disabledReason: 'Gap is already ' + status.toLowerCase() + '.',
-                  action: async function () {
-                      if (!confirm('Close Custom Gap #' + gapId + '?')) return;
-                      try {
-                          const r = await fetch(U('/practice/api/gaps/custom/') + encodeURIComponent(gapId) + '/close', {
-                              method: 'POST', headers: { 'Content-Type': 'application/json' },
-                              credentials: 'same-origin',
-                              body: JSON.stringify({ remarks: 'Closed from Gap Center 3-dot menu.' })
-                          });
-                          if (r.ok) reloadCurrentTab();
-                          else {
-                              const b = await r.json().catch(function () { return {}; });
-                              alert(b.error || 'Close failed');
-                          }
-                      } catch (err) { alert('Network error: ' + err.message); }
-                  } }
-            ];
-        }
-        // Assurance tab: rows carry the custom_gap_id in data-record-id
-        // (set by renderAssuranceGaps). Provide the same lifecycle
-        // drill-down as Custom -- Assurance gaps live in the same
-        // custom_gap table (unified per migrations 109-114).
-        if (activeTab === 'assurance') {
-            const gapId = tr.getAttribute('data-record-id');
-            if (!gapId || gapId === 'null' || gapId === 'undefined') return [];
-            return [
-                { icon: 'fa-magnifying-glass',
-                  label: 'Analysis',
-                  action: function () {
-                      // Pass orgId + gapId; the detail page uses orgId to
-                      // populate the task combo for Link Existing mode.
-                      window.location.href = U('/Practice/Index/gap-detail')
-                          + '?gapId=' + encodeURIComponent(gapId)
-                          + '&orgId=' + encodeURIComponent(selectedOrgId || '');
-                  } }
-            ];
-        }
-        if (activeTab !== 'implementation') return [];
-        const id    = tr.getAttribute('data-instance-id');
-        const code  = tr.getAttribute('data-instance-code') || '';
-        const name  = tr.getAttribute('data-instance-name') || '';
-        const nOpen = Number(tr.getAttribute('data-existing-count') || 0);
-        const items = [
-            { icon: 'fa-eye',  label: 'View Practice Instance',
-                action: function () { window.location.href = '/Practice/Index/practice-instances'; } },
-            // Materialize the custom_gap for this practice_instance (if
-            // one doesn't already exist), then navigate to the lifecycle
-            // detail page. Idempotent server-side -- repeated clicks
-            // hand back the same custom_gap_id.
-            { icon: 'fa-magnifying-glass', label: 'Analysis',
-                action: async function () {
-                    try {
-                        const r = await fetch(U('/practice/api/gap-lifecycle/materialize-from-instance'), {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                practiceInstanceId: Number(id),
-                                organizationId:     Number(selectedOrgId || 0)
-                            })
-                        });
-                        const b = await r.json().catch(function () { return {}; });
-                        if (!r.ok || !b.customGapId) {
-                            alert(b.error || 'Could not materialize gap (HTTP ' + r.status + ').');
-                            return;
-                        }
-                        window.location.href = U('/Practice/Index/gap-detail')
-                            + '?gapId=' + encodeURIComponent(b.customGapId)
-                            + '&orgId=' + encodeURIComponent(selectedOrgId || '');
-                    } catch (err) {
-                        alert('Network error: ' + err.message);
-                    }
-                } },
-            { icon: 'fa-plus', label: 'Add Implementation Task',
-                action: function () {
-                    if (window.__openAddImplTask) window.__openAddImplTask(id, code, name);
-                    else alert('Add Implementation Task dialog not loaded.');
-                } }
-        ];
-        if (nOpen > 0) items.push({
-            icon: 'fa-list',
-            label: 'View Existing Tasks (' + nOpen + ')',
-            action: function () {
-                // Deep-link into Task Center's Implementation tab pre-filtered
-                // by this instance's code/name (Task Center's search box reads
-                // the query param once, via #search=).
-                const q = encodeURIComponent(code || name || '');
-                window.location.href = '/Practice/Index/tasks#tab=implementation&search=' + q;
+    // Migration 255: one menu, branched on the ROW rather than on which
+    // tab is open. Every action the three tabs offered is preserved --
+    // which action applies is decided by Source and IsMaterialized, the
+    // same two facts the columns show.
+    //
+    // ACTIONS MENU (change request, 2026-09-22): the item list and every
+    // applicability/disabled rule now come from window.gracGapActions.
+    // buildMenu() (wwwroot/js/Shared/gap-actions.js) -- Gap View's own
+    // "Actions" button calls the exact same function, so there is
+    // exactly one implementation of these rules, used from both screens.
+    // gotoDetail/materializeThenGoto stay local: the un-materialized
+    // "Analysis" branch they cover can only ever be reached from THIS
+    // grid (Gap View is only ever opened for an already-materialized
+    // gap), so moving it into the shared module would not remove any
+    // duplication -- see that module's own header comment.
+    function gotoDetail(id) {
+        // orgId is passed so the detail page can populate the task
+        // combo for Link Existing mode.
+        window.location.href = U('/Practice/Index/gap-detail')
+            + '?gapId=' + encodeURIComponent(id)
+            + '&orgId=' + encodeURIComponent(selectedOrgId || '');
+    }
+    async function materializeThenGoto(instId) {
+        try {
+            const r = await fetch(U('/practice/api/gap-lifecycle/materialize-from-instance'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    practiceInstanceId: Number(instId),
+                    organizationId:     Number(selectedOrgId || 0)
+                })
+            });
+            const b = await r.json().catch(function () { return {}; });
+            if (!r.ok || !b.customGapId) {
+                alert(b.error || 'Could not materialize gap (HTTP ' + r.status + ').');
+                return;
             }
-        });
-        return items;
+            gotoDetail(b.customGapId);
+        } catch (err) {
+            alert('Network error: ' + err.message);
+        }
+    }
+    function buildRowMenu(tr) {
+        const i   = Number(tr.getAttribute('data-row-index'));
+        const row = currentRows[i];
+        if (!row) return [];
+
+        const src      = row.sourceModuleCode || row.SourceModuleCode || '';
+        const isMat    = !!(row.isMaterialized || row.IsMaterialized);
+        const gapId    = row.customGapId || row.CustomGapId || null;
+        const instId   = row.practiceInstanceId || row.PracticeInstanceId || null;
+        const code     = row.instanceCode || row.InstanceCode || '';
+        const name     = row.instanceName || row.InstanceName || '';
+        const nOpen    = Number(row.existingTaskCount || row.ExistingTaskCount || 0);
+        // Migration 318: statusText is now the lifecycle stage (New /
+        // Analysed / ...), shown in the grid's Status column. The Close
+        // Gap "already closed" check below needs the record's own
+        // Open/InProgress/Closed/Cancelled code instead, which the API
+        // now carries separately as rawStatusCode.
+        const rawStatus = row.rawStatusCode || row.RawStatusCode || '';
+        // Migration 324: the raw lifecycle state_code (not the display
+        // text in statusText -- 175/319 already show that label can be
+        // reworded). 'Delegated' is the code Analysed displays as; once
+        // a gap is there, re-analysis is rejected server-side (55143),
+        // so the menu offers View instead of Analysis for it.
+        const lifecycleCode = row.lifecycleStateCode || row.LifecycleStateCode || '';
+        const isAnalysed    = lifecycleCode === 'Delegated';
+
+        if (!window.gracGapActions) {
+            console.error('[gap-center] Shared/gap-actions.js did not load -- row menu unavailable.');
+            return [];
+        }
+
+        return window.gracGapActions.buildMenu(
+            {
+                gapId: gapId, isMaterialized: isMat, isAnalysed: isAnalysed,
+                sourceModuleCode: src, statusCode: rawStatus,
+                practiceInstanceId: instId, existingTaskCount: nOpen
+            },
+            {
+                onAnalysis: isMat
+                    ? function () { gotoDetail(gapId); }
+                    : function () { materializeThenGoto(instId); },
+                onView: function () {
+                    window.location.href = U('/Practice/Index/gap-view')
+                        + '?gapId=' + encodeURIComponent(gapId)
+                        + '&orgId=' + encodeURIComponent(selectedOrgId || '');
+                },
+                onViewExistingTasks: function () {
+                    // Task Center is one list too now, so the deep link
+                    // carries only the search term -- no tab to name.
+                    window.location.href = '/Practice/Index/tasks#search='
+                        + encodeURIComponent(code || name || '');
+                },
+                onCloseGap: function () {
+                    window.gracGapActions.closeGap(gapId, 'Closed from Gap Center 3-dot menu.', reloadCurrentTab);
+                }
+            }
+        );
     }
     function wireRowMenu() {
         const root = document.getElementById('gapCenterRoot');
         if (root) {
             root.addEventListener('click', function (e) {
                 const trigger = e.target.closest('.pm-action-trigger');
-                if (!trigger || !root.contains(trigger)) return;
-                e.preventDefault(); e.stopPropagation();
-                const tr = trigger.closest('tr');
-                if (!tr) return;
-                if (openMenuTrigger === trigger) { closeRowMenu(); return; }
-                openRowMenu(trigger, buildRowMenu(tr));
+                if (trigger && root.contains(trigger)) {
+                    e.preventDefault(); e.stopPropagation();
+                    const tr = trigger.closest('tr');
+                    if (!tr) return;
+                    if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+                    openRowMenu(trigger, buildRowMenu(tr));
+                    return;
+                }
+                // Row click-to-View (change request, 2026-09-22): a plain
+                // click anywhere else on a materialized gap's row (the
+                // .pm-row-clickable class set in renderGaps()) opens the
+                // same Gap View the row's own "View" menu item does --
+                // the 3-dot menu is still there for every other action.
+                // !e.target.closest('a') is defensive: this grid has no
+                // in-row links today, but a future one should keep its own
+                // destination rather than being hijacked by the row.
+                const tr = e.target.closest('tr.pm-row-clickable');
+                if (!tr || !root.contains(tr) || e.target.closest('a')) return;
+                const i = Number(tr.getAttribute('data-row-index'));
+                const row = currentRows[i];
+                const gapId = row && (row.customGapId || row.CustomGapId);
+                if (!gapId) return;
+                window.location.href = U('/Practice/Index/gap-view')
+                    + '?gapId=' + encodeURIComponent(gapId)
+                    + '&orgId=' + encodeURIComponent(selectedOrgId || '');
             });
         }
         document.addEventListener('click', function (e) {
@@ -938,3 +1082,4 @@
     }
 })();
 </script>
+<script src="~/js/Shared/gap-actions.js" asp-append-version="true"></script>

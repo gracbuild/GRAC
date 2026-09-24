@@ -1,0 +1,261 @@
+@*
+    THE organisation-defined obligation form — add / edit.
+
+    One dialog, included by every screen that can author an obligation the
+    organisation owns, driven by wwwroot/js/Shared/obligation-form.js.
+
+    WHY IT WAS EXTRACTED
+    --------------------
+    It lived inline in resolve-workspace.cshtml: ~110 lines of markup and
+    ~600 lines of JS -- the type dropdown, the typed rule panel mirrored
+    from Control Management, the Assurance -> Automated -> Connection
+    cascade, the evidence list, and the save.
+
+    Practice View needs the same form for a practice-level obligation
+    (docs/practice-level-obligations.md). Copying it would mean two
+    validations, two field lists and two places to change when Control
+    Management adds a field -- which is exactly the drift the shared task
+    form (_task-form-dialog.cshtml) was created to end. So this is that
+    pattern applied a second time.
+
+    ONE FORM, TWO SCOPES
+    --------------------
+      scope: "instance"  -> POST /practice/api/workflow/resolve/local-obligation
+                            the obligation belongs to ONE practice instance
+                            (migration 227), unchanged behaviour
+      scope: "practice"  -> POST /practice/api/practice-obligations
+                            the obligation belongs to the PRACTICE and fans
+                            out to every instance of it
+
+    The caller says which; nothing else about the form differs. The two
+    endpoints take the same field set because the practice-level table
+    mirrors the instance-level columns on purpose.
+
+    SELF-CONTAINED STYLES, AND WHY THE CLASSES WERE RENAMED
+    -------------------------------------------------------
+    The inline version borrowed from two places: global `.rw-dialog*`
+    rules AND `#rwRoot`-scoped ones (`.rw-note`, `.rw-typed`,
+    `.rw-freq-actions`). Inside the Operationalize page that worked,
+    because the dialog sat inside `#rwRoot`. On Practice View (`#pvRoot`)
+    half the form would have rendered unstyled.
+
+    So every class here is `gof-` prefixed and defined below. The dialog
+    looks the same on any page that includes it, and nothing in it can
+    reach another dialog.
+
+    NOT A <form>
+    ------------
+    A `<form method="dialog">` submits on Enter in any text input, which
+    closes the dialog and throws the half-typed obligation away. Every
+    button is type="button" and the save is a fetch, so form semantics buy
+    nothing here. Same reason the inline version used a div.
+
+    No backdrop dismissal either: half-filled work should not vanish on a
+    stray click, so Cancel is the only way out.
+
+    Included ONCE per page. The ids are global, which is what lets any
+    screen on that page open the same dialog.
+*@
+<dialog class="gof" id="gofDialog" aria-labelledby="gofHeading">
+  <div class="gof-form">
+    <header class="gof-head">
+        <h2 id="gofHeading">Add obligation</h2>
+        <button class="pm-icon-button" id="gofClose" type="button" aria-label="Close">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </header>
+
+    <div class="gof-body">
+        @* 0 on an add; the row id on an edit. The server echoes the id it
+           wrote back into here even on a failed save, so a retry updates
+           that obligation instead of inserting a second one. *@
+        <input type="hidden" id="gofId" value="0">
+
+        <div class="gof-fields">
+            <div class="full"><label>Obligation name
+                <input type="text" id="gofName" maxlength="500" placeholder="What must be done, or be true">
+            </label></div>
+            <div class="full"><label>Description
+                <textarea id="gofDescription" rows="2"></textarea>
+            </label></div>
+            <div><label>Type
+                <select id="gofType"><option value="">Select a type...</option></select>
+            </label></div>
+        </div>
+
+        @* The rule fields are not written here: they are built from the
+           chosen type's field list, which the API reads out of Control
+           Management's own table for that type. So the form asks for
+           exactly what CM asks for, and a column CM adds appears here with
+           no change on this side. *@
+        <div id="gofRuleBox" hidden>
+            <p class="gof-note" id="gofRuleNote"></p>
+            <div class="gof-fields" id="gofRuleFields"></div>
+        </div>
+
+        @* Execution frequency is deliberately absent from this row: it is
+           a field of the Execution type and shows on the typed panel above
+           for that type only. Asking again here asked twice for Execution
+           and asked a meaningless question for everything else. The value
+           still flows into execution_frequency_id on save.
+
+           Responsibility reads as Owner (migration 244). Approval
+           authority is hidden -- the control, its column and its save-path
+           plumbing all remain, it simply does not render. *@
+        <div class="gof-fields">
+            <div><label>Name of the Person
+                <select id="gofResponsibility"><option value="">Not set</option></select>
+            </label></div>
+            <div hidden><label>Approval authority
+                <select id="gofApproval"><option value="">Not set</option></select>
+            </label></div>
+            <div id="gofAssuranceTypeWrap" hidden><label>Assurance type
+                <select id="gofAssuranceType"><option value="">Not set</option></select>
+            </label></div>
+            <div id="gofConnectionTypeWrap" hidden><label>Connection type
+                <select id="gofConnectionType"><option value="">Not set</option></select>
+            </label></div>
+            <div id="gofConnectionUrlWrap" class="full" hidden><label>Connection URL
+                <input type="text" id="gofConnectionUrl" placeholder="https://..." />
+            </label></div>
+            <div id="gofImplStatusWrap"><label>Implementation status
+                <select id="gofImplStatus"><option value="">Not set</option></select>
+            </label></div>
+            <div class="full"><label>Remarks
+                <textarea id="gofRemarks" rows="2"></textarea>
+            </label></div>
+        </div>
+
+        @* Evidence for this obligation (migration 232). Adopting a
+           published obligation creates its evidence from what the
+           authority published; an organisation-defined one has no
+           authority behind it, so it is declared here. *@
+        <div class="gof-typed" id="gofEvidenceBox">
+            <h4>Evidence</h4>
+            <p class="gof-note" id="gofEvidenceNote">
+                What proves this obligation has been met. Location and owner are
+                filled in later, on the card.
+            </p>
+            <div id="gofEvidenceRows"></div>
+            <div class="gof-fields" style="margin-top:8px">
+                <div><label>Add evidence type
+                    <select id="gofEvidencePick"><option value="">Select a type...</option></select>
+                </label></div>
+                <div class="gof-inline-actions">
+                    <button class="pm-button ghost small" id="gofEvidenceAdd" type="button">
+                        <i class="fa-solid fa-plus"></i> Add
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="gof-foot">
+        <button class="pm-button" id="gofSave" type="button">
+            <i class="fa-solid fa-circle-check"></i> Save obligation
+        </button>
+        <button class="pm-button ghost" id="gofCancel" type="button">Cancel</button>
+        <span class="gof-note" id="gofMsg"></span>
+    </footer>
+  </div>
+</dialog>
+
+<style>
+    /* Scoped to .gof so nothing here can reach another dialog, and so the
+       dialog does not depend on the page it was included on. */
+
+    /* Sized to the form rather than the viewport: a short type (Constraint
+       has one rule field) should not open a full-height sheet. */
+    .gof {
+        width: min(880px, calc(100vw - 32px));
+        max-height: calc(100vh - 64px);
+        padding: 0; border: 0; border-radius: 10px;
+        background: #fff; color: var(--grac-ink, #25345a);
+    }
+    .gof::backdrop { background: rgba(15, 23, 42, .45); }
+
+    .gof-form { display: flex; flex-direction: column; max-height: calc(100vh - 64px); }
+
+    .gof-head {
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 16px; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    }
+    .gof-head h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
+
+    /* The only part that scrolls, so the actions stay reachable however
+       long the typed panel gets. */
+    .gof-body { padding: 14px 16px; overflow-y: auto; }
+
+    .gof-foot {
+        display: flex; align-items: center; gap: 8px;
+        padding: 12px 16px; border-top: 1px solid var(--grac-line, #e2e7f0);
+        background: #f8fafc;
+    }
+
+    .gof-fields {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 10px 14px;
+    }
+    .gof-fields + .gof-fields, .gof-fields + #gofRuleBox { margin-top: 12px; }
+    .gof-fields .full { grid-column: 1 / -1; }
+
+    .gof label { display: block; font-size: 12px; color: var(--grac-muted, #758095); }
+    .gof label > select,
+    .gof label > input,
+    .gof label > textarea {
+        display: block; width: 100%; margin-top: 3px;
+        font-size: 13px; color: var(--grac-ink, #25345a);
+        padding: 4px 6px;
+        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 5px;
+        background: #fff; font-family: inherit;
+    }
+    .gof label > textarea { resize: vertical; }
+    .gof .required { color: #b91c1c; }
+    .gof-note { font-size: 11px; color: var(--grac-muted, #758095); margin: 0; }
+
+    /* The typed panel and the evidence block: separated from the fields
+       above by a rule rather than by whitespace alone, because both are a
+       different KIND of question -- one is the obligation's own rule, the
+       other is what will prove it. */
+    #gofRuleBox, .gof-typed {
+        margin-top: 14px; padding-top: 12px;
+        border-top: 1px dashed var(--grac-line, #e2e7f0);
+    }
+    #gofRuleBox .gof-note { margin-bottom: 8px; }
+    .gof-typed h4 {
+        margin: 0 0 4px; font-size: 12px; text-transform: uppercase;
+        letter-spacing: .04em; color: var(--grac-muted, #758095);
+    }
+
+    /* A button that has to line up with the bottom edge of the select
+       beside it, which sits under its own label. */
+    .gof-inline-actions {
+        display: flex; align-items: end; gap: 8px; padding-bottom: 1px;
+    }
+
+    .gof-evidence-line {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        padding: 6px 0; border-bottom: 1px dashed var(--grac-line, #e2e7f0);
+    }
+    .gof-evidence-line:last-child { border-bottom: 0; }
+    .gof-evidence-line .gof-evidence-name { flex: 1 1 160px; font-size: 13px; }
+    /* An inline label inside an evidence row is a control beside its text,
+       not a stacked field -- so it opts out of the block rule above. */
+    .gof-evidence-line label { display: inline-flex; align-items: center; gap: 5px; }
+    .gof-evidence-line label > input { display: inline-block; width: auto; margin-top: 0; }
+    .gof-evidence-line .gof-evidence-retention { flex: 0 1 170px; display: block; }
+    .gof-evidence-line .gof-evidence-retention > input { display: block; width: 100%; margin-top: 3px; }
+    /* The evidence Description drops onto its own full-width line beneath the
+       type/mandatory/retention row (the line is flex-wrap), so a longer note
+       gets the dialog's width instead of fighting the controls for space. */
+    .gof-evidence-line .gof-evidence-desc { flex: 1 1 100%; display: block; }
+    .gof-evidence-line .gof-evidence-desc > textarea {
+        display: block; width: 100%; margin-top: 3px; resize: vertical;
+    }
+
+    /* One column on a narrow window: below this the auto-fit pairs stop
+       helping and start cramping. */
+    @@media (max-width: 720px) {
+        .gof-fields { grid-template-columns: minmax(0, 1fr); }
+    }
+</style>

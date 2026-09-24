@@ -111,11 +111,12 @@ public sealed class PracticeController(
         ViewBag.DataScope = HttpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION";
         ViewBag.RoleName = HttpContext.Session.GetString(PracticeSessionIdentity.RoleNameKey) ?? "";
         ViewBag.EmployeeId = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey) ?? "";
+        ViewBag.IsSystemAdmin = IsSystemAdmin();
         if (areaKey.Equals("practice-operationalization", StringComparison.OrdinalIgnoreCase)) areaKey = "resolve";
         var screen = PracticeScreen.All.FirstOrDefault(x => x.Key.Equals(areaKey, StringComparison.OrdinalIgnoreCase));
         if (screen is null) return NotFound();
         if (!string.IsNullOrWhiteSpace(requiredGroup) && !screen.Group.Equals(requiredGroup, StringComparison.OrdinalIgnoreCase)) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return ScreenAccessDenied(screen);
+        if (!permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(screen.Key), "VIEW")) return ScreenAccessDenied(screen);
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))
             return View("Calendar", screen);
         return View("Manage", screen);
@@ -133,6 +134,7 @@ public sealed class PracticeController(
         ViewBag.DataScope = HttpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION";
         ViewBag.RoleName = HttpContext.Session.GetString(PracticeSessionIdentity.RoleNameKey) ?? "";
         ViewBag.EmployeeId = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey) ?? "";
+        ViewBag.IsSystemAdmin = IsSystemAdmin();
         var screen = PracticeScreen.All.FirstOrDefault(x => x.Key.Equals(areaKey, StringComparison.OrdinalIgnoreCase));
         if (screen is null) return NotFound();
         var allowedGroup = screen.Group.Equals(PracticeScreen.PracticeManagementGroup, StringComparison.OrdinalIgnoreCase)
@@ -149,9 +151,9 @@ public sealed class PracticeController(
             || screen.Group.Equals(PracticeScreen.WorkflowGroup, StringComparison.OrdinalIgnoreCase)
             // Phase 2 Assurance Management (BRD Part 2) -- Organization Portal.
             // NEW, INDEPENDENT module; screens live under nav-assurance (migration 071).
-            || screen.Group.Equals(PracticeScreen.OrganizationAssuranceGroup, StringComparison.OrdinalIgnoreCase);
+            || screen.Group.Equals(PracticeScreen.AuditManagementGroup, StringComparison.OrdinalIgnoreCase);
         if (!allowedGroup) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), screen.Key, "VIEW")) return ScreenAccessDenied(screen);
+        if (!permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(screen.Key), "VIEW")) return ScreenAccessDenied(screen);
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))
             return View("Calendar", screen);
         return View("Manage", screen);
@@ -162,6 +164,14 @@ public sealed class PracticeController(
     private string Token() => HttpContext.Session.GetString(PracticeSessionIdentity.TokenKey) ?? "";
 
     private string[] Roles() => (HttpContext.Session.GetString(PracticeSessionIdentity.RolesKey) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+    // Task Calendar -- Scheduler Edit Permission (change request 2026-09-23).
+    // Same check PracticeManagementGatewayController.IsSystemAdmin() already
+    // uses -- mirrored here rather than shared, matching how Roles() itself
+    // is already a small private per-controller helper rather than a shared
+    // service method in this codebase. Exposed to the Calendar view so its
+    // JS can apply the same admin bypass the API tier enforces server-side.
+    private bool IsSystemAdmin() => Roles().Any(role => role.Equals("PM_ADMIN", StringComparison.OrdinalIgnoreCase));
 
     private async Task<PracticeScreen[]> VisibleScreens(CancellationToken cancellationToken)
     {
@@ -199,7 +209,51 @@ public sealed class PracticeController(
     private string[] ActionsFor(string? areaKey)
     {
         if (string.IsNullOrWhiteSpace(areaKey)) return [];
-        return permissionPolicy.ActionsFor(Roles(), areaKey);
+        return permissionPolicy.ActionsFor(Roles(), ScreenPermissionArea(areaKey));
+    }
+
+    // A screen key is normally the same string as its menu_master row.
+    // A few helper pages, however, sit under an owning screen and have
+    // no menu row of their own -- the permission check against their
+    // literal key would refuse every role, because no role can hold a
+    // grant on a menu that does not exist. This map routes those helper
+    // screens onto their owning menu. Same idea as PermissionAreaMap
+    // for the gateway entity types, kept separate here because that map
+    // is keyed on Web -> API entity types, and this one is keyed on the
+    // Web-tier's screen list.
+    private static string ScreenPermissionArea(string screenKey)
+    {
+        if (string.IsNullOrWhiteSpace(screenKey)) return screenKey;
+
+        if (screenKey.Equals("resolve-workspace", StringComparison.OrdinalIgnoreCase))
+            return "resolve";
+
+        // practice-instances became exactly the case this map exists for
+        // when migration 288 set its menu row Inactive. Only 'Active' rows
+        // pass the permission filter (see 279's header), so the screen
+        // would otherwise grant nobody anything -- and it is still reached
+        // deliberately, by "New Practice Instance" on an Organization
+        // Requirement row, which is the screen that now governs it.
+        //
+        // So whoever may add or edit an organization requirement may
+        // create an instance under it. That is the same rule the row
+        // action applies in the UI, enforced here rather than only there.
+        if (screenKey.Equals("practice-instances", StringComparison.OrdinalIgnoreCase))
+            return "organization-requirements";
+
+        // custom-source-statements has no menu_master row either (see the
+        // comment on its PracticeScreen entry) -- it is reached only by a
+        // link from the Standards & Frameworks screen, so it shares that
+        // screen's permission area rather than getting its own row/migration.
+        // Every entity type the new partial calls (custom-release,
+        // custom-release-source-structure, custom-statement,
+        // custom-release-statements) is already mapped to
+        // "organization-controls" in PermissionAreaMap.cs, so this keeps
+        // page-load VIEW access and API-call access on the same area.
+        if (screenKey.Equals("custom-source-statements", StringComparison.OrdinalIgnoreCase))
+            return "organization-controls";
+
+        return screenKey;
     }
 
     // Strict — module identity comes from positive configuration, the

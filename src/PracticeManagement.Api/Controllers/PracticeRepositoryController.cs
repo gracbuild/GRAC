@@ -28,13 +28,52 @@ public sealed class PracticeRepositoryController(
         "roles", "role-menu-permissions", "user-role-assignments",
         "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets", "dependency-processes",
         "user-assignments", "owner-mappings", "applicability-discovery", "applicability-results",
-        "repository-subscriptions", "subscription-owner", "repository-import", "organization-controls", "release-statements", "statement-applicability", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "organization-requirements",
+        "repository-subscriptions", "subscription-owner", "repository-import", "organization-controls", "release-statements", "statement-applicability", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "custom-statement-classification", "organization-requirements",
+        // Source Statement mapping picker on the Add/Edit Practice form
+        // (Organization Requirements screen, change request 2026-09): read
+        // side for the practice's currently-mapped OrgStatementIds. The
+        // save side reuses "organization-requirements" itself -- the
+        // picker's selection is submitted as part of that same save
+        // payload (mappedOrgStatementIds), not as its own manage entity.
+        "practice-statement-mappings",
+        // Bulk applicability. Both resolve, through PermissionAreaMap, to the
+        // same area as the single-record save they loop, so a caller who cannot
+        // mark one record cannot mark many.
+        "statement-applicability-bulk", "requirement-applicability-bulk",
         "control-applicability", "requirement-applicability", "practices", "practice-instances", "practice-operationalization", "practice-dependency-resolutions",
         "resolve",
         "workbench-all", "workbench-applications", "workbench-tools", "workbench-vendors", "workbench-assets", "workbench-teams", "workbench-committees", "workbench-processes", "workbench-locations",
         "dependencies", "dependency-options", "evidence-configurations", "evidence-obligations", "evidence-obligations-typed", "evidence-alignments", "assurance-attributes", "vendor-attributes",
         "risk-attributes", "audit-attributes", "task-attributes", "resilience-attributes",
-        "future-triggers", "repository-subscription-tree", "subscribed-frameworks", "dashboard-summary", "applicability-recommendations", "lookups", "audit-trace",
+        "future-triggers", "repository-subscription-tree", "subscribed-frameworks", "dashboard-summary", "applicability-recommendations", "lookups", "asset-taxonomy", "connection-types", "implementation-status-id", "owners", "user-ownership", "audit-trace",
+        // Location's Time Zone dropdown (change request 2026-09-20, migration
+        // 361). Read-only lookup: standardized IANA time zones referenced
+        // from GRAC_New.time_zone_master (managed in ControlManagement, not
+        // here). Same shim pattern as asset-taxonomy / connection-types.
+        "time-zones",
+        // Team Members tree on the Add/Edit Team form (change request
+        // 2026-09-20, migration 362). "team-department-employees" is the
+        // read-only Department->Employee tree feed; "team-members" is the
+        // currently-selected-members feed used to pre-check the tree on
+        // Edit and render the read-only list on View. Both are query-only
+        // (routed through secure/query's "VIEW" gate) -- saving selections
+        // rides inside the existing "teams" manage payload (memberIds).
+        // This whitelist gate runs before ResolveProcedureAsync/permission
+        // checks, so omitting an entity type here fails every request for
+        // it with 400 "Unsupported practice area." regardless of shim or
+        // permission wiring being correct.
+        "team-department-employees", "team-members",
+        // Committee Members + Committee Designation Master (migration
+        // 370). "committee-members" is the currently-selected-members
+        // feed used to pre-populate the member list on Edit and render
+        // the read-only grid on View, same shape as team-members above.
+        // "committee-designations" is both a read-only lookup (system +
+        // this organization's own custom designations, for the Add
+        // Member row's Designation picker) and a write path (the inline
+        // "Add Designation" quick-create) -- saving Committee Member
+        // selections themselves rides inside the existing "committees"
+        // manage payload (members), same as teams' memberIds.
+        "committee-members", "committee-designations",
         "assurance-dashboard", "assurance-generation", "assurance-activities", "assurance-execution", "evidence-assurance", "dependency-assurance",
         "assurance-results", "assurance-findings", "assurance-signals", "assurance-trends", "practice-health", "audit-intelligence", "risk-intelligence",
         "assurance-schedule-rules", "assurance-schedule-overrides", "assurance-calendar-config", "assurance-calendar-events",
@@ -42,7 +81,7 @@ public sealed class PracticeRepositoryController(
         // Pre-session auth. Reached with a short-lived PM_LOGIN bootstrap token
         // that carries NO entity permissions, so it is inert on every data path
         // above (Manage/Query enforce IsAllowed, which is false for PM_LOGIN).
-        "authenticate", "set-password"
+        "authenticate", "set-password", "resolve-identity"
     };
 
     [HttpGet]
@@ -137,6 +176,26 @@ public sealed class PracticeRepositoryController(
             return user is null
                 ? new PracticeRepositoryResult(false, "Invalid user ID/email or password.")
                 : new PracticeRepositoryResult(true, "Authenticated.", user);
+        });
+
+    // Password-free identity lookup for the bootstrap (ReviewLogin) sign-in,
+    // which is verified against configuration and so arrives with no
+    // employee_id -- leaving approve, reject and every other actor stamp to
+    // fail. Returns identity only: no permissions, no data scope, no token.
+    // It is NOT an authentication path; the caller has already authenticated
+    // by other means and passes a CONFIGURED login id, never visitor input.
+    [HttpPost("secure/resolve-identity")]
+    public Task<IActionResult> ResolveIdentity([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var loginId = JsonString(request.Data, "loginId");
+            if (string.IsNullOrWhiteSpace(loginId))
+                return new PracticeRepositoryResult(false, "A login id is required.");
+
+            var identity = await authenticationService.ResolveIdentityAsync(loginId, cancellationToken);
+            return identity is null
+                ? new PracticeRepositoryResult(false, "No active employee matched.")
+                : new PracticeRepositoryResult(true, "Resolved.", identity);
         });
 
     [HttpPost("secure/set-password")]

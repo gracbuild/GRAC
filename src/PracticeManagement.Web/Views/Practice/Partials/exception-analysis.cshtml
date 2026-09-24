@@ -1,0 +1,301 @@
+@*
+    Exception Analysis (migration 257).
+
+    The stage between a raised exception request and the approval
+    decision. Reached from Exception Centre's 3-dot menu with
+    ?exceptionId=, the way gap-detail is reached from Gap Centre.
+
+    What lives here, and why:
+
+      * The REQUEST DETAIL that used to be captured inside the Approve
+        modal. Asking the approver to fill in the requester's case was
+        backwards -- the approver's job is to judge it, not to write it.
+
+      * REMEDIATION TASKS. An exception is a decision to accept a gap for
+        a time; what is being done about it in the meantime is part of the
+        case, not an afterthought. Raise a new task, or map an existing
+        one from the exception's practice.
+
+      * SUBMIT FOR APPROVAL, which is the only way a request reaches a
+        state where Approve and Reject are offered at all.
+
+    Deliberately NOT here:
+      * Linked practice is DISPLAYED, not selected -- it comes from the
+        request. A picker here would let the analyst point the exception
+        at a different practice than the one that raised it.
+      * Linked requirement ref -- dropped.
+      * Approval note and compensating control -- the note belongs to the
+        approver's form; compensating control is gone.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="exaHeading">Exception Analysis</h1>
+        <p id="exaSubHeading">Complete the analysis, attach the remediation work, then submit for approval.</p>
+    </div>
+    <div>
+        @* Bug fix (2026-09-22): this was a bare "/Practice/Index/exception-centre"
+           href. That is an absolute path, so it always points at the domain
+           root and ignores any PathBase the app is published under (an IIS
+           virtual directory / appsettings PathBase) -- worked locally only
+           because PathBase is empty there, but 404'd once published under
+           one. The fix is the leading "~/": ASP.NET Core's built-in
+           UrlResolutionTagHelper (registered app-wide in _ViewImports.cshtml)
+           rewrites a "~/"-prefixed href against the request's actual
+           PathBase at render time, same as every sibling "Back to..." link
+           already does -- see exception-view.cshtml, gap-detail.cshtml,
+           gap-view.cshtml and task-view.cshtml's own href="~/Practice/Index/...".
+           This was the one place that pattern was missed. *@
+        <a class="pm-button" href="~/Practice/Index/exception-centre">
+            <i class="fa-solid fa-arrow-left"></i> Back to Exception Centre
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="exaUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-shield-halved pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="exaUnavailableTitle">Exception request not found.</h2>
+        <p id="exaUnavailableBody">Open this page from Exception Centre's Actions menu.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="exaRoot" hidden>
+
+    @* Read-only context. Everything here is the request as raised --
+       nothing on this strip is editable, which is the point. *@
+    <div class="pm-toolbar" style="justify-content:space-between">
+        <div>
+            <span class="pm-badge" id="exaStatusChip">-</span>
+            <strong id="exaRequestTitle" style="margin-left:8px"></strong>
+        </div>
+        <div id="exaSubmitWrap">
+            <button class="pm-button primary" id="exaSubmitBtn" type="button">
+                <i class="fa-solid fa-paper-plane"></i> Submit for approval
+            </button>
+        </div>
+    </div>
+
+    <dl class="exa-facts" id="exaFacts"></dl>
+
+    <h3 class="exa-section">Analysis</h3>
+    <div class="pm-form-grid">
+        <label>
+            <span>Exception type</span>
+            <select id="exaType"><option value="">-- select --</option></select>
+        </label>
+        <label>
+            <span>Exception owner</span>
+            <select id="exaOwner"><option value="">-- unassigned --</option></select>
+        </label>
+        <label class="pm-form-grid-full">
+            <span>Justification<span class="pm-required">*</span></span>
+            <textarea id="exaJustification" rows="3" maxlength="5000"
+                      placeholder="Formal reason the exception is being requested..."></textarea>
+        </label>
+        <label class="pm-form-grid-full">
+            <span>Risk / Impact<span class="pm-required">*</span></span>
+            <textarea id="exaRiskImpact" rows="3" maxlength="5000"
+                      placeholder="What business/regulatory exposure does this exception carry?"></textarea>
+        </label>
+        @* Migration 260. The window the analyst is asking for. Required to
+           SUBMIT, not to SAVE, so a half-finished analysis can be parked.
+           The approver sees these pre-filled and may overrule them; the
+           change is recorded in the history below. *@
+        <label>
+            <span>Effective from<span class="pm-required">*</span></span>
+            <input type="date" id="exaEffectiveFrom" />
+        </label>
+        <label>
+            <span>Effective to<span class="pm-required">*</span></span>
+            <input type="date" id="exaEffectiveTo" />
+        </label>
+        <p class="pm-hint pm-form-grid-full">
+            The exception window you are requesting. The approver can change it before approving.
+        </p>
+    </div>
+    <div class="pm-card-actions" style="display:flex; gap:8px; align-items:center; margin:10px 0 4px">
+        <button class="pm-button" id="exaSaveBtn" type="button">
+            <i class="fa-solid fa-floppy-disk"></i> Save analysis
+        </button>
+        <span class="pm-form-message" id="exaSaveMsg" role="status" aria-live="polite"></span>
+    </div>
+
+    @* Remediation work. Two routes in, as specified: raise a new task, or
+       map one that already exists under this exception's practice. *@
+    <h3 class="exa-section">Remediation tasks <span class="pm-badge" id="exaTaskCount">0</span></h3>
+    <p class="pm-hint" id="exaTaskHint">
+        What is being done about the gap while the exception is in force.
+    </p>
+    <div class="pm-toolbar">
+        <button class="pm-button" id="exaNewTaskBtn" type="button">
+            <i class="fa-solid fa-plus"></i> New task
+        </button>
+        <button class="pm-button" id="exaMapTaskBtn" type="button">
+            <i class="fa-solid fa-link"></i> Map existing task
+        </button>
+    </div>
+    <div class="pm-table-wrap">
+        <table id="exaTaskTable">
+            <thead>
+                <tr>
+                    <th>Task #</th><th>Task</th><th>Type</th>
+                    <th>Owner</th><th>Priority</th><th>Due</th>
+                    <th>Status</th><th>Link</th><th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="exaTaskBody">
+                <tr><td colspan="9" class="pm-empty">No tasks attached yet.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* Migration 260. exception_request_history has been written since 161
+       and read by nobody. Traceability that cannot be seen is not
+       traceability, so the whole trail is shown here -- including
+       EffectiveDatesChanged, which is why this section exists. *@
+    <h3 class="exa-section">History</h3>
+    <p class="pm-hint">
+        Every recorded action on this request, newest first.
+    </p>
+    <div class="pm-table-wrap">
+        <table id="exaHistoryTable">
+            <thead>
+                <tr>
+                    <th>When</th><th>Action</th><th>By</th><th>Detail</th>
+                </tr>
+            </thead>
+            <tbody id="exaHistoryBody">
+                <tr><td colspan="4" class="pm-empty">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ---------- Map existing task dialog ---------- *@
+<div class="pm-modal" id="exaMapModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Map an existing task</h2>
+            <button class="pm-modal-close" type="button" data-close-exa-map aria-label="Close">&times;</button>
+        </header>
+        <div style="padding:0 16px">
+            @* Scope note, stated rather than assumed: the picker offers
+               the tasks recorded under this exception's practice. *@
+            <p class="pm-hint" id="exaMapScope"></p>
+            <div class="pm-toolbar">
+                <input type="search" id="exaMapSearch" placeholder="Search task title or number..." />
+                <button class="pm-button icon" id="exaMapRefresh" type="button" title="Refresh" aria-label="Refresh">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+            </div>
+            @* A checkbox grid, not a row of Map buttons: the ticks ARE
+               the link set. Tasks already attached to this exception open
+               ticked, so the grid shows the current state rather than
+               making the operator remember it. *@
+            <div class="pm-table-wrap" style="max-height:50vh; overflow:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:34px">
+                                <input type="checkbox" id="exaMapAll" title="Select all shown" />
+                            </th>
+                            <th>Task #</th><th>Task</th><th>Type</th>
+                            <th>Owner</th><th>Status</th><th>Due</th>
+                        </tr>
+                    </thead>
+                    <tbody id="exaMapBody">
+                        <tr><td colspan="7" class="pm-empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="pm-form-message" id="exaMapMsg" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="pm-modal-footer">
+            <span class="pm-hint" id="exaMapPending" style="margin-right:auto"></span>
+            <button type="button" class="pm-button" data-close-exa-map>Cancel</button>
+            <button type="button" class="pm-button primary" id="exaMapSaveBtn">
+                <i class="fa-solid fa-floppy-disk"></i> Save
+            </button>
+        </footer>
+    </div>
+</div>
+
+@* ---------- New task dialog ----------
+
+   NOT the shared _add-implementation-task-modal partial. That one opens
+   window.__openAddImplTask(instanceId, ...) and raises an Implementation
+   task against a practice INSTANCE. An exception carries a
+   linked_practice_id, not an instance, so reusing it would have created
+   the task against an id this page does not have.
+
+   This form posts to the same /practice/api/tasks endpoint Task Centre's
+   own "New Task" uses, with the exception's practice as LinkedPracticeId
+   and Exception as the source, then links the new task to the request. *@
+<div class="pm-modal" id="exaNewTaskModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>New remediation task</h2>
+            <button class="pm-modal-close" type="button" data-close-exa-new aria-label="Close">&times;</button>
+        </header>
+        <form id="exaNewTaskForm">
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Task name<span class="pm-required">*</span></span>
+                    <input type="text" id="exaNtTitle" maxlength="250" required />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Description</span>
+                    <textarea id="exaNtDescription" rows="3" maxlength="4000"></textarea>
+                </label>
+                <label>
+                    <span>Priority</span>
+                    <select id="exaNtPriority">
+                        <option value="Low">Low</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Assign to</span>
+                    <select id="exaNtAssignee"><option value="">-- unassigned --</option></select>
+                </label>
+                <label>
+                    <span>Target date</span>
+                    <input type="date" id="exaNtTarget" />
+                </label>
+            </div>
+            <p class="pm-form-message" id="exaNtMsg" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exa-new>Cancel</button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-plus"></i> Create and attach
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    #exaRoot .exa-section {
+        margin: 18px 0 8px; font-size: 13px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .04em; color: #4a5568;
+    }
+    #exaRoot .exa-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 240px));
+        gap: 8px 20px; margin: 0 0 4px;
+    }
+    #exaRoot .exa-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #758095;
+    }
+    #exaRoot .exa-facts dd {
+        margin: 0 0 6px; font-size: 13px; color: #25345a; overflow-wrap: anywhere;
+    }
+    #exaRoot .pm-hint { font-size: 12px; color: #64748b; margin: 0 0 8px; }
+    #exaRoot .pm-required { color: #b91c1c; }
+</style>
+
+<script src="~/js/ExceptionCentre/exception-analysis.js" asp-append-version="true"></script>

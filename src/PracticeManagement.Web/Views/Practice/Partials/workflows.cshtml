@@ -197,7 +197,8 @@
                 });
             });
         }
-        window.__wfCommon.updatePager('workflows', payload);
+        window.__wfCommon.updatePager('workflows',
+            Object.assign({}, payload, { pageSize: PAGE_SIZE, rowCount: rows.length }));
     }
 
     function setBody(html) { document.getElementById('wfBody').innerHTML = html; }

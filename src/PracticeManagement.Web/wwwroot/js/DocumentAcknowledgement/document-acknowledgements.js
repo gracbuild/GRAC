@@ -17,6 +17,13 @@
     docSelectedId: null      // active doc within detail
   };
 
+  // pm-grid handle for the BATCH list only. sp_document_ack_list has
+  // paged at 25 since 151, but this screen sent no page parameter, so
+  // batch 26 onwards could not be reached. The detail view's user and
+  // document tables are children of one batch and are left unpaged.
+  // null when pm-grid.js has not loaded; every use is optional-chained.
+  let pager = null;
+
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 
@@ -35,10 +42,23 @@
 
   // -------------------- events ----------------------------------------
   function bindEvents() {
+    // Mounted before the first refreshBatches() so the very first fetch
+    // already carries a page number.
+    pager = window.__pmGrid ? window.__pmGrid.attach({
+      hostId:   "ackPager",
+      onChange: refreshBatches      // refetch -- never slice locally
+    }) : null;
+
     document.getElementById("ackFilterOrganization").addEventListener("change", async e => {
       state.organizationId = e.target.value ? Number(e.target.value) : null;
+      // A different organisation is a different data set. Silent, because
+      // refreshBatches() is called right after.
+      pager?.reset(true);
       await refreshBatches();
     });
+    // Refresh is NOT a filter change: it re-reads the page the user is
+    // on, so it must not reset. Returning from the detail view (below)
+    // does not reset either -- the user came back to where they were.
     document.getElementById("ackRefreshBtn").addEventListener("click", refreshBatches);
     document.getElementById("ackNewBtn").addEventListener("click", showCreateView);
 
@@ -75,11 +95,17 @@
   async function refreshBatches() {
     const tbody = document.getElementById("ackTableBody");
     if (!state.organizationId) {
+      pager?.clear();
       tbody.innerHTML = `<tr><td colspan="9" class="pm-empty-row">Select an organization to load batches.</td></tr>`;
       return;
     }
-    const data = await apiGet(`?organizationId=${state.organizationId}`);
+    // The endpoint's parameter is "page", not "pageNumber".
+    const paging = pager ? `&page=${pager.page()}&pageSize=${pager.size()}` : "";
+    const data = await apiGet(`?organizationId=${state.organizationId}${paging}`);
     const rows = data?.rows || [];
+    // Row count as well as the total, so a short last page reads
+    // "26-31 of 31" rather than assuming every page is full.
+    pager?.setTotal(data?.totalRows, rows.length);
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="9" class="pm-empty-row">No acknowledgement batches yet. Click "New Batch" to create one from pending documents.</td></tr>`;
       return;
@@ -90,13 +116,13 @@
       tr.dataset.ackId = r.acknowledgementId;
       tr.innerHTML = `
         <td><a href="#" class="ack-detail-link">${escapeHtml(r.acknowledgementName)}</a></td>
-        <td>${r.dueDate ? new Date(r.dueDate).toLocaleDateString() : "--"}</td>
+        <td>${r.dueDate ? window.gracFormatDateOnly(r.dueDate) : "--"}</td>
         <td>${r.documentCount}</td>
         <td>${r.userCount}</td>
         <td>${r.ackCount}</td>
         <td>${progressBar(r.completionPct)}</td>
         <td>${progressChip(r.progressLabel)}</td>
-        <td>${escapeHtml(r.createdBy || "")}<br><span class="pm-hint">${new Date(r.createdOn).toLocaleString()}</span></td>
+        <td>${escapeHtml(r.createdBy || "")}<br><span class="pm-hint">${window.gracFormatDisplayDate(r.createdOn)}</span></td>
         <td>
           <button type="button" class="pm-action-trigger" data-ack-menu="${r.acknowledgementId}"
                   aria-haspopup="menu" aria-expanded="false" title="Actions">
@@ -140,7 +166,7 @@
         <td>${escapeHtml(r.documentName)}</td>
         <td>${escapeHtml(r.versionNumber)}</td>
         <td>${r.cycleNo}</td>
-        <td>${new Date(r.queuedOn).toLocaleString()}</td>`;
+        <td>${window.gracFormatDisplayDate(r.queuedOn)}</td>`;
       tbody.appendChild(tr);
     });
   }
@@ -180,12 +206,12 @@
     const meta = document.getElementById("ackDetailMeta");
     if (listRow) {
       meta.innerHTML =
-        `<dt>Due</dt><dd>${listRow.dueDate ? new Date(listRow.dueDate).toLocaleDateString() : "--"}</dd>` +
+        `<dt>Due</dt><dd>${listRow.dueDate ? window.gracFormatDateOnly(listRow.dueDate) : "--"}</dd>` +
         `<dt>Status</dt><dd>${progressChip(listRow.progressLabel)}</dd>` +
         `<dt>Documents</dt><dd>${listRow.documentCount}</dd>` +
         `<dt>Users</dt><dd>${listRow.userCount}</dd>` +
         `<dt>Acknowledged</dt><dd>${listRow.ackCount} (${Number(listRow.completionPct).toFixed(0)}%)</dd>` +
-        `<dt>Created</dt><dd>${escapeHtml(listRow.createdBy || "")} @ ${new Date(listRow.createdOn).toLocaleString()}</dd>`;
+        `<dt>Created</dt><dd>${escapeHtml(listRow.createdBy || "")} @ ${window.gracFormatDisplayDate(listRow.createdOn)}</dd>`;
     }
 
     // Clear right pane; show hint until a doc is picked.
@@ -245,7 +271,7 @@
         <td>${escapeHtml(u.employeeName || "")}${u.employeeCode ? ` <span class="pm-hint">(${escapeHtml(u.employeeCode)})</span>` : ""}</td>
         <td>${escapeHtml(u.email || "--")}</td>
         <td><span class="ack-status-chip ${statusClass}">${escapeHtml(u.statusCode)}</span></td>
-        <td>${u.acknowledgedOn ? new Date(u.acknowledgedOn).toLocaleString() : "--"}</td>`;
+        <td>${u.acknowledgedOn ? window.gracFormatDisplayDate(u.acknowledgedOn) : "--"}</td>`;
       tbody.appendChild(tr);
     });
   }

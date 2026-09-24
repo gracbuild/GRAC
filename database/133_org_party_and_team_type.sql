@@ -465,6 +465,20 @@ BEGIN
     DECLARE @team_status_name  NVARCHAR(30)  =
         COALESCE((SELECT status_name FROM grac_practice.record_status_master WHERE record_status_id = @team_status_id),'Active');
 
+    -- ---- status restriction (2026-09-20 change request) ----
+    -- Same guard as Location/Department: a NEW status may only be Active
+    -- or Inactive going forward; a team already sitting on a legacy status
+    -- (Retired/Draft/Disposed/...) is left alone as long as this save does
+    -- not actually change its status. @current_record_status_id is NULL on
+    -- INSERT, so a brand-new row (status hidden on the Add form, defaults
+    -- Active) is always checked too.
+    DECLARE @current_record_status_id INT =
+        CASE WHEN @p_id <> 0 THEN (SELECT record_status_id FROM grac_practice.organization_team WHERE team_id = @p_id) END;
+    IF @team_status_id <> ISNULL(@current_record_status_id, -1)
+       AND NOT EXISTS (SELECT 1 FROM grac_practice.record_status_master
+                         WHERE record_status_id = @team_status_id AND status_code IN ('Active','Inactive'))
+        THROW 51079, 'Team status can only be set to Active or Inactive.', 1;
+
     -- ---- 133 additions ----
     DECLARE @team_type NVARCHAR(30) = NULLIF(LTRIM(RTRIM(JSON_VALUE(@p_payload,'$.teamType'))),'');
     DECLARE @team_vendor_id BIGINT  = TRY_CONVERT(BIGINT, NULLIF(JSON_VALUE(@p_payload,'$.vendorId'),''));
@@ -495,6 +509,42 @@ BEGIN
     ELSE
         SET @team_vendor_id = NULL;
 
+    -- ---- Team Members (change request 2026-09-20) ----
+    -- @p_payload.memberIds is a JSON array of organization_employee ids
+    -- picked from the Department -> Employee tree, e.g. [3,7,11].
+    -- Missing entirely means "leave existing members untouched" (so any
+    -- caller that does not send this key can never wipe membership); an
+    -- explicit empty array [] means "clear all members" -- the UI always
+    -- posts the full current tree selection, not a diff.
+    --
+    -- Guarded by OBJECT_ID so a database that has not yet run migration
+    -- 362 keeps saving Teams exactly as before -- member selection simply
+    -- has no effect until 362 is deployed, the same degrade-the-feature
+    -- rule the migration-134/241/244/248/342 shims already use.
+    DECLARE @member_ids_json NVARCHAR(MAX) = NULL;
+    IF OBJECT_ID('grac_practice.organization_team_member','U') IS NOT NULL
+    BEGIN
+        SET @member_ids_json = JSON_QUERY(@p_payload, '$.memberIds');
+        IF @member_ids_json IS NOT NULL AND ISJSON(@member_ids_json) <> 1
+            THROW 51082, 'Team Members selection is not a valid list.', 1;
+    END
+
+    -- Only organization-matching, currently Active employees are staged --
+    -- silently dropping anything else (a stale checkbox for an employee
+    -- deactivated after the form loaded, or from another organization)
+    -- rather than failing the whole Team save over it. This is also what
+    -- keeps employees from other organizations, or inactive employees,
+    -- out of a Team's membership even if a payload somehow named one.
+    DECLARE @valid_member_ids TABLE (employee_id BIGINT PRIMARY KEY);
+    IF @member_ids_json IS NOT NULL
+        INSERT @valid_member_ids (employee_id)
+        SELECT DISTINCT e.employee_id
+        FROM   OPENJSON(@member_ids_json) WITH (employee_id BIGINT '$') j
+        JOIN   grac_practice.organization_employee e
+               ON e.employee_id     = j.employee_id
+              AND e.organization_id = @team_org_id
+              AND e.status          = N'Active';
+
     IF @p_id = 0
     BEGIN
         INSERT grac_practice.organization_team
@@ -517,6 +567,20 @@ BEGIN
                updated_by = @p_usr_id, updated_dt = SYSUTCDATETIME()
          WHERE team_id = @p_id;
         SET @out_id = @p_id;
+    END
+
+    -- Replace the member set with whatever was just validated above -- a
+    -- clean replace-per-save that cannot itself create a duplicate
+    -- mapping. uq_pm_team_member is a second, schema-level guard on top
+    -- of this. No-ops (both branches already NULL) when 362 has not run,
+    -- or when the caller did not send memberIds at all.
+    IF @member_ids_json IS NOT NULL
+    BEGIN
+        DELETE FROM grac_practice.organization_team_member WHERE team_id = @out_id;
+        INSERT grac_practice.organization_team_member
+            (team_id, employee_id, organization_id, status, record_status_id, entered_by)
+        SELECT @out_id, v.employee_id, @team_org_id, N'Active', @active_record_status_id, @p_usr_id
+        FROM   @valid_member_ids v;
     END
 END;
 GO

@@ -43,6 +43,10 @@ public interface IEventScopeService
     Task<EventObligationApplicabilityCommandResult> SaveObligationApplicabilityAsync(EventObligationApplicabilitySaveRequest request, CancellationToken cancellationToken);
     Task<EventObligationCoverageResult> ListObligationCoverageAsync(long organizationId, string scopeDimension, long? eventTypeId, CancellationToken cancellationToken);
 
+    // Checklists tab + View Mapped Profiles reverse lookup (migration 344)
+    Task<EventDrivenChecklistResult> ListEventDrivenChecklistsAsync(EventDrivenChecklistQuery query, CancellationToken cancellationToken);
+    Task<EventChecklistMappedProfilesResult> ListChecklistMappedProfilesAsync(EventChecklistMappedProfilesQuery query, CancellationToken cancellationToken);
+
     // Custom questions per scope + event (migration 136)
     Task<ScopeQuestionResult>        ListScopeQuestionsAsync(ScopeQuestionQuery query, CancellationToken cancellationToken);
     Task<ScopeQuestionCommandResult> SaveScopeQuestionAsync(ScopeQuestionSaveRequest request, CancellationToken cancellationToken);
@@ -256,6 +260,7 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
         AddParam(command, "@scope_role_id",           DbType.Int64,   (object?)query.ScopeRoleId          ?? DBNull.Value);
         AddParam(command, "@scope_asset_category_id", DbType.Int32,   (object?)query.ScopeAssetCategoryId ?? DBNull.Value);
         AddParam(command, "@include_unsubscribed",    DbType.Boolean, query.IncludeUnsubscribed);
+        AddParam(command, "@profile_id",              DbType.Int64,   (object?)query.ProfileId            ?? DBNull.Value);
 
         var rows = new List<EventObligationMappingRow>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -268,12 +273,25 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.OrganizationId <= 0 || request.ObligationId <= 0 || request.EventTypeId <= 0)
+        // Migration 343: an obligation's identity is now one of three
+        // columns, never obligation_id alone -- a catalog obligation has no
+        // local identity, a custom one has no GRAC_New id. Mirrors the
+        // procedure's own THROW 67322.
+        var identityCount = (request.ObligationId is > 0 ? 1 : 0)
+                           + (request.LocalPracticeObligationId is > 0 ? 1 : 0)
+                           + (request.LocalInstanceObligationId is > 0 ? 1 : 0);
+        if (request.OrganizationId <= 0 || request.EventTypeId <= 0 || identityCount != 1)
             return new EventObligationApplicabilityCommandResult(false, null,
-                "OrganizationId, ObligationId and EventTypeId are required.");
-        if (!EventScopeDimensions.IsValid(request.ScopeDimension) || request.ScopeDimension is null)
+                "OrganizationId and EventTypeId are required, and exactly one of ObligationId, "
+                + "LocalPracticeObligationId or LocalInstanceObligationId must be set.");
+        if (!EventScopeDimensions.IsConcrete(request.ScopeDimension))
             return new EventObligationApplicabilityCommandResult(false, null,
-                "ScopeDimension must be ORG_ROLE or ASSET_CATEGORY.");
+                "ScopeDimension must be ORG_ROLE, ASSET_CATEGORY or PROFILE.");
+        // Checked here as well as in the procedure so the screen gets a
+        // sentence instead of a THROW number.
+        if (request.ScopeDimension == EventScopeDimensions.Profile && request.ProfileId is null or <= 0)
+            return new EventObligationApplicabilityCommandResult(false, null,
+                "ProfileId is required when ScopeDimension is PROFILE.");
         // Mirrors the proc and the CHECK constraint: an exclusion without a
         // reason is not auditable, so reject it here with a readable message.
         if (!request.IsApplicable && string.IsNullOrWhiteSpace(request.Rationale))
@@ -288,7 +306,9 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
             command.CommandText = "grac_practice.sp_event_obligation_applicability_save";
 
             AddParam(command, "@organization_id",         DbType.Int64,   request.OrganizationId);
-            AddParam(command, "@obligation_id",           DbType.Int64,   request.ObligationId);
+            AddParam(command, "@obligation_id",           DbType.Int64,   (object?)request.ObligationId               ?? DBNull.Value);
+            AddParam(command, "@local_practice_obligation_id", DbType.Int64, (object?)request.LocalPracticeObligationId ?? DBNull.Value);
+            AddParam(command, "@local_instance_obligation_id", DbType.Int64, (object?)request.LocalInstanceObligationId ?? DBNull.Value);
             AddParam(command, "@event_type_id",           DbType.Int64,   request.EventTypeId);
             AddParam(command, "@scope_dimension",         DbType.String,  request.ScopeDimension, 40);
             AddParam(command, "@scope_role_id",           DbType.Int64,   (object?)request.ScopeRoleId          ?? DBNull.Value);
@@ -299,6 +319,7 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
             AddParam(command, "@due_days",                DbType.Int32,   (object?)request.DueDays        ?? DBNull.Value);
             AddParam(command, "@status",                  DbType.String,  (object?)(request.Status ?? "Active"), 30);
             AddParam(command, "@actor_employee_id",       DbType.Int64,   (object?)request.ActorEmployeeId ?? DBNull.Value);
+            AddParam(command, "@profile_id",              DbType.Int64,   (object?)request.ProfileId       ?? DBNull.Value);
             var idParam = AddOutParam(command, "@out_applicability_id", DbType.Int64);
 
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -349,6 +370,94 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
                 ExcludedObligations:   HasColumn(reader, "ExcludedObligations")
                                            ? Convert.ToInt32(reader["ExcludedObligations"]) : 0));
         return new EventObligationCoverageResult(rows);
+    }
+
+    // ==============================================================
+    // Checklists tab + View Mapped Profiles reverse lookup (migration 344)
+    // ==============================================================
+    public async Task<EventDrivenChecklistResult> ListEventDrivenChecklistsAsync(
+        EventDrivenChecklistQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var page = query.PageNumber <= 0 ? 1  : query.PageNumber;
+        var size = query.PageSize   <= 0 ? 25 : query.PageSize;
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_event_driven_checklist_list";
+
+        AddParam(command, "@organization_id", DbType.Int64,  query.OrganizationId);
+        AddParam(command, "@event_type_id",   DbType.Int64,  (object?)query.EventTypeId ?? DBNull.Value);
+        AddParam(command, "@search",          DbType.String, (object?)query.Search      ?? DBNull.Value, 200);
+        AddParam(command, "@page_number",     DbType.Int32,  page);
+        AddParam(command, "@page_size",       DbType.Int32,  size);
+
+        var rows  = new List<EventDrivenChecklistRow>();
+        var total = 0;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            // TotalRows is COUNT(*) OVER (), identical on every row --
+            // docs/grid-and-pagination-standard.md, same convention
+            // sp_event_profile_list's own reader follows.
+            if (rows.Count == 0) total = ToInt(reader["TotalRows"]);
+
+            rows.Add(new EventDrivenChecklistRow(
+                ObligationId:              reader["ObligationId"] as long?,
+                LocalPracticeObligationId: reader["LocalPracticeObligationId"] as long?,
+                LocalInstanceObligationId: reader["LocalInstanceObligationId"] as long?,
+                ObligationKind:            reader["ObligationKind"]?.ToString() ?? "Catalog",
+                ObligationName:            reader["ObligationName"] as string,
+                PracticeInstanceId:        reader["PracticeInstanceId"] as long?,
+                PracticeInstanceCode:      reader["PracticeInstanceCode"] as string,
+                PracticeInstanceName:      reader["PracticeInstanceName"] as string,
+                PracticeId:                reader["PracticeId"] as long?,
+                PracticeCode:              reader["PracticeCode"] as string,
+                PracticeName:              reader["PracticeName"] as string,
+                PracticeInstanceDisplay:   reader["PracticeInstanceDisplay"] as string,
+                EventTypeId:               Convert.ToInt64(reader["EventTypeId"]),
+                EventTypeCode:             reader["EventTypeCode"] as string,
+                EventTypeName:             reader["EventTypeName"] as string,
+                EventDomainName:           reader["EventDomainName"] as string));
+        }
+
+        return new EventDrivenChecklistResult(rows, total, page, size);
+    }
+
+    public async Task<EventChecklistMappedProfilesResult> ListChecklistMappedProfilesAsync(
+        EventChecklistMappedProfilesQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_event_checklist_mapped_profiles_list";
+
+        AddParam(command, "@organization_id",              DbType.Int64, query.OrganizationId);
+        AddParam(command, "@event_type_id",                DbType.Int64, query.EventTypeId);
+        AddParam(command, "@obligation_id",                DbType.Int64, (object?)query.ObligationId               ?? DBNull.Value);
+        AddParam(command, "@local_practice_obligation_id", DbType.Int64, (object?)query.LocalPracticeObligationId ?? DBNull.Value);
+        AddParam(command, "@local_instance_obligation_id", DbType.Int64, (object?)query.LocalInstanceObligationId ?? DBNull.Value);
+
+        var rows = new List<EventChecklistMappedProfileRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            rows.Add(new EventChecklistMappedProfileRow(
+                ProfileId:        Convert.ToInt64(reader["ProfileId"]),
+                ProfileCode:      reader["ProfileCode"]?.ToString() ?? "",
+                ProfileName:      reader["ProfileName"]?.ToString() ?? "",
+                Description:      reader["Description"] as string,
+                Status:           reader["Status"]?.ToString() ?? "Active",
+                CriteriaSummary:  reader["CriteriaSummary"] as string,
+                ApplicabilityId:  reader["ApplicabilityId"] as long?,
+                DueDays:          reader["DueDays"] as int?,
+                OwnerRoleId:      reader["OwnerRoleId"] as long?,
+                OwnerRoleName:    reader["OwnerRoleName"] as string));
+        return new EventChecklistMappedProfilesResult(rows);
     }
 
     public async Task<int> DrainAutoRaiseQueueAsync(
@@ -682,7 +791,16 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
         ActiveItemCount:      Convert.ToInt32(r["ActiveItemCount"]));
 
     private static EventObligationMappingRow MapObligationMapping(DbDataReader r) => new(
-        ObligationId:             Convert.ToInt64(r["ObligationId"]),
+        // Migration 343: ObligationId is NULL on a custom-obligation row, so
+        // this can no longer be Convert.ToInt64 (throws on DBNull). The three
+        // new columns are read defensively via HasColumn, matching this
+        // file's own established pattern (see ListObligationCoverageAsync's
+        // ApplicableObligations/ExcludedObligations) so the API keeps working
+        // against a database where 343 has not been applied yet.
+        ObligationId:              r["ObligationId"] as long?,
+        LocalPracticeObligationId: HasColumn(r, "LocalPracticeObligationId") ? r["LocalPracticeObligationId"] as long? : null,
+        LocalInstanceObligationId: HasColumn(r, "LocalInstanceObligationId") ? r["LocalInstanceObligationId"] as long? : null,
+        ObligationKind:            HasColumn(r, "ObligationKind") ? r["ObligationKind"] as string : null,
         ObligationLabel:          r["ObligationLabel"] as string,
         ObligationText:           r["ObligationText"] as string,
         PracticeId:               r["PracticeId"] as long?,

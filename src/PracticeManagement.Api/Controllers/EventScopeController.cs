@@ -17,6 +17,13 @@
 //   GET  /scope/instances/{id}            Popup detail (header + items)
 //   GET  /scope/trace                     Resolution trace / gap queue
 //
+// Migration 331 added PROFILE as a third value of scopeDimension on
+// /scope/obligation-mappings (GET and POST) and /scope/obligation-
+// coverage, with a profileId alongside scopeRoleId / scopeAssetCategoryId.
+// Profile CRUD lives in EventProfileController under
+// /scope/profiles/... -- the mapping endpoints stay here so there is one
+// write path to event_obligation_applicability, not two.
+//
 // Submission is intentionally absent: the existing
 // POST /event-instance-items and POST /event-instances/{id}/complete on
 // WorkflowController already do it, and duplicating them here would give
@@ -92,23 +99,25 @@ public sealed class EventScopeController(
         [FromQuery] long?   scopeRoleId,
         [FromQuery] int?    scopeAssetCategoryId,
         [FromQuery] bool    includeUnsubscribed = false,
+        [FromQuery] long?   profileId = null,
         CancellationToken cancellationToken = default)
     {
         if (organizationId <= 0)
             return BadRequest(new { error = "organizationId is required." });
-        if (scopeDimension is not (EventScopeDimensions.OrgRole or EventScopeDimensions.AssetCategory))
-            return BadRequest(new { error = "scopeDimension must be ORG_ROLE or ASSET_CATEGORY." });
+        if (!EventScopeDimensions.IsConcrete(scopeDimension))
+            return BadRequest(new { error = "scopeDimension must be ORG_ROLE, ASSET_CATEGORY or PROFILE." });
 
         // The scope value is optional here (migration 137). Which obligations
         // reach the organization depends on the organization, the event and the
         // subscribed releases; the scope value only decides which are ticked.
         // Omitting it returns the list with everything Unmapped, which is what
-        // a record still being added actually has. Saving a decision still
-        // requires it -- see SaveObligationApplicability.
+        // a record still being added actually has -- including a profile the
+        // admin is still filling in. Saving a decision still requires it --
+        // see SaveObligationApplicability.
 
         var q = new EventObligationMappingQuery(
             organizationId, eventTypeId, eventTypeCode, scopeDimension,
-            scopeRoleId, scopeAssetCategoryId, includeUnsubscribed);
+            scopeRoleId, scopeAssetCategoryId, includeUnsubscribed, profileId);
         return Ok(await eventScopeService.ListObligationMappingsAsync(q, cancellationToken));
     }
 
@@ -134,11 +143,59 @@ public sealed class EventScopeController(
     {
         if (organizationId <= 0)
             return BadRequest(new { error = "organizationId is required." });
-        if (scopeDimension is not (EventScopeDimensions.OrgRole or EventScopeDimensions.AssetCategory))
-            return BadRequest(new { error = "scopeDimension must be ORG_ROLE or ASSET_CATEGORY." });
+        if (!EventScopeDimensions.IsConcrete(scopeDimension))
+            return BadRequest(new { error = "scopeDimension must be ORG_ROLE, ASSET_CATEGORY or PROFILE." });
 
         return Ok(await eventScopeService.ListObligationCoverageAsync(
             organizationId, scopeDimension, eventTypeId, cancellationToken));
+    }
+
+    // ============================================================
+    // Checklists tab + View Mapped Profiles reverse lookup (migration 344)
+    //
+    // A "checklist" here is an obligation+event combination -- what EXISTS,
+    // not what one role/asset-category/profile decided (that is the
+    // obligation-mappings endpoints above). Nested under /scope/ like every
+    // other route in this controller, so the Web tier's catch-all proxy
+    // reaches it with no routing change.
+    // ============================================================
+    [HttpGet("checklists")]
+    public async Task<IActionResult> ListEventDrivenChecklists(
+        [FromQuery] long   organizationId,
+        [FromQuery] long?  eventTypeId,
+        [FromQuery] string? search,
+        [FromQuery] int    pageNumber = 1,
+        [FromQuery] int    pageSize = 25,
+        CancellationToken cancellationToken = default)
+    {
+        if (organizationId <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+
+        var q = new EventDrivenChecklistQuery(organizationId, eventTypeId, search, pageNumber, pageSize);
+        return Ok(await eventScopeService.ListEventDrivenChecklistsAsync(q, cancellationToken));
+    }
+
+    [HttpGet("checklist-mapped-profiles")]
+    public async Task<IActionResult> ListChecklistMappedProfiles(
+        [FromQuery] long   organizationId,
+        [FromQuery] long   eventTypeId,
+        [FromQuery] long?  obligationId,
+        [FromQuery] long?  localPracticeObligationId,
+        [FromQuery] long?  localInstanceObligationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (organizationId <= 0 || eventTypeId <= 0)
+            return BadRequest(new { error = "organizationId and eventTypeId are required." });
+
+        var identityCount = (obligationId is > 0 ? 1 : 0)
+                           + (localPracticeObligationId is > 0 ? 1 : 0)
+                           + (localInstanceObligationId is > 0 ? 1 : 0);
+        if (identityCount != 1)
+            return BadRequest(new { error = "Name exactly one of obligationId, localPracticeObligationId or localInstanceObligationId." });
+
+        var q = new EventChecklistMappedProfilesQuery(
+            organizationId, eventTypeId, obligationId, localPracticeObligationId, localInstanceObligationId);
+        return Ok(await eventScopeService.ListChecklistMappedProfilesAsync(q, cancellationToken));
     }
 
     // ============================================================
@@ -147,6 +204,17 @@ public sealed class EventScopeController(
     // These sit next to the obligation list in the Role Master and Asset
     // Category forms. The obligation routes above are unchanged -- both
     // forms call them for the inherited half.
+    //
+    // PROFILE IS DELIBERATELY NOT ACCEPTED HERE, AND IT IS NOT AN
+    // OVERSIGHT. Custom questions are stored as grac_practice.checklist
+    // rows keyed by scope_role_id / scope_asset_category_id and served
+    // through the CHECKLIST raise path (124), which is a different engine
+    // from the obligation path profiles extend. Supporting them per
+    // profile means profile_id on checklist and event_checklist_mapping
+    // plus a PROFILE branch in sp_event_instance_raise_scoped -- a change
+    // to the checklist engine, not to this scoping layer. Until that is
+    // done the Profile screen hides the questions panel rather than
+    // offering a control that would save nothing.
     // ============================================================
     [HttpGet("questions")]
     public async Task<IActionResult> ListScopeQuestions(

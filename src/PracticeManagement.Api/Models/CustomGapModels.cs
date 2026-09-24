@@ -30,7 +30,28 @@ public sealed record CustomGapOpenRequest(
     string? Status,
     string? Remarks,
     string? GapTypeCode,
-    long?   ActorEmployeeId);
+    long?   ActorEmployeeId,
+    // Migration 250: detection method + severity captured at Add-Gap
+    // time on Custom gaps. All optional and last so an older payload
+    // still binds; NULL leaves the store un-opinionated and the
+    // fallback path (severity -> priority) still applies.
+    string? SeverityCode         = null,
+    string? SeverityName         = null,
+    string? DetectionMethodCode  = null,
+    string? DetectionMethodName  = null,
+    // Migration 382: practice ids to map to the new Custom Gap. Optional
+    // and last so an older payload still binds; the UI/API require >= 1.
+    IReadOnlyList<long>? PracticeIds = null);
+
+// Migration 382: one practice mapped to a Custom Gap (read model for the
+// read-only display on the Gap view / detail).
+public sealed record CustomGapPracticeRow(
+    long   CustomGapPracticeMapId,
+    long   CustomGapId,
+    long   PracticeId,
+    string? PracticeName,
+    string? PracticeCode,
+    DateTime? MappedDt);
 
 public sealed record CustomGapCloseRequest(
     long   CustomGapId,
@@ -99,6 +120,117 @@ public sealed record CustomGapListResult(
     int  PageNumber,
     int  PageSize,
     IReadOnlyList<CustomGapListRow> Rows);
+
+// ---------- Migration 255: the unified Gap Centre list ----------
+/// <summary>
+/// One row of <c>grac_practice.sp_gap_centre_list</c>, which UNIONs the
+/// two origins Gap Centre used to show as separate tabs:
+/// <c>custom_gap</c> (every source module) and <c>practice_gap</c> rows
+/// that have not been materialized into a custom gap yet.
+/// <para>
+/// Columns only one origin can answer are null on the other rather than
+/// faked — an un-materialized instance gap has no CustomGapId and no due
+/// date, and a custom gap has no PracticeGapId. <see cref="IsMaterialized"/>
+/// says which arm the row came from, which is what decides whether the
+/// screen offers Materialize on it.
+/// </para>
+/// </summary>
+public sealed record GapCentreListRow(
+    string    RowKey,
+    string    SourceModuleCode,
+    long?     CustomGapId,
+    long?     PracticeGapId,
+    long?     PracticeInstanceId,
+    bool      IsMaterialized,
+    string?   Title,
+    string?   Context,
+    /// <summary>Migration 318: the gap's lifecycle stage (New / Analysed /
+    /// Invalid / Duplicate / a dormant historical name) on the custom_gap
+    /// arm — the same value sp_custom_gap_header projects as
+    /// LifecycleStateName. On the practice_gap arm (no lifecycle state
+    /// yet) this stays the worst logged Obligation status, unchanged.</summary>
+    string?   StatusText,
+    string?   SeverityText,
+    string?   OwnerText,
+    DateTime? DueDate,
+    DateTime? OpenedDt,
+    int       LinkedCount,
+    /// <summary>Instance code/name, non-null only on the practice_gap arm —
+    /// the Add Implementation Task dialog needs them as separate values.</summary>
+    string?   InstanceCode,
+    string?   InstanceName,
+    int       ExistingTaskCount,
+    /// <summary>Migration 318: custom_gap.status verbatim (Open /
+    /// InProgress / Closed / Cancelled), NULL on the practice_gap arm.
+    /// StatusText above no longer carries this — the UI's "already
+    /// Closed/Cancelled" check (Close Gap menu action) reads this
+    /// instead. Trailing/optional so the one existing call site keeps
+    /// compiling without every field re-supplied in a specific order.</summary>
+    string?   RawStatusCode = null,
+    /// <summary>Migration 324: the raw lifecycle state_code (e.g.
+    /// "Delegated"), NULL on the practice_gap arm. StatusText carries the
+    /// DISPLAY name ("Analysed") which 175/319 already show can be
+    /// reworded — this is the stable code the UI gates View-vs-Analysis
+    /// on instead. Trailing/optional for the same reason as RawStatusCode
+    /// above.</summary>
+    string?   LifecycleStateCode = null,
+    /// <summary>Migration 371: derived from the current obligation state of
+    /// the Practice Instance behind the Gap ("Implemented" when every
+    /// obligation is Implemented, else "Not Implemented"), reusing
+    /// practice_gap.gap_status (kept live by sp_practice_gap_sync_for_instance,
+    /// migration 367) rather than re-deriving it. NULL when the Gap has no
+    /// linked Practice Instance.</summary>
+    string?   PracticeInstanceStatusText = null,
+    /// <summary>Migration 371: aggregated across every Task linked to this
+    /// Gap (practice_task.subject_entity_type = 'CustomGap') -- "Completed"
+    /// only when all linked Tasks are in a terminal status
+    /// (entity_status_master.is_terminal = 1, i.e. Closed/Cancelled),
+    /// "Pending" if any are not. NULL when the Gap has no linked Tasks.</summary>
+    string?   TaskStatusText = null,
+    /// <summary>Migration 371: the most recently linked Risk's status --
+    /// risk_register.status_code when the candidate has been registered
+    /// (registered_risk_id set), else risk_candidate.status_code, matching
+    /// gap-view.js's buildRiskCard() precedence. NULL when the Gap has no
+    /// linked Risk.</summary>
+    string?   RiskStatusText = null,
+    /// <summary>Migration 371: the most recently linked Exception's
+    /// exception_request.status_code. NULL when the Gap has no linked
+    /// Exception.</summary>
+    string?   ExceptionStatusText = null);
+
+public sealed record GapCentreListQuery(
+    long?   OrganizationId,
+    string? SourceModuleCode,
+    string? StatusCode,
+    string? Search,
+    /// <summary>Assurance Observations deep-links here with one. Only the
+    /// custom_gap arm can answer it, so it suppresses the practice_gap
+    /// arm rather than returning unrelated instance gaps.</summary>
+    long?   ObservationId = null,
+    int     Page     = 1,
+    int     PageSize = 25);
+
+public sealed record GapCentreListResult(
+    long TotalCount,
+    int  PageNumber,
+    int  PageSize,
+    IReadOnlyList<GapCentreListRow> Rows,
+    /// <summary>
+    /// Null on success. Set when the read failed — most often because
+    /// migration 255 has not been applied, which otherwise surfaces as a
+    /// bare HTTP 500 with nothing on screen to say why.
+    /// </summary>
+    string? Error = null);
+
+/// <summary>
+/// One entry of the Source filter. The full CHECK-constraint vocabulary
+/// is returned including zero counts, so the dropdown does not gain and
+/// lose options as data changes.
+/// </summary>
+public sealed record GapCentreSourceCount(
+    string SourceModuleCode,
+    int    DisplayOrder,
+    long   GapCount);
 
 public sealed record CustomGapCommandResult(
     bool    Success,

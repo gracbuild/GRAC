@@ -65,4 +65,70 @@
   window.gracConfirm = api.confirm;
   window.gracPrompt = api.prompt;
   window.alert = message => { api.alert({ message, type: "info" }); };
+
+  // -------------------------------------------------------------------
+  // window.gracUi -- message-first convenience wrapper.
+  //
+  // WHY IT EXISTS
+  // -------------
+  // window.alert is replaced above, so every alert() in the product
+  // already gets this styling for free. confirm() and prompt() CANNOT be
+  // replaced the same way: they are synchronous and return a value, while
+  // this dialog is a Promise. Overriding them would make every
+  // `if (confirm(...))` pass unconditionally, because a Promise is always
+  // truthy -- a silent, dangerous change. So each call site has to be
+  // converted by hand, and this is what it converts TO:
+  //
+  //     if (!await gracUi.confirm("Retire this release?")) return;
+  //     const reason = await gracUi.prompt("Why not applicable?");
+  //     if (reason === null) return;      // cancelled
+  //
+  // prompt() resolves to the typed string or null when cancelled -- the
+  // same contract window.prompt has, so a converted call site reads the
+  // same as it did before.
+  //
+  // Lifted from RiskCentre/risk-centre.js's local `dlg`, which had the
+  // right shape but was reachable only from that one file. Every native
+  // fallback below is kept for the same reason it had them: a page that
+  // somehow loads without this file still asks the question rather than
+  // silently doing nothing.
+  // -------------------------------------------------------------------
+  window.gracUi = {
+    alert: (message, opts = {}) =>
+      api.alert({ type: opts.type || "info", title: opts.title, message,
+                  confirmText: opts.confirmText }),
+
+    confirm: (message, opts = {}) =>
+      api.confirm({ type: opts.type || "confirm", title: opts.title, message,
+                    confirmText: opts.confirmText, cancelText: opts.cancelText }),
+
+    prompt: (message, opts = {}) =>
+      api.prompt({ type: opts.type || "info", title: opts.title, message,
+                   defaultValue: opts.defaultValue || "",
+                   inputLabel: opts.inputLabel, confirmText: opts.confirmText }),
+
+    // promptRequired -- like prompt(), but a blank answer re-asks instead
+    // of resolving. Cancel still resolves to null, same contract as
+    // prompt() itself, so `if (reason === null) return;` keeps working
+    // unchanged at the call site.
+    //
+    // Added for 355 (Retire/Restore instance): both acts need a reason
+    // that cannot be skipped by clicking through with nothing typed, and
+    // this belongs here rather than duplicated in each call site's own
+    // loop -- any future "reason required" prompt reuses it too.
+    promptRequired: async (message, opts = {}) => {
+      let prefixedMessage = message;
+      for (;;) {
+        const value = await api.prompt({
+          type: opts.type || "info", title: opts.title, message: prefixedMessage,
+          defaultValue: opts.defaultValue || "",
+          inputLabel: opts.inputLabel, confirmText: opts.confirmText
+        });
+        if (value === null) return null;                 // cancelled
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+        prefixedMessage = (opts.requiredNote || "A reason is required.") + "\n\n" + message;
+      }
+    }
+  };
 })();

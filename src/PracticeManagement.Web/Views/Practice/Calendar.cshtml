@@ -16,25 +16,35 @@
 </div>
 
 <section class="pm-panel pm-calendar-container">
-    <!-- Toolbar -->
+    <!--
+        Top-level toolbar. Calendar / List is the only view switch that
+        lives here -- Prev/Today/Next, the month/week/day title, and the
+        Month/Week/Day switch all moved down next to the grid itself (see
+        #calNavHeader further down), since none of them mean anything
+        until Calendar is the selected view.
+    -->
     <div class="cal-toolbar">
         <div class="cal-toolbar-left">
+            @* Migration 336-339: the manual "Generate Schedules" button was
+               retired. Schedules are now created per obligation automatically
+               when an Execution / Assurance obligation is saved on the
+               Operationalize screen (SyncScheduleRulesForInstanceAsync), and
+               existing instances are backfilled by the reconcile proc
+               (sp_pm_reconcile_schedule_rules). There is no per-instance
+               manual creation any more. *@
             <select id="calOrganizationFilter"><option value="">All organizations</option></select>
-            <button class="pm-button primary small" id="calGenerate" type="button" title="Generate schedules from practice instances with assurance frequency">
-                <i class="fa-solid fa-calendar-plus" aria-hidden="true"></i> Generate Schedules
-            </button>
-        </div>
-        <div class="cal-toolbar-center">
-            <button class="pm-button icon" id="calPrev" type="button" title="Previous"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
-            <button class="pm-button small" id="calToday" type="button">Today</button>
-            <button class="pm-button icon" id="calNext" type="button" title="Next"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
-            <h2 id="calTitle" class="cal-title">July 2026</h2>
         </div>
         <div class="cal-toolbar-right">
-            <div class="cal-view-toggle">
-                <button class="pm-button small active" data-cal-view="month">Month</button>
-                <button class="pm-button small" data-cal-view="week">Week</button>
-                <button class="pm-button small" data-cal-view="day">Day</button>
+            <!--
+                Calendar / List display-mode toggle. Both modes render the
+                SAME `events` array fetched by loadCalendarEvents() -- List
+                is a date-wise re-presentation of it, not a second data
+                source, so the two views can never drift out of sync. See
+                setMode()/renderList() in practice-calendar.js.
+            -->
+            <div class="cal-mode-toggle" id="calModeToggle" role="group" aria-label="Display mode">
+                <button class="pm-button small active" data-cal-mode="calendar" type="button" title="Calendar view"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Calendar</button>
+                <button class="pm-button small" data-cal-mode="list" type="button" title="List view"><i class="fa-solid fa-list" aria-hidden="true"></i> List</button>
             </div>
         </div>
     </div>
@@ -43,63 +53,67 @@
         Unified Calendar filters. The frontend keeps these values in
         localStorage so returning to the page restores the same view.
         Every filter narrows the merged event set (Practice Instance +
-        Assurance Plan / Plan Item / Execution / Observation / Gap).
-        Owner picker reuses window.__roleHolderPicker from
-        _workflow-common.cshtml, matching every Assurance dialog.
+        Plan / Plan Item / Execution / Observation / Gap).
+
+        Modules / Status / Criticality are multi-select combos (the shared
+        .pm-checkcombo component defined in practice-management.css) rather
+        than long chip rows, so the whole filter set collapses onto ONE
+        wrapping row instead of three. Ticking an option inside a combo
+        rebuilds filters[group] (sourceModules / statuses / criticalities)
+        from the checked boxes -- exactly the arrays the chips fed before --
+        so the filtering logic, the API payload and the persisted
+        localStorage shape are all unchanged; only the control changed
+        (see initCheckCombo() in practice-calendar.js). Each option keeps
+        its data-cal-chip-value so the value vocabulary is identical.
+        Owner picker reuses the same /practice/api/org-roles endpoints as
+        every Assurance dialog.
     -->
     <div class="cal-filter-panel" id="calFilterPanel">
+        @* Migration 336-340: this is the audit-schedule calendar -- it shows
+           only the Execution + Assurance obligation schedules (typed by colour
+           in the grid/list). There is no module selector: the source-module
+           scope is fixed in practice-calendar.js (CALENDAR_MODULES), so the
+           five Assurance-Management modules never reach here. Only Status /
+           Criticality / Search remain as filters. *@
         <div class="cal-filter-row">
-            <div class="cal-filter-group" data-cal-filter-group="sourceModules">
-                <span class="cal-filter-label">Modules</span>
-                <div class="cal-chip-row" data-cal-chip-row>
-                    <button type="button" class="cal-chip source-PracticeInstance active" data-cal-chip-value="PracticeInstance"><span class="cal-chip-dot"></span>Practice Instance</button>
-                    <button type="button" class="cal-chip source-AssurancePlan active" data-cal-chip-value="AssurancePlan"><span class="cal-chip-dot"></span>Plan</button>
-                    <button type="button" class="cal-chip source-AssurancePlanItem active" data-cal-chip-value="AssurancePlanItem"><span class="cal-chip-dot"></span>Plan Item</button>
-                    <button type="button" class="cal-chip source-AssuranceExecution active" data-cal-chip-value="AssuranceExecution"><span class="cal-chip-dot"></span>Execution</button>
-                    <button type="button" class="cal-chip source-AssuranceObservation active" data-cal-chip-value="AssuranceObservation"><span class="cal-chip-dot"></span>Observation</button>
-                    <button type="button" class="cal-chip source-AssuranceGap active" data-cal-chip-value="AssuranceGap"><span class="cal-chip-dot"></span>Gap</button>
-                </div>
-            </div>
-        </div>
-        <div class="cal-filter-row">
-            <div class="cal-filter-group" data-cal-filter-group="statuses">
+            <div class="cal-filter-group">
                 <span class="cal-filter-label">Status</span>
-                <div class="cal-chip-row" data-cal-chip-row>
-                    <button type="button" class="cal-chip status-chip status-Upcoming" data-cal-chip-value="Upcoming">Upcoming</button>
-                    <button type="button" class="cal-chip status-chip status-InProgress" data-cal-chip-value="InProgress">In Progress</button>
-                    <button type="button" class="cal-chip status-chip status-Overdue" data-cal-chip-value="Overdue">Overdue</button>
-                    <button type="button" class="cal-chip status-chip status-Open" data-cal-chip-value="Open">Open</button>
-                    <button type="button" class="cal-chip status-chip status-Planned" data-cal-chip-value="Planned">Planned</button>
-                    <button type="button" class="cal-chip status-chip status-Closed" data-cal-chip-value="Closed">Closed</button>
-                    <button type="button" class="cal-chip status-chip status-Skipped" data-cal-chip-value="Skipped">Skipped</button>
-                    <button type="button" class="cal-chip status-chip status-Moved" data-cal-chip-value="Moved">Moved</button>
+                <div class="pm-checkcombo cal-filter-combo" data-cal-filter-group="statuses">
+                    <button type="button" class="pm-checkcombo-trigger" aria-haspopup="true" aria-expanded="false">
+                        <span class="pm-checkcombo-value" data-checkcombo-text><span class="pm-checkcombo-placeholder">Any status</span></span>
+                        <i class="pm-checkcombo-caret fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+                    <div class="pm-checkcombo-menu" hidden>
+                        <input type="search" class="pm-checkcombo-search" placeholder="Search status..." aria-label="Search status" />
+                        <div class="pm-checkcombo-options">
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Upcoming" />Upcoming</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="InProgress" />In Progress</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Overdue" />Overdue</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Open" />Open</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Planned" />Planned</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Closed" />Closed</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Skipped" />Skipped</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Moved" />Moved</label>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <div class="cal-filter-group" data-cal-filter-group="criticalities">
-                <span class="cal-filter-label">Criticality</span>
-                <div class="cal-chip-row" data-cal-chip-row>
-                    <button type="button" class="cal-chip crit-chip crit-Critical" data-cal-chip-value="Critical">Critical</button>
-                    <button type="button" class="cal-chip crit-chip crit-High"     data-cal-chip-value="High">High</button>
-                    <button type="button" class="cal-chip crit-chip crit-Medium"   data-cal-chip-value="Medium">Medium</button>
-                    <button type="button" class="cal-chip crit-chip crit-Low"      data-cal-chip-value="Low">Low</button>
-                </div>
-            </div>
-        </div>
-        <div class="cal-filter-row">
-            <div class="cal-filter-group cal-filter-owner">
-                <span class="cal-filter-label">Owner</span>
-                <select id="calFilterOwnerRole" class="cal-filter-select" aria-label="Owner Role">
-                    <option value="">Loading roles...</option>
-                </select>
-                <select id="calFilterOwnerEmp" class="cal-filter-select" aria-label="Owner Employee (current holder)">
-                    <option value="">-- pick a role first --</option>
-                </select>
             </div>
             <div class="cal-filter-group">
-                <span class="cal-filter-label">Definition</span>
-                <select id="calFilterDefinition" class="cal-filter-select">
-                    <option value="">All definitions</option>
-                </select>
+                <span class="cal-filter-label">Criticality</span>
+                <div class="pm-checkcombo cal-filter-combo" data-cal-filter-group="criticalities">
+                    <button type="button" class="pm-checkcombo-trigger" aria-haspopup="true" aria-expanded="false">
+                        <span class="pm-checkcombo-value" data-checkcombo-text><span class="pm-checkcombo-placeholder">Any criticality</span></span>
+                        <i class="pm-checkcombo-caret fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+                    <div class="pm-checkcombo-menu" hidden>
+                        <div class="pm-checkcombo-options">
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Critical" />Critical</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="High" />High</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Medium" />Medium</label>
+                            <label data-checkcombo-option><input type="checkbox" data-cal-chip-value="Low" />Low</label>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="cal-filter-group cal-filter-search">
                 <span class="cal-filter-label">Search</span>
@@ -111,20 +125,44 @@
         </div>
     </div>
 
-    <!-- Legend: one dot per source module so users can decode chip colors. -->
-    <div class="cal-legend" id="calLegend" aria-label="Event color legend">
-        <div class="cal-legend-item"><span class="cal-legend-swatch source-PracticeInstance"></span>Practice Instance</div>
-        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssurancePlan"></span>Plan</div>
-        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssurancePlanItem"></span>Plan Item</div>
-        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssuranceExecution"></span>Execution</div>
-        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssuranceObservation"></span>Observation</div>
-        <div class="cal-legend-item"><span class="cal-legend-swatch source-AssuranceGap"></span>Gap</div>
-        <div class="cal-legend-sep"></div>
-        <div class="cal-legend-item"><span class="cal-legend-swatch status-Overdue"></span>Overdue border</div>
+    <!--
+        Calendar's own header -- Prev/Today/Next, the month/week/day
+        title, and the Month/Week/Day switch all sit together in one row
+        directly above the grid (not up near the page-level toolbar),
+        so they read as the calendar's own controls instead of being
+        separated from it by the filters and legend above. setMode()
+        hides this whole row while List is active -- List has no date
+        grid for any of it to act on; currentView (Month/Week/Day) keeps
+        governing the date range List loads even while the switch is
+        hidden (see setMode()'s comment in practice-calendar.js) -- only
+        the control disappears, not the state.
+    -->
+    <div class="cal-nav-header" id="calNavHeader">
+        <div class="cal-nav-left">
+            <button class="pm-button icon" id="calPrev" type="button" title="Previous"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+            <button class="pm-button small" id="calToday" type="button">Today</button>
+            <button class="pm-button icon" id="calNext" type="button" title="Next"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+            <h2 id="calTitle" class="cal-title">July 2026</h2>
+        </div>
+        <div class="cal-view-toggle" id="calViewToggle" role="group" aria-label="Calendar view">
+            <button class="pm-button small active" data-cal-view="month">Month</button>
+            <button class="pm-button small" data-cal-view="week">Week</button>
+            <button class="pm-button small" data-cal-view="day">Day</button>
+        </div>
     </div>
 
     <!-- Calendar grid -->
     <div id="calGrid" class="cal-grid cal-month-view">
+        <!-- Rendered by JavaScript -->
+    </div>
+
+    <!--
+        Date-wise List View. Lives in the same panel as the grid so the
+        toolbar, filters and legend above stay shared between both modes.
+        Hidden by default; setMode() toggles which of #calGrid /
+        #calListView is visible.
+    -->
+    <div id="calListView" class="cal-list-view" hidden>
         <!-- Rendered by JavaScript -->
     </div>
 </section>
@@ -140,46 +178,28 @@
     </div>
 </div>
 
-<!-- Generate Schedules Dialog -->
-<dialog id="calGenerateDialog">
-    <form id="calGenerateForm">
-        <div class="pm-dialog-heading">
-            <div><h2>Generate Assurance Schedules</h2><p>Create schedule rules from practice instances with an assurance frequency.</p></div>
-            <button type="button" id="calGenerateClose" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
-        </div>
-        <div id="calGenerateMessage" class="pm-message" hidden></div>
-        <div class="pm-form-grid">
-            <label class="pm-field"><span>Organization</span><select id="genOrganization" required><option value="">Select organization</option></select></label>
-            <label class="pm-field"><span>Anchor Date (first occurrence)</span><input id="genAnchorDate" type="date" required /></label>
-        </div>
-        <div id="genInstanceList" class="cal-gen-instance-list">
-            <p class="pm-empty">Select an organization to see eligible practice instances.</p>
-        </div>
-        <div class="pm-dialog-actions">
-            <button type="button" class="pm-button" id="calGenerateCancel">Cancel</button>
-            <button type="button" class="pm-button primary" id="calGenerateSubmit">Generate Selected</button>
-        </div>
-    </form>
-</dialog>
-
 <!-- Edit Schedule Dialog -->
 <dialog id="calEditDialog">
     <form id="calEditForm">
         <div class="pm-dialog-heading">
-            <div><h2 id="calEditTitle">Edit Schedule</h2><p>Move, skip, or modify this assurance occurrence.</p></div>
+            <div><h2 id="calEditTitle">Edit Schedule</h2><p>Change the Execution Date for this occurrence.</p></div>
             <button type="button" id="calEditClose" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
         </div>
         <div id="calEditMessage" class="pm-message" hidden></div>
+        @* Obligation / Scheduler Details -- read-only, rendered by JS from
+           the obligation's own record (renderEditObligationDetails in
+           practice-calendar.js). Task Calendar Edit Scheduler change
+           request (2026-09-23): Obligation Description, Action and
+           Execution Frequency come from the obligation's typed Execution
+           spec and only apply to Execution-kind occurrences; Frequency
+           and Owner are the schedule's own (already on every occurrence). *@
+        <div id="calEditObligationDetails" class="pm-panel cal-side-body cal-edit-obligation-details">
+            <!-- Read-only Obligation / Scheduler details rendered by JS -->
+        </div>
         <div class="pm-form-grid">
             <label class="pm-field"><span>Practice Instance</span><input id="editPracticeInstance" type="text" readonly /></label>
             <label class="pm-field"><span>Current Date</span><input id="editCurrentDate" type="date" readonly /></label>
-            <label class="pm-field" id="editActionField"><span>Action</span>
-                <select id="editAction">
-                    <option value="Move" id="editActionMoveOption">Move to a different date</option>
-                    <option value="Skip">Skip this occurrence</option>
-                </select>
-            </label>
-            <label class="pm-field" id="editNewDateField"><span>New Date</span><input id="editNewDate" type="date" /></label>
+            <label class="pm-field" id="editNewDateField"><span>Execution Date</span><input id="editNewDate" type="date" /></label>
             @* Reason takes its own full-width row so the textarea can breathe.
                The apply-future checkbox drops onto a dedicated row below it so
                its label never has to fight the textarea for row height. *@
@@ -187,6 +207,7 @@
             <label class="pm-field full pm-field-checkbox" id="editApplyFutureField"><input id="editApplyFuture" type="checkbox" /> <span>Apply to this and all future occurrences</span></label>
         </div>
         <div class="pm-dialog-actions">
+            <button type="button" class="pm-button" id="calEditViewPractice" hidden><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> View Practice</button>
             <button type="button" class="pm-button" id="calEditCancel">Cancel</button>
             <button type="button" class="pm-button primary" id="calEditSubmit">Save Change</button>
         </div>
@@ -198,6 +219,13 @@
         window.pmScreen=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model));
         window.pmApi="@ViewBag.ApiBaseUrl";
         window.pmPermissions=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(permissions));
+        // Task Calendar -- Scheduler Edit Permission (change request
+        // 2026-09-23): same window.pmEmployeeId convention Manage.cshtml /
+        // practice.js already use. pmIsSystemAdmin mirrors the API tier's
+        // own admin bypass (_security.isSystemAdmin) so the UI-side hide
+        // of Edit Schedule matches what the backend will actually allow.
+        window.pmEmployeeId="@(ViewBag.EmployeeId ?? "")";
+        window.pmIsSystemAdmin=@(ViewBag.IsSystemAdmin == true ? "true" : "false");
     </script>
     <link rel="stylesheet" href="~/css/practice-calendar.css" asp-append-version="true" />
     <script src="~/js/practice-calendar.js" asp-append-version="true"></script>

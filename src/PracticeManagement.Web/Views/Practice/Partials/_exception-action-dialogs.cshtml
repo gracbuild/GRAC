@@ -1,0 +1,154 @@
+@*
+    Shared Approve / Reject dialogs for exception requests.
+
+    Extracted verbatim from Views/Practice/Partials/exception-centre.cshtml
+    (change request, 2026-09-22): Exception View's own "Actions" menu
+    must open the *exact same* Approve/Reject dialogs Exception Centre's
+    row menu opens -- same markup, same field ids, same validation --
+    rather than a second copy for Exception View. Both screens now
+    include this one partial and drive it through the shared
+    wwwroot/js/Shared/exception-actions.js module (window.gracExceptionActions),
+    so there is exactly one Approve form and one Reject form in the
+    product, used from both screens.
+
+    Include this partial once on a page, then load
+    wwwroot/js/Shared/exception-actions.js and call
+    window.gracExceptionActions.init({ onChanged: ... }) -- see that
+    file's own header comment for what it drives.
+*@
+
+@* Approve modal *@
+<div class="pm-modal" id="excApproveModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Approve exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-approve aria-label="Close">&times;</button>
+        </header>
+        <form id="excApproveForm" enctype="multipart/form-data">
+            <input type="hidden" id="excApproveId" />
+            <dl class="exc-meta" id="excApproveMeta"></dl>
+
+            @* Migration 257: the "Request details" block that used to sit
+               here -- exception type, owner, justification, risk/impact,
+               linked practice, linked requirement ref -- moved to the
+               Exception Analysis page. Asking the approver to write the
+               requester's case was backwards; the approver judges it.
+
+               The analysis is rendered read-only into #excApproveMeta
+               above, so the decision is made with the case in view. *@
+            <h3 style="margin: 16px 0 8px; font-size: 13px; color: #4a5568; text-transform: uppercase;">Approval</h3>
+            @* Migration 260. The dates arrive pre-filled with what the
+               analyst proposed; changing them is allowed and recorded as
+               its own history row, so the trail below shows who moved the
+               window rather than leaving it buried in the approval note. *@
+            <p class="pm-hint" id="excApproveProposed" hidden></p>
+            <div class="pm-form-grid">
+                <label>
+                    <span>Effective from</span>
+                    <input type="date" id="excApproveEffectiveFrom" />
+                </label>
+                <label>
+                    <span>Effective until (Valid Until)<span class="pm-required">*</span></span>
+                    <input type="date" id="excApproveEffectiveUntil" required />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Approval note<span class="pm-required">*</span></span>
+                    <textarea id="excApproveNote" rows="4" maxlength="5000" required
+                              placeholder="Rationale for approval, conditions, monitoring plan..."></textarea>
+                </label>
+                @* Compensating control removed (257). *@
+                <label class="pm-form-grid-full">
+                    <span>Review frequency <span class="pm-hint">(if applicable)</span></span>
+                    <select id="excApproveReviewFrequency">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                @* Evidence-style capture -- same vocabulary as
+                   practice_instance_evidence. Attachment optional; if
+                   supplied, pick a method and provide the matching
+                   fields. Manual -> file; Automated -> location + locator. *@
+                <label class="pm-form-grid-full">
+                    <span>Approval evidence <span class="pm-hint">(optional)</span></span>
+                    <select id="excApproveMethod">
+                        <option value="">-- none --</option>
+                        <option value="Manual">Manual (upload a file)</option>
+                        <option value="Automated">Automated (link an external record)</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="excApproveEvidenceTypeWrap" hidden>
+                    <span>Evidence type</span>
+                    <select id="excApproveEvidenceType">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="excApproveFileWrap" hidden>
+                    <span>Approval note file<span class="pm-required">*</span></span>
+                    <input type="file" id="excApproveFile" />
+                </label>
+                <label id="excApproveLocationWrap" hidden>
+                    <span>Location<span class="pm-required">*</span></span>
+                    <input type="text" id="excApproveLocation" maxlength="500"
+                           placeholder="e.g. SharePoint / ServiceNow / DocuSign" />
+                </label>
+                <label id="excApproveLocatorWrap" hidden>
+                    <span>Locator<span class="pm-required">*</span></span>
+                    <input type="text" id="excApproveLocator" maxlength="500"
+                           placeholder="e.g. https://... or record id" />
+                </label>
+            </div>
+            @* Migration 260. exception_request_history, shown where the
+               decision is made: the approver can see what was already
+               done to this request before adding to it. *@
+            <h3 style="margin: 16px 0 8px; font-size: 13px; color: #4a5568; text-transform: uppercase;">History</h3>
+            <div class="pm-table-wrap">
+                <table id="excApproveHistoryTable">
+                    <thead>
+                        <tr><th>When</th><th>Action</th><th>By</th><th>Detail</th></tr>
+                    </thead>
+                    <tbody id="excApproveHistoryBody">
+                        <tr><td colspan="4" class="pm-empty-row">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="pm-form-message" id="excApproveMessage" role="status" aria-live="polite"></p>
+            @* Both decisions sit on the approver's own form. Reject was
+               dropped from the row 3-dot menu because rejecting is a
+               judgement made with the request open, not a shortcut from
+               the grid — this button hands off to the Reject modal, which
+               still owns the mandatory reason. *@
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-approve>Cancel</button>
+                <button type="button" class="pm-button danger" id="excApproveRejectBtn">
+                    <i class="fa-solid fa-ban"></i> Reject
+                </button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Approve</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* Reject modal *@
+<div class="pm-modal" id="excRejectModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Reject exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-reject aria-label="Close">&times;</button>
+        </header>
+        <form id="excRejectForm">
+            <input type="hidden" id="excRejectId" />
+            <dl class="exc-meta" id="excRejectMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Rejection reason<span class="pm-required">*</span></span>
+                    <textarea id="excRejectReason" rows="4" maxlength="5000" required
+                              placeholder="Why this exception cannot be granted..."></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="excRejectMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-reject>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-ban"></i> Reject</button>
+            </footer>
+        </form>
+    </div>
+</div>

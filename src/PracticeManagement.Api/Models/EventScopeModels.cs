@@ -20,8 +20,22 @@ public static class EventScopeDimensions
     public const string OrgRole       = "ORG_ROLE";
     public const string AssetCategory = "ASSET_CATEGORY";
 
+    /// <summary>
+    /// Migration 329. An attribute-based population (Location / Department /
+    /// Role / ...) rather than one role or one asset category. Added as a
+    /// third value of the SAME discriminator, not a parallel vocabulary --
+    /// 123 chose a discriminator over one table per scope kind precisely so
+    /// a third kind would not mean a third of everything.
+    /// </summary>
+    public const string Profile       = "PROFILE";
+
     public static bool IsValid(string? value)
-        => value is null or OrgRole or AssetCategory;
+        => value is null or OrgRole or AssetCategory or Profile;
+
+    /// <summary>The three concrete values, for endpoints where omitting the
+    /// dimension is not meaningful.</summary>
+    public static bool IsConcrete(string? value)
+        => value is OrgRole or AssetCategory or Profile;
 }
 
 public static class EventSubjectEntities
@@ -270,10 +284,23 @@ public sealed record EventObligationMappingQuery(
     string  ScopeDimension,
     long?   ScopeRoleId,
     int?    ScopeAssetCategoryId,
-    bool    IncludeUnsubscribed = false);
+    bool    IncludeUnsubscribed = false,
+    // Migration 329/331. Carried alongside the other two scope values
+    // rather than replacing them: all three shapes resolve, and an
+    // organization that never creates a profile is unaffected.
+    long?   ProfileId = null);
 
 public sealed record EventObligationMappingRow(
-    long    ObligationId,
+    // Migration 343. Exactly one of ObligationId / LocalPracticeObligationId /
+    // LocalInstanceObligationId is set -- a catalog obligation has no local
+    // identity, a custom one has no GRAC_New id. ObligationId is nullable for
+    // this reason: a custom-obligation row projects it as NULL, not 0.
+    long?   ObligationId,
+    long?   LocalPracticeObligationId,
+    long?   LocalInstanceObligationId,
+    // "Catalog" | "PracticeLevel" | "InstanceOnly" -- so the client does not
+    // have to infer which of the three identity columns is real.
+    string? ObligationKind,
     string? ObligationLabel,
     string? ObligationText,
     long?   PracticeId,
@@ -304,7 +331,11 @@ public sealed record EventObligationMappingResult(
 
 public sealed record EventObligationApplicabilitySaveRequest(
     long    OrganizationId,
-    long    ObligationId,
+    // Migration 343. Nullable: exactly one of ObligationId /
+    // LocalPracticeObligationId / LocalInstanceObligationId must be set --
+    // validated in the service, mirroring the procedure's own CHECK-backed
+    // validation (THROW 67322).
+    long?   ObligationId,
     long    EventTypeId,
     string  ScopeDimension,
     long?   ScopeRoleId,
@@ -314,7 +345,16 @@ public sealed record EventObligationApplicabilitySaveRequest(
     long?   OwnerRoleId,
     int?    DueDays,
     string? Status,
-    long?   ActorEmployeeId);
+    long?   ActorEmployeeId,
+    // Migration 329/331. Required when ScopeDimension is PROFILE, ignored
+    // otherwise -- the procedure NULLs whichever scope columns the chosen
+    // dimension does not use, so a stale value from a screen that switched
+    // scope cannot be written.
+    long?   ProfileId = null,
+    // Migration 343. The other two obligation identities -- a custom
+    // obligation authored at practice level or instance level, respectively.
+    long?   LocalPracticeObligationId = null,
+    long?   LocalInstanceObligationId = null);
 
 public sealed record EventObligationApplicabilityCommandResult(
     bool Success, long? ApplicabilityId, string? Error = null);
@@ -348,6 +388,86 @@ public sealed record EventObligationCoverageRow(
 
 public sealed record EventObligationCoverageResult(
     IReadOnlyList<EventObligationCoverageRow> Rows);
+
+// =====================================================================
+// Event-driven checklist list + reverse "mapped profiles" lookup
+// (migration 344, sp_event_driven_checklist_list /
+// sp_event_checklist_mapped_profiles_list).
+//
+// A "checklist" here is an obligation+event combination -- the same grain
+// EventObligationMappingRow above collapses to via its own `pick` CTE --
+// not a per-scope decision. This is the Checklists tab on the Event
+// Profiles screen (Practice Instance / Obligation Name / Event columns);
+// the reverse lookup is the "View Mapped Profiles" row action, answering
+// "which profiles will receive this checklist" from actual saved
+// event_obligation_applicability rows, never a hardcoded or UI-only list.
+// =====================================================================
+
+public sealed record EventDrivenChecklistQuery(
+    long    OrganizationId,
+    long?   EventTypeId,
+    string? Search,
+    int     PageNumber = 1,
+    int     PageSize   = 25);
+
+public sealed record EventDrivenChecklistRow(
+    // Exactly one of these three identifies the checklist -- see
+    // EventObligationMappingRow's own note above.
+    long?   ObligationId,
+    long?   LocalPracticeObligationId,
+    long?   LocalInstanceObligationId,
+    string  ObligationKind,
+    string? ObligationName,
+    // Real only for the InstanceOnly kind (227, no practice-level parent);
+    // PracticeInstanceDisplay is the one column a grid can show without
+    // branching on ObligationKind -- see the confirmed design in the
+    // migration 344 / 341 headers: catalog and practice-level rows show
+    // the Practice, only an instance-only custom row has a genuine single
+    // instance behind it.
+    long?   PracticeInstanceId,
+    string? PracticeInstanceCode,
+    string? PracticeInstanceName,
+    long?   PracticeId,
+    string? PracticeCode,
+    string? PracticeName,
+    string? PracticeInstanceDisplay,
+    long    EventTypeId,
+    string? EventTypeCode,
+    string? EventTypeName,
+    // The event's parent in the event_type_master domain/leaf tree (230) --
+    // context only, e.g. distinguishing two domains that happen to share a
+    // leaf name. EventTypeName alone already says Onboarding vs Offboarding.
+    string? EventDomainName);
+
+public sealed record EventDrivenChecklistResult(
+    IReadOnlyList<EventDrivenChecklistRow> Rows,
+    int  TotalRows,
+    int  Page,
+    int  PageSize);
+
+public sealed record EventChecklistMappedProfilesQuery(
+    long    OrganizationId,
+    long    EventTypeId,
+    // Exactly one of these three -- validated in the service, mirroring the
+    // procedure's own THROW 67472.
+    long?   ObligationId,
+    long?   LocalPracticeObligationId,
+    long?   LocalInstanceObligationId);
+
+public sealed record EventChecklistMappedProfileRow(
+    long    ProfileId,
+    string  ProfileCode,
+    string  ProfileName,
+    string? Description,
+    string  Status,
+    string? CriteriaSummary,
+    long?   ApplicabilityId,
+    int?    DueDays,
+    long?   OwnerRoleId,
+    string? OwnerRoleName);
+
+public sealed record EventChecklistMappedProfilesResult(
+    IReadOnlyList<EventChecklistMappedProfileRow> Rows);
 
 // =====================================================================
 // Custom checklist questions per scope + event (migration 136)

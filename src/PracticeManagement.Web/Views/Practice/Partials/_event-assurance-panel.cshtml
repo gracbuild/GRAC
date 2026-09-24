@@ -27,9 +27,15 @@
         <option value="EMPLOYEE">People</option>
         <option value="ASSET">Assets</option>
     </select>
-    <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;">
-        <input type="checkbox" id="eaOverdueOnly" /> Overdue only
-    </label>
+    @* A <select> here, not a checkbox: .pm-toolbar input has flex:1 and
+       min-width:220px (sized for the search box), and a bare checkbox
+       <input> picked that up too, forcing it wide and wrapping this
+       toolbar onto a second line. .pm-toolbar select has no such rule,
+       so this sits inline with the other filters on one row. *@
+    <select id="eaOverdueOnly">
+        <option value="">All</option>
+        <option value="true">Overdue only</option>
+    </select>
     <button class="pm-button primary" id="eaRaiseBtn" type="button"><i class="fa-solid fa-bolt"></i> Raise Event</button>
     <button class="pm-button" id="eaGapsBtn" type="button"><i class="fa-solid fa-triangle-exclamation"></i> Coverage Gaps</button>
 </div>
@@ -184,7 +190,7 @@
         body.innerHTML = '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>';
 
         const subject = document.getElementById('eaSubjectFilter').value;
-        const overdue = document.getElementById('eaOverdueOnly').checked;
+        const overdue = document.getElementById('eaOverdueOnly').value === 'true';
         let url = U('/practice/api/workflow/scope/inbox') + '?organizationId=' + encodeURIComponent(org);
         if (subject) url += '&subjectEntity=' + encodeURIComponent(subject);
         if (overdue) url += '&overdueOnly=true';
@@ -230,7 +236,7 @@
 
     function dueCell(row) {
         if (!row.dueDate) return '<span style="color:#94a3b8;">-</span>';
-        const d = String(row.dueDate).substring(0, 10);
+        const d = (typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(row.dueDate)||''):String(row.dueDate).substring(0,10));
         if (!row.isOverdue) return esc(d);
         return '<span style="color:#b91c1c; font-weight:600;">' + esc(d) + ' (+' + (row.daysOverdue || 0) + 'd)</span>';
     }
@@ -337,7 +343,7 @@
         document.getElementById('eaDrawerTitle').textContent = h.checklistName || 'Checklist';
         document.getElementById('eaDrawerMeta').textContent =
             [h.eventName, h.subjectLabel, h.scopeRoleName || h.scopeAssetCategoryName,
-             h.dueDate ? 'due ' + String(h.dueDate).substring(0, 10) : null].filter(Boolean).join('  ·  ');
+             h.dueDate ? 'due ' + (typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(h.dueDate)||''):String(h.dueDate).substring(0,10)) : null].filter(Boolean).join('  ·  ');
 
         renderItems();
         const dlg = document.getElementById('eaItemDialog');
@@ -410,7 +416,11 @@
 
         let na = item.naJustification || null;
         if (status === 'NotApplicable' && item.itemOrigin === 'OBLIGATION' && !na) {
-            na = window.prompt('Why is this obligation not applicable for this subject?\nAn auditor will read this.', '');
+            // gracUi.prompt -- the project dialog, not the browser's
+            // unstyled box. Same contract: string, or null on cancel.
+            na = await window.gracUi.prompt(
+                'Why is this obligation not applicable for this subject? An auditor will read this.',
+                { title: 'Not applicable', inputLabel: 'Justification', confirmText: 'Save justification' });
             if (na === null || !na.trim()) {
                 msg('eaItemMessage', 'Not Applicable needs a justification; nothing was saved.', 'error');
                 renderItems();
@@ -557,13 +567,13 @@
                     ? [ '<td>' + decisionBadge('Excluded') + '</td>', '<td>-</td>',
                         '<td>' + esc(t.eventCode) + '</td>', '<td>' + esc(scope) + '</td>',
                         '<td>' + esc(t.reasonCode) + ' &times;' + t.occurrenceCount + '</td>',
-                        '<td>' + esc(String(t.lastSeenDt).substring(0, 10)) + '</td>' ].join('')
+                        '<td>' + esc((typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(t.lastSeenDt)||''):String(t.lastSeenDt).substring(0,10))) + '</td>' ].join('')
                     : [ '<td>' + decisionBadge(t.decision) + '</td>',
                         '<td>' + esc(t.obligationLabel || t.checklistName || '-') + '</td>',
                         '<td>' + esc(t.eventCode) + '</td>', '<td>' + esc(scope) + '</td>',
                         '<td>' + esc(t.reasonCode)
                             + (t.reasonDetail ? '<br><span style="font-size:11px; color:#94a3b8;">' + esc(t.reasonDetail) + '</span>' : '') + '</td>',
-                        '<td>' + esc(String(t.enteredDt).substring(0, 10)) + '</td>' ].join('');
+                        '<td>' + esc((typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(t.enteredDt)||''):String(t.enteredDt).substring(0,10))) + '</td>' ].join('');
                 body.appendChild(tr);
             }
         } catch (err) {

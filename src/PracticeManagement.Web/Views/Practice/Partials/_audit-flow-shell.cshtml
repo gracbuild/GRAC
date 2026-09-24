@@ -1,0 +1,422 @@
+@*
+    Audit Management flow shell (migration 276 / 278) -- Phase 2.
+
+    The tab / stepper chrome shared by:
+      * org-audit-definition      (Audit Details -> Scope -> Question Sets)
+      * org-audit-configuration   (Evidence -> Workflow -> Scoring ->
+                                   Trigger -> Scope Resolution)
+
+    REUSE, NOT REIMPLEMENTATION
+      Each panel renders the EXISTING screen partial untouched. There is
+      still exactly one implementation of Scope Builder, Evidence Config
+      and so on; this file only adds navigation and shared context around
+      them. Every existing behaviour and API call is preserved verbatim.
+
+    WHY IT IS SAFE TO CO-HOST THEM
+      * Element ids do not collide -- each partial uses its own prefix
+        (oaDef / oaScope / qs / oaEv / oaWf / oaSc / oaTg / oaRs).
+      * Partials/_workflow-common self-guards, so it attaches once.
+      * Every hosted partial boots with the same DOMContentLoaded +
+        readyState pair, which fires its boot exactly once.
+      * The partials reference @@Model only in their page heading, hidden
+        by `.oa-flow-panel .pm-page-heading` in practice-management.css.
+
+    PHASE 2 -- SHARED AUDIT CONTEXT
+      One Organization + Audit picker at the top drives every tab. The six
+      definition-scoped screens each expose a uniform pair of selects,
+      `oa<Prefix>PickOrg` / `oa<Prefix>PickDef`, and already reload on
+      their `change` event. So the context bar drives them by setting the
+      value and dispatching `change` -- no edits to those six files. The
+      Question Sets screen is organization-scoped and only takes the org.
+
+      Applying context waits for the target option to exist, because the
+      hosted partials populate their own selects asynchronously during
+      boot. Each apply retries on a short interval and gives up quietly.
+
+    PHASE 2 -- STATUS CHIPS
+      GET /practice/api/org-assurance/definitions/{id}/setup-status
+      returns one row per step keyed by the SAME step keys used below, so
+      a row maps straight onto a tab. Statuses: Completed / InProgress /
+      NotConfigured. Chips render only once an audit is selected -- with
+      no audit there is nothing to be complete about.
+
+    Deep link: ?step=<step key> opens that tab, ?definitionId=<id>
+    preselects the audit (the same parameter the hosted screens accept).
+*@
+@model PracticeManagement.Web.Models.AuditFlowShell
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Screen.Group / @Model.Screen.Title</p>
+        <h1>@Model.Screen.Title</h1>
+        <p>@Model.Screen.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel oa-flow-shell" id="@Model.ShellId" data-flow-shell="@Model.Screen.Key">
+
+    @* ---------- Shared audit context ---------- *@
+    <div class="oa-flow-context" data-flow-context>
+        <label>
+            <span>Organization</span>
+            <select data-flow-org><option value="">Loading organizations...</option></select>
+        </label>
+        <label>
+            <span>Audit</span>
+            <select data-flow-def><option value="">Select an organization first</option></select>
+        </label>
+        <span class="oa-flow-ctx-state" data-flow-ctx-state></span>
+    </div>
+
+    <div class="pm-tabs oa-flow-steps" role="tablist" aria-label="@Model.Screen.Title steps">
+        @for (var i = 0; i < Model.Steps.Length; i++)
+        {
+            var step = Model.Steps[i];
+            <button type="button"
+                    role="tab"
+                    class="@(i == 0 ? "active" : "")"
+                    id="@(Model.ShellId)-tab-@step.Key"
+                    data-flow-tab="@step.Key"
+                    aria-selected="@(i == 0 ? "true" : "false")"
+                    aria-controls="@(Model.ShellId)-panel-@step.Key">
+                <span class="oa-step-no">@(i + 1)</span>@step.Title<span class="oa-step-chip" data-step-chip="@step.Key" hidden></span>
+            </button>
+        }
+    </div>
+
+    <p class="oa-flow-caption">@Model.Steps[0].Caption</p>
+
+    @for (var i = 0; i < Model.Steps.Length; i++)
+    {
+        var step = Model.Steps[i];
+        <div class="pm-setup-tab-panel oa-flow-panel @(i == 0 ? "active" : "")"
+             role="tabpanel"
+             id="@(Model.ShellId)-panel-@step.Key"
+             data-flow-panel="@step.Key"
+             aria-labelledby="@(Model.ShellId)-tab-@step.Key">
+            @if (!string.IsNullOrWhiteSpace(step.HeaderPartial))
+            {
+                <partial name="@step.HeaderPartial" model="Model.Screen" />
+            }
+            <partial name="@step.PartialName" model="Model.Screen" />
+        </div>
+    }
+
+    <div class="oa-flow-nav">
+        <button type="button" class="pm-button" data-flow-prev>
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Previous
+        </button>
+        <span class="oa-flow-position" data-flow-position></span>
+        <button type="button" class="pm-button primary" data-flow-next>
+            Next <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+        </button>
+    </div>
+</section>
+
+<script>
+(function () {
+    'use strict';
+
+    const shell = document.getElementById(@Html.Raw(Json.Serialize(Model.ShellId)));
+    if (!shell) return;
+
+    const wf  = window.__wfCommon;
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const captions = @Html.Raw(Json.Serialize(
+        Model.Steps.ToDictionary(s => s.Key, s => s.Caption)));
+    const order = @Html.Raw(Json.Serialize(Model.Steps.Select(s => s.Key).ToArray()));
+
+    // Definition-scoped screens expose oa<Prefix>PickOrg / oa<Prefix>PickDef.
+    // Question Sets is organization-scoped, so it takes the org only.
+    const SCOPED = {
+        'scope'            : 'oaScope',
+        'evidence'         : 'oaEv',
+        'workflow'         : 'oaWf',
+        'scoring'          : 'oaSc',
+        'trigger'          : 'oaTg',
+        'scope-resolution' : 'oaRs'
+    };
+    const ORG_ONLY = { 'questions': 'qsFilterOrganization' };
+
+    const tabs     = Array.prototype.slice.call(shell.querySelectorAll('[data-flow-tab]'));
+    const panels   = Array.prototype.slice.call(shell.querySelectorAll('[data-flow-panel]'));
+    const caption  = shell.querySelector('.oa-flow-caption');
+    const position = shell.querySelector('[data-flow-position]');
+    const prevBtn  = shell.querySelector('[data-flow-prev]');
+    const nextBtn  = shell.querySelector('[data-flow-next]');
+    const orgSel   = shell.querySelector('[data-flow-org]');
+    const defSel   = shell.querySelector('[data-flow-def]');
+    const ctxState = shell.querySelector('[data-flow-ctx-state]');
+
+    const state = { orgId: '', definitionId: '' };
+
+    // -----------------------------------------------------------------
+    // Tab navigation. Every step stays reachable at all times -- a
+    // completed step is never disabled, and neither is one ahead.
+    // -----------------------------------------------------------------
+    function currentKey() {
+        const active = shell.querySelector('[data-flow-tab].active');
+        return active ? active.getAttribute('data-flow-tab') : order[0];
+    }
+
+    function show(key, pushState) {
+        const index = order.indexOf(key);
+        if (index < 0) return;
+
+        tabs.forEach(function (t) {
+            const on = t.getAttribute('data-flow-tab') === key;
+            t.classList.toggle('active', on);
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        panels.forEach(function (p) {
+            p.classList.toggle('active', p.getAttribute('data-flow-panel') === key);
+        });
+
+        if (caption)  caption.textContent  = captions[key] || '';
+        if (position) position.textContent = 'Step ' + (index + 1) + ' of ' + order.length;
+        if (prevBtn)  prevBtn.disabled = index === 0;
+        if (nextBtn)  nextBtn.disabled = index === order.length - 1;
+
+        // The newly shown panel may have finished booting after the last
+        // context change, so re-apply to it.
+        applyContextTo(key);
+
+        if (pushState) writeUrl({ step: key });
+    }
+
+    tabs.forEach(function (t) {
+        t.addEventListener('click', function () { show(t.getAttribute('data-flow-tab'), true); });
+    });
+    if (prevBtn) prevBtn.addEventListener('click', function () {
+        const i = order.indexOf(currentKey());
+        if (i > 0) show(order[i - 1], true);
+    });
+    if (nextBtn) nextBtn.addEventListener('click', function () {
+        const i = order.indexOf(currentKey());
+        if (i >= 0 && i < order.length - 1) show(order[i + 1], true);
+    });
+
+    function writeUrl(patch) {
+        try {
+            const url = new URL(window.location.href);
+            Object.keys(patch).forEach(function (k) {
+                if (patch[k]) url.searchParams.set(k, patch[k]);
+                else url.searchParams.delete(k);
+            });
+            history.replaceState(null, '', url.toString());
+        } catch (_) { /* history is a convenience, never a requirement */ }
+    }
+
+    // -----------------------------------------------------------------
+    // Shared context -> hosted screens.
+    //
+    // A hosted partial fills its own selects during boot, so the option
+    // we want may not exist yet. Retry on a short interval, bounded, and
+    // give up quietly rather than spinning.
+    // -----------------------------------------------------------------
+    function setSelect(id, value, attempts) {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        if (String(sel.value) === String(value)) return;
+
+        const has = Array.prototype.some.call(sel.options, function (o) {
+            return String(o.value) === String(value);
+        });
+        if (has) {
+            sel.value = String(value);
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
+        const left = (attempts === undefined ? 20 : attempts) - 1;
+        if (left > 0) setTimeout(function () { setSelect(id, value, left); }, 150);
+    }
+
+    function applyContextTo(stepKey) {
+        const prefix = SCOPED[stepKey];
+        if (prefix) {
+            if (state.orgId)        setSelect(prefix + 'PickOrg', state.orgId);
+            if (state.definitionId) setSelect(prefix + 'PickDef', state.definitionId);
+            return;
+        }
+        const orgOnly = ORG_ONLY[stepKey];
+        if (orgOnly && state.orgId) setSelect(orgOnly, state.orgId);
+    }
+
+    function applyContextEverywhere() {
+        order.forEach(applyContextTo);
+        document.dispatchEvent(new CustomEvent('audit-context-change', {
+            detail: { orgId: state.orgId, definitionId: state.definitionId }
+        }));
+    }
+
+    // -----------------------------------------------------------------
+    // Status chips
+    // -----------------------------------------------------------------
+    const CHIP = {
+        Completed     : { text: 'Completed',      cls: 'is-complete' },
+        InProgress    : { text: 'In progress',    cls: 'is-partial'  },
+        NotConfigured : { text: 'Not configured', cls: 'is-empty'    }
+    };
+
+    function clearChips() {
+        shell.querySelectorAll('[data-step-chip]').forEach(function (c) {
+            c.hidden = true;
+            c.textContent = '';
+            c.className = 'oa-step-chip';
+        });
+    }
+
+    async function refreshStatus() {
+        if (!state.orgId || !state.definitionId) { clearChips(); return; }
+        try {
+            const r = await fetch(
+                U(API + '/definitions/' + encodeURIComponent(state.definitionId)
+                  + '/setup-status?organizationId=' + encodeURIComponent(state.orgId)),
+                { credentials: 'same-origin' });
+            if (!r.ok) { clearChips(); return; }
+            const body  = await r.json();
+            const steps = (body && (body.steps || body.Steps)) || [];
+
+            clearChips();
+            steps.forEach(function (row) {
+                const key    = row.stepKey || row.StepKey;
+                const status = row.status  || row.Status;
+                const chip   = shell.querySelector('[data-step-chip="' + key + '"]');
+                if (!chip || !CHIP[status]) return;
+                chip.hidden = false;
+                chip.textContent = CHIP[status].text;
+                chip.className = 'oa-step-chip ' + CHIP[status].cls;
+            });
+        } catch (_) {
+            // A status roll-up is decoration. If it fails the flow still
+            // works, so fail silently rather than blocking the page.
+            clearChips();
+        }
+    }
+
+    // Hosted screens save through their own code, so the shell cannot
+    // know when something changed. Refresh when the tab changes and when
+    // the window regains focus -- cheap, and catches the common case of
+    // saving on one tab then moving to the next.
+    tabs.forEach(function (t) { t.addEventListener('click', refreshStatus); });
+    window.addEventListener('focus', refreshStatus);
+    document.addEventListener('audit-setup-changed', refreshStatus);
+
+    // -----------------------------------------------------------------
+    // Context bar wiring
+    // -----------------------------------------------------------------
+    async function loadDefinitions(orgId) {
+        defSel.innerHTML = '<option value="">Loading audits...</option>';
+        if (!orgId) { defSel.innerHTML = '<option value="">Select an organization first</option>'; return; }
+        try {
+            const r = await fetch(
+                U(API + '/definitions?organizationId=' + encodeURIComponent(orgId) + '&page=1&pageSize=200'),
+                { credentials: 'same-origin' });
+            const body = r.ok ? await r.json() : null;
+            // Same envelope the hosted screens read: payload.rows / .Rows,
+            // with definitionId / definitionCode / definitionName /
+            // currentStatusName. Kept identical so the context bar and the
+            // per-screen pickers can never disagree about a definition.
+            const rows = (body && (body.rows || body.Rows)) || [];
+            defSel.innerHTML = rows.length
+                ? '<option value="">Select an audit...</option>'
+                : '<option value="">No audits in this organization</option>';
+            rows.forEach(function (row) {
+                const id   = row.definitionId     || row.DefinitionId;
+                const code = row.definitionCode   || row.DefinitionCode || '';
+                const name = row.definitionName   || row.DefinitionName || '';
+                const st   = row.currentStatusName || row.CurrentStatusName || '';
+                if (id == null) return;
+                const opt = document.createElement('option');
+                opt.value = String(id);
+                opt.textContent = name + (code ? ' (' + code + ')' : '') + (st ? '  -  ' + st : '');
+                defSel.appendChild(opt);
+            });
+        } catch (_) {
+            defSel.innerHTML = '<option value="">Could not load audits</option>';
+        }
+    }
+
+    function setCtxState() {
+        if (!ctxState) return;
+        ctxState.textContent = state.definitionId
+            ? 'This audit is applied to every step below.'
+            : 'Pick an audit to carry it across all steps.';
+    }
+
+    orgSel.addEventListener('change', async function () {
+        state.orgId = orgSel.value;
+        state.definitionId = '';
+        writeUrl({ definitionId: '' });
+        await loadDefinitions(state.orgId);
+        applyContextEverywhere();
+        setCtxState();
+        clearChips();
+    });
+
+    defSel.addEventListener('change', function () {
+        state.definitionId = defSel.value;
+        writeUrl({ definitionId: state.definitionId });
+        applyContextEverywhere();
+        setCtxState();
+        refreshStatus();
+    });
+
+    // -----------------------------------------------------------------
+    // Boot
+    // -----------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    async function boot() {
+        // Step first, so the right panel is visible while context loads.
+        let initialStep = order[0];
+        let requestedDef = '';
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const s = q.get('step');
+            if (s && order.indexOf(s) >= 0) initialStep = s;
+            requestedDef = q.get('definitionId') || '';
+        } catch (_) { /* ignore */ }
+        show(initialStep, false);
+        setCtxState();
+
+        if (!wf) return;   // context bar needs the shared org loader
+        const orgs = await wf.loadOrgs();
+        orgSel.innerHTML = '<option value="">Select an organization...</option>';
+        orgs.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
+            orgSel.appendChild(opt);
+        });
+
+        // A single accessible organization is not a choice -- preselect it.
+        if (orgs.length === 1) {
+            orgSel.value = orgs[0].value;
+            state.orgId = orgs[0].value;
+            await loadDefinitions(state.orgId);
+        }
+
+        if (requestedDef) {
+            // The audit may belong to an organization other than the one
+            // preselected; try it, and if it is not in the list leave the
+            // picker empty rather than guessing.
+            const present = Array.prototype.some.call(defSel.options, function (o) {
+                return String(o.value) === String(requestedDef);
+            });
+            if (present) {
+                defSel.value = String(requestedDef);
+                state.definitionId = String(requestedDef);
+            }
+        }
+
+        applyContextEverywhere();
+        setCtxState();
+        refreshStatus();
+    }
+})();
+</script>

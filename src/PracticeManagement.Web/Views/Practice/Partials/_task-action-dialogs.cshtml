@@ -1,0 +1,277 @@
+@*
+    Shared Task action dialogs -- Edit / Complete / Close / Add Evidence.
+
+    Paired with wwwroot/js/Shared/task-actions.js (window.gracTaskActions),
+    which is the ONLY code that opens, fills or submits these. Include
+    this partial once on any page that wants those actions (Task Center's
+    tasks.cshtml, Task View's task-view.cshtml), load task-actions.js,
+    and call window.gracTaskActions.init({...}) once during that page's
+    own init.
+
+    Moved out of tasks.cshtml unchanged (change request: Task View's own
+    "Actions" menu must reuse the exact same forms/modals Task Center's
+    3-dot menu opens, not a second copy) so there is one markup source
+    for every page that offers these actions.
+
+    "Add Child Task" / "New Task" is NOT here -- that already had its own
+    shared dialog before this change: Partials/_task-form-dialog.cshtml +
+    Shared/task-form.js (window.gracTaskForm).
+*@
+@*
+    Task View / Edit -- ONE dialog, two modes.
+
+    View is the read-only representation of the task; Edit modifies it;
+    Complete and Close are workflow actions with their own confirmations
+    below. Keeping View and Edit in one dialog rather than two screens is
+    deliberate: the reader who decides to edit is looking at the fields
+    they want to change, and a second window would make them find their
+    place again.
+
+    The Edit button sits top-right, next to the close control, which is
+    where a reader looks after finishing the page.
+*@
+<dialog id="taskDetailDialog" style="border:none; border-radius:8px; padding:0; max-width:980px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    @* The padding lives in CSS, not inline: edit mode needs to tighten it,
+       and an inline style beats any selector. Same values as before for
+       the read-only view. *@
+    <div class="tdd-body">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <h2 id="taskDetailTitle" style="margin:0; font-size:17px;">Task</h2>
+            <div style="display:flex; align-items:center; gap:8px; flex:0 0 auto;">
+                @* Shown in view mode only; hidden while editing, because
+                   an Edit button on an edit form is a dead control. *@
+                <button type="button" id="taskDetailEditBtn" class="pm-button" hidden>
+                    <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+                </button>
+                <button type="button" id="taskDetailClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer; line-height:1;">&times;</button>
+            </div>
+        </div>
+        <div id="taskDetailBody"></div>
+    </div>
+</dialog>
+
+<style>
+    /* Task edit form (269, carried over unchanged). Scoped to
+       #taskEditForm, which exists only while the dialog is in edit mode,
+       so none of this can reach the read-only view or any other form on
+       the page. */
+
+    /* WIDER ONLY WHILE EDITING.
+       The form carries three columns of controls where the read-only view
+       carries prose, so it needs the room -- but the View keeps the width
+       it has always had. setDetailMode() toggles the class. */
+    #taskDetailDialog.is-editing { max-width: 1180px; }
+
+    /* Moved off the element's inline style so edit mode can override it —
+       these are the read-only view's original values, unchanged. */
+    #taskDetailDialog .tdd-body { margin: 0; padding: 20px 24px; max-height: 82vh; overflow: auto; }
+    /* Tighter chrome in edit mode: the padding that frames a page of
+       prose is wasted around a form. */
+    #taskDetailDialog.is-editing .tdd-body { padding: 16px 20px; max-height: 88vh; }
+
+    #taskEditForm label { display: block; min-width: 0; }
+
+    /* Three columns. Two left the four short controls stacked over four
+       rows with a hint under each, which is what produced the scrollbar. */
+    #taskEditForm .tef-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px 14px;
+        align-items: start;
+    }
+    #taskEditForm .tef-span2 { grid-column: span 2; }
+
+    #taskEditForm .tef-check { display: flex; align-items: flex-start; gap: 8px; }
+    #taskEditForm .tef-check input { margin-top: 2px; flex: 0 0 auto; }
+    #taskEditForm .tef-check .tef-h { margin-top: 0; }
+
+    #taskEditForm .tef-l {
+        display: block; font-size: 12px; font-weight: 600;
+        color: #475569; margin-bottom: 3px;
+    }
+    #taskEditForm .tef-r { color: #dc2626; font-style: normal; margin-left: 2px; }
+    #taskEditForm .tef-h {
+        display: block; font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.3;
+    }
+
+    /* Control size is NOT reduced to make things fit -- padding and font
+       size are the same as every other form in the product. The height
+       came out of the column count and the spacing. */
+    #taskEditForm input[type="text"],
+    #taskEditForm input[type="date"],
+    #taskEditForm select,
+    #taskEditForm textarea {
+        width: 100%; padding: 6px 8px; border: 1px solid #cbd5e1;
+        border-radius: 4px; font: inherit; font-size: 13px;
+        color: #0f172a; background: #fff;
+    }
+    /* Sized here rather than with a rows attribute so the two textareas
+       stay equal and the short-viewport rule below can shrink them. */
+    #taskEditForm textarea { resize: vertical; height: 76px; }
+
+    /* A disabled control here means a governed field the rules do not let
+       this task change -- the hint underneath always says which rule. */
+    #taskEditForm input:disabled,
+    #taskEditForm select:disabled { background: #f1f5f9; color: #64748b; }
+
+    /* The action row stays put, so Save and Cancel are reachable even on
+       a viewport short enough that the fields above have to scroll. */
+    #taskEditForm .tef-actions {
+        position: sticky; bottom: 0; background: #fff;
+        display: flex; justify-content: flex-end; gap: 8px;
+        margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0;
+    }
+
+    /* Two columns on a narrower window, one on a small screen. Below each
+       breakpoint the extra column cramps rather than helps. */
+    @@media (max-width: 1100px) {
+        #taskEditForm .tef-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 760px) {
+        #taskEditForm .tef-grid { grid-template-columns: minmax(0, 1fr); }
+        #taskEditForm .tef-span2 { grid-column: span 1; }
+    }
+    /* On a short viewport the textareas give up height first -- they are
+       the only controls with room to spare. */
+    @@media (max-height: 800px) {
+        #taskEditForm textarea { height: 58px; }
+        #taskEditForm .tef-grid { gap: 8px 14px; }
+    }
+</style>
+
+@*
+    Complete Task — a workflow action, not a field.
+
+    sp_task_complete enforces the BRD §12 mandatory-child gate, stamps
+    completed_by / completed_dt, and emits ChildCompleted plus
+    ParentEligibleForCompletion on the parent. None of that is what
+    "set status = Completed" would do, which is why this is not a value
+    in the Edit form's status dropdown.
+
+    Small and confirming, per the requirement: this is a decision, not
+    data entry.
+*@
+<dialog id="taskCompleteDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="taskCompleteForm" method="dialog" style="margin:0; padding:18px 20px;">
+        <h2 style="margin:0 0 10px; font-size:16px;">Complete task</h2>
+        <p id="taskCompleteSubject" style="margin:0 0 10px; font-size:13px; color:#334155;"></p>
+        <div id="taskCompleteGate" style="display:none; font-size:12px; border-radius:5px; padding:8px 10px; margin-bottom:10px;"></div>
+
+        @* Evidence, as part of the completion workflow.
+           Shown so the completer can see what is already attached, with
+           the option to add more before confirming. NOT required: no
+           per-task evidence-required flag exists (evidence_required lives
+           on workflow_checklist_item, not practice_task) and
+           sp_task_completion_eligibility does not consult evidence, so
+           blocking completion on a file would be a rule this product does
+           not have. *@
+        <div style="margin-bottom:10px;">
+            <div style="font-size:12px; font-weight:600; color:#475569; margin-bottom:4px;">Evidence</div>
+            <div id="taskCompleteEvidence"></div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+                <input type="file" id="taskCompleteFile" style="font-size:12px; flex:1 1 auto; min-width:0;" />
+                <button type="button" class="pm-button" id="taskCompleteAttach" style="padding:3px 10px; font-size:12px;">
+                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i> Attach
+                </button>
+            </div>
+            <span style="display:block; font-size:11px; color:#64748b; margin-top:3px;">
+                Optional. Attaching is immediate and append-only &mdash; evidence is never
+                overwritten or deleted, so a newer file is added alongside the old one.
+            </span>
+        </div>
+
+        <label style="display:block;">
+            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">Completion remark</span>
+            <textarea id="taskCompleteRemark" rows="3" maxlength="4000"
+                      style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:13px;"
+                      placeholder="What was done? Optional, but it is what the audit trail will carry."></textarea>
+        </label>
+        <p id="taskCompleteMsg" style="margin:8px 0 0; font-size:12px; color:#b91c1c;"></p>
+        <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+            <button type="button" class="pm-button" data-close-task-complete>Cancel</button>
+            <button type="submit" class="pm-button primary">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Complete task
+            </button>
+        </footer>
+    </form>
+</dialog>
+
+@*
+    Close Task — shutting a task WITHOUT completing it.
+
+    sp_task_close carries no mandatory-child gate and writes no
+    completion record. It is the "superseded / duplicated / no longer
+    relevant" path, and the reason is required here because a closure
+    with no completion needs one to be readable later.
+*@
+<dialog id="taskCloseDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="taskCloseForm" method="dialog" style="margin:0; padding:18px 20px;">
+        <h2 style="margin:0 0 10px; font-size:16px;">Close task</h2>
+        <p id="taskCloseSubject" style="margin:0 0 10px; font-size:13px; color:#334155;"></p>
+        <div id="taskCloseWarn" style="display:none; font-size:12px; border-radius:5px; padding:8px 10px; margin-bottom:10px;
+                                      background:#fffaf0; border:1px solid #fbd38d; color:#7b341e;"></div>
+        <label style="display:block;">
+            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">
+                Reason<span style="color:#dc2626;">*</span>
+            </span>
+            <textarea id="taskCloseReason" rows="3" maxlength="1000" required
+                      style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:13px;"
+                      placeholder="Why is this being closed without completing it?"></textarea>
+        </label>
+        <p id="taskCloseMsg" style="margin:8px 0 0; font-size:12px; color:#b91c1c;"></p>
+        <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+            <button type="button" class="pm-button" data-close-task-close>Cancel</button>
+            <button type="submit" class="pm-button primary">
+                <i class="fa-solid fa-lock" aria-hidden="true"></i> Close task
+            </button>
+        </footer>
+    </form>
+</dialog>
+
+@*
+    Add Evidence — the pre-completion path.
+
+    Evidence often has to be attached BEFORE completion, for review or
+    verification, so upload cannot live only inside Complete Task. It is
+    its own small action, reachable from either page's action menu at
+    any point while the task is open.
+
+    It is not part of the Edit form either: Edit is an all-or-nothing
+    transactional save of task fields, while an upload is multipart,
+    immediate and append-only. A validation failure elsewhere in that form
+    would roll back the fields and leave the file — so they stay separate.
+
+    Append-only is deliberate. sp_task_attachment_add is the only writer;
+    there is no delete and no replace, because evidence you can quietly
+    remove is not evidence. Attaching a newer file adds it alongside, and
+    both keep their own uploader and timestamp.
+*@
+<dialog id="taskEvidenceDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="taskEvidenceForm" method="dialog" style="margin:0; padding:18px 20px;">
+        <h2 style="margin:0 0 10px; font-size:16px;">Add evidence</h2>
+        <p id="taskEvidenceSubject" style="margin:0 0 10px; font-size:13px; color:#334155;"></p>
+
+        <div id="taskEvidenceExisting" style="margin-bottom:10px;"></div>
+
+        <label style="display:block; margin-bottom:8px;">
+            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">
+                File<span style="color:#dc2626;">*</span>
+            </span>
+            <input type="file" id="taskEvidenceFile" required style="font-size:12px; width:100%;" />
+        </label>
+        <label style="display:block;">
+            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">Description</span>
+            <input type="text" id="taskEvidenceDesc" maxlength="1000"
+                   style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:13px;"
+                   placeholder="What does this file show? Recorded on the task's activity feed." />
+        </label>
+
+        <p id="taskEvidenceMsg" style="margin:8px 0 0; font-size:12px;"></p>
+        <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+            <button type="button" class="pm-button" data-close-task-evidence>Cancel</button>
+            <button type="submit" class="pm-button primary">
+                <i class="fa-solid fa-paperclip" aria-hidden="true"></i> Attach evidence
+            </button>
+        </footer>
+    </form>
+</dialog>

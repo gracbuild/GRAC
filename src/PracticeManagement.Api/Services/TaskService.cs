@@ -45,6 +45,8 @@ public interface ITaskService
 
     // ---- Task Centre v2 (192-196) -----------------------------------
     Task<TaskCountsResult> CountsAsync(long? organizationId, CancellationToken cancellationToken);
+    // Migration 256 -- per-source counts for the Source filter.
+    Task<TaskSourceCountsResult> SourceCountsAsync(long? organizationId, CancellationToken cancellationToken);
     Task<TaskDetailResult?> GetAsync(long taskId, CancellationToken cancellationToken);
     Task<TaskCommandResult> ChangePriorityAsync(TaskPriorityChangeRequest request, CancellationToken cancellationToken);
     Task<TaskCommandResult> RequestSlaExtensionAsync(TaskSlaExtensionRequest request, CancellationToken cancellationToken);
@@ -58,6 +60,14 @@ public interface ITaskService
     Task<IReadOnlyList<TaskSourceTaskRow>> SourceTasksAsync(string sourceTypeCode, long sourceRecordId, long? organizationId, CancellationToken cancellationToken);
     Task<TaskCommandResult> AddAttachmentAsync(long taskId, string fileName, string? contentType, byte[] fileData, string? evidenceDescription, long? uploadedByEmployeeId, CancellationToken cancellationToken);
     Task<TaskAttachmentContent?> GetAttachmentAsync(long taskAttachmentId, CancellationToken cancellationToken);
+
+    // ---- Task edit (269) --------------------------------------------
+    // The single update path. The four single-field commands above stay
+    // on this interface: they are still the right call for one governed
+    // act from elsewhere in the product, and UpdateAsync composes the
+    // same procedures rather than re-deciding anything.
+    Task<TaskEditOptions?> GetEditOptionsAsync(long taskId, CancellationToken cancellationToken);
+    Task<TaskUpdateResult> UpdateAsync(TaskUpdateRequest request, CancellationToken cancellationToken);
 }
 
 public sealed class TaskService(IConfiguration configuration, ILogger<TaskService> logger) : ITaskService
@@ -305,6 +315,52 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             CustomCount:          GetLong(reader, cols, "CustomCount") ?? 0,
             BreachedCount:        GetLong(reader, cols, "BreachedCount") ?? 0,
             PendingApprovalCount: GetLong(reader, cols, "PendingApprovalCount") ?? 0);
+    }
+
+    // Migration 256 -- Source filter counts, the Task Centre twin of
+    // CustomGapService.ListGapCentreSourcesAsync. Non-fatal by contract:
+    // an empty list means "no counts available" and the screen falls back
+    // to unlabelled options rather than failing the page.
+    public async Task<TaskSourceCountsResult> SourceCountsAsync(
+        long? organizationId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_centre_source_counts";
+            AddParam(command, "@organization_id", DbType.Int64, (object?)organizationId ?? DBNull.Value);
+
+            var sources = new List<TaskSourceCount>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                sources.Add(new TaskSourceCount(
+                    reader["SourceTypeCode"]?.ToString() ?? "",
+                    Convert.ToInt32(reader["DisplayOrder"]),
+                    Convert.ToInt64(reader["TaskCount"])));
+
+            long total = 0, unsourced = 0;
+            if (await reader.NextResultAsync(cancellationToken)
+                && await reader.ReadAsync(cancellationToken))
+            {
+                total     = Convert.ToInt64(reader["TotalCount"]);
+                unsourced = Convert.ToInt64(reader["UnsourcedCount"]);
+            }
+            return new TaskSourceCountsResult(sources, total, unsourced);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "sp_task_centre_source_counts failed for organization {OrgId}.", organizationId);
+            // 2812 = "Could not find stored procedure" -- name the cause
+            // rather than leaving a silent empty dropdown, the same way
+            // 255's Gap Centre read does.
+            var message = ex.Number == 2812
+                ? "Task Centre source-count procedure is missing. Run database migration "
+                  + "256_task_centre_source_counts.sql."
+                : ex.Message;
+            return new TaskSourceCountsResult([], 0, 0, message);
+        }
     }
 
     public async Task<TaskDetailResult?> GetAsync(long taskId, CancellationToken cancellationToken)
@@ -801,23 +857,16 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
     /// alternative (a hard failure on "too many arguments specified") is
     /// far worse operationally.
     /// </summary>
-    private static async Task<bool> ProcHasParameterAsync(
+    /// <remarks>
+    /// The implementation moved to
+    /// <see cref="Infrastructure.ProcParameterProbe"/> when RiskCentreService
+    /// needed the same probe — one rule, one implementation. This wrapper
+    /// stays so the call sites in this file read unchanged.
+    /// </remarks>
+    private static Task<bool> ProcHasParameterAsync(
         DbConnection connection, string procName, string parameterName, CancellationToken cancellationToken)
-    {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandType = CommandType.Text;
-        cmd.CommandText = @"
-            SELECT CASE WHEN EXISTS (
-                       SELECT 1 FROM sys.parameters
-                        WHERE object_id = OBJECT_ID('grac_practice.' + @proc)
-                          AND name = @param)
-                   THEN 1 ELSE 0 END;";
-        AddParam(cmd, "@proc",  DbType.String, procName, 128);
-        AddParam(cmd, "@param", DbType.String, parameterName, 128);
-
-        var result = await cmd.ExecuteScalarAsync(cancellationToken);
-        return result is not null && Convert.ToInt32(result) == 1;
-    }
+        => Infrastructure.ProcParameterProbe.HasParameterAsync(
+               connection, procName, parameterName, cancellationToken);
 
     /// <summary>Best-effort activity note. Never throws — the governing
     /// action has already committed by the time this runs.</summary>
@@ -960,7 +1009,14 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
 
         CompletedByEmployeeId:      GetLong  (reader, c, "completed_by_employee_id"),
         CompletedByEmployeeName:    GetString(reader, c, "completed_by_employee_name"),
-        CompletedDt:                GetDate  (reader, c, "completed_dt"));
+        CompletedDt:                GetDate  (reader, c, "completed_dt"),
+
+        // ---- Organization / Created-Updated (326) ------------------------
+        OrganizationName:           GetString(reader, c, "organization_name"),
+        EnteredBy:                  GetString(reader, c, "entered_by"),
+        EnteredDt:                  GetDate  (reader, c, "entered_dt"),
+        UpdatedBy:                  GetString(reader, c, "updated_by"),
+        UpdatedDt:                  GetDate  (reader, c, "updated_dt"));
 
     private TaskCommandResult HandleSqlError(SqlException ex, string op)
     {
@@ -993,9 +1049,22 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             55692 => "ALREADY_COMPLETED",
             55693 => "COMPLETION_BLOCKED",
 
+            // task edit (269). Each one is a distinct thing for the form
+            // to say, which is why they are not collapsed into
+            // VALIDATION_ERROR: the field-level messages are the point.
+            56704 => "TASK_CLOSED",
+            56705 => "CONCURRENT_EDIT",
+            56706 => "OWNER_NOT_IN_ORGANIZATION",
+            56707 => "CLOSE_VIA_EDIT_REFUSED",
+            56708 => "ILLEGAL_TRANSITION",
+            56710 => "REASON_REQUIRED",
+            56711 => "REASON_REQUIRED",
+            56712 => "ACTOR_REQUIRED",
+
             // everything else in the Task Centre v2 ranges is a
             // validation failure rather than a server fault
             >= 55600 and <= 55799 => "VALIDATION_ERROR",
+            >= 56700 and <= 56719 => "VALIDATION_ERROR",
 
             _     => "SQL_ERROR"
         };
@@ -1004,4 +1073,170 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
     }
 
     private static TaskCommandResult Fail(string error) => new(false, null, error);
+
+    // =================================================================
+    // Task edit — migration 269
+    //
+    // ONE update path. Before this, changing status + owner + priority
+    // was three endpoints, three round trips and three audit shapes; the
+    // UI drove them from three separate 3-dot actions.
+    //
+    // These two methods add no rules of their own. sp_task_update
+    // composes sp_task_assign / sp_task_transition /
+    // sp_task_priority_change / sp_task_sla_extension_request_create, so
+    // every §7 and §8 rule is enforced exactly once, in the procedure
+    // that already owned it. Duplicating any of that here would create
+    // the second copy this work exists to remove.
+    // =================================================================
+
+    /// <summary>
+    /// What the editor may offer for this task, including the status
+    /// transitions that are legal right now. One round trip, so the form
+    /// can be built without guessing and without a second call.
+    /// </summary>
+    public async Task<TaskEditOptions?> GetEditOptionsAsync(long taskId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_edit_options";
+            AddParam(command, "@task_id", DbType.Int64, taskId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+
+            var c = ColumnSet(reader);
+            var header = new
+            {
+                CurrentStatusCode     = GetString(reader, c, "CurrentStatusCode"),
+                TaskTypeCode          = GetString(reader, c, "TaskTypeCode"),
+                CurrentPriority       = GetString(reader, c, "CurrentPriority"),
+                IsChild               = GetBool(reader, c, "IsChild"),
+                IsTerminal            = GetBool(reader, c, "IsTerminal"),
+                CanEdit               = GetBool(reader, c, "CanEdit"),
+                CanEditPriority       = GetBool(reader, c, "CanEditPriority"),
+                CanEditDueDate        = GetBool(reader, c, "CanEditDueDate"),
+                PriorityChangePending = GetBool(reader, c, "PriorityChangePending"),
+                SlaExtensionPending   = GetBool(reader, c, "SlaExtensionPending"),
+                CanEditMandatory      = GetBool(reader, c, "CanEditMandatory"),
+                // Read defensively: an older 269 without these columns
+                // still yields a working editor, just without prefill and
+                // without the concurrency check.
+                StartDate             = GetDate(reader, c, "StartDate"),
+                IsMandatoryChild      = GetBoolN(reader, c, "IsMandatoryChild"),
+                ChildTargetDate       = GetDate(reader, c, "ChildTargetDate"),
+                UpdatedDt             = GetDate(reader, c, "UpdatedDt")
+            };
+
+            // Second result set: the legal transitions.
+            var statuses = new List<TaskStatusOption>();
+            if (await reader.NextResultAsync(cancellationToken))
+            {
+                var sc = ColumnSet(reader);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var code = GetString(reader, sc, "StatusCode");
+                    if (string.IsNullOrWhiteSpace(code)) continue;
+                    statuses.Add(new TaskStatusOption(code, GetString(reader, sc, "StatusName") ?? code));
+                }
+            }
+
+            return new TaskEditOptions(
+                taskId,
+                header.CurrentStatusCode,
+                header.TaskTypeCode,
+                header.CurrentPriority,
+                header.IsChild,
+                header.IsTerminal,
+                header.CanEdit,
+                header.CanEditPriority,
+                header.CanEditDueDate,
+                header.PriorityChangePending,
+                header.SlaExtensionPending,
+                header.CanEditMandatory,
+                statuses,
+                header.StartDate,
+                header.IsMandatoryChild,
+                header.ChildTargetDate,
+                header.UpdatedDt);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "TaskService.GetEditOptionsAsync failed for task {TaskId}", taskId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Save the whole edit form. Returns one row per field that was
+    /// actually different, each saying what happened to it.
+    ///
+    /// <para>A caller must read <see cref="TaskFieldChange.Outcome"/>
+    /// before telling the user anything: <c>PendingApproval</c> means a
+    /// request was raised and <b>the task did not change</b>.</para>
+    /// </summary>
+    public async Task<TaskUpdateResult> UpdateAsync(TaskUpdateRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_update";
+
+            // NULL means "leave alone", so every optional field is sent
+            // as DBNull rather than as a default. An empty string is NOT
+            // collapsed to NULL for the description: clearing a
+            // description is a real edit, and "" is how the form says so.
+            AddParam(command, "@task_id",                 DbType.Int64,    request.TaskId);
+            AddParam(command, "@subject_title",           DbType.String,   (object?)request.SubjectTitle ?? DBNull.Value, 250);
+            AddParam(command, "@subject_description",     DbType.String,   (object?)request.SubjectDescription ?? DBNull.Value, -1);
+            AddParam(command, "@assigned_to_employee_id", DbType.Int64,    (object?)request.AssignedToEmployeeId ?? DBNull.Value);
+            AddParam(command, "@priority",                DbType.String,   (object?)request.Priority ?? DBNull.Value, 30);
+            AddParam(command, "@status_code",             DbType.String,   (object?)request.StatusCode ?? DBNull.Value, 60);
+            AddParam(command, "@start_date",              DbType.DateTime2,(object?)request.StartDate ?? DBNull.Value);
+            AddParam(command, "@due_at",                  DbType.DateTime2,(object?)request.DueAt ?? DBNull.Value);
+            AddParam(command, "@is_mandatory_child",      DbType.Boolean,  (object?)request.IsMandatoryChild ?? DBNull.Value);
+            AddParam(command, "@child_target_date",       DbType.DateTime2,(object?)request.ChildTargetDate ?? DBNull.Value);
+            AddParam(command, "@change_reason",           DbType.String,   (object?)request.ChangeReason ?? DBNull.Value, -1);
+            AddParam(command, "@actor_employee_id",       DbType.Int64,    (object?)request.ActorEmployeeId ?? DBNull.Value);
+            AddParam(command, "@actor_role_code",         DbType.String,   (object?)request.ActorRoleCode ?? DBNull.Value, 60);
+            AddParam(command, "@caller_display_name",     DbType.String,   "task-center", 100);
+            AddParam(command, "@expected_updated_dt",     DbType.DateTime2,(object?)request.ExpectedUpdatedDt ?? DBNull.Value);
+
+            var changes = new List<TaskFieldChange>();
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                var c = ColumnSet(reader);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    changes.Add(new TaskFieldChange(
+                        GetString(reader, c, "FieldCode")  ?? "",
+                        GetString(reader, c, "FieldLabel") ?? "",
+                        GetString(reader, c, "FromValue"),
+                        GetString(reader, c, "ToValue"),
+                        GetString(reader, c, "Outcome")    ?? "Applied",
+                        GetString(reader, c, "Detail")));
+                }
+            }
+
+            // An empty list is a success with nothing to do, not a
+            // failure. The caller says "no changes to save" rather than
+            // claiming one.
+            return new TaskUpdateResult(true, request.TaskId, changes);
+        }
+        catch (SqlException ex)
+        {
+            // Reuses the same number -> reason map every other command
+            // uses, so the client branches on one vocabulary.
+            var mapped = HandleSqlError(ex, nameof(UpdateAsync));
+            return new TaskUpdateResult(false, request.TaskId,
+                                        Array.Empty<TaskFieldChange>(),
+                                        mapped.Error, mapped.ReasonCode);
+        }
+    }
 }

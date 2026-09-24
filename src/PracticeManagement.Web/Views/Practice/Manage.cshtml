@@ -13,6 +13,10 @@
     var workflowScreens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "tasks", "gaps", "waivers", "applicability-decision", "ownership-tree",
+        // Migration 345: Ownership Management -- select a user, list every
+        // active item they own, reassign each to an active Functional User.
+        // Custom page (not the generic grid), so it renders its own partial.
+        "ownership-management",
         "my-assignments", "gap-view", "handover", "auditor-workbench",
         "risk-register", "kri-dashboard", "adapter-bindings",
         // Workflow & Event-Driven Assurance Engine (BRD v1.0).
@@ -27,6 +31,13 @@
         // the Role Master form; asset-category checklists are the screen below
         // (migration 138).
         "asset-category-assurance",
+        // Event Profiles (migrations 329-332) -- attribute-based people
+        // populations replacing role-only checklist scoping. Listed here AS
+        // WELL AS in PracticeScreen.cs: a PracticeScreen entry alone does not
+        // dispatch a route screen, and without this line the request falls
+        // through to the generic entity-grid layout and 400s against the
+        // API's entity whitelist.
+        "event-profiles",
         // Full-page practice view (migration 139) -- replaces the view modal.
         "practice-view",
         // Resolve (migrations 140/141): a flat owner-scoped list, and a
@@ -37,6 +48,11 @@
         // Phase 2 Assurance Management (BRD Part 2) -- NEW independent
         // module. Each key resolves to Views/Practice/Partials/{key}.cshtml.
         // Menu rows seeded under nav-assurance by migrations 071 / 075 / 078 / 081.
+        // Audit Management containers (migration 276) -- tab/stepper shells
+        // that host the screens below as steps. Navigation only: they add
+        // no data, no API and no second copy of any screen.
+        "org-audit-definition",
+        "org-audit-configuration",
         "org-assurance-definitions",
         "org-assurance-scope-builder",
         "org-assurance-question-sets",
@@ -65,11 +81,34 @@
         // "gaps" partial is untouched; this is the drill-down landing.
         "gap-detail",
         "exception-centre",
+        "exception-analysis",
         "risk-centre",
         // Organization SLA Configuration (migrations 178/179/180).
         // Adopts Control Management SLA masters into per-org configs with
         // warning/escalation thresholds, notify roles and process bindings.
-        "org-sla-config"
+        "org-sla-config",
+        // Organization -> Risk Acceptance Approval Authority (271).
+        // An Organization configuration screen, not a Risk module one:
+        // it configures the organisation's approval authority, and the
+        // Risk Centre reads it. Menu row is a child of nav-organization.
+        "risk-acceptance-authority",
+        // Task View / Exception View (326) -- dedicated read-only full-page
+        // views. Same "route" screen convention as gap-view/gap-detail:
+        // no menu row, reached only by ?taskId=/?exceptionId= links from
+        // tasks.cshtml/exception-centre.js/gap-view.js. Without an entry
+        // here the request falls through to the generic Manage grid layout,
+        // which has no "task-view"/"exception-view" entity type and 400s
+        // ("Unsupported practice area") from PracticeRepositoryController's
+        // secure/query -- exactly the failure this entry prevents.
+        "task-view",
+        "exception-view",
+        // Add Source Statements (Release -> Source Structure -> Source
+        // Statements), added for Custom Release authoring without an
+        // Organization selector. No menu row of its own -- reached only by
+        // a link from the Standards & Frameworks screen below. See the
+        // PracticeScreen.cs entry and PracticeController.ScreenPermissionArea
+        // for the rest of the no-menu-row wiring.
+        "custom-source-statements"
     };
     if (workflowScreens.Contains(Model.Key))
     {
@@ -100,10 +139,16 @@
     var isOrganizationWorkspace = isOrganizationOnboarding || isOrganizationAdministration || isOrganizationDependencies;
     var setupChildTabs = isOrganizationDependencies
         ? new[] {
-            new { Key = "dependency-applications", Title = "Applications", Description = "Business applications supporting organizational practices." },
-            new { Key = "dependency-tools", Title = "Tools", Description = "Utility tools supporting execution of practices." },
+            // Applications and Tools tabs retired -- the Asset taxonomy
+            // (migration 239-241) subsumed both. A business application is
+            // now an Asset under sub-category "Business Application", a
+            // utility tool is an Asset under "Utility Tool" -- so keeping
+            // separate tabs would create two ways to enter the same thing
+            // and two rows for one truth. The dependency-applications /
+            // dependency-tools schemas still exist for legacy reads
+            // (workbench pages) but the setup tabs no longer surface them.
             new { Key = "dependency-vendors", Title = "Vendors", Description = "Third parties providing services or products." },
-            new { Key = "dependency-assets", Title = "Assets", Description = "Physical or logical assets supporting practices." },
+            new { Key = "dependency-assets", Title = "Assets", Description = "Physical or logical assets (applications, tools, hardware, facilities) supporting practices." },
             new { Key = "dependency-processes", Title = "Processes", Description = "Business processes supporting organizational execution." }
         }
         : isOrganizationAdministration
@@ -140,6 +185,14 @@
         {
             <button class="pm-button primary" id="addRecord" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> @(Model.Key == "organization-controls" ? "Add Release" : Model.Key == "organization-requirements" || Model.Key == "practices" ? "Add Practice" : Model.Key == "practice-instances" ? "Add New Instance" : Model.Key == "assurance-generation" ? "Generate Activity" : Model.Key == "assurance-activities" ? "Add Activity" : Model.Key == "roles" ? "Add Role" : "Add Record")</button>
         }
+        @* The "Add Source Statements" toolbar link (Release -> Source Structure ->
+             Source Statements standalone screen) was removed here per change request
+             2026-09-22: Source Structure and Statement Classification are now managed
+             in-place from the Add Control Statement dialog itself (see the "Manage"
+             buttons wired in openCustomStatementForm in practice.js), so the separate
+             entry point is no longer needed. The custom-source-statements screen/route
+             (PracticeScreen.cs, ScreenPermissionArea) is left in place, unlinked --
+             removing only the button here per the minimum-change request. *@
         @* Q13/Q14/Q15 v2 — the "Add Implementation Task" action now lives in the row-level 3-dot menu.
              Row-level injection happens in _add-implementation-task-modal.cshtml when ImplementationStatus = "Not Implemented". *@
     </div>
@@ -180,6 +233,17 @@
                 </div>
                 <div class="pm-form-grid pm-form-grid-compact" id="setupBasicFields" data-setup-readonly="@isOrganizationAdministration.ToString().ToLowerInvariant()"></div>
             </section>
+            @* Organization Attributes is removed from Organization Administration's
+               Organization tab (change request 2026-09-20): the page is read-only
+               there, and the request was to drop this section from that view
+               entirely -- not just make its fields non-interactive. Attribute
+               data, the API and #setupAttributeFields' own rendering (JS
+               renderSetupAttributes(), which already no-ops when the element
+               isn't in the DOM) are untouched; this only removes the SECTION
+               from Organization Administration's markup. Onboarding still gets
+               the editable section exactly as before. *@
+            @if (!isOrganizationAdministration)
+            {
             <section class="pm-setup-card">
                 <div class="pm-section-heading">
                     <h2>Organization Attributes</h2>
@@ -187,12 +251,13 @@
                 </div>
                 <div class="pm-form-grid pm-form-grid-compact" id="setupAttributeFields" data-setup-readonly="@isOrganizationAdministration.ToString().ToLowerInvariant()"></div>
             </section>
+            }
         </div>
         @if (isOrganizationOnboarding)
         {
         <aside class="pm-setup-card pm-subscription-card">
             <div class="pm-section-heading">
-                <h2>Repository Subscription</h2>
+                <h2>Standards & Frameworks</h2>
                 <p>Select applicable Authority / Artifact / Release items.</p>
             </div>
             <div class="pm-tree-toolbar">
@@ -255,13 +320,64 @@
         <form id="recordForm">
             <div class="pm-dialog-heading">
                 <div><h2 id="dialogTitle">Organization Setup</h2><p>Complete the required fields and save your changes.</p></div>
-                <button type="button" id="closeRecord" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                <div class="pm-dialog-heading-actions">
+                    @* View -> Edit (change request 2026-09-20): Location/Department/Teams
+                       only, top-right next to Close per feedback. Hidden by default;
+                       practice.js shows it only in View mode for those three entities,
+                       and only with Edit/Add permission -- see editButton.hidden in
+                       openForm()/openSetupChildForm(). Reuses the existing Edit flow
+                       (openForm/openSetupChildForm with mode="edit"), never a second
+                       save path. *@
+                    <button type="button" class="pm-button primary" id="editRecord" hidden><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>
+                    <button type="button" id="closeRecord" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                </div>
             </div>
             <div id="formMessage" class="pm-message" hidden></div>
             <div id="recordFields" class="pm-form-grid"></div>
             <div class="pm-dialog-actions">
                 <button type="button" class="pm-button" id="cancelRecord">Cancel / Back</button>
                 <button type="button" class="pm-button primary" id="saveRecord">Save</button>
+            </div>
+        </form>
+    </dialog>
+
+    @* Add Designation (change request 2026-09-22): a SEPARATE, independent
+         <dialog> from #recordDialog just above -- same nested-popup-over-
+         #recordDialog reasoning as #manageStructureDialog/#manageClassification
+         Dialog further down this file for the Control Statement screens: it
+         opens on top of the still-open Add/Edit Committee form so whatever
+         the user already picked (Employee, other members already added)
+         stays exactly as it was underneath. Replaces the inline expand/
+         collapse panel that used to live inside the Designation table cell
+         (see committeeMemberAddRowMarkup in practice.js) -- that panel made
+         the Designation cell taller than the Employee/Add cells beside it,
+         which practice-management.css's now-removed vertical-align: top /
+         toggle-link margin-top rules were patched around; a real popup
+         removes the cell-height problem at its source instead of
+         compensating for it. Kept to the single-field-plus-Save/Cancel
+         shape #implStatusDialog uses for a similar "quick add to a master
+         list" popup, rather than the heavier .pm-manage-structure-dialog
+         list-and-form shape those two Control Statement dialogs use -- a
+         Designation is one field, not a list. Wired in practice.js's
+         existing Committee Members click-delegation block (same
+         document.body listener as Add Member / Remove Member / the old
+         toggle it replaces), not a separate addEventListener like the
+         Control Statement dialogs below -- keeps every Committee Members
+         interaction in the one place the top-of-file comment on that
+         listener already explains. *@
+    <dialog id="committeeDesignationDialog" style="border:none; border-radius:8px; padding:0; max-width:420px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+        <form id="committeeDesignationForm" method="dialog" style="margin:0; padding:20px 24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="margin:0; font-size:18px;">Add Designation</h2>
+                <button type="button" id="closeCommitteeDesignation" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+            </div>
+            <div id="committeeDesignationMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Designation Name <span style="color:#b91c1c;">*</span>
+                <input id="committeeDesignationName" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" />
+            </label>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button type="button" id="cancelCommitteeDesignation" class="pm-button">Cancel</button>
+                <button type="button" id="saveCommitteeDesignation" class="pm-button primary">Save</button>
             </div>
         </form>
     </dialog>
@@ -272,7 +388,15 @@ else
 var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model.Key == "organization-controls";
 <section class="pm-panel">
     <div class="pm-toolbar @(usesApplicabilityFilters ? "pm-toolbar-compact" : "")">
-        <input id="search" placeholder="Search..." @(Model.Key == "organization-requirements" ? "hidden" : "") />
+        @* On every other screen, search stays first -- unchanged. Organization
+           Practices moves it to the end of the filter row instead (right
+           before Clear Filter), so Organization -> Framework -> Applicability
+           Status all read left-to-right before the free-text box. Exactly one
+           of the two branches below renders #search, never both. *@
+        @if (Model.Key != "organization-requirements")
+        {
+            <input id="search" placeholder="Search..." />
+        }
         <select id="organizationFilter"><option value="">All organizations</option></select>
         @if (Model.Key == "organization-requirements" || Model.Key == "organization-controls")
         {
@@ -282,9 +406,13 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         {
             <select id="sourceFilter"><option value="">All sources</option><option value="repository">Repository</option><option value="organization">Organization</option></select>
         }
-        <select id="status"><option value="">@(usesApplicabilityFilters ? "All applicability statuses" : "All statuses")</option></select>
+        <select id="status" @(Model.Key == "organization-controls" ? "hidden" : "")><option value="">@(usesApplicabilityFilters ? "All applicability statuses" : "All statuses")</option></select>
+        @if (Model.Key == "organization-requirements")
+        {
+            <input id="search" placeholder="Search practices..." />
+        }
         <select id="originTypeFilter" @(usesApplicabilityFilters ? "hidden" : "")><option value="">All origins</option></select>
-        <select id="criticalityFilter" @(Model.Key == "organization-requirements" ? "hidden" : "")><option value="">All criticalities</option></select>
+        <select id="criticalityFilter" @(Model.Key == "organization-requirements" || Model.Key == "organization-controls" ? "hidden" : "")><option value="">All criticalities</option></select>
         <input id="ownerFilter" placeholder="Owner..." @(usesApplicabilityFilters ? "hidden" : "") />
         <input id="dateFromFilter" type="date" title="Entered from" @(usesApplicabilityFilters ? "hidden" : "") />
         <input id="dateToFilter" type="date" title="Entered to" @(usesApplicabilityFilters ? "hidden" : "") />
@@ -293,6 +421,19 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
             <button class="pm-button" id="clearFilters" type="button">Clear Filter</button>
         }
         <button class="pm-button icon" id="refresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+        @* Bulk applicability. Rendered on the two screens that mark
+           applicability in a list -- Source Statements (an alias of
+           organization-controls) and Organization Practices -- and kept hidden
+           by practice.js until at least one eligible row is ticked. The count
+           lives in its own span so the label does not reflow as the selection
+           changes. *@
+        @if (Model.Key == "organization-controls" || Model.Key == "source-statements" || Model.Key == "organization-requirements")
+        {
+            <button class="pm-button primary" id="bulkApplicability" type="button" hidden>
+                <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                Mark Applicability<span id="bulkApplicabilityCount"></span>
+            </button>
+        }
     </div>
     <div class="@(isResolve ? "pm-workbench-layout" : "")">
         @if (isResolve)
@@ -320,24 +461,31 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
             </div>
         </div>
     </div>
-    <div class="pm-pager">
-        <button class="pm-button" id="previousPage" type="button">Previous</button>
-        <span id="pageInfo">Page 1</span>
-        <button class="pm-button" id="nextPage" type="button">Next</button>
-        <select id="pageSize">
-            <option value="10">10 / page</option>
-            <option value="25" selected>25 / page</option>
-            <option value="50">50 / page</option>
-            <option value="100">100 / page</option>
-        </select>
-    </div>
+    @* Pager host. pm-grid renders Previous / range / Next / rows-per-page
+       into this div and owns the page number, so the generic grid no
+       longer hand-wires its own -- see docs/grid-and-pagination-standard.md.
+       The markup pm-grid emits is the same .pm-pager shape this div used
+       to contain, so the screen looks identical. Left empty on purpose:
+       if pm-grid.js fails to load, attach() returns null, practice.js
+       falls back to page 1 with no pager and the grid still renders. *@
+    <div id="practiceGridPager"></div>
 </section>
 
 <dialog id="recordDialog">
     <form id="recordForm">
         <div class="pm-dialog-heading">
             <div><h2 id="dialogTitle">@Model.Title</h2><p>Complete the required fields and save your changes.</p></div>
-            <button type="button" id="closeRecord" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            <div class="pm-dialog-heading-actions">
+                @* View -> Edit (change request 2026-09-20): Location/Department/Teams
+                   only, top-right next to Close per feedback. Hidden by default;
+                   practice.js shows it only in View mode for those three entities,
+                   and only with Edit/Add permission -- see editButton.hidden in
+                   openForm()/openSetupChildForm(). Reuses the existing Edit flow
+                   (openForm/openSetupChildForm with mode="edit"), never a second
+                   save path. *@
+                <button type="button" class="pm-button primary" id="editRecord" hidden><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>
+                <button type="button" id="closeRecord" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>
         </div>
         <div id="formMessage" class="pm-message" hidden></div>
         <div id="recordFields" class="pm-form-grid"></div>
@@ -345,6 +493,58 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
             <button type="button" class="pm-button" id="cancelRecord">Cancel / Back</button>
             <button type="button" class="pm-button primary" id="saveRecord">Save</button>
         </div>
+    </form>
+</dialog>
+
+@* Manage Source Structure / Statement Classification (change request 2026-09-22):
+     a SEPARATE, independent <dialog> from #recordDialog above -- deliberately not
+     reusing it -- because it opens AS A NESTED POPUP on top of the Add/Edit Control
+     Statement form (#recordDialog), which needs to stay open with whatever the user
+     already typed (Statement Title/Text/Keywords etc.) still in it underneath. It is
+     entirely self-contained in practice.js (its own fetch calls against the existing
+     custom-release-source-structure query/save entity -- no new API, no new table:
+     Statement Classification IS the Level-1 Source Structure nodes, so both the
+     "Manage" button beside Source Structure Node and the one beside Statement
+     Classification in openCustomStatementForm open this exact same dialog). Its
+     native <dialog> "close" event (fires on the X button, Esc, or dialog.close()) is
+     what openManageStructureDialog()'s onClose callback hooks, so the Structure
+     Node / Classification combos on the Control Statement form behind it always
+     refresh, regardless of how this popup was dismissed. *@
+<dialog id="manageStructureDialog" class="pm-manage-structure-dialog">
+    <form id="manageStructureForm" onsubmit="return false;">
+        <div class="pm-dialog-heading">
+            <div><h2 id="manageStructureDialogTitle">Manage Source Structure</h2><p>Add, edit or inactivate nodes for this release.</p></div>
+            <div class="pm-dialog-heading-actions">
+                <button type="button" id="closeManageStructure" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>
+        </div>
+        <div id="manageStructureMessage" class="pm-message" hidden></div>
+        <div id="manageStructureBody" class="pm-form-grid"></div>
+    </form>
+</dialog>
+
+@* Manage Statement Classification (change request 2026-09-22, part 2): a
+     SEPARATE, independent <dialog> from #manageStructureDialog above -- the
+     user pointed out that both "Manage" buttons were opening the Source
+     Structure popup, and that Statement Classification is backed by a
+     completely different table (grac_practice.custom_statement_classification,
+     merged with the shared grac_new.statement_classification reference
+     values -- see the comment above manageClassificationState in
+     practice.js). Same nested-popup-over-#recordDialog pattern as
+     #manageStructureDialog: opens on top of the still-open Add/Edit
+     Control Statement form, and its native <dialog> "close" event is what
+     refreshes the Structure Node / Classification combos on that form
+     behind it. *@
+<dialog id="manageClassificationDialog" class="pm-manage-structure-dialog">
+    <form id="manageClassificationForm" onsubmit="return false;">
+        <div class="pm-dialog-heading">
+            <div><h2 id="manageClassificationDialogTitle">Manage Statement Classification</h2><p>Add, edit or inactivate this organization's custom classifications for this release.</p></div>
+            <div class="pm-dialog-heading-actions">
+                <button type="button" id="closeManageClassification" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>
+        </div>
+        <div id="manageClassificationMessage" class="pm-message" hidden></div>
+        <div id="manageClassificationBody" class="pm-form-grid"></div>
     </form>
 </dialog>
 
@@ -365,5 +565,7 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         window.pmEmployeeId="@(ViewBag.EmployeeId ?? "")";
     </script>
     <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
+    @* pm-grid before practice.js: the grid mounts its pager during init. *@
+    <script src="~/js/pm-grid.js" asp-append-version="true"></script>
     <script src="~/js/practice.js" asp-append-version="true"></script>
 }

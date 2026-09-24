@@ -475,17 +475,25 @@ AND NOT EXISTS(
  CREATE UNIQUE INDEX ux_pm_employee_email ON grac_practice.organization_employee(email) WHERE email IS NOT NULL AND email<>'';
 GO
 
+-- Values below were synced 2026-09-16 from a live export of grac_practice.menu_master
+-- (name/url/display_order/icon_class/module_type only -- status and parent_menu_id
+-- are not sourced here; parent linkage is 274's job, and status is deliberately left
+-- off the WHEN MATCHED SET below). Before this sync several of these had drifted from
+-- 274/347's later renames/reparents (e.g. organization-controls was still seeded here
+-- as "Organization Controls" under Practice Management, while 274/347 had already
+-- renamed it to "Repository Subscriptions" under Governance) -- harmless on its own,
+-- but WHEN MATCHED was overwriting those fields back to the stale values on every run.
 IF OBJECT_ID('grac_practice.menu_master','U') IS NOT NULL
 BEGIN
  MERGE grac_practice.menu_master AS target
  USING (VALUES
-  (N'dashboard',N'Dashboard',N'Practice/Index',5,N'chart-line',N'Dashboard'),
+  (N'dashboard',N'Dashboard',N'Practice/Index',0,N'chart-line',N'Dashboard'),
   (N'menu-master',N'Menu Master',N'Practice/Index/menu-master',6,N'bars',N'System'),
   (N'organization-setup',N'Organization Setup',N'Practice/Index/organization-setup',10,N'building',N'Organization Setup'),
-  (N'organization-administration',N'Organization Administration',N'Practice/Index/organization-administration',20,N'building-user',N'Organization Administration'),
+  (N'organization-administration',N'Administration',N'Practice/Index/organization-administration',195,N'building-user',N'Organization'),
   (N'organizations',N'Organization Onboarding',N'Practice/Index/organizations',30,N'building',N'Organization Setup'),
   (N'organization-metadata',N'Organization Metadata',N'Practice/Index/organization-metadata',40,N'sliders',N'Organization Setup'),
-  (N'repository-subscriptions',N'Repository Subscriptions',N'Practice/Index/repository-subscriptions',50,N'bookmark',N'Organization Setup'),
+  (N'repository-subscriptions',N'Repository Subscriptions (Admin)',N'Practice/Index/repository-subscriptions',50,N'bookmark',N'Organization Setup'),
   (N'locations',N'Location Management',N'Practice/Index/locations',60,N'location-dot',N'Organization Administration'),
   (N'departments',N'Department Management',N'Practice/Index/departments',70,N'building-user',N'Organization Administration'),
   (N'business-functions',N'Business Function Management',N'Practice/Index/business-functions',80,N'briefcase',N'Organization Administration'),
@@ -494,16 +502,16 @@ BEGIN
   (N'roles',N'Role Master',N'Practice/Index/roles',110,N'user-lock',N'Organization Administration'),
   (N'role-menu-permissions',N'Role Menu Permission',N'Practice/Index/role-menu-permissions',120,N'list-check',N'Organization Administration'),
   (N'users',N'User Management',N'Practice/Index/users',130,N'users',N'Organization Administration'),
-  (N'organization-dependencies',N'Organization Dependencies',N'Practice/Index/organization-dependencies',140,N'diagram-project',N'Organization Dependencies'),
+  (N'organization-dependencies',N'Dependencies',N'Practice/Index/organization-dependencies',197,N'diagram-project',N'Organization'),
   (N'dependency-applications',N'Applications',N'Practice/Index/dependency-applications',150,N'window-restore',N'Organization Dependencies'),
   (N'dependency-tools',N'Tools',N'Practice/Index/dependency-tools',160,N'screwdriver-wrench',N'Organization Dependencies'),
   (N'dependency-vendors',N'Vendors',N'Practice/Index/dependency-vendors',170,N'handshake',N'Organization Dependencies'),
   (N'dependency-assets',N'Assets',N'Practice/Index/dependency-assets',180,N'server',N'Organization Dependencies'),
   (N'dependency-processes',N'Processes',N'Practice/Index/dependency-processes',190,N'arrows-spin',N'Organization Dependencies'),
-  (N'organization-controls',N'Organization Controls',N'Practice/Index/organization-controls',200,N'shield',N'Practice Management'),
-  (N'organization-requirements',N'Organization Practices',N'Practice/Index/organization-requirements',210,N'list-check',N'Practice Management'),
-  (N'practice-instances',N'Practice Instances',N'Practice/Index/practice-instances',220,N'network-wired',N'Practice Management'),
-  (N'resolve',N'Resolve',N'Practice/Index/resolve',230,N'gears',N'Practice Management'),
+  (N'organization-controls',N'Repository Subscriptions',N'Practice/Index/organization-controls',100,N'bookmark',N'Governance'),
+  (N'organization-requirements',N'Organization Practices',N'Practice/Index/organization-requirements',110,N'list-check',N'Practice Management'),
+  (N'practice-instances',N'Practice Instances',N'Practice/Index/practice-instances',115,N'network-wired',N'Practice Management'),
+  (N'resolve',N'Operationalize',N'Practice/Index/resolve',120,N'gears',N'Governance'),
   (N'workbench-applications',N'Applications',N'Practice/Index/workbench-applications',240,N'window-restore',N'Registers'),
   (N'workbench-tools',N'Tools',N'Practice/Index/workbench-tools',250,N'screwdriver-wrench',N'Registers'),
   (N'workbench-vendors',N'Vendors',N'Practice/Index/workbench-vendors',260,N'handshake',N'Registers'),
@@ -512,10 +520,14 @@ BEGIN
   (N'workbench-committees',N'Committees',N'Practice/Index/workbench-committees',290,N'users-gear',N'Registers'),
   (N'workbench-processes',N'Processes',N'Practice/Index/workbench-processes',300,N'arrows-spin',N'Registers'),
   (N'workbench-locations',N'Locations',N'Practice/Index/workbench-locations',310,N'location-dot',N'Registers'),
-  (N'audit-trace',N'Audit Traceability',N'Practice/Index/audit-trace',900,N'timeline',N'Practice Management')
+  (N'audit-trace',N'Audit Traceability',N'Practice/Index/audit-trace',900,N'timeline',N'Governance')
  ) AS source(menu_key,menu_name,menu_url,display_order,icon_class,module_type)
  ON target.menu_key=source.menu_key
- WHEN MATCHED THEN UPDATE SET menu_name=source.menu_name,menu_url=source.menu_url,display_order=source.display_order,icon_class=source.icon_class,module_type=source.module_type,status='Active',updated_by='seed',updated_dt=SYSUTCDATETIME()
+ -- status intentionally left out of this SET list -- on a MATCH, only cosmetic/
+ -- navigation fields are kept in sync; whatever Active/Inactive an admin, 274, or
+ -- 347 set for an existing menu is left untouched no matter how many times this
+ -- file runs. A brand-new row (WHEN NOT MATCHED) still starts Active by default.
+ WHEN MATCHED THEN UPDATE SET menu_name=source.menu_name,menu_url=source.menu_url,display_order=source.display_order,icon_class=source.icon_class,module_type=source.module_type,updated_by='seed',updated_dt=SYSUTCDATETIME()
  WHEN NOT MATCHED THEN INSERT(menu_key,menu_name,menu_url,display_order,icon_class,module_type,status,entered_by)
  VALUES(source.menu_key,source.menu_name,source.menu_url,source.display_order,source.icon_class,source.module_type,'Active','seed');
 END
@@ -564,7 +576,9 @@ BEGIN
   (N'risk-intelligence',N'Risk Intelligence View',N'Practice/Index/risk-intelligence',720,N'shield-halved',N'Assurance Management')
  ) AS source(menu_key,menu_name,menu_url,display_order,icon_class,module_type)
  ON target.menu_key=source.menu_key
- WHEN MATCHED THEN UPDATE SET menu_name=source.menu_name,menu_url=source.menu_url,display_order=source.display_order,icon_class=source.icon_class,module_type=source.module_type,status='Active',updated_by='seed',updated_dt=SYSUTCDATETIME()
+ -- Same reasoning as the menu_master MERGE above -- status left off the MATCHED
+ -- SET so a re-run can't reactivate a menu that was deliberately set Inactive.
+ WHEN MATCHED THEN UPDATE SET menu_name=source.menu_name,menu_url=source.menu_url,display_order=source.display_order,icon_class=source.icon_class,module_type=source.module_type,updated_by='seed',updated_dt=SYSUTCDATETIME()
  WHEN NOT MATCHED THEN INSERT(menu_key,menu_name,menu_url,display_order,icon_class,module_type,status,entered_by)
  VALUES(source.menu_key,source.menu_name,source.menu_url,source.display_order,source.icon_class,source.module_type,'Active','seed');
 END
@@ -1706,6 +1720,13 @@ IF OBJECT_ID('grac_practice.assurance_activity','U') IS NOT NULL
  CREATE INDEX ix_pm_assurance_activity_org_instance_status ON grac_practice.assurance_activity(organization_id,practice_instance_id,status,due_dt);
 GO
 
+-- SUPERSEDED BY 300_generic_grid_total_rows.sql.
+-- 300 re-emits this procedure whole with COUNT(*) OVER () AS TotalRows on
+-- each of its 37 paged branches, because CREATE OR ALTER cannot patch a
+-- projection in place. The copy below is the baseline and is left as the
+-- historical record; it is NOT what a deployed database ends up running.
+-- Change a branch in 300, not here -- an edit made here is reverted the
+-- next time 300 runs, the same way menu_master edits are reverted by 274.
 CREATE OR ALTER PROCEDURE dbo.pm_get_practice_repository
  @p_entity_type NVARCHAR(100), @p_action NVARCHAR(30)='', @p_id BIGINT=0, @p_search NVARCHAR(250)='', @p_status NVARCHAR(30)='',
  @p_payload NVARCHAR(MAX)='{}', @p_usr_id NVARCHAR(100)=''
@@ -3289,6 +3310,26 @@ OFFSET 0 ROWS FETCH NEXT @take ROWS ONLY;';
 END
 GO
 
+-- 2026-09-16: Reason / Justification stopped being erased on Applicable.
+-- Every organization-requirements/practices save branch below used to run
+-- `exclusion_justification = CASE WHEN <status>='Applicable' THEN NULL ELSE
+-- ... END` -- so a previously entered reason vanished from the database the
+-- moment a record was (re)marked Applicable, even if the save itself never
+-- touched that field. Reported by sir: "owner is now ok [separate, already-
+-- fixed issue], but Reason / Justification not displayed" on Practices ->
+-- Update Applicability for a record whose status was Applicable. Confirmed
+-- with sir this is a genuine behaviour change (not "keep as-is"): the save
+-- no longer nulls the column for Applicable, only merges in whatever new
+-- value the client sends (COALESCE(@new, existing) -- an empty/blank
+-- payload value already normalizes to NULL above via NULLIF, so it falls
+-- through to the existing value instead of erasing it). The client side
+-- (practice.js) now disables -- not hides -- the Reason/Justification input
+-- whenever Applicable is selected, so no NEW reason can be typed while
+-- Applicable, but whatever was saved before still displays on reopen. Scope
+-- is organization-requirements + practices only, per sir's answer --
+-- organization-controls/control-applicability (lines below, unchanged)
+-- keep their original clear-on-Applicable behaviour; ask before extending
+-- this there too.
 CREATE OR ALTER PROCEDURE dbo.pm_manage_practice_repository
  @p_entity_type NVARCHAR(100), @p_action NVARCHAR(30), @p_id BIGINT=0, @p_search NVARCHAR(250)='', @p_status NVARCHAR(30)='',
  @p_payload NVARCHAR(MAX)='{}', @p_usr_id NVARCHAR(100)=''
@@ -3642,6 +3683,15 @@ BEGIN
    DECLARE @location_head_id BIGINT=TRY_CONVERT(BIGINT,NULLIF(JSON_VALUE(@p_payload,'$.locationHeadId'),''));
    DECLARE @location_status_id INT=COALESCE(@payload_record_status_id,@active_record_status_id);
    DECLARE @location_status_name NVARCHAR(30)=COALESCE((SELECT status_name FROM grac_practice.record_status_master WHERE record_status_id=@location_status_id),'Active');
+   -- Status restriction (2026-09-20 change request): a NEW status may only
+   -- be Active or Inactive; a legacy status already on the row (Retired/
+   -- Draft/Disposed/...) is left alone unless this save actually changes
+   -- it. Mirrors the same guard in the dedicated sp_org_location_save shim
+   -- (361) -- this monolith branch only runs when that shim is missing.
+   DECLARE @location_current_status_id INT=CASE WHEN @p_id<>0 THEN (SELECT record_status_id FROM grac_practice.organization_location WHERE location_id=@p_id) END;
+   IF @location_status_id<>ISNULL(@location_current_status_id,-1)
+      AND NOT EXISTS(SELECT 1 FROM grac_practice.record_status_master WHERE record_status_id=@location_status_id AND status_code IN ('Active','Inactive'))
+     THROW 51077,'Location status can only be set to Active or Inactive.',1;
    IF @location_org_id IS NULL THROW 51064,'Organization is required for Location.',1;
    IF @location_name IS NULL THROW 51065,'Location Name is required.',1;
    IF @location_type_id IS NULL OR NOT EXISTS(SELECT 1 FROM grac_practice.location_type_master WHERE location_type_id=@location_type_id AND is_active=1)
@@ -3671,6 +3721,15 @@ BEGIN
    IF @department_name IS NULL THROW 51042,'Department Name is required.',1;
    IF @department_head_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM grac_practice.organization_employee WHERE employee_id=@department_head_id AND organization_id=@department_org_id AND status='Active')
      THROW 51043,'Selected Department Head is not valid for this organization.',1;
+   -- Status restriction (2026-09-20 change request): a NEW status may only
+   -- be Active or Inactive; a legacy status already on the row (Retired/
+   -- Draft/Disposed/...) is left alone unless this save actually changes
+   -- it. Department has no dedicated shim, so this is the only save path.
+   DECLARE @department_current_status_id INT=CASE WHEN @p_id<>0 THEN (SELECT record_status_id FROM grac_practice.organization_department WHERE department_id=@p_id) END;
+   DECLARE @department_resolved_status_id INT=COALESCE(@payload_record_status_id,@department_current_status_id,@active_record_status_id);
+   IF @department_resolved_status_id<>ISNULL(@department_current_status_id,-1)
+      AND NOT EXISTS(SELECT 1 FROM grac_practice.record_status_master WHERE record_status_id=@department_resolved_status_id AND status_code IN ('Active','Inactive'))
+     THROW 51078,'Department status can only be set to Active or Inactive.',1;
    IF @p_id=0
    BEGIN
      INSERT grac_practice.organization_department(organization_id,department_code,department_name,head_employee_id,description,status,record_status_id,entered_by)
@@ -3691,6 +3750,15 @@ BEGIN
    DECLARE @team_department_id BIGINT=TRY_CONVERT(BIGINT,NULLIF(JSON_VALUE(@p_payload,'$.parentDepartmentId'),''));
    DECLARE @team_status_id INT=COALESCE(@payload_record_status_id,@active_record_status_id);
    DECLARE @team_status_name NVARCHAR(30)=COALESCE((SELECT status_name FROM grac_practice.record_status_master WHERE record_status_id=@team_status_id),'Active');
+   -- Status restriction (2026-09-20 change request): a NEW status may only
+   -- be Active or Inactive; a legacy status already on the row (Retired/
+   -- Draft/Disposed/...) is left alone unless this save actually changes
+   -- it. Mirrors the same guard in the dedicated sp_org_team_save shim
+   -- (133) -- this monolith branch only runs when that shim is missing.
+   DECLARE @team_current_status_id INT=CASE WHEN @p_id<>0 THEN (SELECT record_status_id FROM grac_practice.organization_team WHERE team_id=@p_id) END;
+   IF @team_status_id<>ISNULL(@team_current_status_id,-1)
+      AND NOT EXISTS(SELECT 1 FROM grac_practice.record_status_master WHERE record_status_id=@team_status_id AND status_code IN ('Active','Inactive'))
+     THROW 51081,'Team status can only be set to Active or Inactive.',1;
    IF @team_org_id IS NULL THROW 51068,'Organization is required for Team.',1;
    IF @team_name IS NULL THROW 51069,'Team Name is required.',1;
    IF @team_manager_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM grac_practice.organization_employee WHERE employee_id=@team_manager_id AND organization_id=@team_org_id AND status='Active')
@@ -4390,8 +4458,16 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
    DECLARE @org_requirement_practice_owner NVARCHAR(200)=NULL;
    DECLARE @org_requirement_org_id BIGINT=TRY_CONVERT(BIGINT,NULLIF(JSON_VALUE(@p_payload,'$.organizationId'),''));
    DECLARE @org_requirement_control_id BIGINT=TRY_CONVERT(BIGINT,NULLIF(JSON_VALUE(@p_payload,'$.organizationControlId'),''));
+   -- Custom Practice Code Auto Generation (change request): true "custom
+   -- practice" creation on this branch is exactly the condition already used
+   -- below to auto-parent the row under the ORG-PRACTICES container -- a
+   -- brand-new row (@p_id=0), no organization control chosen, origin
+   -- 'Organization'. Pulled into its own flag so the code-generation block
+   -- can reuse it without duplicating the condition.
+   DECLARE @org_requirement_is_custom_create BIT=CASE WHEN @p_id=0 AND @org_requirement_control_id IS NULL AND COALESCE(NULLIF(JSON_VALUE(@p_payload,'$.originType'),''),'Organization')='Organization' THEN 1 ELSE 0 END;
+   DECLARE @org_requirement_generated_code NVARCHAR(50)=NULL;
    IF @org_requirement_org_id IS NULL THROW 51035,'Organization is required.',1;
-   IF @p_id=0 AND @org_requirement_control_id IS NULL AND COALESCE(NULLIF(JSON_VALUE(@p_payload,'$.originType'),''),'Organization')='Organization'
+   IF @org_requirement_is_custom_create=1
    BEGIN
      SELECT TOP (1) @org_requirement_control_id=organization_control_id
      FROM grac_practice.organization_control
@@ -4413,6 +4489,34 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
          'Medium','Active',@active_record_status_id,@p_usr_id);
        SET @org_requirement_control_id=SCOPE_IDENTITY();
      END
+
+     -- Auto-generate the Practice Code (PR_001, PR_002, ...). Never taken
+     -- from the payload for this path (requirement 6, "no manual
+     -- override") -- see the requirement_code column of the INSERT below.
+     -- sp_getapplock serializes this against every other custom-practice
+     -- create (this branch and the practices branch both use the same
+     -- resource name) so two concurrent creates cannot compute the same
+     -- next number (requirement 10). @LockOwner='Transaction' auto-releases
+     -- at this procedure's COMMIT/ROLLBACK (BEGIN TRAN / SET XACT_ABORT ON
+     -- at the top of this procedure cover the whole body, confirmed down to
+     -- the COMMIT right before the final SELECT).
+     DECLARE @org_requirement_lock_result INT;
+     EXEC @org_requirement_lock_result=sp_getapplock @Resource='pm_custom_practice_code_seq',@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=15000;
+     IF @org_requirement_lock_result<0 THROW 51210,'Unable to generate Practice Code right now. Please try again.',1;
+
+     DECLARE @org_requirement_next_seq INT;
+     SELECT @org_requirement_next_seq=ISNULL(MAX(seq),0)+1
+     FROM (
+       SELECT TRY_CONVERT(INT,SUBSTRING(requirement_code,4,50)) seq FROM grac_practice.organization_requirement WHERE requirement_code LIKE 'PR[_]%'
+       UNION ALL
+       SELECT TRY_CONVERT(INT,SUBSTRING(practice_code,4,50)) seq FROM grac_practice.practice WHERE practice_code LIKE 'PR[_]%'
+     ) existing_codes
+     WHERE seq IS NOT NULL;
+
+     -- Zero-pad to 3 digits (PR_001 .. PR_999); beyond that, grow the number
+     -- naturally instead of truncating it (RIGHT('000'+CAST(1000...),3)
+     -- would otherwise cut a 4-digit number back down to 3 digits).
+     SET @org_requirement_generated_code='PR_'+CASE WHEN @org_requirement_next_seq<1000 THEN RIGHT('000'+CAST(@org_requirement_next_seq AS VARCHAR(10)),3) ELSE CAST(@org_requirement_next_seq AS VARCHAR(10)) END;
    END
    IF @org_requirement_practice_owner_id IS NOT NULL
    BEGIN
@@ -4436,7 +4540,7 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
 
    IF @p_id=0 BEGIN
      INSERT grac_practice.organization_requirement(organization_id,origin_type,repository_requirement_id,organization_control_id,requirement_code,requirement_name,requirement_statement,objective,applicability_status,applicability_status_id,exclusion_justification,implementation_status,implementation_status_id,status,record_status_id,entered_by)
-     VALUES(@org_requirement_org_id,COALESCE(NULLIF(JSON_VALUE(@p_payload,'$.originType'),''),'Organization'),NULLIF(JSON_VALUE(@p_payload,'$.repositoryRequirementId'),''),@org_requirement_control_id,JSON_VALUE(@p_payload,'$.code'),JSON_VALUE(@p_payload,'$.name'),JSON_VALUE(@p_payload,'$.statement'),JSON_VALUE(@p_payload,'$.objective'),@org_requirement_applicability_status,COALESCE(@payload_applicability_status_id,@not_updated_applicability_status_id),@org_requirement_justification,COALESCE(JSON_VALUE(@p_payload,'$.implementationStatus'),'Not Started'),COALESCE(@payload_implementation_status_id,@not_started_implementation_status_id),COALESCE(JSON_VALUE(@p_payload,'$.status'),'Active'),COALESCE(@payload_record_status_id,@active_record_status_id),@p_usr_id);
+     VALUES(@org_requirement_org_id,COALESCE(NULLIF(JSON_VALUE(@p_payload,'$.originType'),''),'Organization'),NULLIF(JSON_VALUE(@p_payload,'$.repositoryRequirementId'),''),@org_requirement_control_id,COALESCE(@org_requirement_generated_code,JSON_VALUE(@p_payload,'$.code')),JSON_VALUE(@p_payload,'$.name'),JSON_VALUE(@p_payload,'$.statement'),JSON_VALUE(@p_payload,'$.objective'),@org_requirement_applicability_status,COALESCE(@payload_applicability_status_id,@not_updated_applicability_status_id),@org_requirement_justification,COALESCE(JSON_VALUE(@p_payload,'$.implementationStatus'),'Not Started'),COALESCE(@payload_implementation_status_id,@not_started_implementation_status_id),COALESCE(JSON_VALUE(@p_payload,'$.status'),'Active'),COALESCE(@payload_record_status_id,@active_record_status_id),@p_usr_id);
      SET @new_id=SCOPE_IDENTITY();
    END
    ELSE UPDATE grac_practice.organization_requirement
@@ -4450,7 +4554,7 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
          objective=COALESCE(JSON_VALUE(@p_payload,'$.objective'),objective),
          applicability_status=COALESCE(JSON_VALUE(@p_payload,'$.applicabilityStatus'),applicability_status),
          applicability_status_id=COALESCE(@payload_applicability_status_id,applicability_status_id),
-         exclusion_justification=CASE WHEN @org_requirement_applicability_status='Applicable' THEN NULL ELSE COALESCE(@org_requirement_justification,exclusion_justification) END,
+         exclusion_justification=COALESCE(@org_requirement_justification,exclusion_justification),
          implementation_status=COALESCE(JSON_VALUE(@p_payload,'$.implementationStatus'),implementation_status),
          implementation_status_id=COALESCE(@payload_implementation_status_id,implementation_status_id),
          status=COALESCE(JSON_VALUE(@p_payload,'$.status'),status),
@@ -4467,7 +4571,7 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
            practice_owner=@org_requirement_practice_owner,
            applicability_status=@org_requirement_applicability_status,
            applicability_status_id=COALESCE(@payload_applicability_status_id,p.applicability_status_id),
-           exclusion_justification=CASE WHEN @org_requirement_applicability_status='Applicable' THEN NULL ELSE COALESCE(@org_requirement_justification,p.exclusion_justification) END,
+           exclusion_justification=COALESCE(@org_requirement_justification,p.exclusion_justification),
            updated_by=@p_usr_id,
            updated_dt=SYSUTCDATETIME()
      FROM grac_practice.practice p
@@ -4479,7 +4583,7 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
      SELECT q.organization_id,q.organization_requirement_id,q.origin_type,q.requirement_code,q.requirement_name,q.requirement_statement,
        @org_requirement_practice_owner_id,@org_requirement_practice_owner,
        @org_requirement_applicability_status,COALESCE(@payload_applicability_status_id,@not_updated_applicability_status_id),
-       CASE WHEN @org_requirement_applicability_status='Applicable' THEN NULL ELSE @org_requirement_justification END,
+       COALESCE(@org_requirement_justification,q.exclusion_justification),
        'Active',COALESCE(@payload_record_status_id,@active_record_status_id),@p_usr_id
      FROM grac_practice.organization_requirement q
      WHERE q.organization_requirement_id=@saved_org_requirement_id
@@ -4489,6 +4593,74 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
          WHERE p.organization_id=q.organization_id
            AND p.organization_requirement_id=q.organization_requirement_id
        );
+
+     -- Source Statement mapping (change request, 2026-09): the Add/Edit
+     -- Practice form on Organization Requirements lets the user pick which
+     -- subscribed-release Source Statements this practice maps to. The
+     -- picker submits the FULL desired set as mappedOrgStatementIds (an
+     -- array of organization_framework_statements.org_statement_id values)
+     -- and this block reconciles organization_statement_practice_mapping
+     -- to match it exactly -- insert/reactivate what's newly selected,
+     -- deactivate what was dropped. Gated on the key actually being present
+     -- in the payload (JSON_QUERY returns NULL both when the key is absent
+     -- and when its value is JSON null, but returns '[]' for an empty
+     -- array) so callers that don't send this field -- Update Applicability,
+     -- quick edits, any other save that reuses this same branch -- leave
+     -- existing mappings untouched instead of wiping them out.
+     IF JSON_QUERY(@p_payload,'$.mappedOrgStatementIds') IS NOT NULL
+     BEGIN
+       DECLARE @mapped_statement_ids TABLE(org_statement_id BIGINT PRIMARY KEY);
+       INSERT @mapped_statement_ids(org_statement_id)
+       SELECT DISTINCT v.org_statement_id
+       FROM (
+         SELECT TRY_CONVERT(BIGINT,[value]) org_statement_id
+         FROM OPENJSON(@p_payload,'$.mappedOrgStatementIds')
+       ) v
+       -- Only statements that actually belong to this organization can be
+       -- mapped -- silently drops anything forged/stale rather than
+       -- throwing, since the picker itself only ever offers this org's own
+       -- subscribed-release statements.
+       WHERE v.org_statement_id IS NOT NULL
+         AND EXISTS(
+           SELECT 1 FROM grac_practice.organization_framework_statements ofs
+           WHERE ofs.org_statement_id=v.org_statement_id
+             AND ofs.organization_id=@org_requirement_org_id
+         );
+
+       DECLARE @mapping_repository_requirement_id BIGINT=(SELECT repository_requirement_id FROM grac_practice.organization_requirement WHERE organization_requirement_id=@saved_org_requirement_id);
+
+       -- Reactivate/insert every currently-selected statement.
+       MERGE grac_practice.organization_statement_practice_mapping AS target
+       USING (
+         SELECT m.org_statement_id,ofs.organization_id,ofs.release_id,ofs.framework_statement_id
+         FROM @mapped_statement_ids m
+         JOIN grac_practice.organization_framework_statements ofs ON ofs.org_statement_id=m.org_statement_id
+       ) AS src
+         ON target.organization_id=src.organization_id
+        AND target.org_statement_id=src.org_statement_id
+        AND target.org_practice_id=@saved_org_requirement_id
+       WHEN MATCHED AND target.status<>'Active' THEN UPDATE SET
+         status='Active',
+         record_status_id=@active_record_status_id,
+         framework_statement_id=src.framework_statement_id,
+         release_id=src.release_id,
+         updated_by=@p_usr_id,
+         updated_dt=SYSUTCDATETIME()
+       WHEN NOT MATCHED BY TARGET THEN INSERT(
+         organization_id,org_statement_id,framework_statement_id,repository_requirement_id,org_practice_id,release_id,status,record_status_id,entered_by)
+       VALUES(
+         src.organization_id,src.org_statement_id,src.framework_statement_id,@mapping_repository_requirement_id,@saved_org_requirement_id,src.release_id,'Active',@active_record_status_id,@p_usr_id);
+
+       -- Deactivate mappings for this practice that are no longer selected.
+       UPDATE grac_practice.organization_statement_practice_mapping
+         SET status='Inactive',
+             record_status_id=@inactive_record_status_id,
+             updated_by=@p_usr_id,
+             updated_dt=SYSUTCDATETIME()
+       WHERE org_practice_id=@saved_org_requirement_id
+         AND status='Active'
+         AND org_statement_id NOT IN (SELECT org_statement_id FROM @mapped_statement_ids);
+     END
    END
  END
  ELSE IF @p_entity_type='practices'
@@ -4500,9 +4672,35 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
    DECLARE @practice_organization_id BIGINT=TRY_CONVERT(BIGINT,NULLIF(JSON_VALUE(@p_payload,'$.organizationId'),''));
    DECLARE @practice_organization_requirement_id BIGINT=TRY_CONVERT(BIGINT,NULLIF(JSON_VALUE(@p_payload,'$.organizationRequirementId'),''));
    DECLARE @practice_origin_type NVARCHAR(30)=COALESCE(NULLIF(JSON_VALUE(@p_payload,'$.originType'),''),'Organization');
+   -- Custom Practice Code Auto Generation (change request): same condition
+   -- already used below to auto-create the linked organization_requirement
+   -- container row -- a brand-new practice (@p_id=0), not linked to an
+   -- existing organization requirement, origin 'Organization'.
+   DECLARE @practice_is_custom_create BIT=CASE WHEN @p_id=0 AND @practice_organization_requirement_id IS NULL AND @practice_origin_type='Organization' THEN 1 ELSE 0 END;
+   DECLARE @practice_generated_code NVARCHAR(50)=NULL;
    IF @practice_organization_id IS NULL THROW 51028,'Organization is required.',1;
-   IF @p_id=0 AND @practice_organization_requirement_id IS NULL AND @practice_origin_type='Organization'
+   IF @practice_is_custom_create=1
    BEGIN
+     -- Same generation as the organization-requirements branch, sharing the
+     -- same sp_getapplock resource name so a custom create on either screen
+     -- serializes against the other and neither can land on the same
+     -- PR_NNN code (requirement 10). See that branch for the full
+     -- explanation of the lock and the padding formula.
+     DECLARE @practice_lock_result INT;
+     EXEC @practice_lock_result=sp_getapplock @Resource='pm_custom_practice_code_seq',@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=15000;
+     IF @practice_lock_result<0 THROW 51212,'Unable to generate Practice Code right now. Please try again.',1;
+
+     DECLARE @practice_next_seq INT;
+     SELECT @practice_next_seq=ISNULL(MAX(seq),0)+1
+     FROM (
+       SELECT TRY_CONVERT(INT,SUBSTRING(requirement_code,4,50)) seq FROM grac_practice.organization_requirement WHERE requirement_code LIKE 'PR[_]%'
+       UNION ALL
+       SELECT TRY_CONVERT(INT,SUBSTRING(practice_code,4,50)) seq FROM grac_practice.practice WHERE practice_code LIKE 'PR[_]%'
+     ) existing_codes
+     WHERE seq IS NOT NULL;
+
+     SET @practice_generated_code='PR_'+CASE WHEN @practice_next_seq<1000 THEN RIGHT('000'+CAST(@practice_next_seq AS VARCHAR(10)),3) ELSE CAST(@practice_next_seq AS VARCHAR(10)) END;
+
      DECLARE @practice_container_control_id BIGINT=NULL;
      SELECT TOP (1) @practice_container_control_id=organization_control_id
      FROM grac_practice.organization_control
@@ -4529,7 +4727,7 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
      FROM grac_practice.organization_requirement
      WHERE organization_id=@practice_organization_id
        AND organization_control_id=@practice_container_control_id
-       AND requirement_code=JSON_VALUE(@p_payload,'$.code')
+       AND requirement_code=COALESCE(@practice_generated_code,JSON_VALUE(@p_payload,'$.code'))
        AND status='Active'
      ORDER BY organization_requirement_id;
 
@@ -4540,7 +4738,7 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
          requirement_statement,objective,applicability_status,applicability_status_id,exclusion_justification,
          implementation_status,implementation_status_id,status,record_status_id,entered_by)
        VALUES(
-         @practice_organization_id,'Organization',NULL,@practice_container_control_id,JSON_VALUE(@p_payload,'$.code'),JSON_VALUE(@p_payload,'$.name'),
+         @practice_organization_id,'Organization',NULL,@practice_container_control_id,COALESCE(@practice_generated_code,JSON_VALUE(@p_payload,'$.code')),JSON_VALUE(@p_payload,'$.name'),
          JSON_VALUE(@p_payload,'$.description'),NULL,'Applicable',
          COALESCE((SELECT applicability_status_id FROM grac_practice.applicability_status_master WHERE status_code='Applicable'),@not_updated_applicability_status_id),
          NULL,'Not Started',@not_started_implementation_status_id,'Active',@active_record_status_id,@p_usr_id);
@@ -4571,10 +4769,10 @@ WHERE ' + QUOTENAME(@resolution_cfg_id_column) + N'=@referenceId
 
    IF @p_id=0 BEGIN
      INSERT grac_practice.practice(organization_id,organization_requirement_id,origin_type,practice_code,practice_name,description,practice_owner_id,practice_owner,applicability_status,applicability_status_id,exclusion_justification,status,record_status_id,entered_by)
-     VALUES(@practice_organization_id,@practice_organization_requirement_id,@practice_origin_type,JSON_VALUE(@p_payload,'$.code'),JSON_VALUE(@p_payload,'$.name'),JSON_VALUE(@p_payload,'$.description'),@practice_owner_id,@practice_owner,@practice_applicability_status,COALESCE(@payload_applicability_status_id,@not_updated_applicability_status_id),CASE WHEN @practice_applicability_status='Applicable' THEN NULL ELSE @practice_justification END,COALESCE(JSON_VALUE(@p_payload,'$.status'),'Active'),COALESCE(@payload_record_status_id,@active_record_status_id),@p_usr_id);
+     VALUES(@practice_organization_id,@practice_organization_requirement_id,@practice_origin_type,COALESCE(@practice_generated_code,JSON_VALUE(@p_payload,'$.code')),JSON_VALUE(@p_payload,'$.name'),JSON_VALUE(@p_payload,'$.description'),@practice_owner_id,@practice_owner,@practice_applicability_status,COALESCE(@payload_applicability_status_id,@not_updated_applicability_status_id),@practice_justification,COALESCE(JSON_VALUE(@p_payload,'$.status'),'Active'),COALESCE(@payload_record_status_id,@active_record_status_id),@p_usr_id);
      SET @new_id=SCOPE_IDENTITY();
    END
-   ELSE UPDATE grac_practice.practice SET organization_id=COALESCE(JSON_VALUE(@p_payload,'$.organizationId'),organization_id),organization_requirement_id=COALESCE(JSON_VALUE(@p_payload,'$.organizationRequirementId'),organization_requirement_id),origin_type=COALESCE(JSON_VALUE(@p_payload,'$.originType'),origin_type),practice_code=COALESCE(JSON_VALUE(@p_payload,'$.code'),practice_code),practice_name=COALESCE(JSON_VALUE(@p_payload,'$.name'),practice_name),description=COALESCE(JSON_VALUE(@p_payload,'$.description'),description),practice_owner_id=@practice_owner_id,practice_owner=@practice_owner,applicability_status=@practice_applicability_status,applicability_status_id=COALESCE(@payload_applicability_status_id,applicability_status_id),exclusion_justification=CASE WHEN @practice_applicability_status='Applicable' THEN NULL ELSE @practice_justification END,status=COALESCE(JSON_VALUE(@p_payload,'$.status'),status),record_status_id=COALESCE(@payload_record_status_id,record_status_id),updated_by=@p_usr_id,updated_dt=SYSUTCDATETIME() WHERE practice_id=@p_id;
+   ELSE UPDATE grac_practice.practice SET organization_id=COALESCE(JSON_VALUE(@p_payload,'$.organizationId'),organization_id),organization_requirement_id=COALESCE(JSON_VALUE(@p_payload,'$.organizationRequirementId'),organization_requirement_id),origin_type=COALESCE(JSON_VALUE(@p_payload,'$.originType'),origin_type),practice_code=COALESCE(JSON_VALUE(@p_payload,'$.code'),practice_code),practice_name=COALESCE(JSON_VALUE(@p_payload,'$.name'),practice_name),description=COALESCE(JSON_VALUE(@p_payload,'$.description'),description),practice_owner_id=@practice_owner_id,practice_owner=@practice_owner,applicability_status=@practice_applicability_status,applicability_status_id=COALESCE(@payload_applicability_status_id,applicability_status_id),exclusion_justification=COALESCE(@practice_justification,exclusion_justification),status=COALESCE(JSON_VALUE(@p_payload,'$.status'),status),record_status_id=COALESCE(@payload_record_status_id,record_status_id),updated_by=@p_usr_id,updated_dt=SYSUTCDATETIME() WHERE practice_id=@p_id;
  END
  ELSE IF @p_entity_type='practice-instances'
  BEGIN

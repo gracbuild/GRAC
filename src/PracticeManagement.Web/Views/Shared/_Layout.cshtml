@@ -84,6 +84,13 @@
     <link rel="stylesheet" href="~/css/repository-actions.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/practice-management.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/topbar-auth.css" asp-append-version="true" />
+    @* Master Page layout + alignment refinement. Loaded LAST on purpose:
+       the chrome rules it supersedes are spread across cacca-styles.css,
+       control-management.css and practice-management.css, so a fix made
+       in the first of those is silently overridden by the later two.
+       Chrome only -- header, user block, breadcrumb, sidebar, content
+       gutter. No markup or behaviour depends on it. *@
+    <link rel="stylesheet" href="~/css/master-layout.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/PracticeManagement.Web.styles.css" asp-append-version="true" />
     <script>
         (function () {
@@ -364,6 +371,28 @@
         window.addEventListener('error', function (event) {
             console.error('PracticeManagement menu/rendering error', event.message, event.filename, event.lineno, event.error);
         });
+        // Parent menu rows that are also pages (Audit Definition / Audit
+        // Configuration, migration 276). AdminLTE's treeview swallows the
+        // click with preventDefault() so the subtree can expand, which
+        // would leave these pages unreachable from the sidebar. Its
+        // preventDefault only stops the browser's default navigation, not
+        // ours, so navigate explicitly. Deliberately unconditional rather
+        // than keyed on event.defaultPrevented: both handlers are bound on
+        // document, so which one runs first depends on load order and
+        // defaultPrevented would be an unreliable signal. Rows without
+        // data-nav-href -- every pre-276 parent and every leaf -- are
+        // untouched.
+        document.addEventListener('click', function (event) {
+            var link = event.target && event.target.closest
+                ? event.target.closest('a.nav-link[data-nav-href]')
+                : null;
+            if (!link) return;
+            var href = link.getAttribute('data-nav-href');
+            if (!href || href === '#') return;
+            event.preventDefault();
+            window.location.href = href;
+        });
+
         function syncPracticeMenuState() {
             try {
                 var nav = document.querySelector('.nav-sidebar');
@@ -486,10 +515,50 @@
             }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
         } catch (e) { }
         $(document).on('shown.lte.treeview collapsed.lte.treeview expanded.lte.treeview', syncPracticeMenuState);
+        // Only a DELIBERATE hamburger press should be remembered. AdminLTE
+        // fires these same collapsed/shown events for its automatic
+        // width<=992 collapse, which it re-checks on every window resize
+        // (DevTools docked, 125%+ zoom, window snap, a transient wide form).
+        // Persisting those pinned the sidebar collapsed for all later loads
+        // -- even back on a wide screen -- because the inline restore script
+        // re-applies localStorage on every page. Gate the write on an
+        // explicit pointerdown of the pushmenu button; a flag that clears
+        // itself after the click tick, so resize-driven collapses never
+        // persist. window.__pmSidebarUserToggle is defined here so it exists
+        // before cacca-scripts.js (which shares the same gate) initialises.
+        window.__pmSidebarUserToggle = false;
+        $(document).on('pointerdown mousedown', '[data-widget="pushmenu"]', function () {
+            window.__pmSidebarUserToggle = true;
+            window.setTimeout(function () { window.__pmSidebarUserToggle = false; }, 0);
+        });
         $(document).on('collapsed.lte.pushmenu shown.lte.pushmenu', function () {
-            try { localStorage.setItem('cacca_sidebar_collapsed', document.body.classList.contains('sidebar-collapse')); } catch (e) { }
+            if (window.__pmSidebarUserToggle) {
+                try { localStorage.setItem('cacca_sidebar_collapsed', document.body.classList.contains('sidebar-collapse')); } catch (e) { }
+            }
             syncPracticeMenuState();
         });
+
+        // While the sidebar is collapsed to its icon rail, AdminLTE's own
+        // CSS (adminlte.css, the Layout widget) expands .main-sidebar to
+        // 250px on :hover or the .sidebar-focused class (which it adds on
+        // keyboard focus of a sidebar link) -- a pure CSS flyout that never
+        // touches .content-wrapper/.main-header/.main-footer's margin, so
+        // the flyout sits on top of the page. Reserve that same 250px by
+        // toggling a body class (master-layout.css section 7c reacts to
+        // it) for both triggers, mirroring AdminLTE's own two triggers
+        // exactly -- .main-header can't be reached with a CSS sibling
+        // selector alone because it sits BEFORE .main-sidebar in the
+        // markup above, hence doing this in script.
+        (function () {
+            function syncSidebarHoverPush() {
+                var $sidebar = $('.main-sidebar');
+                var flying = document.body.classList.contains('sidebar-collapse')
+                    && ($sidebar.is(':hover') || $sidebar.hasClass('sidebar-focused'));
+                document.body.classList.toggle('sidebar-hover-push', flying);
+            }
+            $(document).on('mouseenter mouseleave', '.main-sidebar', syncSidebarHoverPush);
+            $(document).on('focusin focusout', '.main-sidebar a', syncSidebarHoverPush);
+        })();
     </script>
 
     @*

@@ -165,7 +165,22 @@ public sealed record TaskListRow(
     // ---- Completion (BRD §10) ----------------------------------------
     long? CompletedByEmployeeId = null,
     string? CompletedByEmployeeName = null,
-    DateTime? CompletedDt = null);
+    DateTime? CompletedDt = null,
+
+    // ---- Organization (326) -------------------------------------------
+    // Resolved once, on vw_pm_practice_task (326), for the Task View full
+    // page's "Related Organization" fact. Null against an un-migrated
+    // database -- read tolerantly by MapRow like every other v2 column.
+    string? OrganizationName = null,
+
+    // ---- Created / Updated (326) --------------------------------------
+    // practice_task.entered_by/entered_dt/updated_by/updated_dt have
+    // always been on vw_pm_practice_task (195); nothing read them until
+    // the Task View full page needed a Created/Updated section.
+    string? EnteredBy = null,
+    DateTime? EnteredDt = null,
+    string? UpdatedBy = null,
+    DateTime? UpdatedDt = null);
 
 public sealed record TaskListResult(
     long TotalCount,
@@ -321,6 +336,129 @@ public sealed record TaskActivityAddRequest(
     string? ToValue,
     long? ActorEmployeeId);
 
+// =====================================================================
+// Task edit — migration 269
+//
+// ONE request for every editable field, replacing the four single-field
+// commands the UI used to call one at a time (transition, assign,
+// priority, sla-extension). Those commands still exist and still own
+// their rules; sp_task_update composes them.
+//
+// EVERY FIELD IS NULLABLE AND NULL MEANS "LEAVE ALONE", not "clear".
+// A partial form (the mobile edit sheet, a future inline editor) can
+// post only what it shows without blanking what it does not.
+//
+// The consequence, stated because it is a real limitation: a field
+// cannot be cleared through this contract. Nothing in the current form
+// needs to clear one -- title and owner are required, dates are governed
+// -- so an explicit "clear this field" marker is not invented ahead of a
+// caller that wants it.
+// =====================================================================
+
+/// <summary>
+/// One save for the whole edit form (migration 269).
+///
+/// <para><b>Not every field applies immediately.</b> Priority reductions
+/// (§7) and due-date changes (§8) create Exception Centre requests and
+/// leave the task untouched until approved. The per-field
+/// <see cref="TaskFieldChange.Outcome"/> in the result says which
+/// happened; the caller must not report "saved" without reading it.</para>
+///
+/// <para><b>All or nothing.</b> If any field is refused the whole edit
+/// rolls back, so the form the user is looking at still matches the task.</para>
+///
+/// <para><see cref="ExpectedUpdatedDt"/> is optimistic concurrency: pass
+/// the value the form was loaded with and a save is refused (56705) if
+/// someone else edited the task meanwhile. NULL skips the check.</para>
+/// </summary>
+public sealed record TaskUpdateRequest(
+    long TaskId,
+    string? SubjectTitle = null,
+    string? SubjectDescription = null,
+    long? AssignedToEmployeeId = null,
+    string? Priority = null,
+    string? StatusCode = null,
+    DateTime? StartDate = null,
+    DateTime? DueAt = null,
+    bool? IsMandatoryChild = null,
+    DateTime? ChildTargetDate = null,
+    // Required by the governed paths (a priority reduction and an SLA
+    // extension are both refused without one); optional for the rest.
+    string? ChangeReason = null,
+    long? ActorEmployeeId = null,
+    string? ActorRoleCode = null,
+    DateTime? ExpectedUpdatedDt = null);
+
+/// <summary>
+/// What one field did. <c>Outcome</c> is <c>Applied</c> (the task
+/// changed), <c>PendingApproval</c> (a request was raised and the task
+/// did NOT change), or <c>Unchanged</c>.
+///
+/// <para>FromValue/ToValue are the same strings written to
+/// <c>task_activity</c>, so the confirmation the user sees after saving
+/// and the audit row recorded against the task cannot disagree.</para>
+/// </summary>
+public sealed record TaskFieldChange(
+    string FieldCode,
+    string FieldLabel,
+    string? FromValue,
+    string? ToValue,
+    string Outcome,
+    string? Detail);
+
+/// <summary>
+/// An empty <see cref="Changes"/> list means the form was saved with
+/// nothing actually different — reported honestly rather than as a save.
+/// </summary>
+public sealed record TaskUpdateResult(
+    bool Success,
+    long TaskId,
+    IReadOnlyList<TaskFieldChange> Changes,
+    string? Error = null,
+    string? ReasonCode = null)
+{
+    public bool AnyApplied         => Changes.Any(c => c.Outcome == "Applied");
+    public bool AnyPendingApproval => Changes.Any(c => c.Outcome == "PendingApproval");
+}
+
+/// <summary>
+/// What the editor may offer for one task (migration 269), so the UI
+/// never renders a control whose save SQL would refuse.
+///
+/// <para><see cref="AllowedStatuses"/> comes from
+/// <c>fn_is_transition_allowed</c> against the live rule table — not a
+/// list hard-coded in JavaScript that drifts the day a status is added.
+/// Closed and Cancelled are deliberately absent: a task is closed with
+/// Complete or Close, which carry the §12 gate and the completion
+/// record.</para>
+/// </summary>
+public sealed record TaskEditOptions(
+    long TaskId,
+    string? CurrentStatusCode,
+    string? TaskTypeCode,
+    string? CurrentPriority,
+    bool IsChild,
+    bool IsTerminal,
+    bool CanEdit,
+    bool CanEditPriority,
+    bool CanEditDueDate,
+    bool PriorityChangePending,
+    bool SlaExtensionPending,
+    bool CanEditMandatory,
+    IReadOnlyList<TaskStatusOption> AllowedStatuses,
+    // Current values the editor needs that TaskListRow does not carry.
+    // Returned here rather than widening the list contract that every
+    // grid, count and export reads, to serve one form.
+    DateTime? StartDate = null,
+    bool? IsMandatoryChild = null,
+    DateTime? ChildTargetDate = null,
+    // Optimistic-concurrency token: post it back as
+    // TaskUpdateRequest.ExpectedUpdatedDt and a save is refused if
+    // someone else changed the task in the meantime.
+    DateTime? UpdatedDt = null);
+
+public sealed record TaskStatusOption(string StatusCode, string StatusName);
+
 /// <summary>BRD §6. Read-only preview of the owner ladder — used by the
 /// UI to show "Proposed owner: X (Practice owner)" before anything is
 /// committed.</summary>
@@ -376,3 +514,27 @@ public sealed record TaskCountsResult(
     long CustomCount,
     long BreachedCount,
     long PendingApprovalCount);
+
+// ---------- Migration 256: Task Centre Source filter counts ----------
+/// <summary>
+/// One entry of Task Centre's Source dropdown. Mirrors
+/// <c>GapCentreSourceCount</c> so the two Centres read the same way — the
+/// full <c>ck_pm_practice_task_source_type</c> vocabulary, zero counts
+/// included, rather than only the values that happen to have rows.
+/// </summary>
+public sealed record TaskSourceCount(
+    string SourceTypeCode,
+    int    DisplayOrder,
+    long   TaskCount);
+
+/// <summary>
+/// Totals alongside the per-source counts. <see cref="UnsourcedCount"/>
+/// is reported rather than hidden so the dropdown's numbers reconcile
+/// against the grid, but it is not filterable — <c>sp_task_list</c>'s
+/// predicate cannot express "source is null".
+/// </summary>
+public sealed record TaskSourceCountsResult(
+    IReadOnlyList<TaskSourceCount> Sources,
+    long TotalCount,
+    long UnsourcedCount,
+    string? Error = null);

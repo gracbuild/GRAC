@@ -88,6 +88,40 @@ public sealed class TaskController(
         }
     }
 
+    // Migration 256 -- proxy for the Source filter's per-source counts.
+    // The Web TaskController has no catch-all route, so every API
+    // endpoint needs an explicit method here; this mirrors Counts above.
+    [HttpGet("source-counts")]
+    public async Task<IActionResult> SourceCounts(
+        [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+
+        if (organizationId.HasValue && !HttpContext.IsOrganizationAllowed(organizationId.Value))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "Caller is not authorised for the requested organization." });
+
+        var client = BuildClient();
+        try
+        {
+            var qs = organizationId.HasValue ? "?organizationId=" + organizationId.Value : "";
+            var resp    = await client.GetAsync("api/practice/tasks/source-counts" + qs, cancellationToken);
+            var payload = await resp.Content.ReadAsStringAsync(cancellationToken);
+            return new ContentResult
+            {
+                Content     = payload,
+                ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                StatusCode  = (int)resp.StatusCode
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "TaskController.SourceCounts proxy failed");
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
     [HttpGet("feature-status")]
     public async Task<IActionResult> FeatureStatus(
         [FromQuery] long? organizationId,
@@ -196,6 +230,26 @@ public sealed class TaskController(
     [HttpGet("{id:long}/eligibility")]
     public Task<IActionResult> Eligibility(long id, CancellationToken cancellationToken)
         => ForwardGetAsync($"api/practice/tasks/{id}/eligibility", cancellationToken);
+
+    // ---- Task edit (migration 269) ----------------------------------
+    // Thin proxies, like everything else in this tier: the Web project
+    // holds no connection and makes no decision. The per-field outcome
+    // list and every §7/§8 rule come back from the Api untouched.
+
+    /// <summary>Which fields the editor may offer, and the status
+    /// transitions that are legal right now.</summary>
+    [HttpGet("{id:long}/edit-options")]
+    public Task<IActionResult> EditOptions(long id, CancellationToken cancellationToken)
+        => ForwardGetAsync($"api/practice/tasks/{id}/edit-options", cancellationToken);
+
+    /// <summary>
+    /// The single task edit save. PUT, matching the Api — a 200 here does
+    /// not mean every field applied; the response's per-field outcomes say
+    /// which were applied and which became Exception Centre requests.
+    /// </summary>
+    [HttpPut("{id:long}")]
+    public Task<IActionResult> Update(long id, CancellationToken cancellationToken)
+        => ForwardBodyAsync(HttpMethod.Put, $"api/practice/tasks/{id}", cancellationToken);
 
     /// <summary>Source -> Tasks panel (BRD §15). Called by the Gap /
     /// Exception / Risk / Assurance detail screens.</summary>

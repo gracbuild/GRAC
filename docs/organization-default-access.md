@@ -135,6 +135,53 @@ SELECT grac_practice.fn_pm_feature_enabled(<new org id>, N'screen.gaps');
 SELECT grac_practice.fn_pm_feature_enabled(<new org id>, N'screen.tasks');
 ```
 
+## Forcing the three centres ON — `305`
+
+**Migrations:** `305_enable_centres.sql`, `305_enable_centres_rollback.sql`
+
+`pm_grant_organization_default_access` is **insert-only** by design: a
+`feature_flag` row already sitting at `is_enabled = 0`, or a permission
+row already sitting at `can_view = 0`, is an operator decision and is
+left alone. So `217` fixes "no row at all" but never "row present and
+switched off" — and a database restored from an older backup, or one
+where a flag was toggled during testing, lands in exactly that state.
+
+`305` is the explicit operator decision to the contrary, scoped to the
+three centres only:
+
+| Section | What it does |
+| --- | --- |
+| 1 | Ensures `screen.gaps`, `screen.tasks`, `screen.exception-centre` exist in `feature_flag_master` and are `is_active = 1`. `default_enabled` stays `0` — enabling is a per-org call. |
+| 2 | `MERGE` on `feature_flag` — **raises** an existing `0` to `1`, inserts where absent. |
+| 3 | Re-raises `menu_master.status` to `Active` for `gaps`, `tasks`, `exception-centre` and their parent `nav-oversight`. Never inserts — `274` owns the snapshot. |
+| 4 | `MERGE` on `organization_role_menu_permission` — full rights on those four rows for `Admin` / `ORG_ADMIN` / `GRAC_ADMIN`, raising `can_view = 0` rows. |
+| 5 | BEFORE/AFTER report + three PASS/FAIL checks. |
+
+Scope switch at the top of each batch:
+
+```sql
+DECLARE @OrganizationId BIGINT = NULL;   -- NULL = all active orgs; <id> = one org
+```
+
+Change it in **every** batch that declares it (the forward script has two,
+the rollback two) — a table variable and a local do not survive `GO`.
+
+No API or UI change: both gates already read these tables at sign-in.
+Which is also the gotcha — **sign out and back in** after running it, or
+the session keeps the old permission set and the sidebar looks unchanged.
+
+Rollback keys on `entered_by` / `updated_by = 'seed-305'`:
+
+- rows `305` **created** (flags and grants alike) are deleted;
+- `feature_flag` rows it only **raised** go back to `is_enabled = 0`;
+- `organization_role_menu_permission` rows it only **raised** are
+  *listed for review*, not reset — `305` tops up five flags at once and
+  the pre-run combination is not recorded anywhere, so zeroing `can_view`
+  would invent a state the row never had;
+- `menu_master.status` is deliberately **not** reverted, because `Active`
+  is what `274` declares for all four keys — switch a menu off with its
+  own migration instead (the `288` / `289` pattern).
+
 ## Known limitation
 
 Only the **Admin** role is granted. The other roles seeded by `022`

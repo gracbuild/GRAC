@@ -433,6 +433,66 @@ The new row actions use `prompt()`/`confirm()` to match the existing
 actions in that file. Converting the whole screen to modal dialogs is a
 separate UI pass — mixing the two styles would be worse than either.
 
+### The parent → sub task tree
+
+The grid shows the hierarchy inline. **No procedure, API, service or
+controller changed for it** — everything it needs already existed:
+
+| Need | Already there |
+| --- | --- |
+| Is there a sub task, and how many? | `child_count` on the row (195) |
+| The sub tasks themselves | the SAME list endpoint with `?parentTaskId=N` — `sp_task_list` sets `@include_children = 1` when a parent is named (195) |
+| The query string reaching the API | the Web proxy forwards `Request.QueryString` whole |
+| A working 3-dots menu on a sub task | `buildTaskRowMenu(tr)` reads the row it was clicked on |
+
+**Pagination, search, the Source filter, sorting and the count badges are
+untouched.** The top-level list still returns parents only
+(`@include_children = 0` → `parent_task_id IS NULL`), so a sub task never
+consumes a row of a page. Sub tasks are fetched per parent, on expand.
+
+`taskRowEl(r, tabKey, index, depth)` is the one row builder for both —
+because `?parentTaskId=` returns full `TaskListRow`s, every cell renderer
+and every `data-task-*` attribute is reused verbatim.
+
+The hierarchy lives entirely in the **Task #** cell: a table cannot
+indent a whole row without breaking the column alignment that makes it a
+table. A parent with sub tasks gets a rotating chevron; a task with none
+gets `.task-tree-toggle.is-empty`, a spacer of exactly the button's
+width, so its number still lines up — a missing element would shift the
+column, which is the opposite of "display it normally".
+
+**The sub-task menu is the shared menu.** On a child row, `View`,
+`Complete Task` and `Close Task` are all applicable (a leaf has
+`mandatory_child_open_count = 0`, so `is_eligible_for_completion = 1` and
+Complete is enabled), and `Add Child Task` is already hidden by
+`applicable: !isTerminal && !isChild` — structural, since `55674` forbids
+a third level. `Edit`, `Add Evidence` and `Add Update` come along and are
+legitimate on a sub task. No second builder was written.
+
+Two pieces of state, declared with the rest of the module state at the
+top of the IIFE rather than beside the functions that use them —
+`init()` is called at script-parse time, so a mid-file `let` sits in its
+temporal dead zone during that call:
+
+- `childRowCache` — per parent, dropped by `reloadCurrentTab()`, which is
+  where every write in the screen ends. One hook instead of an
+  `invalidateChildRows(id)` call in a dozen handlers.
+- `expandedTaskIds` — survives the refresh, so completing a sub task does
+  not rebuild the grid collapsed and hide the row just acted on. Ids not
+  on the current page are pruned on each render.
+
+Collapse walks forward while `data-depth` exceeds the parent's, so a
+whole subtree goes at once. `depth` and `MAX_TREE_DEPTH` mean the
+renderer is not one level deep by accident: the **model** is one level
+(`55674`), so `child_count` on a sub task is always 0 and no toggle is
+drawn — if that rule is ever relaxed, this renders the extra levels
+without being touched.
+
+The **Children** column on a sub task no longer repeats "child of
+T-4-91" — the indent says that. It shows `Mandatory` or `Optional`
+instead, which is what the tree cannot say (§12: only mandatory sub tasks
+block the parent's completion).
+
 ---
 
 ## Behaviour changes
@@ -589,9 +649,17 @@ manual add can never collide with a generator's.
 
 ### Sources wired
 
+> **Tabs merged in 255.** Implementation / Continuous Assurance / Custom
+> are now one list with Source as a column and a filter — see
+> [centre-source-column.md](centre-source-column.md). Event Driven keeps
+> its own tab, because conflict 4 below is still open. No procedure or
+> API change was needed: `sp_task_list` already treated a null
+> `@task_type_code` as "every type" and already accepted
+> `@source_type_code`.
+
 | Source | Seam | Dedupe key |
 |---|---|---|
-| Gap | `sp_custom_gap_task_create` (rewritten) | `GAP_REMEDIATION` |
+| Gap | ~~`sp_custom_gap_task_create` (rewritten)~~ — **withdrawn in 253**, see below | ~~`GAP_REMEDIATION`~~ |
 | Risk | `sp_risk_candidate_accept` (superset) | `RISK_TREATMENT` |
 | Continuous Assurance | `sp_org_assurance_observation_accept` (superset) | `OBSERVATION_REMEDIATION` |
 | Event Assurance | **not wired** — conflict 4 | — |
@@ -605,6 +673,34 @@ reroute happens at the seam it already calls.
 Gaps that already had an open task before Phase 2 keep it: the rewritten
 `sp_custom_gap_task_create` returns the existing task and raises no
 candidate.
+
+> **Live version note (252).** The body described above as "174" now lives
+> in migration **252**. Migration 249 rebuilt `sp_custom_gap_analysis_save`
+> from 157's pre-decision-model body and dropped everything 168–174 had
+> added — `@remediation_possible` / `@business_risk_present`, the
+> terminal-invalid guard, and all three auto-triggers including the
+> `sp_custom_gap_task_create` call this section relies on. Symptom was
+> *"Procedure or function sp_custom_gap_analysis_save has too many
+> arguments specified"* on saving Gap Analysis, because the API still sent
+> the two 168 parameters. 252 re-emits the proc as 174's body plus 249's
+> `@preventive_action`, so this seam behaves exactly as documented again.
+> **When editing this proc, start from 252, never from 157 or 174.**
+
+> **Gap source withdrawn from the candidate model (253).** Phase 2's
+> reroute worked, but the work it produced was unreachable: the Task
+> Candidates tab had been retired from Task Centre, so nothing could
+> approve a `GAP_REMEDIATION` candidate, and `Rectification` — the type
+> an approved one becomes — was queried by no tab and counted by no
+> badge. Gap analysis therefore reported "a Task" while producing
+> something no screen could show. **253 reverts the gap seam only:**
+> `sp_custom_gap_task_create` opens a Task directly through `sp_task_open`
+> again (174's body, keeping 199's priority carry-forward), and the
+> Custom Tasks tab was widened to cover `Rectification` in `sp_task_list`
+> and `sp_task_center_counts`. Risk and Continuous Assurance keep
+> raising candidates through 199's other rewrites — **the candidate model
+> is not withdrawn, only the Gap source is.** Candidates raised between
+> 199 and 253 are left in place; re-saving that gap's analysis opens its
+> task, and 253's verification block lists the affected rows.
 
 ### Approval
 
@@ -973,3 +1069,442 @@ Phase 1, tracking BRD §20:
 26. Gap SLA override (184) still works end to end; `sp_exception_request_list` still returns gap rows *and* now returns task rows.
 27. Implementation task in `InProgress` → `sp_task_complete` still throws 53752.
 28. Api tier deployed **before** 192–196 → list, counts and open all still work.
+
+## Migration 245 — Persistent gap + per-obligation save
+
+Gap listing was **derived** through 243 (`vw_pm_instance_effective_impl_status` +
+`sp_task_center_gaps_list`). It answered "which instances are in gap
+territory right now" and nothing else. It could not answer
+
+- when did this gap first appear
+- who was on it (obligation-wise) at any point
+- has this gap ever been closed
+
+245 makes gaps persistent with two tables:
+
+- `practice_gap` — one row per `practice_instance_id` (unique). Carries
+  `gap_status` (`Open` / `Closed`), `opened_dt`, `closed_dt`, and a
+  `reopened_dt` stamp for `Closed → Open` transitions.
+- `practice_gap_obligation` — one row per (gap, offending obligation).
+  Snapshots `obligation_name` and `obligation_type_code` at the moment
+  the row was added. `logged_status_code` records the reason it was
+  logged (`Not Implemented` or `Partially Implemented`). Active while
+  the obligation is in gap territory; **Retired** with `removed_dt` the
+  moment it moves out. A filtered unique index keeps one Active row per
+  (gap, obligation) and lets a re-entry after retirement get a fresh row
+  rather than reviving stale metadata.
+
+### The sync procedure
+
+`sp_practice_gap_sync_for_instance` is invoked from the API tier
+(`ResolveWorkspaceService`) after every obligation save — both the bulk
+`AdoptObligationsAsync` and the single `SaveLocalObligationAsync`. It is
+idempotent:
+
+1. Retire any active child whose obligation is no longer in gap territory
+   (moved to `Implemented` / `N/A`, or the obligation itself was retired).
+2. Insert an active child for any current gap-territory obligation that
+   has none.
+3. Recompute the parent `gap_status`: `Closed` when no actives remain,
+   `Open` otherwise. `Closed → Open` stamps `reopened_dt`.
+
+A best-effort sync — a failure here logs a warning and does not roll back
+the save the operator just performed. Because the procedure reads current
+state, a subsequent save catches the tables back up.
+
+### `sp_task_center_gaps_list` reads from the tables
+
+Re-emitted to source rows from `practice_gap` where `gap_status = 'Open'`.
+`GapObligationsJson` now comes from the child table's active rows —
+snapshot obligation names, snapshot logged status. Rows carry `OpenedDt`
+and `ReopenedDt` for the view-details expansion.
+
+### The save flow the user sees
+
+The old bulk **Save obligations** at the top of the workspace panel is
+retired. Each obligation card now carries its own **Save obligation**
+button. Clicking it
+
+1. Sends only that obligation through `/resolve/obligations` (single-item
+   array — one path through `sp_resolve_obligation_adopt`).
+2. Flushes every evidence row inside the card via `/resolve/evidence`
+   (parallelised).
+3. The API side then triggers `sp_practice_gap_sync_for_instance`, so a
+   move to / out of `Not Implemented` / `Partially Implemented` on this
+   obligation lands in the gap tables on the same click.
+
+Locally added obligations retain the modal-based edit — the modal already
+bundles obligation + evidence — so the per-card Save button renders only
+on published-obligation cards.
+
+---
+
+## One Edit, not five field updates (migration 269)
+
+### What it replaced
+
+| Before | After |
+| --- | --- |
+| 3-dot → Update Status → prompt → save | one field on the Edit form |
+| 3-dot → Assign / Reassign → prompt → save | one field on the Edit form |
+| 3-dot → Change Priority → prompt → save | one field on the Edit form |
+| 3-dot → Request SLA Extension → prompt → save | one field on the Edit form |
+| title / description / start date | **were not editable at all** — there was no `sp_task_update` |
+
+Three round trips through three endpoints with three audit shapes, and a
+typo in a task name was permanent.
+
+### `sp_task_update` composes; it does not reimplement
+
+| Field | Owned by | Enforced there |
+| --- | --- | --- |
+| owner | `sp_task_assign` | the Open → Assigned side effect |
+| priority | `sp_task_priority_change` | §7 increase/reduction rules |
+| due date | `sp_task_sla_extension_request_create` | §8 |
+| status | `sp_task_transition` | the state machine |
+| title, description, start date, mandatory flag, child target date | `sp_task_update` itself | nothing else owns them |
+
+Reimplementing any of them would create a second home for the §7
+reduction rule — the drift this migration exists to end. `PUT /tasks/{id}`
+is an additional door into the same rooms, which is why `/transition`,
+`/assign` and `/priority` all remain: Risk Treatment reassigns from its
+own row menu, Exception Centre approves reductions, and both still call
+the procedure that owns the rule.
+
+### Audit: the existing mechanism, extended by nothing
+
+`task_activity` already had `from_value`, `to_value`, `actor_employee_id`,
+`actor_display_name` and `entered_dt`, and `sp_task_activity_add` already
+took `@from_value` / `@to_value`. So a field diff is one row in the table
+the feed already reads:
+
+```
+Priority:  Medium → High
+Owner:     John → David
+Due date:  10-Sep-2026 → 15-Sep-2026
+```
+
+**No audit table and no audit column was added.** The new
+`activity_type_code` values (`FieldChange` chief among them) need no
+schema change either — 192 deliberately left that column a free
+`NVARCHAR(40)` with no CHECK and no FK.
+
+Only fields that actually changed are written. A form that posts all ten
+because the user edited one produces **one** row, not ten
+`Priority: High → High` entries.
+
+### "Saved" would have been a lie, so it isn't said
+
+A priority **reduction** and any due-date change do not alter the task —
+they raise an Exception Centre request and leave every column as it was
+(§7, §8). A form reporting "Saved" after one of those has told the user
+something false.
+
+`sp_task_update` therefore returns one row per attempted field:
+
+| Outcome | Meaning |
+| --- | --- |
+| `Applied` | the task changed |
+| `PendingApproval` | a request was raised; **the task did not change** |
+| `Unchanged` | posted, but identical to the current value |
+
+The UI renders that list verbatim above the read-only view, and the
+banner turns amber with *"Saved — but 1 change still needs approval"*
+rather than green. An empty list is reported as *"Nothing was different"*,
+not as a save.
+
+### All or nothing
+
+The whole edit is one transaction. Any refusal — illegal transition,
+reduction with no reason, an extension already pending — rolls everything
+back and names the field. A partial save would leave the operator looking
+at a form in two states, on the one screen whose purpose is an accurate
+record of what changed.
+
+### Complete and Close stayed out of Edit
+
+They are workflow actions, not values:
+
+| | `sp_task_complete` | `sp_task_close` |
+| --- | --- | --- |
+| §12 mandatory-child gate | **yes** (throws 55693) | no |
+| `completed_by` / `completed_dt` | **stamped** | not written |
+| `ChildCompleted` on the parent | **emitted** | not emitted |
+| `ParentEligibleForCompletion` | **emitted** when the last mandatory child closes | not emitted |
+
+Different pre-conditions, different side effects, different audit — so
+each is a small confirmation dialog, and `sp_task_update` **refuses**
+`status = Closed` or `Cancelled` outright (56707). Allowing it would have
+been a third closure path bypassing both the gate and the completion
+record.
+
+The Close dialog warns when mandatory sub tasks are open, because
+`sp_task_close` will not stop it.
+
+### The menu now
+
+```
+View · Edit · Complete Task · Add Child Task · Add Evidence · Add Update / Comment · Close Task
+```
+
+Everything left either changes no field (Add Update), creates a different
+record (Add Child Task, Add Evidence), or is a workflow transition with
+its own gate.
+
+### Row menus: three states, not two
+
+`openRowMenu` (here and the matching one in `risk-centre.js`) reads three
+states off each item:
+
+| Declared as | Meaning | Rendered |
+| --- | --- | --- |
+| `applicable: false` | can **never** apply to this item | **hidden** |
+| `disabled` + `disabledReason` | applicable, blocked by something that **can change** | shown, greyed, tooltip |
+| neither | available now | shown |
+
+The rule for deciding which: **a terminal or structural fact hides; an
+unmet prerequisite disables.**
+
+- *Terminal* — the task is closed, the risk is Closed/Retired, the
+  candidate is no longer open. Nothing the reader does here brings it
+  back.
+- *Structural* — a sub task can never have sub tasks; a Tolerate risk
+  raises no treatment task; approval is not configured for this
+  organisation.
+- *Prerequisite* — mandatory sub tasks still open, the analysis not
+  finished, no treatment option chosen yet. These clear, and the greyed
+  item with its reason is the signpost to what clears them.
+
+Everything used to be `disabled`, so a closed task offered seven grey
+rows that would never become anything. A closed task's menu is now just
+**View**.
+
+Two guards keep this honest: `openRowMenu` warns in the console when an
+item is `disabled` with no `disabledReason` (a greyed item that cannot
+say why is a dead end), and a menu with nothing left renders
+*"No actions available"* rather than an empty popover.
+
+**This is presentation only.** Every gate mirrored in a menu is also
+enforced by the API and by SQL — `sp_task_complete`'s §12 child gate,
+`sp_task_update`'s closed-task refusal (56704), the state machine, and
+Risk Centre's 56454/56456. Hiding an item removes a button, never a
+check.
+
+---
+
+## Evidence (BRD §16)
+
+### What the code actually says, before any design
+
+Four facts decided where upload belongs. None of them were assumed.
+
+1. **There is no per-task "evidence required" flag.** `evidence_required`
+   exists on `workflow_checklist_item` (066) and on the event and
+   assurance schemas — **never on `practice_task`** — and the workflow
+   subsystem is not wired into Task Center. Evidence is therefore
+   optional for every task here.
+2. **`sp_task_completion_eligibility` does not consult evidence at all.**
+   The completion gate is mandatory-children only (§12). Blocking
+   completion on a file would be enforcing a rule this product does not
+   have.
+3. **`sp_task_attachment_add` already writes the audit row** — an
+   `EvidenceAdded` activity carrying the file name in `to_value` and the
+   uploader as actor. Nothing needed adding.
+4. **Attachments are append-only.** `sp_task_attachment_add` and
+   `sp_task_attachment_get` are the only procedures: no delete, no
+   replace.
+
+### Append-only is the feature, not the gap
+
+Point 4 is worth stating plainly because it shapes the UI. Evidence you
+can quietly remove is not evidence. So:
+
+- **"Replace"** means attaching a newer file. Both stay, each with its own
+  uploader and timestamp, and the activity feed shows both events in
+  order.
+- **"Remove"** is not offered, because it does not exist and should not.
+
+No delete endpoint was added to satisfy the wording of a request. If
+retraction is ever genuinely needed it should be a *supersede* marker
+that keeps the row, not a `DELETE`.
+
+### Where each surface stands
+
+| Surface | Evidence |
+| --- | --- |
+| **View** (read-only) | count, file name, uploaded by, uploaded date, View/Download. **No upload.** |
+| **Add Evidence** (row menu) | the pre-completion path — attach any time while the task is open |
+| **Complete Task** | shows what is already attached, and allows attaching more before confirming |
+| **Edit** | nothing. See below. |
+
+Putting the product's one write action inside its one read-only surface
+was the inconsistency. It moved out — but not into Complete alone, because
+evidence is frequently attached *before* completion for review or
+verification, and an upload reachable only from the completion dialog
+would force people to complete a task in order to attach a file to it.
+
+### Why upload is not in the Edit form
+
+Edit is an **all-or-nothing transactional save** of task fields
+(`sp_task_update`). A file upload is multipart, immediate and
+append-only. Putting them in one form means a validation failure on, say,
+the priority field rolls back every field **while the already-uploaded
+file stays** — breaking the all-or-nothing contract the edit path exists
+to provide.
+
+`renderEvidenceList()` is shared by the View and both dialogs, and
+`postEvidence()` is the single upload implementation behind all three
+call sites, so the same files can never be described two different ways.
+
+The attach control inside the Complete modal uploads **immediately**
+rather than deferring to Confirm: `sp_task_attachment_add` is its own
+transaction and writes its own audit row, so holding the file back would
+mean either a second upload path or an upload that silently vanishes when
+the user cancels.
+
+No API, procedure or schema changed for any of this — including the
+description field, which `POST /tasks/{id}/attachments` already accepted
+as `[FromForm] string? evidenceDescription`.
+
+### Concurrency
+
+`sp_task_edit_options` returns `updated_dt`; the form posts it back as
+`@expected_updated_dt` and a save is refused with 56705 if someone else
+edited the task meanwhile. Two people editing one task from two screens
+is not hypothetical in a task centre, and last-write-wins would silently
+discard one of them.
+
+`sp_task_edit_options` also returns the **legal status transitions**
+straight from `fn_is_transition_allowed`, so the dropdown cannot drift
+from the rule table the day a status is added — and `start_date`,
+`is_mandatory_child` and `child_target_date`, which the editor needs and
+`TaskListRow` does not carry. Returning them here avoids widening the list
+contract that every grid, count and export reads in order to serve one
+form.
+
+---
+
+## The common Task / Sub Task form
+
+`Views/Practice/Partials/_task-form-dialog.cshtml` +
+`wwwroot/js/Shared/task-form.js` (`window.gracTaskForm`).
+
+Task work could be created from three places, each with its own form:
+
+| Where | What it was |
+| --- | --- |
+| Task Center → **New Task** | a proper dialog — the reference layout |
+| Task Center → row menu → **Add child task** | **four chained `window.prompt()` boxes** plus a `confirm()`; it could not show which parent it was adding to, had no validation, and required typing an employee id by hand |
+| Risk Treatment → **Add a sub task** | an inline panel with its own six fields and its own validation |
+
+Three implementations of one concept: three validations, three sets of
+field names, three places to change when a task field is added. All three
+now open the same dialog.
+
+### Two modes, one dialog
+
+```
+mode: "task"    -> POST /practice/api/tasks               (sp_task_open)
+mode: "subtask" -> POST /practice/api/tasks/{id}/children (sp_task_child_create)
+```
+
+The caller states *what* it wants and in what context; the component
+picks the endpoint and builds the payload. Callers never do either.
+
+### Parent task
+
+- **Opened from a task** (row menu, or Risk Treatment with one open
+  treatment task) — the parent is fixed, shown **read-only**, and cannot
+  be changed. The user is never asked to choose a parent they already
+  chose.
+- **Opened without one** (Risk Treatment where the risk has several open
+  treatment tasks) — a parent **selector** appears and is required.
+
+Same dialog; only one of the two rows is visible.
+
+### Fields a sub task cannot carry — shown, not hidden
+
+`sp_task_child_create` takes title, description, assignee, mandatory and
+a target date. It has **no priority and no start date**, because BRD §11
+makes the child inherit both from its parent. That is a rule, not a gap.
+
+Hiding those two in sub-task mode would make the form look different
+depending on how it was opened — the exact inconsistency this component
+removes. They are shown, **disabled, and say why**, so the same eight
+fields appear everywhere and the rule is visible in the form.
+
+### Remarks — a bug this surfaced
+
+`TaskOpenRequest` has **no `Remarks` property** and `sp_task_open` has no
+such parameter, but the Task Center form has always sent one. An unknown
+JSON property is not a binding error, so **every remark typed into "New
+Task (Custom)" has been silently discarded.**
+
+The common form posts remarks as a task **activity** (`sp_task_activity_add`)
+immediately after creation, for a task and a sub task alike — which is
+where a remark on a task lives anyway. One path, both modes, and the
+field finally does something. No API or schema change was needed.
+
+### Layout — one screen, no vertical scrolling
+
+Sub-task mode is the tall one: ten controls plus a header and an action
+row. Stacked one per line in a 640px dialog, that overran a 768px laptop
+viewport and the dialog scrolled.
+
+Three changes, largest height saving first. **No field was removed and no
+control was made smaller** — padding and font size are unchanged; the
+space *between* fields is what shrank.
+
+| # | Change | Detail |
+| --- | --- | --- |
+| 1 | **Two columns at 880px** (was one at 640px) | `Assigned To / Priority` and `Start Date / Target Date` were already paired; `Organization / Parent Task` and `Description / Remarks` now are too. Four stacked rows become two. |
+| 2 | **Tighter rhythm** | gaps 12 → 10px, label margins 4 → 3px, dialog padding 20/24 → 16/20px. |
+| 3 | **Sticky action row** | the fields scroll inside the form, never the footer — so **Cancel** and **Create** are reachable at any viewport height. |
+
+`Description` and `Remarks` share a row rather than Remarks keeping its
+place at the end. Both are optional free text of the same kind, and
+pairing them is the single biggest saving available without touching a
+field.
+
+**Resulting height** (label 15 + control 28 + note 17 per row, 10px gaps):
+
+| Mode | Normal desktop | Viewport < 780px tall |
+| --- | --- | --- |
+| New Task | 432px | 398px |
+| Add Sub Task | 525px | 489px |
+
+Against `max-height: 92vh`, a 768px screen caps the dialog at ~621px, so
+the taller of the two fits with ~130px to spare.
+
+**Two responsive rules** carry the edges:
+
+- `max-width: 720px` — back to one column, because below that the pairs
+  cramp rather than help.
+- `max-height: 780px` — textareas drop 84 → 62px and gaps 10 → 8px. The
+  textareas give up height first because they are the only controls with
+  room to spare; no single-line control is touched.
+
+**Mode drives layout as well as behaviour.** `open()` sets
+`form.classList.toggle("is-subtask", isSub)` so CSS can give
+`Organization` the whole row when there is no Parent Task cell beside it,
+instead of the JS setting grid spans by hand.
+
+All styling lives in one `<style>` block scoped to `.gtf`, replacing the
+inline styles the first version carried — which is what makes the media
+queries possible at all. Applies to **New Task and Add Sub Task alike**;
+there is only the one form.
+
+### Employee lookup
+
+Task Center used `/practice/api/organizations/{id}/employees`; Risk Centre
+used the document-uploads lookup. The component tries the first and falls
+back to the second, so one list serves both regardless of which endpoint a
+role is permitted.
+
+### Not folded in
+
+**Risk Centre → "Raise additional task (via candidate)"** (migration 215)
+creates a task *candidate*, not a task — a different record in a
+different table with its own validation gate. It keeps its own small
+modal.
+

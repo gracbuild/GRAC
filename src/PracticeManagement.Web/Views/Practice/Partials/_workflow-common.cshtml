@@ -20,6 +20,25 @@
     }
     function badge(v) { return v ? '<span class="pm-badge">' + escape(v) + '</span>' : ''; }
 
+    // "Vinod - Risk Owner", or just "Vinod" when no role is held.
+    //
+    // Lives here because two separate scripts render people with their
+    // roles -- the Risk Centre bundle and resolve-workspace's own inline
+    // script -- and a copy in each would drift on the separator alone.
+    //
+    // DISPLAY ONLY. Never used to build a value that is saved: the
+    // dependency save sends data-object-name, which stays the bare name,
+    // and acceptance stores the name server-side. Roles travel as their
+    // own field so this stays a rendering concern.
+    //
+    // Returns a raw string; callers escape it.
+    function personWithRole(name, roleNames) {
+        var n = String(name || '').trim();
+        var r = String(roleNames || '').trim();
+        if (!n) return r;          // a role with no name is still worth showing
+        return r ? (n + ' - ' + r) : n;
+    }
+
     async function loadOrgs() {
         try {
             const r = await fetch(U('/practice/api/organizations/allowed'), { credentials: 'same-origin' });
@@ -66,19 +85,93 @@
         const b = document.getElementById(bodyId);  if (b && body)  b.textContent = body;
     }
 
+    // ==================================================================
+    // Pager -- the shared implementation for every .pm-pager[data-pager]
+    // in the workflow and assurance screens (eleven partials).
+    //
+    // The MARKUP is the standard and does not change:
+    //   <div class="pm-pager" data-pager="key">
+    //     <button data-pg="prev">Previous</button>
+    //     <span data-pg="label">Page 1</span>
+    //     <button data-pg="next">Next</button>
+    //     <span data-pg="total" class="pm-pager-total">0 total</span>
+    //   </div>
+    //
+    // The CALLER still owns its page number and calls back with a delta,
+    // which is why this was left as a delta rather than converted to
+    // pm-grid's own page state: eleven partials increment their own
+    // counter, and two sources of truth for the current page is how a
+    // Next click ends up advancing two pages.
+    //
+    // WHAT CHANGED, AND WHY IT IS BACKWARD COMPATIBLE
+    // Previously the buttons were never disabled, so Next stayed live on
+    // the last page and clicking it fetched an empty page that looked
+    // like data loss. Disabling needs a page SIZE, which the old payload
+    // did not carry -- so pageSize is optional:
+    //
+    //   { pageNumber, totalCount }            -> as before: "Page 3",
+    //                                            "143 total", no disabling
+    //   { pageNumber, totalCount, pageSize }  -> "41-60 of 143", and the
+    //                                            buttons disable correctly
+    //
+    // Every existing call keeps working untouched; a caller opts into the
+    // better behaviour by adding one field. Same label shape pm-grid.js
+    // renders, so the two read identically once a screen opts in.
+    // ==================================================================
+    function pagerNav(key) {
+        return document.querySelector('.pm-pager[data-pager="' + key + '"]');
+    }
+
     function wirePager(key, onDelta) {
-        const nav = document.querySelector('.pm-pager[data-pager="' + key + '"]');
+        const nav = pagerNav(key);
         if (!nav) return;
         const prev = nav.querySelector('[data-pg="prev"]');
         const next = nav.querySelector('[data-pg="next"]');
-        if (prev) prev.addEventListener('click', function () { onDelta(-1); });
-        if (next) next.addEventListener('click', function () { onDelta(1); });
+        // A disabled button still fires click in some browsers when the
+        // handler is attached directly, so the guard is here too rather
+        // than only in the attribute.
+        if (prev) prev.addEventListener('click', function () { if (!prev.disabled) onDelta(-1); });
+        if (next) next.addEventListener('click', function () { if (!next.disabled) onDelta(1); });
     }
+
     function updatePager(key, payload) {
-        const nav = document.querySelector('.pm-pager[data-pager="' + key + '"]');
+        const nav = pagerNav(key);
         if (!nav) return;
-        nav.querySelector('[data-pg="label"]').textContent = 'Page ' + (payload && payload.pageNumber || 1);
-        nav.querySelector('[data-pg="total"]').textContent = (payload && payload.totalCount || 0) + ' total';
+
+        const page  = Number(payload && payload.pageNumber) || 1;
+        const total = Number(payload && payload.totalCount) || 0;
+        const size  = Number(payload && payload.pageSize) || 0;
+        // What actually came back, so a short last page reads 41-52 of 52
+        // rather than assuming every page is full.
+        const rows  = Number(payload && payload.rowCount);
+
+        const label = nav.querySelector('[data-pg="label"]');
+        const totEl = nav.querySelector('[data-pg="total"]');
+        const prev  = nav.querySelector('[data-pg="prev"]');
+        const next  = nav.querySelector('[data-pg="next"]');
+
+        if (label) {
+            if (size > 0 && total > 0) {
+                const from = (page - 1) * size + 1;
+                const to   = Math.min(total, from + (Number.isFinite(rows) && rows >= 0 ? rows : size) - 1);
+                label.textContent = from + '–' + to + ' of ' + total;
+            } else if (size > 0 && total === 0) {
+                label.textContent = 'No rows';
+            } else {
+                label.textContent = 'Page ' + page;
+            }
+        }
+        if (totEl) totEl.textContent = total + ' total';
+
+        if (prev) prev.disabled = page <= 1;
+        if (next) {
+            // Only when the size is known. Without it there is no way to
+            // tell a full last page from a page with more behind it, and
+            // guessing from the row count is the bug this replaces.
+            next.disabled = size > 0 && total > 0
+                ? page >= Math.max(1, Math.ceil(total / size))
+                : false;
+        }
     }
 
     function setMessage(id, text, kind) {
@@ -93,7 +186,8 @@
     window.__wfCommon = {
         escape: escape, badge: badge, loadOrgs: loadOrgs, populateOrgSelect: populateOrgSelect,
         checkFeature: checkFeature, unavailable: unavailable, wirePager: wirePager,
-        updatePager: updatePager, setMessage: setMessage
+        updatePager: updatePager, setMessage: setMessage,
+        personWithRole: personWithRole
     };
 
     // ==================================================================

@@ -1,0 +1,212 @@
+@*
+    DEAD MARKUP. NOT INCLUDED BY ANY PAGE. DO NOT BUILD ON THIS FILE.
+
+    The narrative Impact Details feature was withdrawn -- see the banner
+    on Api/Models/RiskImpactDetailModels.cs. risk-centre.cshtml no longer
+    includes this partial or impact-detail-form.js, and the endpoints the
+    script calls are gone. Delete both files together.
+
+    THE Impact Details form -- add / edit one recorded consequence of a
+    risk, against an obligation or against the risk as a whole.
+
+    Driven by wwwroot/js/Shared/impact-detail-form.js. Include this
+    partial once on a page, load that script, and any screen on that page
+    can open the same dialog.
+
+    WHY IT IS SHARED FROM THE START
+    -------------------------------
+    Migration 309 added Impact Details for FIVE pages: Risk Analysis,
+    View Risk, Residual Analysis, Accept and Review. Two of them can
+    ADD (Risk Analysis and Review), and the requirement is explicit that
+    Review "use the same Impact Details fields, validation, popup/modal
+    and API/database structure already used in Risk Analysis".
+
+    So the form is a shared component before it has a second caller,
+    rather than being copied into the second page later -- which is what
+    _task-form-dialog.cshtml and _obligation-form-dialog.cshtml both had
+    to be extracted to fix. See docs/risk-obligation-structure.md.
+
+    THE FIELD SET
+    -------------
+    Impact area* - Description* - Severity - Affected party -
+    Estimated value - Time horizon - Remarks.
+
+    Only the first two are required, and Severity is deliberately
+    optional: an impact worth recording before it has been sized is a real
+    state, and demanding a level would invite a guessed one.
+
+    Severity is the SAME risk_impact_master the inherent and residual
+    scores use, so "impact" means one thing in this product. The host
+    passes the options it has already loaded rather than this dialog
+    fetching a second copy.
+
+    NOT A <form>
+    ------------
+    A `<form method="dialog">` submits on Enter in any text input, which
+    closes the dialog and throws the half-typed impact away. Every button
+    is type="button" and the save is a fetch. Same reason the obligation
+    form uses a div, and no backdrop dismissal for the same reason
+    either: Cancel is the only way out.
+
+    SELF-CONTAINED STYLES
+    ---------------------
+    Every class is `gid-` prefixed and defined below. The risk pages
+    style their own panels through .risk-* and .ra-* rules scoped to
+    those pages; a dialog that borrowed them would render differently
+    depending on which of the five pages opened it.
+
+    Included ONCE per page. The ids are global, which is what lets any
+    screen on that page open the same dialog.
+*@
+<dialog class="gid" id="gidDialog" aria-labelledby="gidHeading">
+  <div class="gid-form">
+    <header class="gid-head">
+        <div>
+            <h2 id="gidHeading">Add impact detail</h2>
+            @* Which obligation this is being recorded against, or the
+               risk itself. Read-only: it is decided by the button that
+               opened the dialog, not chosen here -- picking it twice is
+               how an impact ends up filed under the wrong obligation. *@
+            <p class="gid-note" id="gidContext"></p>
+        </div>
+        <button class="pm-modal-close" id="gidClose" type="button" aria-label="Close">&times;</button>
+    </header>
+
+    <div class="gid-msg" id="gidMsg"></div>
+
+    <div class="gid-body">
+        @* 0 adds; the row id edits. The server echoes back the id it
+           wrote even on a failed save, so a retry edits that row instead
+           of inserting a second one. *@
+        <input type="hidden" id="gidId" value="0">
+
+        <div class="gid-grid">
+            <label class="gid-field">
+                <span class="gid-label">Impact area<i class="gid-req">*</i></span>
+                <select id="gidArea"><option value="">-- select --</option></select>
+            </label>
+
+            <label class="gid-field">
+                <span class="gid-label">Severity</span>
+                <select id="gidSeverity"><option value="">-- not sized yet --</option></select>
+                <span class="gid-hint">The same scale as the risk score. Leave blank until it is known.</span>
+            </label>
+
+            <label class="gid-field gid-span2">
+                <span class="gid-label">Description<i class="gid-req">*</i></span>
+                <textarea id="gidDescription" rows="4" maxlength="4000"
+                          placeholder="What actually happens, and to what."></textarea>
+            </label>
+
+            <label class="gid-field">
+                <span class="gid-label">Affected party</span>
+                <input type="text" id="gidAffected" maxlength="300"
+                       placeholder="A customer segment, a regulator, a team" />
+            </label>
+
+            <label class="gid-field">
+                <span class="gid-label">Estimated value</span>
+                <input type="text" id="gidEstimated" maxlength="120"
+                       placeholder="e.g. 2 days downtime, ~200 records" />
+                @* Free text, not money: four of the nine impact areas
+                   have no currency value at all. *@
+                <span class="gid-hint">Free text -- not every impact is a number.</span>
+            </label>
+
+            <label class="gid-field">
+                <span class="gid-label">Time horizon</span>
+                <select id="gidHorizon">
+                    <option value="">-- not set --</option>
+                    <option value="Immediate">Immediate</option>
+                    <option value="ShortTerm">Short term</option>
+                    <option value="MediumTerm">Medium term</option>
+                    <option value="LongTerm">Long term</option>
+                </select>
+            </label>
+
+            <label class="gid-field gid-span2">
+                <span class="gid-label">Remarks</span>
+                <textarea id="gidRemarks" rows="2" maxlength="1000"></textarea>
+            </label>
+        </div>
+    </div>
+
+    <footer class="gid-foot">
+        <button class="pm-button primary" id="gidSave" type="button">
+            <i class="fa-solid fa-circle-check"></i> Save impact
+        </button>
+        <button class="pm-button" id="gidCancel" type="button">Cancel</button>
+        <span class="gid-note" id="gidStage"></span>
+    </footer>
+  </div>
+</dialog>
+
+<style>
+    /* Scoped to .gid so nothing here reaches another dialog, and so the
+       dialog does not depend on which page included it. */
+    .gid {
+        width: min(760px, calc(100vw - 32px));
+        max-height: calc(100vh - 64px);
+        padding: 0; border: 0; border-radius: 10px;
+        background: #fff; color: var(--grac-ink, #25345a);
+        box-shadow: 0 10px 40px rgba(15, 23, 42, .25);
+    }
+    .gid::backdrop { background: rgba(15, 23, 42, .45); }
+
+    .gid-form { display: flex; flex-direction: column; max-height: calc(100vh - 64px); }
+
+    .gid-head {
+        display: flex; align-items: flex-start; gap: 12px;
+        padding: 12px 16px; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    }
+    .gid-head > div { flex: 1 1 auto; min-width: 0; }
+    .gid-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+
+    /* The only part that scrolls, so Save stays reachable on a short
+       viewport however long the description gets. */
+    .gid-body { padding: 14px 16px; overflow-y: auto; }
+
+    .gid-foot {
+        display: flex; align-items: center; gap: 8px;
+        padding: 12px 16px; border-top: 1px solid var(--grac-line, #e2e7f0);
+        background: #f8fafc;
+    }
+
+    .gid-msg {
+        display: none; margin: 10px 16px 0;
+        padding: 7px 11px; border-radius: 5px; font-size: 12px;
+    }
+
+    /* Two columns; the long-form fields take the whole row. */
+    .gid-grid {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 14px; align-items: start;
+    }
+    .gid-span2 { grid-column: span 2; }
+
+    .gid-field { display: block; min-width: 0; }
+    .gid-label {
+        display: block; font-size: 12px; font-weight: 600;
+        color: var(--grac-muted, #758095); margin-bottom: 3px;
+    }
+    .gid-req { color: #dc2626; font-style: normal; margin-left: 2px; }
+    .gid-note { margin: 2px 0 0; font-size: 11px; color: var(--grac-muted, #758095); }
+    .gid-hint { display: block; margin-top: 3px; font-size: 11px; color: var(--grac-muted, #758095); }
+
+    .gid-field input[type="text"],
+    .gid-field select,
+    .gid-field textarea {
+        width: 100%; padding: 6px 8px;
+        border: 1px solid var(--grac-line, #cbd5e1); border-radius: 4px;
+        font: inherit; font-size: 13px; color: var(--grac-ink, #0f172a);
+        background: #fff;
+    }
+    .gid-field textarea { resize: vertical; }
+
+    /* One column on a narrow window: below this the pairs stop helping
+       and start cramping. */
+    @@media (max-width: 640px) {
+        .gid-grid { grid-template-columns: minmax(0, 1fr); }
+        .gid-span2 { grid-column: span 1; }
+    }
+</style>

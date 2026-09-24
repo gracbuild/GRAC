@@ -48,6 +48,17 @@ public sealed class ExceptionCentreController(
         return ForwardGetAsync("api/practice/exception-centre/lookups/exception-types", ct);
     }
 
+    // Review Frequency options for the Approve dialog (reuses
+    // grac_practice.sp_risk_review_frequency_list, 293 -- see the Api-side
+    // controller/service for why this is not a new frequency list).
+    [HttpGet("lookups/review-frequencies")]
+    public Task<IActionResult> ReviewFrequencies(CancellationToken ct)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Task.FromResult<IActionResult>(Unauthorized(new { error = "Session expired." }));
+        return ForwardGetAsync("api/practice/exception-centre/lookups/review-frequencies", ct);
+    }
+
     // Linked-practice combo lookup. Org-scoped -- caller must be authorised
     // for the organizationId supplied on the query string (same guard as
     // the main list endpoint).
@@ -80,6 +91,16 @@ public sealed class ExceptionCentreController(
         if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
             return Task.FromResult<IActionResult>(Unauthorized(new { error = "Session expired." }));
         return ForwardGetAsync($"api/practice/exception-centre/{id}", ct);
+    }
+
+    // Migration 260. The audit trail behind the analysis page and the
+    // approver's form -- including who moved the effective window.
+    [HttpGet("{id:long}/history")]
+    public Task<IActionResult> ListHistory(long id, CancellationToken ct)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Task.FromResult<IActionResult>(Unauthorized(new { error = "Session expired." }));
+        return ForwardGetAsync($"api/practice/exception-centre/{id}/history", ct);
     }
 
     [HttpGet("{id:long}/attachments")]
@@ -126,6 +147,92 @@ public sealed class ExceptionCentreController(
     }
 
     // ---- writes ----
+
+    // Migration 327 -- "+ Add Custom Exception." Same bare collection
+    // route as List (GET), but this Web-tier controller routes each verb
+    // explicitly rather than via a catch-all (see approve-sla / analysis
+    // comments above) -- so a POST here needed its own enumerated action.
+    // Without it, routing still matches the route template (List's GET
+    // proves the template resolves) but finds no action accepting POST,
+    // which ASP.NET Core reports as 405 Method Not Allowed rather than
+    // 404 -- exactly the symptom reported ("HTTP 405 on saving new
+    // exception").
+    //
+    // Follow-up after ship: "Requested By" is now stamped server-side
+    // from the caller's own session -- no dropdown, no client input --
+    // the same way Approve/Reject stamp their own employee-id field via
+    // ForwardJsonWithCallerStampAsync. Any requestedByEmployeeId the
+    // client sends is discarded and overwritten here; it is never
+    // trusted from the request body, same reasoning as every other
+    // stamped field in this file.
+    [HttpPost]
+    public async Task<IActionResult> CreateCustom(CancellationToken ct)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired." });
+
+        string body;
+        using (var sr = new StreamReader(Request.Body)) body = await sr.ReadToEndAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+            return BadRequest(new { error = "Request body is required." });
+
+        long orgId;
+        System.Text.Json.JsonDocument doc;
+        try
+        {
+            doc = System.Text.Json.JsonDocument.Parse(body);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return BadRequest(new { error = "Request body is not valid JSON." });
+        }
+        using (doc)
+        {
+            if (!doc.RootElement.TryGetProperty("organizationId", out var orgProp)
+                || !orgProp.TryGetInt64(out orgId) || orgId <= 0)
+                return BadRequest(new { error = "organizationId is required." });
+            if (!HttpContext.IsOrganizationAllowed(orgId))
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = "Caller not authorised for this organization." });
+
+            long.TryParse(HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey), out var callerId);
+            var callerNm = HttpContext.Session.GetString(PracticeSessionIdentity.UserKey);
+            var client = BuildClient();
+            try
+            {
+                using var ms = new MemoryStream();
+                using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+                {
+                    w.WriteStartObject();
+                    foreach (var p in doc.RootElement.EnumerateObject())
+                    {
+                        if (p.Name.Equals("requestedByEmployeeId", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (p.Name.Equals("callerDisplayName",     StringComparison.OrdinalIgnoreCase)) continue;
+                        p.WriteTo(w);
+                    }
+                    if (callerId > 0) w.WriteNumber("requestedByEmployeeId", callerId);
+                    if (!string.IsNullOrWhiteSpace(callerNm)) w.WriteString("callerDisplayName", callerNm);
+                    w.WriteEndObject();
+                }
+
+                using var msg = new HttpRequestMessage(HttpMethod.Post, "api/practice/exception-centre") { Content = new ByteArrayContent(ms.ToArray()) };
+                msg.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                var resp    = await client.SendAsync(msg, ct);
+                var payload = await resp.Content.ReadAsStringAsync(ct);
+                return new ContentResult
+                {
+                    Content     = payload,
+                    ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                    StatusCode  = (int)resp.StatusCode
+                };
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "ExceptionCentre.CreateCustom proxy failed");
+                return BadRequest(new { success = false, error = ex.Message });
+            }
+        }
+    }
+
     [HttpPost("{id:long}/approve")]
     public Task<IActionResult> Approve(long id, CancellationToken ct)
         => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
@@ -149,6 +256,77 @@ public sealed class ExceptionCentreController(
         => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
             $"api/practice/exception-centre/{id}/approve-sla",
             "approvedByEmployeeId", ct);
+
+    // =================================================================
+    // Migration 257 -- Analysis stage proxies.
+    //
+    // Enumerated for the same reason approve-sla is: this Web controller
+    // routes explicitly, with no catch-all, so an un-proxied endpoint 404s
+    // in the Web tier before it ever reaches the Api.
+    // =================================================================
+    [HttpPost("{id:long}/analysis")]
+    public Task<IActionResult> SaveAnalysis(long id, CancellationToken ct)
+        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+            $"api/practice/exception-centre/{id}/analysis",
+            "ownerEmployeeId", ct);
+
+    [HttpPost("{id:long}/submit-for-approval")]
+    public Task<IActionResult> SubmitForApproval(long id, CancellationToken ct)
+        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+            $"api/practice/exception-centre/{id}/submit-for-approval",
+            "actorEmployeeId", ct);
+
+    [HttpGet("{id:long}/tasks")]
+    public Task<IActionResult> ListTasks(long id, CancellationToken ct)
+    {
+        // Same session guard shape the other id-scoped GETs use. The Api
+        // resolves the organisation from the row, so there is no
+        // organizationId on the query string to check here.
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Task.FromResult<IActionResult>(Unauthorized(new { error = "Session expired." }));
+        return ForwardGetAsync($"api/practice/exception-centre/{id}/tasks", ct);
+    }
+
+    [HttpGet("{id:long}/task-candidates")]
+    public Task<IActionResult> ListTaskCandidates(long id, CancellationToken ct)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Task.FromResult<IActionResult>(Unauthorized(new { error = "Session expired." }));
+        var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        return ForwardGetAsync($"api/practice/exception-centre/{id}/task-candidates{qs}", ct);
+    }
+
+    [HttpPost("{id:long}/tasks")]
+    public Task<IActionResult> LinkTask(long id, CancellationToken ct)
+        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+            $"api/practice/exception-centre/{id}/tasks",
+            "actorEmployeeId", ct);
+
+    [HttpDelete("{id:long}/tasks/{taskId:long}")]
+    public async Task<IActionResult> UnlinkTask(long id, long taskId, CancellationToken ct)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired." });
+        var client = BuildClient();
+        var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        try
+        {
+            var resp    = await client.DeleteAsync(
+                $"api/practice/exception-centre/{id}/tasks/{taskId}{qs}", ct);
+            var payload = await resp.Content.ReadAsStringAsync(ct);
+            return new ContentResult
+            {
+                Content     = payload,
+                ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                StatusCode  = (int)resp.StatusCode
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "ExceptionCentre DELETE task-link proxy failed for {Id}/{TaskId}", id, taskId);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
 
     // Multipart proxy for attachment upload -- ReadFormAsync + rebuild
     // (same pattern as document-uploads to avoid Kestrel/streaming races).

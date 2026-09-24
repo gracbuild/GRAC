@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Ctrl+C repro v2</title></head>
+<body>
+<button id="openBtn" type="button">Open dialog</button>
+<div id="log" style="white-space:pre; font-family:monospace;"></div>
+<dialog id="d" style="width:300px;">
+  <p>Type something, select it, press Ctrl+C</p>
+  <input id="inp" type="text" value="select me and press ctrl+c" style="width:90%">
+  <button type="button" id="closeBtn">Close</button>
+</dialog>
+<script>
+  const d = document.getElementById('d');
+  const logEl = document.getElementById('log');
+  function log(s) { logEl.textContent += s + "\n"; }
+  document.getElementById('openBtn').addEventListener('click', () => { d.showModal(); logEl.textContent=''; log('opened'); });
+  document.getElementById('closeBtn').addEventListener('click', () => d.close());
+  // NEW logic under test: target-based backdrop detection
+  d.addEventListener('click', function (e) {
+    log('click event: target=' + e.target.tagName + '#' + e.target.id + ' isTrusted=' + e.isTrusted + ' targetIsDialog=' + (e.target === d));
+    if (e.target === d) { log('=> WOULD CLOSE (target is the dialog itself = backdrop click)'); d.close(); }
+    else { log('=> stays open (click landed on content inside the dialog)'); }
+  });
+  d.addEventListener('close', () => log('DIALOG CLOSE EVENT FIRED'));
+  d.addEventListener('cancel', () => log('DIALOG CANCEL EVENT FIRED (native Escape)'));
+</script>
+</body>
+</html>

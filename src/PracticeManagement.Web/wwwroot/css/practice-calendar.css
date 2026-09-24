@@ -16,7 +16,35 @@
 }
 .cal-toolbar-left,
 .cal-toolbar-right { display: flex; align-items: center; gap: 8px; }
-.cal-toolbar-center { display: flex; align-items: center; gap: 8px; }
+
+/* === Calendar's own nav header ===
+   Prev/Today/Next, the month/week/day title, and the Month/Week/Day
+   switch used to sit inside .cal-toolbar as a third "center" column.
+   They now form their own row -- Prev/Today/Next/title on the left,
+   Month/Week/Day on the right -- styled as a light, bordered strip
+   directly above the grid, so they read as the calendar grid's own
+   header rather than another global toolbar. It sits below the filter
+   panel/legend (not right under the page-level toolbar) so it reads as
+   part of the grid it controls. setMode() in practice-calendar.js
+   hides this whole row while List is the active display mode, since
+   List has no date grid for Prev/Next/Month-Week-Day to act on. */
+.cal-nav-header {
+    align-items: center;
+    background: #f8fafc;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: space-between;
+    /* Capped and centered to the SAME 900px as .cal-grid below it, so the
+       header sits flush above the grid instead of running the full panel
+       width while the grid stays narrow -- the two read as one unit. */
+    max-width: 900px;
+    margin: 0 auto 14px;
+    padding: 8px 12px;
+}
+.cal-nav-left { align-items: center; display: flex; gap: 8px; }
 
 /* Match the Organization filter (and any future toolbar inputs) to the
    standard .pm-toolbar select styling used by every other Practice
@@ -74,15 +102,27 @@
     min-width: 180px;
     text-align: center;
 }
-.cal-view-toggle { display: flex; gap: 0; }
-.cal-view-toggle .pm-button { border-radius: 0; border-right: 0; }
-.cal-view-toggle .pm-button:first-child { border-radius: 6px 0 0 6px; }
-.cal-view-toggle .pm-button:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid var(--grac-line, #e2e7f0); }
+/* .cal-mode-toggle (Calendar/List) is a horizontal pill-group in the
+   top-level toolbar. */
+.cal-mode-toggle { display: flex; gap: 0; }
+.cal-mode-toggle .pm-button { border-radius: 0; border-right: 0; }
+.cal-mode-toggle .pm-button:first-child { border-radius: 6px 0 0 6px; }
+.cal-mode-toggle .pm-button:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid var(--grac-line, #e2e7f0); }
+.cal-mode-toggle .pm-button.active,
 .cal-view-toggle .pm-button.active {
     background: var(--grac-blue, #2465ca);
     border-color: var(--grac-blue, #2465ca);
     color: #fff;
 }
+
+/* .cal-view-toggle (Month/Week/Day) is a horizontal pill-group, same
+   shape as .cal-mode-toggle -- it now sits inside .cal-nav-header as
+   the right-hand sibling of .cal-nav-left (the space-between on
+   .cal-nav-header pushes it flush right). */
+.cal-view-toggle { display: flex; gap: 0; }
+.cal-view-toggle .pm-button { border-radius: 0; border-right: 0; }
+.cal-view-toggle .pm-button:first-child { border-radius: 6px 0 0 6px; }
+.cal-view-toggle .pm-button:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid var(--grac-line, #e2e7f0); }
 
 /* === Calendar Container ===
    Full-width panel -- toolbar (org filter, Generate Schedule button, view
@@ -94,8 +134,9 @@
 /* === Month Grid ===
    Cap the grid width so day cells stay a comfortable ~120px square and
    6 weeks fit inside a typical laptop viewport without scrolling
-   (header row + 6 rows ~ 720px + panel chrome fits within ~900px). Grid
-   is centered horizontally inside the full-width toolbar container. */
+   (header row + 6 rows ~ 720px + panel chrome fits within ~900px).
+   Centered at 900px -- .cal-nav-header above it is capped and centered
+   to the same 900px, so header and grid line up as one column. */
 .cal-grid {
     background: #fff;
     border: 1px solid var(--grac-line, #e2e7f0);
@@ -365,35 +406,23 @@
 }
 .cal-side-actions { display: flex; gap: 8px; padding: 12px 0 0; }
 
-/* === Generate Dialog instance list === */
-.cal-gen-instance-list {
-    max-height: 300px;
-    overflow-y: auto;
-    margin: 12px 0;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 6px;
-    padding: 8px;
-}
-.cal-gen-row {
-    align-items: center;
-    border-bottom: 1px solid var(--grac-line, #e2e7f0);
-    display: flex;
-    gap: 8px;
-    padding: 8px 4px;
-}
-.cal-gen-row:last-child { border-bottom: 0; }
-.cal-gen-row label { flex: 1; font-size: 13px; cursor: pointer; }
-.cal-gen-row .cal-gen-freq {
-    color: var(--grac-muted, #758095);
-    font-size: 11px;
-}
-.cal-gen-row.already-scheduled { opacity: .5; }
-.cal-gen-row.already-scheduled label::after {
-    content: ' (already scheduled)';
-    color: var(--grac-muted, #758095);
-    font-size: 11px;
-    font-style: italic;
-}
+/* === Edit Scheduler dialog: read-only Obligation / Scheduler Details
+   panel (Task Calendar Edit Scheduler change request, 2026-09-23).
+   Reuses .cal-detail-row/.cal-detail-label/.cal-detail-value from the
+   side panel above via .cal-side-body, wrapped in .pm-panel for the
+   dialog's own card look; only the margin below and the [hidden]
+   override (practice-management.css's .pm-button sets display:inline-flex,
+   which beats the browser's own [hidden] default -- same gotcha
+   .pm-inline-actions[hidden] / .pm-checkcombo-menu[hidden] already
+   document) are specific to this block. === */
+.cal-edit-obligation-details { margin-bottom: 14px; }
+.cal-edit-obligation-details .cal-detail-value.muted { color: var(--grac-muted, #758095); }
+#calEditViewPractice[hidden] { display: none; }
+/* Separates the navigation action from the Cancel/Save decision --
+   .pm-dialog-actions is flex-end, so without this the three buttons
+   would cluster together on the right as if all three were part of
+   the same save/cancel choice. */
+#calEditViewPractice { margin-right: auto; }
 
 /* === Status dot === */
 .cal-status-dot {
@@ -409,33 +438,16 @@
 .cal-status-dot.skipped { background: #bdc3c7; }
 .cal-status-dot.added { background: #16a085; }
 
-/* === Legend === */
-.cal-legend {
-    display: flex;
-    gap: 16px;
-    padding: 8px 0;
-    flex-wrap: wrap;
-}
-.cal-legend-item {
-    align-items: center;
-    color: var(--grac-muted, #758095);
-    display: flex;
-    font-size: 11px;
-    gap: 4px;
-}
-.cal-legend-swatch {
-    border-radius: 3px;
-    display: inline-block;
-    height: 12px;
-    width: 12px;
-}
-
 /* === Responsive === */
 @media (max-width: 768px) {
     .cal-toolbar { flex-direction: column; align-items: stretch; }
-    .cal-toolbar-center { justify-content: center; }
+    .cal-nav-header { flex-direction: column; align-items: stretch; }
+    .cal-nav-left { justify-content: center; }
+    .cal-view-toggle { justify-content: center; }
     .cal-day-cell { min-height: 60px; }
     .cal-side-panel { left: 10px; right: 10px; width: auto; max-width: none; }
+    .cal-scheduler-toolbar { flex-direction: column; align-items: stretch; }
+    .cal-scheduler-count { text-align: right; }
 }
 
 /* ==================================================================
@@ -451,10 +463,11 @@
     /* Source-module palette. Kept perceptually distinct so users can
        decode the calendar without needing the legend after the first
        glance. Values match the legend swatches below 1:1. */
-    --cal-src-pi:    #2465ca; /* Practice Instance -- reuses GRAC blue */
+    --cal-src-pi:    #2465ca; /* Execution obligation -- GRAC blue (was Practice Instance) */
+    --cal-src-oassur:#16a34a; /* Assurance obligation -- green */
     --cal-src-plan:  #0d9488; /* Assurance Plan    -- teal */
     --cal-src-item:  #7c3aed; /* Plan Item         -- violet */
-    --cal-src-exec:  #ea580c; /* Execution         -- orange */
+    --cal-src-exec:  #ea580c; /* Audit Execution   -- orange */
     --cal-src-obs:   #db2777; /* Observation       -- pink */
     --cal-src-gap:   #b91c1c; /* Gap               -- crimson */
 
@@ -484,7 +497,6 @@
     display: flex;
     gap: 6px;
 }
-.cal-filter-owner { gap: 4px; }
 .cal-filter-search { flex: 1 1 220px; min-width: 200px; }
 .cal-filter-label {
     color: var(--grac-muted, #758095);
@@ -507,73 +519,47 @@
     padding: 4px 8px;
 }
 .cal-filter-input { flex: 1 1 auto; }
-.cal-chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
+
+/* --- Filter multi-select combos (Modules / Status / Criticality) ----
+   These three filters use the shared .pm-checkcombo component (defined
+   in practice-management.css) instead of the old chip rows, so the whole
+   filter set collapses onto one wrapping row. The rules here only make
+   the trigger match the calendar filter bar's compact 30px selects and
+   colour the module option dots; the component's own chrome (menu,
+   search, caret, checkboxes) is inherited unchanged. */
+.cal-filter-combo { min-width: 158px; }
+.cal-filter-combo .pm-checkcombo-trigger {
+    min-height: 30px;
+    padding: 4px 9px;
+    font-size: 12px;
 }
-.cal-chip {
-    align-items: center;
-    background: #fff;
-    border: 1px solid #d5dce7;
-    border-radius: 999px;
-    color: var(--grac-muted, #758095);
-    cursor: pointer;
-    display: inline-flex;
-    font-family: "Lato", "Segoe UI", Arial, sans-serif;
-    font-size: 11px;
-    font-weight: 600;
-    gap: 4px;
-    padding: 3px 10px;
-    transition: background .12s ease, color .12s ease, border-color .12s ease;
-}
-.cal-chip:hover { background: #eef4fb; color: var(--grac-ink, #172033); }
-.cal-chip.active {
-    background: var(--grac-ink, #172033);
-    border-color: var(--grac-ink, #172033);
-    color: #fff;
-}
-.cal-chip .cal-chip-dot {
-    background: currentColor;
+.cal-filter-combo .pm-checkcombo-menu { min-width: 210px; }
+/* Trigger summary text: muted at the default (all / none) state, normal
+   ink once the user narrows the selection. */
+.cal-filter-combo .pm-checkcombo-summary { font-size: 12px; color: var(--grac-ink, #172033); }
+.cal-filter-combo .pm-checkcombo-summary.is-default { color: #98a2b3; font-weight: 500; }
+/* Small colour dot on each Module option, matching the legend swatches so
+   the combo keeps the module-colour language the old chips carried. */
+.cal-combo-dot {
     border-radius: 50%;
     display: inline-block;
-    height: 8px;
-    width: 8px;
-    opacity: .85;
+    flex: 0 0 auto;
+    height: 9px;
+    width: 9px;
 }
-/* Source-module chip dots pick up the module color even when inactive. */
-.cal-chip.source-PracticeInstance     { color: var(--cal-src-pi); }
-.cal-chip.source-AssurancePlan        { color: var(--cal-src-plan); }
-.cal-chip.source-AssurancePlanItem    { color: var(--cal-src-item); }
-.cal-chip.source-AssuranceExecution   { color: var(--cal-src-exec); }
-.cal-chip.source-AssuranceObservation { color: var(--cal-src-obs); }
-.cal-chip.source-AssuranceGap         { color: var(--cal-src-gap); }
-.cal-chip.source-PracticeInstance.active     { background: var(--cal-src-pi);   border-color: var(--cal-src-pi);   color: #fff; }
-.cal-chip.source-AssurancePlan.active        { background: var(--cal-src-plan); border-color: var(--cal-src-plan); color: #fff; }
-.cal-chip.source-AssurancePlanItem.active    { background: var(--cal-src-item); border-color: var(--cal-src-item); color: #fff; }
-.cal-chip.source-AssuranceExecution.active   { background: var(--cal-src-exec); border-color: var(--cal-src-exec); color: #fff; }
-.cal-chip.source-AssuranceObservation.active { background: var(--cal-src-obs);  border-color: var(--cal-src-obs);  color: #fff; }
-.cal-chip.source-AssuranceGap.active         { background: var(--cal-src-gap);  border-color: var(--cal-src-gap);  color: #fff; }
-
-/* --- Legend ------------------------------------------------------- */
-.cal-legend { margin: 0 0 8px; padding: 0; }
-.cal-legend-sep {
-    border-left: 1px solid var(--grac-line, #e2e7f0);
-    height: 14px;
-    margin: 0 4px;
-}
-.cal-legend-swatch.source-PracticeInstance     { background: var(--cal-src-pi); }
-.cal-legend-swatch.source-AssurancePlan        { background: var(--cal-src-plan); }
-.cal-legend-swatch.source-AssurancePlanItem    { background: var(--cal-src-item); }
-.cal-legend-swatch.source-AssuranceExecution   { background: var(--cal-src-exec); }
-.cal-legend-swatch.source-AssuranceObservation { background: var(--cal-src-obs); }
-.cal-legend-swatch.source-AssuranceGap         { background: var(--cal-src-gap); }
-.cal-legend-swatch.status-Overdue { background: #fff; border: 2px solid var(--cal-overdue); }
+.cal-combo-dot.source-Execution            { background: var(--cal-src-pi); }
+.cal-combo-dot.source-Assurance            { background: var(--cal-src-oassur); }
+.cal-combo-dot.source-AssurancePlan        { background: var(--cal-src-plan); }
+.cal-combo-dot.source-AssurancePlanItem    { background: var(--cal-src-item); }
+.cal-combo-dot.source-AssuranceExecution   { background: var(--cal-src-exec); }
+.cal-combo-dot.source-AssuranceObservation { background: var(--cal-src-obs); }
+.cal-combo-dot.source-AssuranceGap         { background: var(--cal-src-gap); }
 
 /* --- Chip color by source module (day cells) --------------------- */
 /* Module color WINS over the older criticality-* colors so mixed calendars
    read as "what kind of thing is this?" first, criticality second. */
-.cal-event.cal-event-chip.source-PracticeInstance     { background: var(--cal-src-pi); }
+.cal-event.cal-event-chip.source-Execution            { background: var(--cal-src-pi); }
+.cal-event.cal-event-chip.source-Assurance            { background: var(--cal-src-oassur); }
 .cal-event.cal-event-chip.source-AssurancePlan        { background: var(--cal-src-plan); }
 .cal-event.cal-event-chip.source-AssurancePlanItem    { background: var(--cal-src-item); }
 .cal-event.cal-event-chip.source-AssuranceExecution   { background: var(--cal-src-exec); }
@@ -631,7 +617,8 @@
     white-space: nowrap;
 }
 .cal-range-bar:hover { filter: brightness(1.08); box-shadow: 0 1px 4px rgba(15,23,42,.15); }
-.cal-range-bar.source-PracticeInstance     { background: var(--cal-src-pi); }
+.cal-range-bar.source-Execution            { background: var(--cal-src-pi); }
+.cal-range-bar.source-Assurance            { background: var(--cal-src-oassur); }
 .cal-range-bar.source-AssurancePlan        { background: var(--cal-src-plan); }
 .cal-range-bar.source-AssurancePlanItem    { background: var(--cal-src-item); }
 .cal-range-bar.source-AssuranceExecution   { background: var(--cal-src-exec); }
@@ -659,6 +646,8 @@
     padding: 3px 10px;
     text-transform: uppercase;
 }
+.cal-side-source-badge.source-Execution            { background: var(--cal-src-pi); }
+.cal-side-source-badge.source-Assurance            { background: var(--cal-src-oassur); }
 .cal-side-source-badge.source-AssurancePlan        { background: var(--cal-src-plan); }
 .cal-side-source-badge.source-AssurancePlanItem    { background: var(--cal-src-item); }
 .cal-side-source-badge.source-AssuranceExecution   { background: var(--cal-src-exec); }
@@ -679,3 +668,81 @@
     text-decoration: none;
 }
 .cal-side-deep-link:hover { background: #eef4fb; }
+
+/* ==================================================================
+   Scheduler List
+   ------------------------------------------------------------------
+   One distinct row per configured schedule rule (see renderList() in
+   practice-calendar.js) -- NOT a date-wise event list. Rendered with
+   the app's standard .pm-table / .pm-table-wrap grid (practice-
+   management.css) so it reads identically to every other data grid in
+   the product; only the toolbar, the Type pill (.cal-side-source-badge
+   source-*, shared with the side panel) and the pager are calendar-
+   specific. Uses the full panel width, not the grid's 900px square-cell
+   cap. */
+.cal-list-view { width: 100%; }
+
+/* Toolbar above the table: client-side search on the left, row count on
+   the right. Mirrors the search affordance used on the app's other
+   grids. */
+.cal-scheduler-toolbar {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.cal-scheduler-search {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    color: var(--grac-muted, #758095);
+    display: flex;
+    flex: 1 1 320px;
+    gap: 8px;
+    max-width: 420px;
+    padding: 0 10px;
+}
+.cal-scheduler-search i { font-size: 12px; }
+.cal-scheduler-search input {
+    background: transparent;
+    border: 0;
+    color: var(--grac-ink, #172033);
+    flex: 1;
+    font-size: 13px;
+    outline: none;
+    padding: 8px 0;
+}
+.cal-scheduler-count {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* The table itself leans on .pm-table; these rules only add the pieces
+   the shared grid does not cover. */
+.cal-scheduler-table-wrap { margin: 0; }
+.cal-scheduler-table .cal-sched-obligation {
+    color: var(--grac-ink, #172033);
+    font-weight: 600;
+}
+.cal-scheduler-table .cal-side-source-badge { margin-bottom: 0; white-space: nowrap; }
+.cal-scheduler-table .cal-sched-next { white-space: nowrap; }
+.cal-scheduler-table .cal-sched-none { color: var(--grac-muted, #758095); }
+
+/* Pager -- Prev / range / Next, using the shared .pm-button small. */
+.cal-scheduler-pager {
+    align-items: center;
+    display: flex;
+    gap: 14px;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+.cal-scheduler-pageinfo {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    font-weight: 600;
+}
+.cal-scheduler-pager .pm-button[disabled] { cursor: default; opacity: .5; }

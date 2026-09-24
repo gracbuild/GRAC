@@ -75,6 +75,43 @@ public sealed class CustomGapController(
         return Ok(result);
     }
 
+    // -----------------------------------------------------------
+    // Migration 255: the unified Gap Centre list
+    //
+    // Gap Centre used to run three tabs off two different endpoints.
+    // This is the one list behind all of them, with Source as a column.
+    // Added alongside the List route above rather than replacing it --
+    // the assurance-observation screens still call that one with their
+    // own filters.
+    // -----------------------------------------------------------
+    [HttpGet("centre")]
+    public async Task<IActionResult> GapCentreList(
+        [FromQuery] long?   organizationId,
+        [FromQuery] string? sourceModuleCode,
+        [FromQuery] string? statusCode,
+        [FromQuery] string? search,
+        [FromQuery] long?   observationId = null,
+        [FromQuery] int page     = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await customGapService.ListGapCentreAsync(
+            new GapCentreListQuery(organizationId, sourceModuleCode, statusCode, search,
+                                   observationId, page, pageSize),
+            cancellationToken);
+        // Carry the reason through instead of letting the exception become
+        // an anonymous 500 -- the screen shows this text verbatim.
+        return result.Error is null
+            ? Ok(result)
+            : StatusCode(StatusCodes.Status500InternalServerError, new { error = result.Error });
+    }
+
+    [HttpGet("centre/sources")]
+    public async Task<IActionResult> GapCentreSources(
+        [FromQuery] long? organizationId,
+        CancellationToken cancellationToken = default)
+        => Ok(await customGapService.ListGapCentreSourcesAsync(organizationId, cancellationToken));
+
     [HttpPost]
     public async Task<IActionResult> Open([FromBody] CustomGapOpenRequest body, CancellationToken cancellationToken)
     {
@@ -83,6 +120,15 @@ public sealed class CustomGapController(
         return result.Success
             ? StatusCode(StatusCodes.Status201Created, new { customGapId = result.CustomGapId })
             : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    // Migration 382: practices mapped to a Custom Gap (read-only display
+    // on the Gap view / detail). GET /api/practice/gaps/custom/{id}/practices
+    [HttpGet("{id:long}/practices")]
+    public async Task<IActionResult> Practices(long id, CancellationToken cancellationToken)
+    {
+        var rows = await customGapService.GetPracticesAsync(id, cancellationToken);
+        return Ok(new { data = rows });
     }
 
     [HttpPost("{id:long}/close")]

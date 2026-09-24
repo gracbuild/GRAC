@@ -52,6 +52,11 @@
             </tbody>
         </table>
     </div>
+
+    @* Standard grid pager (pm-grid.js). sp_document_ack_list has always
+       paged at 25; this screen sent no page parameter, so batch 26
+       onwards was unreachable. *@
+    <div id="ackPager"></div>
 </section>
 
 @* =============================================================
@@ -203,4 +208,6 @@
     #ackDetailDocs tbody tr.ack-doc-selected { background: #ebf8ff; }
 </style>
 
+@* Before the screen's own script -- the pager is mounted during init. *@
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
 <script src="~/js/DocumentAcknowledgement/document-acknowledgements.js" asp-append-version="true"></script>

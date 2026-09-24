@@ -162,7 +162,7 @@
       const menu       = actionMenu(r);
       return `
         <tr data-id="${r.slaMasterId}">
-          <td><strong>${name}</strong>${codeMarkup}</td>
+          <td>${name}${codeMarkup}</td>
           <td>${escapeHtml(r.processCode || "-")}</td>
           <td>${escapeHtml(r.classification || "-")}</td>
           <td>${duration}</td>
@@ -484,9 +484,12 @@
   // Inactivate / Reactivate
   // -------------------------------------------------------------
   async function toggleActive(row, makeActive) {
-    if (!confirm(makeActive
-      ? `Reactivate this SLA for ${row.slaMasterName || row.slaMasterCode}?`
-      : `Inactivate this SLA for ${row.slaMasterName || row.slaMasterCode}? Downstream process pickers will stop surfacing it.`))
+    if (!await window.gracUi.confirm(makeActive
+          ? `Reactivate this SLA for ${row.slaMasterName || row.slaMasterCode}?`
+          : `Inactivate this SLA for ${row.slaMasterName || row.slaMasterCode}? Downstream process pickers will stop surfacing it.`,
+          { type: makeActive ? "confirm" : "warning",
+            title: makeActive ? "Reactivate SLA" : "Inactivate SLA",
+            confirmText: makeActive ? "Reactivate" : "Inactivate" }))
       return;
     try {
       const r = await fetch(U(`${SLA_API}/configs/set-active`), {

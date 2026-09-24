@@ -28,7 +28,7 @@
 <section class="pm-panel" id="oaDefUnavailable" hidden>
     <div class="pm-empty">
         <i class="fa-solid fa-file-shield pm-empty-icon" aria-hidden="true"></i>
-        <h2 id="oaDefUnavailableTitle">Organization Assurance module is not yet enabled for this organization.</h2>
+        <h2 id="oaDefUnavailableTitle">Audit Management is not yet enabled for this organization.</h2>
         <p id="oaDefUnavailableBody">Ask a GRAC Admin to turn on <code>screen.org-assurance-definitions</code>.</p>
     </div>
 </section>
@@ -43,7 +43,7 @@
         <button class="pm-button icon" id="oaDefRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
             <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
         </button>
-        <button class="pm-button primary" id="oaDefAddBtn" type="button" title="Add Assurance Definition">
+        <button class="pm-button primary" id="oaDefAddBtn" type="button" title="Add Audit Definition">
             <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Definition
         </button>
     </div>
@@ -58,7 +58,7 @@
                 </tr>
             </thead>
             <tbody id="oaDefBody">
-                <tr><td colspan="8" class="pm-empty">Select an organization to load assurance definitions.</td></tr>
+                <tr><td colspan="8" class="pm-empty">Select an organization to load audits.</td></tr>
             </tbody>
         </table>
     </div>
@@ -74,39 +74,57 @@
 <dialog id="oaDefDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
     <form id="oaDefForm" method="dialog" style="margin:0; padding:20px 24px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaDefDialogTitle" style="margin:0; font-size:18px;">Add Assurance Definition</h2>
+            <h2 id="oaDefDialogTitle" style="margin:0; font-size:18px;">Add Audit Definition</h2>
             <button type="button" id="oaDefClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
         </div>
         <div id="oaDefMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
         <input type="hidden" id="oaDefEditId" />
-        @* Two-column grid. `align-items:start` keeps rows top-aligned even if
-           a label wraps -- prevents the "Code" input dropping below "Effective
-           Date" that the earlier layout produced. Each label wraps its title +
-           required-asterisk in a single <span> so the asterisk cannot fall
-           onto its own line under flex-direction:column. *@
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        @* Identity row: Code 25% | Name 50% | Effective Date 25%.
+           Name used to sit on its own full-width row below; folding it in
+           here removes one row of vertical height from a form that is
+           already long. The 1fr/2fr/1fr tracks give the 25/50/25 split.
+
+           `align-items:start` keeps the three top-aligned even if one
+           label wraps -- otherwise a wrapped label pushes its own input
+           below the others. `min-width:0` lets a long value shrink inside
+           its track instead of widening it and breaking the ratio.
+
+           Each label keeps its title + required-asterisk inside a single
+           <span> so the asterisk cannot fall onto its own line under
+           flex-direction:column. Ids, required flags, maxlengths and the
+           input styling are unchanged -- only the grid around them moved.
+
+           Stacks to one column under 900px (practice-management.css). *@
+        <div style="display:grid; grid-template-columns:1fr 2fr 1fr; gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
                 <span>Code <span style="color:#b91c1c;">*</span></span>
                 <input id="oaDefCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Name <span style="color:#b91c1c;">*</span></span>
+                <input id="oaDefName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
                 <span>Effective Date</span>
                 <input id="oaDefEffectiveDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
             </label>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
-            <span>Name <span style="color:#b91c1c;">*</span></span>
-            <input id="oaDefName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
-        </label>
-        @* minmax(0,1fr) instead of 1fr so long <option> text in the Owner
-           selects can't push the second column wider than its slot and
-           force a horizontal scrollbar on the dialog. *@
-        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-top:10px; align-items:start;">
+        @* SAME 1fr/2fr/1fr tracks as the identity row above, so the two
+           rows share vertical guides: Audit Category lines up under Code,
+           and the Owner pair spans exactly the width of Name. The third
+           track is intentionally left empty -- an aligned gap under
+           Effective Date reads better than a second row on its own,
+           unrelated rhythm.
+
+           The inner Owner grid keeps minmax(0,1fr) so long <option> text
+           cannot push a select wider than its slot and force a
+           horizontal scrollbar. *@
+        <div style="display:grid; grid-template-columns:1fr 2fr 1fr; gap:10px; margin-top:10px; align-items:start;">
             @* Assurance Category is fed from the GRAC Admin (Phase 1) master
                grac_new.assurance_category via /practice/api/org-assurance/categories.
                Selected option carries category id / code / name via data-* attrs. *@
             <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
-                <span>Assurance Category</span>
+                <span>Audit Category</span>
                 <select id="oaDefCategory" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; width:100%; box-sizing:border-box;">
                     <option value="">Loading categories...</option>
                 </select>
@@ -224,7 +242,7 @@
         const enabled = await wf.checkFeature(FEATURE, state.orgId);
         if (!enabled) {
             wf.unavailable('oaDefUnavailable', 'oaDefUnavailableTitle', 'oaDefUnavailableBody',
-                'Organization Assurance module is not yet enabled for this organization.',
+                'Audit Management is not yet enabled for this organization.',
                 'Ask a GRAC Admin to turn on ' + FEATURE + ' for this organization.');
             return;
         }
@@ -326,6 +344,19 @@
         document.getElementById('oaDefRefreshBtn').addEventListener('click', reload);
         document.getElementById('oaDefAddBtn').addEventListener('click', function () { openDialog(null); });
 
+        // Phase 3: expose the two entry points this screen already has so
+        // the Audit Definition workspace can drive the SAME form rather
+        // than growing a second one. Nothing new is implemented here --
+        // these are the existing functions, published.
+        window.__oaDefinitions = {
+            open   : openDialog,   // (id) edit, (null) create
+            reload : reload,
+            orgId  : function () { return state.orgId; }
+        };
+        try {
+            document.dispatchEvent(new CustomEvent('audit-definitions-ready'));
+        } catch (_) { /* nothing depends on this when unhosted */ }
+
         document.getElementById('oaDefClose').addEventListener('click', closeDialog);
         document.getElementById('oaDefCancel').addEventListener('click', closeDialog);
         document.getElementById('oaDefForm').addEventListener('submit', function (e) {
@@ -347,8 +378,8 @@
     async function reload() {
         const body = document.getElementById('oaDefBody');
         if (!state.orgId) {
-            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Select an organization to load assurance definitions.</td></tr>';
-            wf.updatePager('oa-def', { pageNumber: 1, totalCount: 0 });
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Select an organization to load audits.</td></tr>';
+            wf.updatePager('oa-def', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>';
@@ -442,6 +473,12 @@
     // appear only when the current status allows them.
     function buildActionsMenu(id, statusCode) {
         const items = [
+            // Phase 3: View opens the audit's own 3-tab workspace
+            // (Definition Details / Scope Details / Question Set). It is
+            // first because it is now the normal way into an audit -- the
+            // per-section entries below stay for direct deep links.
+            { icon: 'fa-up-right-from-square', label: 'View',
+                action: function () { handleRowAction(id, 'view'); } },
             { icon: 'fa-pen',              label: 'Edit',
                 action: function () { handleRowAction(id, 'edit'); } },
             { icon: 'fa-diagram-project',  label: 'Scope',
@@ -540,6 +577,18 @@
     }
 
     function handleRowAction(id, action) {
+        if (action === 'view') {
+            // The audit's 3-tab workspace. When this screen is already
+            // hosted inside that workspace the host intercepts the event
+            // below and switches tabs in place instead of navigating.
+            const handled = !document.dispatchEvent(new CustomEvent('audit-definition-open', {
+                detail: { definitionId: id }, cancelable: true
+            }));
+            if (handled) return;
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-audit-definition?definitionId=' + encodeURIComponent(id);
+            return;
+        }
         if (action === 'edit')     return openDialog(id);
         if (action === 'history')  return openHistory(id);
         if (action === 'scope') {
@@ -586,7 +635,8 @@
     }
 
     async function doTransition(id, action) {
-        const reason = window.prompt('Reason (optional):', '');
+        const reason = await window.gracUi.prompt('Reason (optional):',
+              { title: 'Reason', inputLabel: 'Reason', confirmText: 'Continue' });
         const url    = U(API + '/definitions/' + id + '/' + action);
         try {
             const r = await fetch(url, {
@@ -616,7 +666,7 @@
         clearMessage();
 
         if (id) {
-            document.getElementById('oaDefDialogTitle').textContent = 'Edit Assurance Definition';
+            document.getElementById('oaDefDialogTitle').textContent = 'Edit Audit Definition';
             try {
                 const r = await fetch(U(API + '/definitions/' + id + '?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
                 if (!r.ok) { alert('Failed to load definition.'); return; }
@@ -665,7 +715,7 @@
                 return;
             }
         } else {
-            document.getElementById('oaDefDialogTitle').textContent  = 'Add Assurance Definition';
+            document.getElementById('oaDefDialogTitle').textContent  = 'Add Audit Definition';
             document.getElementById('oaDefEditId').value             = '';
             document.getElementById('oaDefCode').disabled            = false;
             document.getElementById('oaDefForm').reset();
@@ -683,10 +733,18 @@
                 } catch (_) { /* soft-fail */ }
             }
         }
-        dlg.showModal();
+        // Audit Definition workspace (Phase 3): when this screen is hosted
+        // as the "Definition Details" tab the form is rendered inline, not
+        // as a modal over a list the user cannot see. Same form, same
+        // fields, same submit handler -- only the presentation differs.
+        if (window.__oaDefInlineForm) dlg.show(); else dlg.showModal();
     }
 
-    function closeDialog() { document.getElementById('oaDefDialog').close(); }
+    function closeDialog() {
+        // Inline mode has nothing to close back to: the form IS the tab.
+        if (window.__oaDefInlineForm) return;
+        document.getElementById('oaDefDialog').close();
+    }
 
     async function saveDefinition() {
         const idStr    = document.getElementById('oaDefEditId').value;
@@ -732,6 +790,20 @@
                 showMessage('error', (j && (j.error || j.Error)) || ('HTTP ' + r.status));
                 return;
             }
+            // Announce what was saved so a host page can react. The POST
+            // returns { definitionId, definitionVersionId }, and the id is
+            // the ONLY reliable way for the Audit Definition workspace to
+            // know which audit a brand-new record became -- guessing it
+            // from the reloaded list would be a race.
+            try {
+                document.dispatchEvent(new CustomEvent('audit-definition-saved', {
+                    detail: {
+                        definitionId : (j && (j.definitionId || j.DefinitionId)) || (idStr ? Number(idStr) : null),
+                        isNew        : !idStr
+                    }
+                }));
+            } catch (_) { /* the save already succeeded; never fail on the notification */ }
+
             closeDialog();
             reload();
         } catch (err) {
@@ -787,12 +859,14 @@
         el.textContent   = '';
     }
     function formatDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         return isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0,10);
     }
     function onlyDate(v) {
         if (!v) return '';
+        if (typeof window.gracFormatDisplayDate === "function") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         const s = String(v);
         return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
     }

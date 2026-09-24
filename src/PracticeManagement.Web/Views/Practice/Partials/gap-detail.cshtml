@@ -6,15 +6,33 @@
 
     Layout (single column):
       - Top toolbar: back link, state chip, compact stepper pills, refresh
-      - Action strip: only the actions still meaningful in the collapsed
-        model (Mark Invalid, Mark Duplicate). "Analyse" happens implicitly
-        via the Save Analysis button; auto-transition to Delegated fires
-        server-side after save succeeds.
+      - Action strip: only Mark Duplicate is offered as a clickable
+        action here -- Mark Invalid exists identically at the lifecycle/
+        API layer (sp_custom_gap_lifecycle_transition, action_code
+        'MarkInvalid') but its button is deliberately hidden from this
+        UI on request; nothing server-side changed. "Analyse" happens
+        implicitly via the Save Analysis button; auto-transition to
+        Delegated fires server-side after save succeeds.
       - Tabs: Analysis, Metadata (History moved inside Metadata as a
-        compact timeline).
-      - Analysis tab: form + linked-artefacts chip strip that appears
-        below the form and shows the Task / Exception / Risk auto-created
-        when analysis was saved.
+        compact timeline). A third Practice Instance tab embedding
+        resolve-workspace via iframe was tried (321) and dropped in
+        favour of a plain "View Practice Instance" link at the top of
+        the Analysis tab (still 321-sourced: PracticeInstanceId off the
+        gap header) -- same destination gaps.cshtml's row menu already
+        opens, just not framed.
+      - Analysis tab: Practice Instance link (when the gap has one) +
+        form + linked-artefacts chip strip that appears below the form
+        and shows the Task / Exception / Risk auto-created when analysis
+        was saved.
+      - Decision checkboxes (migration 323): Generate Task / Request
+        Exception / Create Risk, each independent -- any combination,
+        including all three or none. Replaces the 168 model of two
+        mandatory Yes/No dropdowns (Remediation possible? / Is there a
+        business Risk?) that forced exactly one of Task/Exception and
+        gated Risk on a second, separate decision. No schema change --
+        these bind straight to custom_gap_analysis.recommend_task/
+        recommend_exception/recommend_risk, which is what those columns
+        meant before 168 added the branching this migration removes.
       - Downstream tab / #dsAddModal / Left-side pane / Link Artefact
         top button REMOVED (sir's full simplification). Task, Exception
         and Risk all auto-create in their respective Centres from the
@@ -39,6 +57,12 @@
         <a class="pm-button" href="~/Practice/Index/gaps">
             <i class="fa-solid fa-arrow-left"></i> Back to Gap Centre
         </a>
+        @* Migration 325. The read-only "everything about this gap"
+           companion page -- full details plus Task/Exception/Risk cards.
+           Built once gapDetailLoaded() knows the gap id + org. *@
+        <a class="pm-button" id="gapOpenViewLink" href="#" hidden>
+            <i class="fa-solid fa-circle-info"></i> Gap View
+        </a>
         @* Compact horizontal stepper -- current state is highlighted so a
            standalone chip is redundant. JS labels states by display name
            (state_code 'Delegated' shows as 'Analysed' per migration 175). *@
@@ -62,6 +86,55 @@
                 The gap was marked as Invalid or Duplicate during validation.
                 Analysis and downstream artefacts are not applicable. Data
                 below (if any) is kept read-only for audit.
+            </p>
+        </div>
+    </div>
+
+    @* Migration 324: "already Analysed" read-only banner -- request C
+       part 2 ("Show View only. Hide/disable Analyse."). A friendlier,
+       green counterpart to the red terminal-invalid banner above: being
+       Analysed is the successful outcome, not a problem. Shown/hidden
+       and the form locked by the SAME applyTerminalInvalidMode() in
+       gap-detail.js that already handles Invalid/Duplicate -- this is
+       reuse, not a second lock mechanism. The server enforces the same
+       rule independently (sp_custom_gap_analysis_save THROWs 55143 on a
+       second save), so this banner is a courtesy, not the only guard. *@
+    <div id="gapAlreadyAnalysedBanner" class="gap-analysed-banner" hidden>
+        <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+        <div>
+            <strong>This gap has already been analysed.</strong>
+            <p>
+                You are viewing the saved analysis below in read-only mode.
+                Generate Task / Request Exception / Create Risk cannot be
+                re-triggered from here -- use the linked artefacts strip
+                below the form to open what was already created.
+            </p>
+        </div>
+    </div>
+
+    @* Migration 367: "blocked pending obligations/Operationalization"
+       read-only banner. Amber, between the red terminal-invalid banner
+       and the green already-Analysed banner in severity -- this gap is
+       still fully open and expected to be worked on, just not ready for
+       Analysis yet. Shown/hidden and the form locked by the SAME
+       applyTerminalInvalidMode() in gap-detail.js that already handles
+       the two banners above -- reuse, not a third lock mechanism. The
+       server enforces the same rule independently
+       (sp_custom_gap_analysis_save THROWs 55144/55145), so this banner
+       is a courtesy, not the only guard. Only ever shown for a gap
+       materialized from a Practice Instance -- see
+       isBlockedByUnresolvedObligations() in gap-detail.js. *@
+    <div id="gapObligationsBlockedBanner" class="gap-obligations-blocked-banner" hidden>
+        <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+        <div>
+            <strong>This gap cannot be analysed yet.</strong>
+            <p id="gapObligationsBlockedText">
+                @* Migration 372: placeholder text only -- always overwritten by
+                   applyTerminalInvalidMode() in gap-detail.js before this banner
+                   is ever shown, to match the live Not-Set/Operationalized count. *@
+                Analysis is blocked until every obligation displayed below has
+                been assessed (Not Set) and the related Practice has been
+                Operationalized.
             </p>
         </div>
     </div>
@@ -115,6 +188,40 @@
     </div>
 
     <div class="pm-tab-panel" data-panel="analysis">
+        @* Migration 321, simplified. An iframe embed (tried first) hit
+           connectivity issues an ordinary link doesn't -- this is a
+           plain "open in a new tab" link instead, same destination
+           (resolve-workspace, ?mode=view) gaps.cshtml's row menu
+           already uses. Shown only when the header resolves a
+           PracticeInstanceId -- Custom/Assurance gaps and an
+           un-materialized Implementation row have nothing to link to. *@
+        <p class="pm-hint gap-instance-link-wrap" id="gapInstanceLinkWrap" hidden>
+            <a id="gapInstanceLink" href="#" target="_blank" rel="noopener">
+                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> View Practice Instance
+            </a>
+        </p>
+
+        @* Obligations to Resolve -- migration 317, broadened by 367.
+           Shown only for an automatically generated gap (materialized
+           from a Practice Instance) -- a manually created gap has
+           nothing to show here and this strip stays hidden for it. Since
+           367, lists every obligation currently displayed under the gap
+           (Not Implemented, Partially Implemented, and Not Set/Not
+           Started) -- not only the one whose failure originally raised
+           it -- because Gap Analysis is blocked (55144) until every one
+           of them is resolved. Populated by refreshLinkedArtefacts() in
+           gap-detail.js from the SAME /linked-artefacts call the
+           Task/Exception/Risk chips already use
+           (result.failedObligations), so this is one round trip, not a
+           second one. Placed above the analysis form so the analyst sees
+           WHY the gap exists, and what is still outstanding, before
+           filling it in. *@
+        <div class="gap-failed-obligations-strip" id="gapFailedObligationsStrip" hidden>
+            <h3>Obligations to Resolve</h3>
+            <p class="pm-hint">The Obligation(s) under this Practice that are not yet Implemented. All of them must be resolved -- and the Practice Operationalized -- before this gap can be analysed.</p>
+            <div class="gap-linked-chips" id="gapFailedObligationsChips"></div>
+        </div>
+
         <form id="gapAnalysisForm" novalidate>
             <div class="pm-form-grid">
                 <label>
@@ -185,47 +292,72 @@
                     <span>Regulatory Impact Summary</span>
                     <textarea id="anRegulatoryImpactSummary" rows="2" maxlength="5000"></textarea>
                 </label>
-                <label>
-                    <span>RCA Required</span>
+                @* RCA is optional. The tick opens a dedicated card below;
+                   before the tick the RCA / Corrective / Preventive
+                   inputs are not part of the form at all -- so an analyst
+                   who does not need RCA is not looking at an empty grid.
+                   RCA Method dropdown retired: the taxonomy was noise on
+                   an already-optional workflow.
+
+                   The tick row spans BOTH columns of the outer grid so
+                   the RCA card can open right below it edge-to-edge,
+                   rather than starting at the right half. *@
+                <label class="pm-rca-tick-row">
                     <input type="checkbox" id="anRcaRequired" />
+                    <span>RCA Required</span>
+                    <span class="pm-rca-hint">Tick to record root cause + corrective / preventive actions</span>
                 </label>
-                <label>
-                    <span>RCA Method</span>
-                    <select id="anRcaMethodCode">
-                        <option value="">--</option>
-                        <option value="FiveWhys">5 Whys</option>
-                        <option value="Fishbone">Fishbone</option>
-                        <option value="Freeform">Freeform narrative</option>
-                    </select>
-                </label>
-                <label class="pm-form-grid-full">
-                    <span>RCA Summary</span>
-                    <textarea id="anRcaSummary" rows="3" maxlength="10000"></textarea>
-                </label>
-                <label class="pm-form-grid-full">
-                    <span>Recommended Action Summary</span>
-                    <textarea id="anRecommendedActionSummary" rows="3" maxlength="10000"
-                              placeholder="Feeds the auto-created Task / Exception / Risk artefacts on save."></textarea>
-                </label>
-                @* Sir's decision model (migration 168). Both mandatory. *@
-                <label>
-                    <span>Remediation possible?<span class="pm-required">*</span>
-                        <span class="pm-hint">(Yes = auto-open a Task; No = auto-request an Exception)</span></span>
-                    <select id="anRemediationPossible" required>
-                        <option value="">-- select --</option>
-                        <option value="Y">Yes -- track as a task</option>
-                        <option value="N">No -- request an exception</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Is there a business Risk?<span class="pm-required">*</span>
-                        <span class="pm-hint">(Yes = auto-log a Risk candidate)</span></span>
-                    <select id="anBusinessRiskPresent" required>
-                        <option value="">-- select --</option>
-                        <option value="Y">Yes -- log a candidate</option>
-                        <option value="N">No</option>
-                    </select>
-                </label>
+                <fieldset class="pm-rca-block" id="anRcaBlock" hidden>
+                    <legend>Root cause analysis</legend>
+                    <div class="pm-form-grid">
+                        <label class="full">
+                            <span>RCA Summary</span>
+                            <textarea id="anRcaSummary" rows="3" maxlength="10000"
+                                      placeholder="The reason this gap arose."></textarea>
+                        </label>
+                        <label>
+                            <span>Corrective Action</span>
+                            @* Renamed from "Recommended Action Summary".
+                               Same store column; only the label + id change.
+                               Feeds the auto-created Task / Exception /
+                               Risk artefacts on save. *@
+                            <textarea id="anCorrectiveAction" rows="3" maxlength="10000"
+                                      placeholder="What we will do to fix the specific gap."></textarea>
+                        </label>
+                        <label>
+                            <span>Preventive Action</span>
+                            @* New free-text column added by migration 249. *@
+                            <textarea id="anPreventiveAction" rows="3" maxlength="10000"
+                                      placeholder="Change to controls / process so this class of gap does not recur."></textarea>
+                        </label>
+                    </div>
+                </fieldset>
+                @* Migration 323: three independent decisions, replacing the
+                   168 Remediation-possible/business-Risk Yes-No dropdowns
+                   (which forced exactly one of Task/Exception and coupled
+                   Risk to a second, separate Yes/No). Each checkbox here
+                   is its own decision -- any combination, including all
+                   three or none, is valid. They map 1:1 onto
+                   recommend_task/recommend_exception/recommend_risk,
+                   which is where this app started (156) before 168 added
+                   the branching; this migration removes that branching
+                   rather than adding new columns. None is required --
+                   an analyst who has nothing to trigger yet just saves
+                   the analysis with all three unchecked. *@
+                <div class="pm-decision-checkboxes" id="gapDecisionChecks">
+                    <label class="pm-decision-check">
+                        <input type="checkbox" id="anGenerateTask" />
+                        <span>Generate Task</span>
+                    </label>
+                    <label class="pm-decision-check">
+                        <input type="checkbox" id="anRequestException" />
+                        <span>Request Exception</span>
+                    </label>
+                    <label class="pm-decision-check">
+                        <input type="checkbox" id="anCreateRisk" />
+                        <span>Create Risk</span>
+                    </label>
+                </div>
             </div>
             <p class="pm-form-message" id="anMessage" role="status" aria-live="polite"></p>
             <div class="pm-toolbar" style="justify-content: flex-end;">
@@ -260,6 +392,7 @@
             <ul id="gapHistoryList"><li class="pm-hint">Loading...</li></ul>
         </div>
     </div>
+
 </section>
 
 @* Shared across Gap / Risk / Observation — see the partial's header. *@
@@ -275,13 +408,16 @@
         <form id="gapActionForm">
             <input type="hidden" id="gapActionCode" />
             <div class="pm-form-grid">
+                <label class="pm-form-grid-full" id="gapActionDuplicateWrap" hidden>
+                    <span>Duplicate of <span class="pm-required">*</span></span>
+                    <select id="gapActionDuplicateOfId">
+                        <option value="">-- select the gap this duplicates --</option>
+                    </select>
+                    <span class="pm-hint" id="gapActionDuplicateOfHint"></span>
+                </label>
                 <label class="pm-form-grid-full" id="gapActionRemarkWrap">
                     <span>Remark <span id="gapActionRemarkHint" class="pm-hint"></span></span>
                     <textarea id="gapActionRemark" rows="3" maxlength="5000"></textarea>
-                </label>
-                <label class="pm-form-grid-full" id="gapActionDuplicateWrap" hidden>
-                    <span>Duplicate of gap id <span class="pm-required">*</span></span>
-                    <input type="number" id="gapActionDuplicateOfId" />
                 </label>
                 <label class="pm-form-grid-full" id="gapActionInvalidWrap" hidden>
                     <span>Invalid reason <span class="pm-required">*</span></span>
@@ -300,6 +436,62 @@
 <style>
     /* --- Gap Centre v2 detail (simplified) --- */
     .gap-detail-toolbar { align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    /* RCA card. The parent .pm-form-grid is 2 columns; the fieldset
+       spans both, sits as its own card with an inset background so it
+       reads as a subsection rather than a naked form region. The inner
+       grid is a plain 2-col that collapses to 1-col on narrow widths,
+       matching how the outer form behaves. */
+    .pm-rca-block {
+        grid-column: 1 / -1;
+        margin: 4px 0 4px;
+        padding: 14px 16px 12px;
+        border: 1px solid #cbd5e0;
+        border-radius: 8px;
+        background: #f7fafc;
+    }
+    .pm-rca-block > legend {
+        padding: 0 6px;
+        font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase; color: #2d3748;
+    }
+    .pm-rca-block .pm-form-grid { gap: 10px 14px; }
+    .pm-rca-block textarea { background: #fff; }
+    /* One-column at narrow widths; the outer 2-col grid does the same. */
+    @@media (max-width: 900px) {
+        .pm-rca-block .pm-form-grid { grid-template-columns: 1fr; }
+    }
+    /* Small "since ticked" hint next to the checkbox so the operator
+       sees why the block appeared -- no separate row needed. */
+    .pm-rca-tick-row {
+        grid-column: 1 / -1;
+        display: flex; align-items: center; gap: 8px;
+        margin: 0;
+    }
+    .pm-rca-tick-row > input[type="checkbox"] { margin: 0; }
+    .pm-rca-tick-row > .pm-rca-hint {
+        font-size: 11px; color: #718096;
+    }
+
+    /* Migration 323: three independent decision checkboxes (Generate
+       Task / Request Exception / Create Risk), replacing the two
+       mandatory Yes/No dropdowns. Same card treatment as .pm-rca-block
+       so it reads as its own decision area, not a plain form row. */
+    .pm-decision-checkboxes {
+        grid-column: 1 / -1;
+        display: flex; flex-wrap: wrap; gap: 10px 22px;
+        margin: 4px 0 4px;
+        padding: 12px 16px;
+        border: 1px solid #cbd5e0;
+        border-radius: 8px;
+        background: #f7fafc;
+    }
+    .pm-decision-checkboxes .pm-decision-check {
+        display: flex; align-items: center; gap: 8px;
+        font-weight: 600; color: #2d3748;
+        cursor: pointer;
+    }
+    .pm-decision-checkboxes .pm-decision-check input[type="checkbox"] { margin: 0; }
 
     /* Compact horizontal stepper -- shows only active states, current
        state highlighted. Terminal-invalid states render red. */
@@ -337,6 +529,13 @@
                           text-transform: uppercase; font-size: 11px; align-self: center; }
     .gap-detail-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
 
+    /* Practice Instance link (321) -- plain "open in a new tab" line
+       above the analysis form; no dedicated tab/panel any more.
+       Right-aligned within its own row on request -- same position,
+       just pushed to the right edge instead of sitting flush left. */
+    .gap-instance-link-wrap { margin: 0 0 14px; text-align: right; }
+    .gap-instance-link-wrap a { font-weight: 600; }
+
     /* History compact -- lives inside Metadata tab now. */
     .gap-history-compact h3 { font-size: 12px; text-transform: uppercase; color: #718096;
                               margin: 16px 0 8px 0; letter-spacing: 0.02em; }
@@ -363,11 +562,27 @@
     .gap-linked-chip.type-task      .chip-type { color: #2c5282; }
     .gap-linked-chip.type-exception .chip-type { color: #744210; }
     .gap-linked-chip.type-risk      .chip-type { color: #742a2a; }
+    .gap-linked-chip.type-obligation .chip-type { color: #9b2c2c; }
     .gap-linked-chip .chip-title  { font-size: 13px; font-weight: 600; color: #2d3748; }
     .gap-linked-chip .chip-status {
         display: inline-block; align-self: flex-start; padding: 2px 8px; border-radius: 999px;
         font-size: 10px; font-weight: 700; text-transform: uppercase;
         background: #edf2f7; color: #4a5568;
+    }
+    /* Failed Obligation(s) strip -- migration 317. Same chip shape as the
+       Task/Exception/Risk strip below (.gap-linked-chip, reused rather
+       than duplicated), its own heading and a warm-red chip-status so a
+       "Not Implemented" / "Partially Implemented" tag reads as the
+       problem it is rather than a neutral state label. Placed above the
+       Analysis form instead of near the other strip -- this is the cause
+       of the gap, not something the gap created. */
+    .gap-failed-obligations-strip { margin: 0 0 20px; }
+    .gap-failed-obligations-strip[hidden] { display: none !important; }
+    .gap-failed-obligations-strip h3 { font-size: 12px; text-transform: uppercase; color: #718096;
+                           margin: 0 0 4px 0; letter-spacing: 0.02em; }
+    .gap-failed-obligations-strip .pm-hint { margin: 0 0 10px; }
+    .gap-linked-chip.type-obligation .chip-status {
+        background: #fff5f5; color: #9b2c2c;
     }
 
     .gap-state-chip {
@@ -395,6 +610,33 @@
     .gap-terminal-banner strong { display: block; font-size: 14px; margin-bottom: 4px; }
     .gap-terminal-banner p { margin: 0; font-size: 12px; line-height: 1.5; }
 
+    /* Already-Analysed read-only banner (migration 324). Same layout as
+       .gap-terminal-banner above, green instead of red -- being Analysed
+       is the successful outcome, not a problem. */
+    .gap-analysed-banner {
+        display: flex; align-items: flex-start; gap: 12px;
+        background: #f0fff4; border: 1px solid #9ae6b4; color: #22543d;
+        border-radius: 6px; padding: 12px 14px; margin: 12px 0;
+    }
+    .gap-analysed-banner[hidden] { display: none !important; }
+    .gap-analysed-banner i { font-size: 18px; padding-top: 2px; }
+    .gap-analysed-banner strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .gap-analysed-banner p { margin: 0; font-size: 12px; line-height: 1.5; }
+
+    /* Blocked-pending-obligations/Operationalization banner (migration
+       367). Same layout as .gap-terminal-banner/.gap-analysed-banner
+       above, amber -- this gap is still open and expected to be worked
+       on, not a terminal state and not yet a success. */
+    .gap-obligations-blocked-banner {
+        display: flex; align-items: flex-start; gap: 12px;
+        background: #fffbeb; border: 1px solid #fbd38d; color: #7b341e;
+        border-radius: 6px; padding: 12px 14px; margin: 12px 0;
+    }
+    .gap-obligations-blocked-banner[hidden] { display: none !important; }
+    .gap-obligations-blocked-banner i { font-size: 18px; padding-top: 2px; }
+    .gap-obligations-blocked-banner strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .gap-obligations-blocked-banner p { margin: 0; font-size: 12px; line-height: 1.5; }
+
     /* Compact duplicate strip (from 177 -- simplified per sir).
        Parent gap link + hint; the parent analysis populates the
        (disabled) Analysis form fields below to avoid duplication. */
@@ -421,33 +663,47 @@
     .gap-invalid-card p { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
 
     /* Modal overlay (scoped to this partial). */
-    .pm-modal {
-        position: fixed; inset: 0; z-index: 1100;
-        display: flex; align-items: flex-start; justify-content: center;
-        background: rgba(15, 23, 42, 0.55);
-        padding: 40px 20px; overflow-y: auto;
-    }
-    .pm-modal[hidden] { display: none !important; }
-    .pm-modal-panel {
-        background: #fff; border-radius: 8px;
-        box-shadow: 0 12px 32px rgba(0,0,0,0.25);
-        padding: 20px; width: 100%; max-width: 560px;
-        max-height: calc(100vh - 80px); overflow-y: auto;
-    }
-    .pm-modal-panel > header {
-        display: flex; justify-content: space-between; align-items: center;
-        border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;
-    }
-    .pm-modal-panel > header h2 { margin: 0; font-size: 18px; color: #2d3748; }
-    .pm-modal-close {
+
+
+
+
+
+    /* .pm-modal / .pm-modal-panel / .pm-modal-footer moved to
+           practice-management.css -- they were identical in three
+           views and absent from any fourth that used the classes.
+           The .pm-modal-close override below is kept deliberately:
+           the global rule is a bordered button, this is a glyph. */
+        .pm-modal-close {
         background: transparent; border: 0; padding: 0;
         font-size: 26px; line-height: 1; cursor: pointer; color: #718096;
     }
     .pm-modal-close:hover { color: #e53e3e; }
-    .pm-modal-footer {
-        display: flex; justify-content: flex-end; gap: 8px;
-        margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0;
+
+    /* Mark Duplicate / Mark Invalid dialog (#gapActionModal) -- a bit
+       roomier than the shared .pm-modal-panel default (560px / content-
+       height only), now that it carries a gap picker as well as the
+       remark field. Scoped to this one dialog's id, not to
+       .pm-modal-wide, so Exception Centre and Risk Centre's dialogs
+       (which share the same base class) are unaffected. */
+    #gapActionModal .pm-modal-panel {
+        max-width: 680px;
+        min-height: 360px;
     }
+
+    /* Remark + "Duplicate of" (or Remark + Invalid reason) were sitting
+       side by side because .pm-form-grid is a 2-column grid by default
+       and the "-full" class on these labels is pm-form-grid-full, which
+       practice-management.css does not define (the real full-width
+       class there is plain .full) -- so it never took grid-column: 1/-1
+       and both fields just fell into the grid's two columns. Forcing a
+       single column here, scoped to this dialog, stacks them into their
+       own rows without touching the shared .pm-form-grid used by every
+       other screen (some of which may be relying on today's 2-column
+       behaviour on purpose). */
+    #gapActionModal .pm-form-grid {
+        grid-template-columns: 1fr;
+    }
+
 </style>
 
 @* SLA Override dialog (migration 184). Raises an SLA_CANDIDATE

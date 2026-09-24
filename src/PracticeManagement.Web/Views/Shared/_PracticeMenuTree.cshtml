@@ -9,8 +9,15 @@
     var isCurrent = item.MenuKey.Equals(currentArea, StringComparison.OrdinalIgnoreCase);
     var isOpen = isCurrent || item.Children.Any(child => IsCurrentOrParent(child, currentArea));
     var hasChildren = item.Children.Count > 0;
+    // AdminLTE's treeview calls preventDefault() on ANY nav-link whose li
+    // owns a .nav-treeview, so a parent's href alone never navigates. For
+    // a parent that is also a page (migration 276) emit the target as
+    // data-nav-href; _Layout navigates to it explicitly. Razor omits the
+    // attribute entirely when the value is null, so ordinary parents and
+    // leaves render exactly as before.
+    var navHref = hasChildren && !string.IsNullOrWhiteSpace(item.MenuUrl) ? MenuUrl(item) : null;
     <li class="nav-item @(isCurrent ? "active" : "") @(isOpen && hasChildren ? "menu-open" : "")" data-menu-key="@item.MenuKey">
-        <a href="@MenuUrl(item)" class="nav-link @(isCurrent ? "active" : isOpen ? "active-parent" : "")">
+        <a href="@MenuUrl(item)" data-nav-href="@navHref" class="nav-link @(isCurrent ? "active" : isOpen ? "active-parent" : "")">
             <i class="nav-icon @IconClass(item, hasChildren)"></i>
             <p>
                 @item.MenuName
@@ -36,7 +43,14 @@
 
     private string MenuUrl(PracticeMenuItem item)
     {
-        if (item.Children.Count > 0) return "#";
+        // A parent normally only toggles its subtree, so it has no
+        // destination. Audit Definition / Audit Configuration (migration
+        // 276) are the exception: they are real pages that ALSO parent
+        // the screens they host, so a parent carrying a menu_url keeps
+        // it. No menu row before 276 was both a parent and had a url, so
+        // this changes nothing that already exists.
+        if (item.Children.Count > 0 && string.IsNullOrWhiteSpace(item.MenuUrl)) return "#";
+        if (item.Children.Count > 0) return NormalizeMenuUrl(item.MenuUrl!);
         if (!string.IsNullOrWhiteSpace(item.MenuUrl)) return NormalizeMenuUrl(item.MenuUrl);
         if (item.Screen is null) return "#";
         if (item.Screen.Key == "dashboard") return Url.Action("Index", "Practice") ?? "#";

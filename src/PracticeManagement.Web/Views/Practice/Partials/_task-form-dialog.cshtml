@@ -1,0 +1,299 @@
+@*
+    THE common Task / Sub Task creation form.
+
+    One dialog, included by every screen that can create task work, driven
+    by wwwroot/js/Shared/task-form.js. Before this existed there were three
+    implementations:
+
+      1. Task Center "New Task (Custom)" -- a proper dialog (this layout)
+      2. Task Center row menu "Add child task" -- FOUR chained
+         window.prompt() / confirm() boxes
+      3. Risk Treatment "Add a sub task" -- an inline panel with its own
+         fields and its own validation
+
+    Three forms, three validation rules, three sets of field names for one
+    concept. This partial is the single one, and the JS decides what it is
+    creating from the options it is opened with.
+
+    FIELD SET -- unchanged from the reference
+    ----------------------------------------
+    Organization - Task Name* - Description - Assigned To* - Priority -
+    Start Date - Target Date - Remarks, plus Parent Task and Mandatory in
+    sub task mode. Nothing was removed to make it fit.
+
+    FITTING IN ONE SCREEN
+    ---------------------
+    Sub task mode is the tall one: ten controls plus a header and an
+    action row. Stacked one per line at 640px wide that is well past a
+    768px-tall laptop viewport, so the dialog scrolled.
+
+    Three changes, in order of how much height each returns:
+
+      1. TWO COLUMNS THROUGHOUT, at 880px instead of 640px. The pairs the
+         requirement names -- Assigned To / Priority, Start Date / Target
+         Date -- were already side by side; Organization / Parent Task and
+         Description / Remarks now are too. Four stacked rows become two.
+
+      2. TIGHTER RHYTHM. Gaps 12px -> 10px, label margins 4px -> 3px,
+         dialog padding 20/24 -> 16/20, header and action margins trimmed.
+         Control padding and font size are UNCHANGED -- the requirement
+         asks for less space between fields, not smaller fields.
+
+      3. A STICKY ACTION ROW. Below ~600px of viewport the fields scroll
+         inside the form while Cancel and Create stay put, so the buttons
+         are reachable at any height rather than only when everything fits.
+
+    Description and Remarks share a row rather than Remarks keeping its
+    place at the end. Both are optional free text of the same kind, and
+    pairing them is the single biggest height saving available without
+    touching a field.
+
+    Included ONCE per page. The ids are global, which is exactly what lets
+    any screen on that page open the same dialog.
+*@
+<dialog id="gracTaskFormDialog" class="gtf">
+    <form id="gracTaskForm" method="dialog" class="gtf-form">
+        <header class="gtf-head">
+            <h2 id="gracTaskFormTitle">New Task (Custom)</h2>
+            <button type="button" id="gracTaskFormClose" class="gtf-x" aria-label="Close">&times;</button>
+        </header>
+
+        <div id="gracTaskFormMessage" class="gtf-msg"></div>
+
+        <div class="gtf-body">
+            <div class="gtf-grid">
+                @* Organization is context, not a choice: every caller
+                   already knows which organisation it is working in, and
+                   a picker here would let a task be created against one
+                   the rest of the screen is not showing.
+
+                   Spans both columns for a task; shares the row with
+                   Parent Task for a sub task (see .is-subtask below). *@
+                <div class="gtf-field gtf-org">
+                    <span class="gtf-label">Organization</span>
+                    <div class="gtf-org-box" id="gracTaskFormOrgLabel">&mdash;</div>
+                </div>
+
+                @* ---- Parent task (sub task mode only) ----------------
+                   Two mutually exclusive cells, one shown at a time by
+                   the JS:
+
+                     ParentFixed  opened from a task's own menu, so the
+                                  parent is known -- read-only, never
+                                  editable
+                     ParentPick   opened without a parent in hand, so the
+                                  user chooses one
+
+                   The fixed one is a disabled input rather than plain
+                   text so it reads as a field the user cannot change,
+                   which is what read-only should look like in a form. *@
+                <label class="gtf-field gtf-parent" id="gracTaskFormParentFixed">
+                    <span class="gtf-label">Parent Task</span>
+                    <input type="text" id="gracTaskFormParentLabel" disabled />
+                    <input type="hidden" id="gracTaskFormParentId" />
+                    <span class="gtf-note">Set from the task you opened this from; it cannot be changed here.</span>
+                </label>
+
+                <label class="gtf-field gtf-parent" id="gracTaskFormParentPick">
+                    <span class="gtf-label">Parent Task<i class="gtf-req">*</i></span>
+                    <select id="gracTaskFormParentSelect">
+                        <option value="">&mdash; select the parent task &mdash;</option>
+                    </select>
+                </label>
+
+                <label class="gtf-field gtf-span2">
+                    <span class="gtf-label">Task Name<i class="gtf-req">*</i></span>
+                    <input type="text" id="gracTaskFormTitleInput" maxlength="250" required />
+                </label>
+
+                <label class="gtf-field">
+                    <span class="gtf-label">Description</span>
+                    <textarea id="gracTaskFormDescription" rows="4" maxlength="4000"></textarea>
+                </label>
+
+                <label class="gtf-field">
+                    <span class="gtf-label">Remarks</span>
+                    <textarea id="gracTaskFormRemarks" rows="4" maxlength="4000"></textarea>
+                </label>
+
+                <label class="gtf-field">
+                    <span class="gtf-label">Assigned To<i class="gtf-req">*</i></span>
+                    <select id="gracTaskFormAssignee" required>
+                        <option value="">&mdash; select an employee &mdash;</option>
+                    </select>
+                </label>
+
+                <label class="gtf-field">
+                    <span class="gtf-label">Priority</span>
+                    <select id="gracTaskFormPriority">
+                        <option value="Low">Low</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                    <span class="gtf-note" id="gracTaskFormPriorityNote"></span>
+                </label>
+
+                <label class="gtf-field">
+                    <span class="gtf-label">Start Date</span>
+                    <input type="date" id="gracTaskFormStartDate" />
+                    <span class="gtf-note" id="gracTaskFormStartNote"></span>
+                </label>
+
+                <label class="gtf-field">
+                    <span class="gtf-label">Target Date</span>
+                    <input type="date" id="gracTaskFormTargetDate" />
+                </label>
+
+                @* Sub task only. BRD §12: a mandatory child blocks its
+                   parent's completion, which is the gate Risk Centre's
+                   residual analysis depends on -- a real decision, not a
+                   detail. *@
+                <div class="gtf-check gtf-span2" id="gracTaskFormMandatoryRow">
+                    <input type="checkbox" id="gracTaskFormMandatory" checked />
+                    <label for="gracTaskFormMandatory">
+                        Mandatory &mdash; the parent task cannot be completed while this sub task is open.
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        @* Sticky, so Cancel and Create stay reachable even on a viewport
+           short enough that the fields above have to scroll. *@
+        <footer class="gtf-actions">
+            <button type="button" id="gracTaskFormCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="gracTaskFormSubmit" class="pm-button primary">Create Task</button>
+        </footer>
+    </form>
+</dialog>
+
+<style>
+    /* Scoped to .gtf so nothing here can reach another dialog. */
+    .gtf {
+        border: none;
+        border-radius: 10px;
+        padding: 0;
+        width: 94%;
+        max-width: 880px;          /* was 640 -- two real columns need it */
+        max-height: 92vh;          /* never taller than the viewport      */
+        box-shadow: 0 10px 40px rgba(15, 23, 42, .25);
+        color: #0f172a;
+    }
+    .gtf::backdrop { background: rgba(15, 23, 42, .45); }
+
+    /* The form is the flex column: head and actions hold their size, the
+       body is the only part allowed to scroll -- and only when the
+       viewport is genuinely too short. */
+    .gtf-form {
+        display: flex;
+        flex-direction: column;
+        max-height: 92vh;
+        margin: 0;
+        padding: 16px 20px;
+        gap: 10px;
+    }
+    .gtf-body { overflow-y: auto; min-height: 0; }
+
+    .gtf-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; flex: 0 0 auto;
+    }
+    .gtf-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+    .gtf-x {
+        background: none; border: 0; font-size: 22px; line-height: 1;
+        cursor: pointer; color: #64748b; padding: 0 2px;
+    }
+    .gtf-x:hover { color: #dc2626; }
+
+    .gtf-msg {
+        display: none; flex: 0 0 auto;
+        padding: 7px 11px; border-radius: 5px; font-size: 13px;
+    }
+
+    /* Two columns. Every field is a grid cell; the ones that need the
+       whole row say so. */
+    .gtf-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 14px;
+        align-items: start;
+    }
+    .gtf-span2 { grid-column: span 2; }
+
+    /* Organization owns the row on a task, and shares it with Parent Task
+       on a sub task -- so neither mode leaves half a row empty. */
+    .gtf-org { grid-column: span 2; }
+    .gtf-form.is-subtask .gtf-org { grid-column: span 1; }
+
+    /* Both parent cells are hidden until the JS shows the right one. */
+    .gtf-parent { display: none; }
+
+    .gtf-field { display: block; min-width: 0; }
+    .gtf-label {
+        display: block; font-size: 12px; font-weight: 600;
+        color: #475569; margin-bottom: 3px;
+    }
+    .gtf-req { color: #dc2626; font-style: normal; margin-left: 2px; }
+
+    /* Hidden by default: the Priority and Start Date notes only apply in
+       sub task mode, and the JS shows them there. */
+    .gtf-note {
+        display: none; font-size: 11px; color: #64748b; margin-top: 3px;
+    }
+
+    /* The read-only parent's note is the exception -- that row is only
+       ever visible when the note is true, so it needs no JS. */
+    #gracTaskFormParentFixed .gtf-note { display: block; }
+
+    /* Control size is deliberately NOT reduced: the requirement asks for
+       less space between fields, not smaller fields. */
+    .gtf-field input[type="text"],
+    .gtf-field input[type="date"],
+    .gtf-field select,
+    .gtf-field textarea {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 4px;
+        font: inherit;
+        font-size: 13px;
+        color: #0f172a;
+        background: #fff;
+    }
+    .gtf-field textarea { resize: vertical; min-height: 84px; }
+    .gtf-field input:disabled,
+    .gtf-field select:disabled,
+    .gtf-field textarea:disabled { background: #f1f5f9; color: #334155; }
+
+    .gtf-org-box {
+        border: 1px solid #e2e8f0; border-radius: 5px; background: #f8fafc;
+        padding: 6px 10px; font-weight: 600; font-size: 13px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .gtf-check { display: none; align-items: flex-start; gap: 8px; }
+    .gtf-check label { font-size: 12px; color: #475569; line-height: 1.35; }
+    .gtf-check input { margin-top: 2px; }
+
+    .gtf-actions {
+        display: flex; justify-content: flex-end; gap: 10px;
+        flex: 0 0 auto; padding-top: 10px;
+        border-top: 1px solid #e2e8f0;
+    }
+
+    /* One column on a narrow window. Below this the two-column pairs stop
+       helping and start cramping. */
+    @@media (max-width: 720px) {
+        .gtf-grid { grid-template-columns: minmax(0, 1fr); }
+        .gtf-span2, .gtf-org, .gtf-form.is-subtask .gtf-org { grid-column: span 1; }
+    }
+
+    /* On a short viewport the textareas give up height first -- they are
+       the only controls with room to spare, and shrinking them keeps the
+       fields on one screen without touching any single-line control. */
+    @@media (max-height: 780px) {
+        .gtf-field textarea { min-height: 62px; }
+        .gtf-form { gap: 8px; }
+        .gtf-grid { gap: 8px 14px; }
+    }
+</style>

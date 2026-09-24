@@ -1,0 +1,300 @@
+@*
+    Ownership Management -- screen key `ownership-management` (migration 345)
+
+    Pick a user; every ACTIVE item they currently own (across Practice,
+    Control, Dependencies, Audit, Risk, Task, Release, Reporting Officer,
+    and the name-valued owners) is listed with a New Owner picker limited to
+    active Functional Users. Reassigning saves through the backend
+    (sp_pm_user_ownership_reassign, one transaction) and the row drops off
+    the list. This is the page the User Management deactivation block sends
+    the admin to (?userId=... deep-link pre-selects and auto-loads).
+
+    Self-contained: its own tiny helpers, talks to the gateway directly.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<style>
+    #omRoot { max-width: 1180px; }
+    #omRoot .om-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 14px; }
+    #omRoot .om-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 0 0 14px; }
+    #omRoot .om-field { display: flex; flex-direction: column; gap: 4px; min-width: 260px; }
+    #omRoot .om-field label { font-size: 12px; font-weight: 600; color: var(--grac-ink, #25345a); }
+    #omRoot .om-field select { padding: 7px 10px; border: 1px solid var(--grac-line, #d7deea); border-radius: 6px; min-height: 36px; }
+    #omRoot .om-count { font-size: 12px; color: var(--grac-muted, #758095); align-self: center; }
+    #omRoot .om-msg { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px; display: none; }
+    #omRoot .om-msg.info  { display: block; background: #eef4ff; color: #25345a; border: 1px solid #cdddff; }
+    #omRoot .om-msg.error { display: block; background: #fdecec; color: #8a1c1c; border: 1px solid #f5c2c2; }
+    #omRoot .om-msg.success { display: block; background: #e9f8ef; color: #1f6b3b; border: 1px solid #bfe6cd; }
+    #omRoot table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #omRoot th, #omRoot td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grac-line, #eef1f6); vertical-align: middle; }
+    #omRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--grac-muted, #758095); }
+    #omRoot .om-module { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a); font-size: 11px; font-weight: 600; }
+    #omRoot .om-type { color: var(--grac-muted, #758095); font-size: 12px; }
+    #omRoot .om-newowner select { padding: 6px 8px; border: 1px solid var(--grac-line, #d7deea); border-radius: 6px; min-width: 200px; }
+    #omRoot .om-empty { padding: 26px; text-align: center; color: var(--grac-muted, #758095); }
+    #omRoot .om-actions-bar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+    #omRoot .om-pill { font-size: 11px; font-weight: 600; color: #8a5a00; background: #fff3d6; border: 1px solid #f0dca0; border-radius: 10px; padding: 1px 7px; }
+</style>
+
+<div id="omRoot">
+    <p class="om-hint">
+        Select a user to see every active item they currently own. Reassign each item to an
+        active Functional User. A user cannot be deactivated until they own nothing.
+    </p>
+
+    <div class="om-toolbar">
+        <div class="om-field">
+            <label for="omUser">User</label>
+            <select id="omUser"><option value="">Loading users...</option></select>
+        </div>
+        <div class="om-count" id="omCount"></div>
+    </div>
+
+    <div class="om-msg" id="omMessage" role="status"></div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:150px">Module / Type</th>
+                    <th>Item</th>
+                    <th style="width:180px">Current Owner</th>
+                    <th style="width:230px">New Owner</th>
+                    <th style="width:120px">Action</th>
+                </tr>
+            </thead>
+            <tbody id="omRows">
+                <tr><td colspan="5" class="om-empty">Select a user to load their owned items.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="om-actions-bar">
+        <button type="button" class="pm-button" id="omReassignAll" hidden>Reassign all selected</button>
+    </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+    // ---- tiny self-contained helpers (no external deps) ----------------
+    const base = String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "");
+    const U    = p => base + p;
+    const api  = U("/practice-management-gateway");
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const esc  = v => String(v ?? "").replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const rowsOf = body => {
+        if (Array.isArray(body)) return body;
+        if (!body || typeof body !== "object") return [];
+        return body.data || body.Data || body.rows || body.Rows || body.items || body.Items || [];
+    };
+    const val = (row, ...keys) => {
+        for (const k of keys) {
+            if (row[k] !== undefined && row[k] !== null) return row[k];
+            const lk = k.charAt(0).toLowerCase() + k.slice(1);
+            if (row[lk] !== undefined && row[lk] !== null) return row[lk];
+        }
+        return "";
+    };
+    const msgEl = document.getElementById("omMessage");
+    const setMsg = (text, kind) => {
+        msgEl.className = "om-msg" + (kind ? " " + kind : "");
+        msgEl.textContent = text || "";
+        if (!text) msgEl.style.display = "none";
+    };
+
+    async function getJson(url, options) {
+        const res = await fetch(url, Object.assign({ credentials: "same-origin" }, options));
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* non-JSON */ }
+        if (!res.ok) {
+            const m = (body && (body.message || body.error || body.Message)) || ("Request failed (HTTP " + res.status + ")");
+            throw new Error(m);
+        }
+        return body;
+    }
+    const postQuery = (entity, data) => getJson(`${api}/${entity}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+        body: JSON.stringify({ data: data || {} })
+    });
+    const postSave = (entity, data) => getJson(`${api}/${entity}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+        body: JSON.stringify({ data: data || {} })
+    });
+
+    // ---- state ---------------------------------------------------------
+    let users = [];          // { id, name, status, organizationId, functional }
+    let owners = [];         // functional+active owner options { value, label, organizationId }
+    let selectedUserId = ""; // employee id string
+
+    const userSelect = document.getElementById("omUser");
+    const rowsHost   = document.getElementById("omRows");
+    const countEl    = document.getElementById("omCount");
+    const reassignAllBtn = document.getElementById("omReassignAll");
+
+    function ownerOptionsFor(orgId, excludeId) {
+        const org = String(orgId || "");
+        return owners
+            .filter(o => (!org || String(o.organizationId || "") === org))
+            .filter(o => String(o.value) !== String(excludeId || ""))
+            .map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`)
+            .join("");
+    }
+
+    function renderEmpty(text) {
+        rowsHost.innerHTML = `<tr><td colspan="5" class="om-empty">${esc(text)}</td></tr>`;
+        reassignAllBtn.hidden = true;
+        countEl.textContent = "";
+    }
+
+    function renderRows(items) {
+        if (!items.length) {
+            renderEmpty("This user does not own any active items. They can be deactivated.");
+            return;
+        }
+        countEl.textContent = items.length + (items.length === 1 ? " item" : " items");
+        rowsHost.innerHTML = items.map(it => {
+            const key    = esc(val(it, "OwnershipKey"));
+            const orgId  = val(it, "OrganizationId");
+            const source = esc(val(it, "SourceCode"));
+            const nameBased = String(val(it, "IsNameBased")) === "true" || val(it, "IsNameBased") === true || val(it, "IsNameBased") === 1;
+            const opts = ownerOptionsFor(orgId, selectedUserId);
+            return `<tr data-key="${key}" data-source="${source}" data-entity="${esc(val(it, "EntityId"))}">
+                <td><span class="om-module">${esc(val(it, "ModuleName"))}</span><div class="om-type">${esc(val(it, "ItemType"))}${nameBased ? ' <span class="om-pill" title="Owner stored by name">name</span>' : ""}</div></td>
+                <td>${esc(val(it, "EntityName"))}</td>
+                <td>${esc(val(it, "CurrentOwnerName") || (selectedUserLabel()))}</td>
+                <td class="om-newowner"><select data-newowner>${opts ? '<option value="">Select new owner...</option>' + opts : '<option value="">No eligible Functional User</option>'}</select></td>
+                <td><button type="button" class="pm-button small" data-reassign>Reassign</button></td>
+            </tr>`;
+        }).join("");
+        reassignAllBtn.hidden = false;
+        wireRowActions();
+    }
+
+    function selectedUserLabel() {
+        const u = users.find(x => String(x.id) === String(selectedUserId));
+        return u ? u.name : "";
+    }
+
+    function collectRow(tr) {
+        const sel = tr.querySelector("[data-newowner]");
+        const newOwnerId = sel ? sel.value : "";
+        return {
+            sourceCode: tr.getAttribute("data-source"),
+            entityId: Number(tr.getAttribute("data-entity")),
+            newOwnerId: newOwnerId ? Number(newOwnerId) : 0
+        };
+    }
+
+    async function reassign(items, trs) {
+        if (!items.length) { setMsg("Pick a new owner first.", "error"); return; }
+        setMsg("Reassigning...", "info");
+        try {
+            await postSave("user-ownership", { organizationId: currentUserOrg(), items });
+            // Drop the reassigned rows and refresh counts.
+            trs.forEach(tr => tr.remove());
+            const remaining = rowsHost.querySelectorAll("tr[data-key]").length;
+            if (!remaining) {
+                renderEmpty("All ownership has been reassigned. This user can now be deactivated.");
+                setMsg("Ownership reassigned. This user can now be deactivated.", "success");
+            } else {
+                countEl.textContent = remaining + (remaining === 1 ? " item" : " items");
+                setMsg("Reassignment saved.", "success");
+            }
+        } catch (err) {
+            setMsg(err.message || "Reassignment failed.", "error");
+        }
+    }
+
+    function currentUserOrg() {
+        const u = users.find(x => String(x.id) === String(selectedUserId));
+        return u ? Number(u.organizationId) || null : null;
+    }
+
+    function wireRowActions() {
+        rowsHost.querySelectorAll("[data-reassign]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const tr = btn.closest("tr");
+                const item = collectRow(tr);
+                if (!item.newOwnerId) { setMsg("Select a new owner for this item.", "error"); return; }
+                reassign([item], [tr]);
+            });
+        });
+    }
+
+    reassignAllBtn.addEventListener("click", () => {
+        const trs = Array.from(rowsHost.querySelectorAll("tr[data-key]"));
+        const chosen = [];
+        const chosenTrs = [];
+        trs.forEach(tr => {
+            const item = collectRow(tr);
+            if (item.newOwnerId) { chosen.push(item); chosenTrs.push(tr); }
+        });
+        if (!chosen.length) { setMsg("Pick a new owner on at least one row.", "error"); return; }
+        reassign(chosen, chosenTrs);
+    });
+
+    async function loadOwnership() {
+        if (!selectedUserId) { renderEmpty("Select a user to load their owned items."); setMsg(""); return; }
+        renderEmpty("Loading owned items...");
+        setMsg("");
+        try {
+            const body = await postQuery("user-ownership", { employeeId: Number(selectedUserId) });
+            renderRows(rowsOf(body));
+        } catch (err) {
+            renderEmpty("");
+            setMsg(err.message || "Could not load ownership for this user.", "error");
+        }
+    }
+
+    function populateUserSelect(preselectId) {
+        const sorted = users.slice().sort((a, b) => a.name.localeCompare(b.name));
+        userSelect.innerHTML = '<option value="">Select a user...</option>' + sorted.map(u =>
+            `<option value="${esc(u.id)}">${esc(u.name)}${u.status && u.status !== "Active" ? " (" + esc(u.status) + ")" : ""}</option>`
+        ).join("");
+        if (preselectId && sorted.some(u => String(u.id) === String(preselectId))) {
+            userSelect.value = String(preselectId);
+            selectedUserId = String(preselectId);
+        }
+    }
+
+    userSelect.addEventListener("change", () => {
+        selectedUserId = userSelect.value;
+        loadOwnership();
+    });
+
+    async function init() {
+        try {
+            const [usersBody, ownersBody] = await Promise.all([
+                postQuery("users", { pageNumber: 1, pageSize: 5000 }),
+                postQuery("owners", { pageNumber: 1, pageSize: 5000 })
+            ]);
+            users = rowsOf(usersBody).map(r => ({
+                id: val(r, "Id", "EmployeeId"),
+                name: val(r, "EmployeeName", "Name") || ("User #" + val(r, "Id")),
+                status: val(r, "Status"),
+                organizationId: val(r, "OrganizationId"),
+                functional: String(val(r, "IsFunctionalUser")) === "true" || val(r, "IsFunctionalUser") === true
+            })).filter(u => u.id !== "" && u.id !== null && u.id !== undefined);
+            owners = rowsOf(ownersBody).map(r => ({
+                value: val(r, "Value", "Id"),
+                label: val(r, "Label", "EmployeeName", "Name"),
+                organizationId: val(r, "OrganizationId")
+            }));
+
+            const params = new URLSearchParams(window.location.search);
+            const preselect = params.get("userId") || params.get("employeeId") || "";
+            populateUserSelect(preselect);
+            if (selectedUserId) loadOwnership();
+        } catch (err) {
+            userSelect.innerHTML = '<option value="">Unable to load users</option>';
+            setMsg(err.message || "Unable to initialise the page.", "error");
+        }
+    }
+
+    init();
+})();
+</script>

@@ -47,7 +47,62 @@ public sealed class LoginController(
         "menu-master:VIEW",
         "lookups:VIEW",
         "dashboard-summary:VIEW",
-        "subscribed-frameworks:VIEW"
+        "subscribed-frameworks:VIEW",
+        // Migration 241: the Add Asset form's cascade fetch. No menu_master
+        // row governs this -- it is a per-form auxiliary lookup, and every
+        // caller reaching the Add Asset dialog must be able to read the
+        // taxonomy that populates its two dropdowns.
+        "asset-taxonomy:VIEW",
+        // Migration 244: the operationalize obligation card's Connection
+        // type dropdown (shown only when assurance_type is Automated).
+        // Auxiliary lookup, same reasoning as asset-taxonomy above.
+        "connection-types:VIEW",
+        // Migration 248: id-valued implementation-status lookup for
+        // the operationalize card's Implementation status dropdown.
+        // The bulk /lookups entry keeps its status_code Value so the
+        // Practice Instance form is unaffected; the resolve workspace
+        // reads this shim instead so the save round-trips as an INT.
+        "implementation-status-id:VIEW",
+        // Migration 342: functional-user-only owners lookup. Owner pickers
+        // across the Organization-Setup forms (and several bespoke owner
+        // selects) read this to offer only Functional Users (341). Read by
+        // many screens, so it is a supporting read rather than a mapped
+        // helper -- same reasoning as lookups/subscribed-frameworks above.
+        "owners:VIEW",
+        // Migration 361: Location's Time Zone dropdown, fed by the
+        // sp_get_time_zone_lookup shim over GRAC_New.time_zone_master. No
+        // menu_master row governs it -- same auxiliary-lookup reasoning as
+        // asset-taxonomy/connection-types/implementation-status-id above.
+        // Without this, PermissionAreaMap.For("time-zones") falls through
+        // to the entity type itself (no DirectMap/OrganizationControlsHelpers
+        // entry), and any role without an explicit "*:VIEW"/"time-zones:*"
+        // grant -- PM_ORG_ADMIN, which lists "locations:*" but nothing for
+        // this helper lookup -- gets 403 on time-zones/query and the
+        // dropdown silently stays empty.
+        "time-zones:VIEW",
+        // Migration 362: Team Members tree on Add/Edit/View Team. Both are
+        // auxiliary lookups for the Team form (no menu_master row of their
+        // own), same reasoning as asset-taxonomy/owners/time-zones above --
+        // anyone who can reach the Team form must be able to read the
+        // Department/Employee tree and a team's currently-selected members,
+        // regardless of whether their role separately holds "teams:VIEW".
+        "team-department-employees:VIEW",
+        "team-members:VIEW",
+        // Migration 370: Committee Members section on Add/Edit/View
+        // Committee. Both are auxiliary lookups for the Committee form
+        // (no menu_master row of their own), same reasoning as
+        // team-department-employees/team-members above -- anyone who can
+        // reach the Committee form must be able to read the organization's
+        // employee/designation options and a committee's currently-
+        // selected members, regardless of whether their role separately
+        // holds "committees:VIEW". The write side of Committee
+        // Designations (the inline Add Designation quick-create) is NOT
+        // here -- it is gated by "committees:ADD"/"committees:EDIT" via
+        // PermissionAreaMap instead, since creating data (unlike reading
+        // an auxiliary lookup) should follow the same permission as
+        // editing the Committee itself.
+        "committee-members:VIEW",
+        "committee-designations:VIEW"
     ];
 
     [HttpGet]
@@ -114,11 +169,40 @@ public sealed class LoginController(
             .Concat(SupportingReads)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        // The bootstrap login is verified against configuration, not the
+        // employee table, so it used to reach the session with no employee
+        // id at all -- and every procedure that requires an actor (approve,
+        // reject, the owner stamps) refused the request with "employee id is
+        // required". If an employee row exists for this configured email or
+        // code, adopt it: the admin then acts as themselves and the audit
+        // trail names a real person. If none exists, nothing changes.
+        //
+        // The lookup takes no password and is called only with the value
+        // already matched against ReviewLogin:Email above -- never with
+        // anything a visitor typed.
+        var resolved = await loginService.ResolveIdentityAsync(email, cancellationToken);
+
         HttpContext.Session.Clear();
         HttpContext.Session.SetString(PracticeSessionIdentity.UserKey, model.LoginId);
-        // The bootstrap login has no employee record behind it, so the
+        // Prefer the employee's own name when there is one; otherwise the
         // sign-in id is the only honest name to show.
-        HttpContext.Session.SetString(PracticeSessionIdentity.DisplayNameKey, model.LoginId);
+        HttpContext.Session.SetString(PracticeSessionIdentity.DisplayNameKey,
+            string.IsNullOrWhiteSpace(resolved?.EmployeeName) ? model.LoginId : resolved!.EmployeeName);
+        if (resolved is not null)
+        {
+            HttpContext.Session.SetString(PracticeSessionIdentity.EmployeeIdKey, resolved.EmployeeId.ToString());
+            logger.LogInformation(
+                "ReviewLogin {LoginId} adopted employee {EmployeeId} ({EmployeeCode}) for actor stamping.",
+                model.LoginId, resolved.EmployeeId, resolved.EmployeeCode);
+        }
+        else
+        {
+            logger.LogWarning(
+                "ReviewLogin {LoginId} has no matching employee row. Approve, Reject and other actor-stamped "
+                + "actions will be refused by the procedures. Add an organization_employee row with this email "
+                + "or employee_code, or sign in as a database user.",
+                model.LoginId);
+        }
         HttpContext.Session.SetString(PracticeSessionIdentity.RolesKey, string.Join(',', roles));
         HttpContext.Session.SetString(PracticeSessionIdentity.TokenKey, tokenService.Issue(model.LoginId, roles));
         // ReviewLogin path is treated as GRAC Admin (data_scope=GLOBAL) so the

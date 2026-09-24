@@ -6,11 +6,21 @@
     navigation code (FilterType = Practice). Replaces the old view modal
     because this page now carries three things, not one:
 
-        1. the practice header
-        2. its obligations, in the same typed shape the View Obligations
-           panel renders (dbo.sp_pm_view_obligations_typed, migration 122)
-        3. Configure -- pick teams, get one Practice Instance per team
+        1. the practice header / details
+        2. its Practice Instances, with Configure in that panel's header --
+           pick teams, get one Practice Instance per team
            (grac_practice.sp_practice_instance_configure, migration 139)
+        3. its obligations, in the same typed shape the View Obligations
+           panel renders (dbo.sp_pm_view_obligations_typed, migration 122)
+
+    Instances sit above Obligations deliberately: the page reads "what this
+    practice is -> where it is carried out -> what it requires", Configure
+    is met first rather than last, and Obligations -- the tallest section --
+    no longer pushes the instance list below a screenful of cards.
+
+    Evidence is not a section here. It renders inside each obligation card
+    (renderEvidence): the evidence type as a badge with the published
+    remark on the line beneath.
 
     A modal with all three would be a scrolling box inside a scrolling
     page, with the obligation detail cards squeezed into whatever width
@@ -35,7 +45,22 @@
         color: var(--grac-ink, #25345a);
     }
     #pvRoot .pm-panel-header { display: flex; align-items: baseline; gap: 8px; }
-    #pvRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 10px; }
+    /* A panel header that carries an action: the button is pushed to the
+       far right and centred against the title instead of sitting on its
+       baseline, which parked it a few pixels low. Only headers that have a
+       button are affected -- the rule keys on the button itself. */
+    #pvRoot .pm-panel-header > .pm-button {
+        margin-left: auto; align-self: center; flex: 0 0 auto;
+    }
+    /* Every panel on this page whose header carries a button (Practice
+       Instances' Configure, Obligations' Add New Obligation) had its hint
+       paragraph sitting with zero space above it -- .pm-panel-header has
+       no margin-bottom, so the text read as glued to the header row right
+       above it. 8px above separates it from the header; the existing
+       bottom margin is nudged up slightly too so the line below (the
+       instances/obligations table, or the empty-state message) isn't
+       cramped either. */
+    #pvRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 8px 0 12px; }
     #pvRoot .pm-subheading {
         font-size: 13px; font-weight: 600; margin: 14px 0 6px;
         color: var(--grac-ink, #25345a);
@@ -55,12 +80,87 @@
         padding: 10px 12px; margin-bottom: 8px; background: #fbfcfe;
     }
     #pvRoot .pm-card h4 { margin: 0 0 6px; font-size: 13px; color: var(--grac-ink, #25345a); }
+    /* Migration 307. Edit / Remove on a practice-level obligation card.
+       Separated from the card body by a rule rather than whitespace, so
+       the two buttons read as actions on the card above them and not as
+       another field of it. */
+    #pvRoot .pm-card-actions {
+        display: flex; gap: 8px; align-items: center;
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px dashed var(--grac-line, #e2e7f0);
+    }
+    /* The published-feed failure line above the obligation groups. */
+    #pvRoot .pm-message.pv-warning {
+        background: #fffbeb; color: #92400e; border: 1px solid #fde68a;
+        margin-bottom: 10px;
+    }
+    /* The obligation's authored text, directly under its name. Muted and a
+       step smaller than the name so the card still reads name-first, and
+       pre-wrap because published text carries its own line breaks.
+       margin-bottom matches the h4 it replaces as the last thing before the
+       meta grid, so adding it does not change the card's rhythm. */
+    #pvRoot .pm-card .pm-obligation-text {
+        margin: -2px 0 8px; font-size: 12px; line-height: 1.5;
+        color: var(--grac-muted, #758095); white-space: pre-wrap;
+    }
+    /* Frameworks chips in the details grid. The badges are pm-badge from the
+       site stylesheet; this only lets a long list wrap inside its <dd>
+       instead of stretching the grid column. */
+    #pvRoot .pm-detail-grid dd.pm-chip-list {
+        display: flex; flex-wrap: wrap; gap: 4px;
+    }
+    /* The Frameworks cell takes two columns' worth of the row it lands on, so
+       several releases sit side by side instead of stacking in one 210px
+       column. min-width:0 stops a long release name from widening the track
+       and blowing the grid out horizontally.
+
+       Guarded by the media query because grid honours a span even when there
+       are not enough columns for it -- it invents implicit ones, and the panel
+       scrolls sideways. Below 900px the grid is down to one or two columns,
+       where the cell should stay a plain single-column item. */
+    #pvRoot .pm-detail-grid .pm-detail-wide { min-width: 0; }
+    @@media (min-width: 900px) {
+        #pvRoot .pm-detail-grid .pm-detail-wide { grid-column: span 2; }
+    }
     #pvRoot .pm-typed-detail { margin-top: 8px; }
     #pvRoot .pm-typed-detail-row {
         font-size: 12px; padding: 3px 0;
         border-top: 1px dashed var(--grac-line, #e2e7f0);
     }
-    #pvRoot .pm-evidence-list { margin-top: 8px; font-size: 12px; }
+    /* Each entry is its type badge with the remark on the line beneath.
+       "Evidence:" takes a row to itself rather than sitting inline, which is
+       the same label-over-value shape the FRAMEWORK / value pairs in this
+       card already use, and it is what puts the label, every badge and every
+       remark on one left edge -- inline, the remark started wherever the
+       label happened to end and the block read as misaligned. */
+    #pvRoot .pm-evidence-list {
+        margin-top: 8px; font-size: 12px;
+        display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px;
+    }
+    /* The label and any entry carrying a remark each take a full row; a bare
+       badge does not. So evidences with no remark still chip up together on
+       one line, the way the section read before remarks existed, and only an
+       entry that actually has something to say costs a row of its own. */
+    #pvRoot .pm-evidence-list > strong { flex: 0 0 100%; }
+    #pvRoot .pm-evidence-item.has-remark { flex: 0 0 100%; }
+    /* No max-width: the remark gets the card's full width, so a sentence that
+       was wrapping to two lines against a half-empty card now reads on one.
+       Aligned to the badge's box, not its text, which is what makes the two
+       lines look like one block. */
+    #pvRoot .pm-evidence-remark {
+        margin: 3px 0 0; line-height: 1.45;
+        color: var(--grac-muted, #758095); white-space: pre-wrap;
+    }
+    /* practice-management.css reserves the last column of a .pm-table-wrap for
+       Actions -- 58px wide and centred. This grid is read-only and has no
+       Actions column, so its last column is Status and must be a normal one;
+       without this it renders squeezed into 58px and centre-aligned while
+       every other column is left-aligned. */
+    #pvRoot #pvInstancesWrap th:last-child,
+    #pvRoot #pvInstancesWrap td:last-child {
+        width: auto;
+        text-align: left;
+    }
     #pvRoot .pm-form-actions { display: flex; gap: 8px; margin-top: 12px; }
     #pvRoot .pm-text-warning { color: #b45309; }
     /* pm-badge is used across the workflow partials but has never had a rule;
@@ -114,11 +214,14 @@
         <h1 id="pvHeading">Practice</h1>
         <p id="pvSubheading">Loading practice...</p>
     </div>
+    @*
+        Configure moved into the Practice Instances panel (see below): it
+        acts on that list, so it belongs beside it rather than in the page
+        heading, where it read as an action on the practice as a whole.
+        Back to Practices stays here -- that IS a page-level action.
+    *@
     <div>
         <a class="pm-button ghost" id="pvBackBtn" href="#"><i class="fa-solid fa-arrow-left"></i> Back to Practices</a>
-        <button class="pm-button" id="pvConfigureBtn" type="button" hidden>
-            <i class="fa-solid fa-sliders"></i> Configure
-        </button>
     </div>
 </div>
 
@@ -142,16 +245,83 @@
         </div>
     </section>
 
+    @*
+        ---------- 2. Practice Instances ----------
+
+        Above Obligations as of this change. The page reads top-down as
+        "what this practice is -> where it is carried out -> what it
+        requires", and Configure (which creates the instances) is now the
+        first action you meet rather than the last. Obligations is also the
+        tallest section by far, so having it last means the instance list
+        no longer sits below a screen of obligation cards.
+    *@
+    <section class="pm-panel">
+        <div class="pm-panel-header">
+            <h2 class="pm-panel-title">Practice Instances</h2>
+            <span class="pm-badge" id="pvInstanceCount"></span>
+            @* Same button, same id, same handler -- only the position moved.
+
+               .primary, so it gets the house blue. Plain .pm-button is the
+               WHITE secondary style (background: #fff in
+               practice-management.css) -- correct for a Cancel, wrong for
+               the action a panel exists to offer. Every other panel-header
+               action in the product is primary; "Map a practice" on the
+               Risk Centre scope panel is the same button in the same slot.
+
+               `small` dropped, not replaced: .pm-button.small is not
+               defined anywhere in practice-management.css, so it styled
+               nothing and only suggested a size that was never applied.
+               Removing it changes no pixels. *@
+            <button class="pm-button primary" id="pvConfigureBtn" type="button" hidden>
+                <i class="fa-solid fa-sliders"></i> Configure
+            </button>
+        </div>
+        <p class="pm-hint">
+            One instance per team this practice has been configured for. Use
+            Operationalize to work on an instance -- this list is read-only.
+        </p>
+        @* Configure's outcome, on the PAGE rather than only inside the
+           dialog. The dialog now closes itself on a successful save, and
+           the summary it used to show would have gone with it -- including
+           the two things worth reading: how many teams were skipped
+           because they already had an instance, and how many instances
+           were created with no owner. Same .pm-message element and the
+           same __wfCommon.setMessage call the dialog uses. *@
+        <div class="pm-message" id="pvInstanceMessage" style="display:none"></div>
+        <div class="pm-table-wrap" id="pvInstancesWrap">
+            <table>
+                <thead id="pvInstancesHead"></thead>
+                <tbody id="pvInstances">
+                    <tr><td class="pm-empty">Loading practice instances...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     @* ---------- 3. Obligations ---------- *@
     <section class="pm-panel">
         <div class="pm-panel-header">
             <h2 class="pm-panel-title">Obligations</h2>
             <span class="pm-badge" id="pvObligationCount"></span>
+            @* Migration 307. An obligation authored here belongs to the
+               PRACTICE and applies to every Practice Instance of it --
+               unlike the Add obligation button on Operationalize, which
+               adds one to a single instance. Hidden until the practice row
+               and the obligation type list are both in hand. *@
+            @* .primary for the same reason as Configure above -- these two
+               are the same button in the same slot, one panel apart, and
+               leaving one white while the other went blue would read as an
+               accident rather than a distinction. *@
+            <button class="pm-button primary" id="pvAddObligation" type="button" hidden>
+                <i class="fa-solid fa-plus"></i> Add New Obligation
+            </button>
         </div>
         <p class="pm-hint">
             What the framework requires of this practice, as published by the
-            authority. Read-only here -- obligations are maintained in the
-            repository, not per organization.
+            authority -- read-only, maintained in the repository. Obligations
+            this organization adds itself are listed alongside them and are
+            marked <span class="pm-badge">Organization defined</span>; they
+            apply to every Practice Instance of this practice.
         </p>
         <div id="pvObligations"><div class="pm-empty compact">Loading obligations...</div></div>
     </section>
@@ -208,6 +378,15 @@
 
 <partial name="Partials/_workflow-common" model="Model" />
 
+@*
+    The add / edit obligation form, shared with the Operationalize
+    workspace. Included once, before the script below, so
+    window.gracObligationForm exists by the time init() primes it.
+    Opened here with scope "practice" -- see openPracticeObligationForm.
+*@
+<partial name="Partials/_obligation-form-dialog" />
+<script src="~/js/Shared/obligation-form.js" asp-append-version="true"></script>
+
 <script>
 (function () {
     'use strict';
@@ -223,6 +402,39 @@
     let practiceId = null, organizationId = null, requirementId = null, practice = null;
     let teams = [];
     const selected = new Set();
+
+    // ---- migration 307: the practice's own obligations ---------------
+    // Authored here, applying to every Practice Instance of the practice.
+    // Held separately from the published rows because they are a
+    // different thing with a different lifecycle -- renderObligations
+    // puts them in their own group at the top of the same list.
+    let practiceObligations = [];
+
+    // The published rows, kept so the panel can be re-rendered when only
+    // the practice-level half changed. Without this, saving one of those
+    // would blank the published groups until the next page load.
+    let lastPublishedRows = [];
+
+    // Set when the published feed failed, so the panel can say so above
+    // the practice's own obligations instead of claiming there are none.
+    let publishedError = null;
+
+    // What the shared obligation form needs to fill its dropdowns. Only
+    // the four this scope actually uses: implementation status and the
+    // connection pair are instance-level facts (see migration 307) and
+    // the form is told to hide both, so fetching them here would be
+    // fetching something nobody can answer.
+    const pvLookups = {
+        frequencies:   [],
+        roles:         [],
+        evidenceTypes: [],
+        // Fixed vocabulary, not master data -- the CHECK constraint on
+        // practice_obligation.assurance_type says so.
+        assuranceTypes: [
+            { value: 'Manual',    label: 'Manual' },
+            { value: 'Automated', label: 'Automated' }
+        ]
+    };
 
     // -----------------------------------------------------------------
     async function init() {
@@ -252,7 +464,159 @@
 
         wire();
         await loadPractice();
-        loadObligations();       // not awaited: the page is usable without it
+        // Neither is awaited: the page is usable without them, and loadPractice
+        // has already resolved practiceId, which loadInstances filters on.
+        loadObligations();
+        loadInstances();
+        // Migration 307. Independent of the published feed above, and
+        // deliberately after loadPractice so practiceId is settled.
+        loadPracticeObligations();
+        primeObligationForm();
+        loadPracticeLookups();
+    }
+
+    // ==================================================================
+    // Migration 307 -- practice-level obligations
+    // ==================================================================
+
+    // The form's dropdowns. Same /lookups feed the Operationalize
+    // workspace reads; only the keys this scope can answer are picked.
+    async function loadPracticeLookups() {
+        try {
+            const r = await fetch(U('/practice-management-gateway/lookups'), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const rows = rowsOf(await r.json());
+            const pick = key => rows
+                .filter(x => String(x.LookupKey ?? x.lookupKey ?? '') === key)
+                .map(x => ({
+                    value: String(x.Value ?? x.value),
+                    label: String(x.Label ?? x.label ?? ''),
+                    organizationId: String(x.OrganizationId ?? x.organizationId ?? '')
+                }));
+
+            pvLookups.frequencies = pick('frequency-master');
+            // Global master data, so no organisation filter.
+            pvLookups.evidenceTypes = pick('evidence-types');
+
+            // Role Master, organisation-scoped and de-duplicated by name:
+            // two organisations the caller can see may both have a role
+            // called Approver, and the stored value is the NAME (an
+            // adoption snapshot -- renaming a role later must not rewrite
+            // what was recorded). Same rule the workspace applies.
+            const roleNames = new Set();
+            pvLookups.roles = (organizationId
+                ? pick('roles').filter(x => !x.organizationId || x.organizationId === String(organizationId))
+                : []
+            ).reduce(function (acc, x) {
+                const name = String(x.label || '').trim();
+                if (!name || roleNames.has(name)) return acc;
+                roleNames.add(name);
+                acc.push({ value: name, label: name });
+                return acc;
+            }, []);
+        } catch (_) { /* the form's dropdowns degrade to their placeholders */ }
+    }
+
+    // The Add button needs a type list to offer: no types means no way to
+    // say what an obligation IS, and the save procedure refuses one
+    // without a type -- so the button does not appear rather than leading
+    // somewhere that cannot succeed. A practice with no row of its own
+    // (the 218 fallback) has nothing to hang obligations on either.
+    async function primeObligationForm() {
+        try {
+            await window.gracObligationForm.prime();
+            const types = await window.gracObligationForm.loadTypes();
+            document.getElementById('pvAddObligation').hidden = !(types.length && practiceId > 0);
+        } catch (err) {
+            console.error('practice-view: obligation form prime failed', err);
+        }
+    }
+
+    // Reconcile first, then read. The fan-out is idempotent and is what
+    // gives an instance created after a definition existed its copies --
+    // migration 304 set the precedent that a read may repair rather than
+    // asking the operator to press Save. Best-effort: the list is still
+    // correct if it fails, the instances are simply not caught up yet.
+    async function loadPracticeObligations() {
+        if (!practiceId) { practiceObligations = []; return; }
+        try {
+            await fetch(U('/practice/api/practice-obligations/fan-out?practiceId=')
+                        + encodeURIComponent(practiceId),
+                        { method: 'POST', credentials: 'same-origin',
+                          headers: { 'X-CSRF-TOKEN': CSRF } });
+        } catch (err) {
+            console.warn('practice-view: obligation fan-out skipped', err);
+        }
+
+        try {
+            const qs = '?practiceId=' + encodeURIComponent(practiceId)
+                     + (organizationId ? '&organizationId=' + encodeURIComponent(organizationId) : '');
+            const r = await fetch(U('/practice/api/practice-obligations') + qs,
+                                  { credentials: 'same-origin' });
+            practiceObligations = r.ok ? rowsOf(await r.json()) : [];
+        } catch (err) {
+            console.error('practice-view: practice obligation load failed', err);
+            practiceObligations = [];
+        }
+        renderObligations(lastPublishedRows);
+    }
+
+    function openPracticeObligationForm(row) {
+        window.gracObligationForm.open({
+            scope:          'practice',
+            practiceId:     practiceId,
+            organizationId: organizationId,
+            row:            row || null,
+            recordId:       row ? Number(O(row, 'PracticeObligationId') || 0) : 0,
+            detailJson:     row ? O(row, 'TypedDetailJson') : null,
+            // The declared list, stored on the definition so an instance
+            // created later can be seeded from it. `locked` is never set:
+            // nobody fills evidence in HERE -- that happens on each
+            // instance, and retiring a type from this list leaves the
+            // filled-in instance rows alone (the sync's own rule).
+            evidence: row
+                ? (jsonArray(row, 'EvidenceJson') || []).map(e => ({
+                    evidenceTypeId:  Number(e.evidenceTypeId ?? e.EvidenceTypeId ?? 0),
+                    evidenceType:    labelOfEvidenceType(e.evidenceTypeId ?? e.EvidenceTypeId),
+                    isMandatory:     (e.isMandatory ?? e.IsMandatory) !== false,
+                    retentionPeriod: String(e.retentionPeriod ?? e.RetentionPeriod ?? ''),
+                    // Carry the stored evidence Description (remarks) back into
+                    // the dialog so editing the obligation preserves it instead
+                    // of blanking it on the next save.
+                    remarks:         String(e.remarks ?? e.Remarks ?? ''),
+                    locked:          false
+                  })).filter(e => e.evidenceTypeId > 0)
+                : [],
+            lookups: pvLookups,
+            // Both are instance-level answers, so the practice form does
+            // not ask for them -- see migration 307.
+            showImplementationStatus: false,
+            showConnection:           false,
+            onSaved: loadPracticeObligations
+        });
+    }
+
+    function labelOfEvidenceType(id) {
+        const hit = pvLookups.evidenceTypes.find(t => String(t.value) === String(id));
+        return hit ? hit.label : '';
+    }
+
+    async function removePracticeObligation(id) {
+        if (!window.confirm('Remove this obligation from the practice?\n\n'
+                          + 'It will be removed from every Practice Instance of this practice. '
+                          + 'Evidence already filled in against it is kept.')) return;
+        try {
+            await window.gracObligationForm.retire({
+                scope:          'practice',
+                practiceId:     practiceId,
+                organizationId: organizationId,
+                recordId:       Number(id)
+            });
+            await loadPracticeObligations();
+        } catch (err) {
+            console.error('practice-view: remove practice obligation failed', err);
+            window.alert(err && err.message ? err.message : 'Could not remove the obligation.');
+        }
     }
 
     async function resolveContext(code) {
@@ -282,6 +646,11 @@
     function wire() {
         const dlg = document.getElementById('pvConfigureDialog');
         document.getElementById('pvConfigureBtn').addEventListener('click', openConfigure);
+        // Migration 307. Every other control of the form -- Cancel, Close,
+        // Esc, Save, the type cascade, Add evidence -- is wired by the
+        // shared module itself on its first open.
+        document.getElementById('pvAddObligation')
+            .addEventListener('click', function () { openPracticeObligationForm(null); });
         document.getElementById('pvCancelBtn').addEventListener('click', function () { dlg.close(); });
         document.getElementById('pvCloseBtn').addEventListener('click', function () { dlg.close(); });
         // Clicking the backdrop closes it. Nothing is written until Save, so
@@ -348,17 +717,53 @@
         document.getElementById('pvNamePattern').textContent = (name || 'Practice') + '-<team name>';
 
         const rows = [
+            // Implementation Status leads, in the slot Requirement used to
+            // hold. Requirement is gone from here: the page already names it
+            // in the heading and again on every obligation card, so a third
+            // copy in the details grid was repetition, not information.
+            //
+            // The value is the practice's roll-up over its instances, derived
+            // by sp_practice_detail_get (migration 303) with the same rule and
+            // the same four labels the Organization Practices list uses -- so
+            // the row a user clicked and the page it lands on cannot disagree.
+            ['Implementation Status', P('practiceImplementationStatus'), 'badge'],
             ['Practice Code',        code],
             ['Origin',               P('originType')],
             ['Practice Owner',       P('practiceOwner')],
             ['Applicability',        P('applicabilityStatus')],
-            ['Requirement',          [P('requirementCode'), P('requirementName')].filter(Boolean).join(' - ')],
             ['Status',               P('status')],
-            ['Active Instances',     P('activeInstanceCount')]
+            ['Active Instances',     P('activeInstanceCount')],
+            // Frameworks goes second-to-last, immediately before Source
+            // Statement. Both are the only fields whose height grows with the
+            // data -- a practice mapped to five releases (or several
+            // statements) should not push the whole first row down -- and
+            // landing them last puts them in the second row's free space
+            // rather than cramped against the panel edge.
+            ['Frameworks',           frameworkChips(), 'html'],
+            // Source Statement(s) this practice is mapped to, directly under
+            // Frameworks -- both are 'pm-detail-wide' (span 2 columns), so
+            // this renders on its own row immediately beneath Frameworks.
+            // Omitted, same as Frameworks, when nothing is mapped (a practice
+            // reached through a Control has a Framework but no individual
+            // Source Statement) or when the database predates migration 316.
+            ['Control Statement',     sourceStatementChips(), 'html']
         ];
+        // The third element says how the value is rendered:
+        //   'html'  -- already markup, inserted as-is (Frameworks builds its
+        //              chips from esc()'d text in frameworkChips())
+        //   'badge' -- escaped text wrapped in pm-badge, the same treatment
+        //              formatCell gives a status in the grids
+        //   absent  -- escaped text
         document.getElementById('pvDetails').innerHTML = rows
             .filter(([, v]) => v !== null && v !== undefined && v !== '')
-            .map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>')
+            .map(([k, v, kind]) => (kind === 'html' ? '<div class="pm-detail-wide">' : '<div>')
+                + '<dt>' + esc(k) + '</dt>'
+                + (kind === 'html'
+                    ? '<dd class="pm-chip-list">' + v + '</dd>'
+                    : kind === 'badge'
+                        ? '<dd><span class="pm-badge">' + esc(v) + '</span></dd>'
+                        : '<dd>' + esc(v) + '</dd>')
+                + '</div>')
             .join('');
 
         const desc = P('description');
@@ -368,8 +773,57 @@
         }
     }
 
+    // Framework releases this practice is mapped to, one pm-badge each.
+    //
+    // MappedFrameworksJson comes from sp_practice_detail_get (migration 301),
+    // sourced from organization_statement_practice_mapping -- the same
+    // relationship the Source Statements grid reads in the other direction.
+    // It arrives as a JSON array, parsed with the same jsonArray() helper the
+    // obligations panel uses for its detail columns.
+    //
+    // Returns '' when nothing is mapped, when the array is empty, or when the
+    // database is still on the pre-301 procedure and the column is absent.
+    // All three cases hit the same filter in renderPractice and the row is
+    // simply not drawn -- the layout closes up the way it already does for a
+    // practice with no owner.
+    function frameworkChips() {
+        const list = jsonArray(practice, 'MappedFrameworksJson')
+            .map(f => String(f.FrameworkRelease ?? f.frameworkRelease ?? '').trim())
+            .filter(Boolean);
+        if (!list.length) return '';
+        return list.map(name => '<span class="pm-badge">' + esc(name) + '</span>').join('');
+    }
+
+    // Source Statement(s) this practice is mapped to, one pm-badge each --
+    // same rendering as frameworkChips(), directly below it.
+    //
+    // MappedSourceStatementsJson comes from sp_practice_detail_get (migration
+    // 316), sourced from organization_statement_practice_mapping -- the SAME
+    // mapping rows frameworkChips() reads above, joined to
+    // GRAC_New.framework_statement instead of GRAC_New.release. Reused, not
+    // duplicated: no second lookup of what a practice is mapped to.
+    //
+    // Returns '' when nothing is mapped (including a practice reached through
+    // a Control, which has a Framework but no individual Source Statement),
+    // when the array is empty, or when the database is still on the pre-316
+    // procedure and the column is absent. All three hit the same filter in
+    // renderPractice and the row is simply not drawn.
+    function sourceStatementChips() {
+        const list = jsonArray(practice, 'MappedSourceStatementsJson')
+            .map(s => String(s.SourceStatement ?? s.sourceStatement ?? '').trim())
+            .filter(Boolean);
+        if (!list.length) return '';
+        return list.map(name => '<span class="pm-badge">' + esc(name) + '</span>').join('');
+    }
+
     // ---------- 2. Configure -----------------------------------------
+    // Bumped on every open. The delayed auto-close after a successful save
+    // carries the value it started with, so a dialog the operator has
+    // closed and reopened inside that window is not shut under them.
+    let configureOpenSeq = 0;
+
     async function openConfigure() {
+        configureOpenSeq++;
         document.getElementById('pvOutcome').hidden = true;
         msg('', '');
         document.getElementById('pvConfigureDialog').showModal();
@@ -474,9 +928,14 @@
 
     async function saveConfigure() {
         if (!selected.size) return;
+        const openSeq = configureOpenSeq;
         const btn = document.getElementById('pvSaveBtn');
         btn.disabled = true;
         msg('Creating practice instances...', 'info');
+        // Clear the page-level summary from any earlier run: a previous
+        // "3 instances created" sitting behind a dialog that is about to
+        // show an error would read as though this attempt had worked.
+        window.__wfCommon.setMessage('pvInstanceMessage', '', '');
 
         try {
             const r = await fetch(U('/practice/api/workflow/practice-configure/instances'), {
@@ -491,13 +950,44 @@
             });
             const body = await r.json().catch(() => ({}));
             if (!r.ok) {
+                // FAILURE: the dialog stays open with the error and the
+                // selection intact, so the operator can fix it and retry.
+                // Nothing below runs.
                 msg(body.error || ('Could not create the instances (HTTP ' + r.status + ').'), 'error');
                 btn.disabled = false;
                 return;
             }
+
+            // SUCCESS. Outcome first, so the message and the per-team table
+            // are on screen while the dialog is still up.
             renderOutcome(body);
+
+            // Then refresh, and finish refreshing BEFORE the dialog closes:
+            // the operator should find the new instances already listed
+            // behind it, not watch the section fill in afterwards.
             await loadTeams();          // re-read so the new ones show as Configured
             await loadPractice();       // instance count on the header
+            await loadInstances();      // and the instances Configure just created
+            // Migration 307: a new instance needs its copies of the
+            // practice's own obligations. The fan-out runs on this load.
+            await loadPracticeObligations();
+
+            // Carry the same summary onto the page, where it survives the
+            // close -- otherwise the only record of what happened would
+            // shut with the dialog.
+            const summary = outcomeSummary(body);
+            window.__wfCommon.setMessage('pvInstanceMessage',
+                summary.text + (summary.note ? ' ' + summary.note : ''), summary.kind);
+
+            // Close on a short delay rather than instantly: the message
+            // inside the dialog is the confirmation, and a modal that
+            // vanishes the moment the click lands reads as though nothing
+            // happened. Same 700ms the shared task form uses after a save.
+            setTimeout(function () {
+                if (openSeq !== configureOpenSeq) return;   // reopened meanwhile
+                const dlg = document.getElementById('pvConfigureDialog');
+                if (dlg.open) dlg.close();
+            }, 700);
         } catch (err) {
             console.error('practice-view: configure failed', err);
             msg('Could not create the instances.', 'error');
@@ -505,20 +995,39 @@
         }
     }
 
-    function renderOutcome(body) {
-        const rows    = body.data || body.Data || [];
+    // Say what actually happened rather than a blanket "Saved". A batch
+    // that skipped every team looks identical to a successful one unless
+    // the counts are spelled out.
+    //
+    // Built in one place because it is now shown in TWO: inside the dialog
+    // while it is still open, and on the page after the dialog closes
+    // itself. Two copies of this sentence would eventually disagree.
+    function outcomeSummary(body) {
         const created = Number(body.createdCount ?? 0);
         const already = Number(body.alreadyConfiguredCount ?? 0);
         const noOwner = Number(body.withoutOwnerCount ?? 0);
 
-        // Say what actually happened rather than a blanket "Saved". A batch
-        // that skipped every team looks identical to a successful one unless
-        // the counts are spelled out.
         const parts = [];
         parts.push(created + ' instance' + (created === 1 ? '' : 's') + ' created');
         if (already) parts.push(already + ' team' + (already === 1 ? '' : 's') + ' already had one');
         if (noOwner) parts.push(noOwner + ' created without an owner');
-        msg(parts.join('. ') + '.', created ? 'ok' : 'info');
+
+        return {
+            text: parts.join('. ') + '.',
+            kind: created ? 'ok' : 'info',
+            // An instance with no owner is not assurance-eligible, so the
+            // page keeps saying so after the dialog has gone.
+            note: noOwner
+                ? 'An instance with no owner is not assurance-eligible. Set a team manager, '
+                  + 'or set the owner directly on the instance under Governance / Practice Instances.'
+                : null
+        };
+    }
+
+    function renderOutcome(body) {
+        const rows    = body.data || body.Data || [];
+        const summary = outcomeSummary(body);
+        msg(summary.text, summary.kind);
 
         const host = document.getElementById('pvOutcome');
         host.hidden = false;
@@ -542,11 +1051,11 @@
             }).join('')
             + '</tbody></table>';
 
-        if (noOwner) {
+        // The same sentence outcomeSummary carries onto the page, from the
+        // same place -- two copies of it would eventually disagree.
+        if (summary.note) {
             host.insertAdjacentHTML('beforeend',
-                '<p class="pm-hint">An instance with no owner is not assurance-eligible. '
-                + 'Set a team manager, or set the owner directly on the instance under '
-                + 'Governance / Practice Instances.</p>');
+                '<p class="pm-hint">' + esc(summary.note) + '</p>');
         }
     }
 
@@ -555,6 +1064,111 @@
     }
 
     // ---------- 3. Obligations ---------------------------------------
+    // ---------- 4. Practice Instances --------------------------------
+    //
+    // The Practice Instances screen's own columns, in its own order. Kept as
+    // one list so the header and every row read from the same place and cannot
+    // drift apart -- the mistake the grids in practice.js keep making.
+    //
+    // These are the field names the practice-instances entity projects; see
+    // QueryPracticeInstanceFallbackAsync, which is what actually answers this
+    // query once an organizationId is present.
+    // Execution Frequency, Assurance Frequency and Practice Type
+    // (AssuranceMode) were dropped from this grid on request -- display only.
+    // The API still returns them (QueryPracticeInstanceFallbackAsync is
+    // unchanged) and nothing below reads them; instanceCell() and
+    // renderInstances() both drive off this array, so removing an entry here
+    // is the whole change. No colgroup/width rule keyed these columns by
+    // position -- .pm-table-wrap has no fixed widths and only overrides
+    // :last-child (see the CSS above) -- so the remaining seven columns
+    // reflow to fill the row with no further CSS change needed.
+    const instanceColumns = [
+        ['Code',                 'Instance Code'],
+        ['Name',                 'Instance Name'],
+        ['PrimaryOwner',         'Owner'],
+        ['Department',           'Department'],
+        ['Criticality',          'Criticality'],
+        ['ImplementationStatus', 'Implementation Status'],
+        ['Status',               'Status']
+    ];
+
+    // The same entity the Practice Instances screen reads, filtered to this
+    // practice. No new endpoint and no new query: practiceId is a filter the
+    // existing one already supports (@@practice_id), so this is the Practice
+    // Instances list with one more WHERE clause.
+    //
+    // Not awaited by init() -- like the obligations panel, the page is usable
+    // without it, and a slow instance query must not hold up the header.
+    async function loadInstances() {
+        const host = document.getElementById('pvInstances');
+        // Nothing to filter by. A requirement with no practice row has no
+        // instances yet by definition (Configure creates them against a
+        // practice id), so this is the empty state, not a failure.
+        if (!practiceId) { renderInstances([]); return; }
+        try {
+            const r = await fetch(U('/practice-management-gateway/practice-instances/query'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ data: {
+                    practiceId:     practiceId,
+                    organizationId: organizationId || undefined,
+                    pageNumber:     1,
+                    // One practice's instances are bounded by the number of
+                    // teams it was configured for, so they fit one page. The
+                    // procedure caps at 200 anyway.
+                    pageSize:       200
+                }})
+            });
+            if (!r.ok) {
+                host.innerHTML = '<tr><td class="pm-empty">Could not load practice instances (HTTP '
+                                 + r.status + ').</td></tr>';
+                return;
+            }
+            renderInstances(rowsOf(await r.json()));
+        } catch (err) {
+            console.error('practice-view: instance load failed', err);
+            host.innerHTML = '<tr><td class="pm-empty">Could not load practice instances.</td></tr>';
+        }
+    }
+
+    function renderInstances(rows) {
+        const head  = document.getElementById('pvInstancesHead');
+        const host  = document.getElementById('pvInstances');
+        const count = document.getElementById('pvInstanceCount');
+
+        count.textContent = rows.length + ' instance' + (rows.length === 1 ? '' : 's');
+
+        if (!rows.length) {
+            head.innerHTML = '';
+            // The message the Practice Instances grid shows for an empty
+            // result, kept word for word.
+            host.innerHTML = '<tr><td class="pm-empty">No practice instances found for the selected '
+                           + 'requirement/practice. Add a new instance or verify the selected '
+                           + 'requirement/practice context.</td></tr>';
+            return;
+        }
+
+        head.innerHTML = '<tr>' + instanceColumns
+            .map(([, label]) => '<th>' + esc(label) + '</th>').join('') + '</tr>';
+
+        host.innerHTML = rows.map(row => '<tr>' + instanceColumns
+            .map(([field]) => '<td>' + instanceCell(row, field) + '</td>').join('') + '</tr>').join('');
+    }
+
+    // Statuses render as badges here exactly as formatCell renders them in the
+    // grids, so an instance reads the same on both pages.
+    const instanceBadgeFields = new Set(['Criticality', 'ImplementationStatus', 'Status']);
+
+    function instanceCell(row, field) {
+        const value = O(row, field);
+        const text  = value === null || value === undefined ? '' : String(value);
+        if (!text) return '';
+        return instanceBadgeFields.has(field)
+            ? '<span class="pm-badge">' + esc(text) + '</span>'
+            : esc(text);
+    }
+
     async function loadObligations() {
         const host = document.getElementById('pvObligations');
         try {
@@ -574,14 +1188,20 @@
                 }})
             });
             if (!r.ok) {
-                host.innerHTML = '<div class="pm-empty compact">Could not load obligations (HTTP '
-                                 + r.status + ').</div>';
+                // The PUBLISHED half failed. Say so and still render the
+                // practice's own obligations -- they come from a different
+                // endpoint, and blanking the panel would hide the half the
+                // operator can actually act on. Migration 307.
+                publishedError = 'Could not load published obligations (HTTP ' + r.status + ').';
+                renderObligations([]);
                 return;
             }
+            publishedError = null;
             renderObligations(rowsOf(await r.json()));
         } catch (err) {
             console.error('practice-view: obligation load failed', err);
-            host.innerHTML = '<div class="pm-empty compact">Could not load obligations.</div>';
+            publishedError = 'Could not load published obligations.';
+            renderObligations([]);
         }
     }
 
@@ -613,16 +1233,34 @@
     }
 
     function renderObligations(rows) {
-        const host = document.getElementById('pvObligations');
-        document.getElementById('pvObligationCount').textContent =
-            rows.length + ' obligation' + (rows.length === 1 ? '' : 's');
+        rows = rows || [];
+        lastPublishedRows = rows;
 
-        if (!rows.length) {
+        const host  = document.getElementById('pvObligations');
+        const mine  = practiceObligations || [];
+        const total = rows.length + mine.length;
+
+        document.getElementById('pvObligationCount').textContent =
+            total + ' obligation' + (total === 1 ? '' : 's');
+
+        if (!total) {
             host.innerHTML = '<div class="pm-empty compact">'
-                + 'No obligations are published against this practice\'s requirement, '
-                + 'or its framework release is not subscribed.</div>';
+                + (publishedError
+                    ? esc(publishedError) + ' Nothing has been added against the practice either.'
+                    : 'No obligations are published against this practice\'s requirement, '
+                      + 'or its framework release is not subscribed. Use '
+                      + '<strong>Add New Obligation</strong> to add one of your own.')
+                + '</div>';
             return;
         }
+
+        // .pm-message comes from the site stylesheet; the warning colour
+        // is scoped below, because the only .pm-text-warning rule on this
+        // page belongs to the Configure dialog.
+        const errorLine = publishedError
+            ? '<div class="pm-message pv-warning" style="display:block">'
+              + esc(publishedError) + '</div>'
+            : '';
 
         // Group by obligation type so the page reads the way the taxonomy is
         // authored, rather than as one undifferentiated list.
@@ -633,11 +1271,97 @@
             groups.get(key).push(row);
         });
 
-        host.innerHTML = Array.from(groups.entries()).map(([type, list]) =>
-            '<div class="pm-obligation-group">'
-            + '<h3 class="pm-subheading">' + esc(type) + ' <span class="pm-badge">' + list.length + '</span></h3>'
-            + list.map(renderObligation).join('')
-            + '</div>').join('');
+        // Migration 307: the practice's own obligations lead. They are the
+        // half this page can change, and putting them under the published
+        // groups would bury the thing the new button just created.
+        host.innerHTML =
+            errorLine
+            + (mine.length
+                ? '<div class="pm-obligation-group">'
+                  + '<h3 class="pm-subheading">Organization defined '
+                  + '<span class="pm-badge">' + mine.length + '</span></h3>'
+                  + '<p class="pm-hint">'
+                  + 'Added by this organization against the practice, so they apply to '
+                  + 'every Practice Instance of it. Edit or remove them here -- an '
+                  + 'instance cannot change what the practice owns.</p>'
+                  + mine.map(renderPracticeObligation).join('')
+                  + '</div>'
+                : '')
+            + Array.from(groups.entries()).map(([type, list]) =>
+                '<div class="pm-obligation-group">'
+                + '<h3 class="pm-subheading">' + esc(type) + ' <span class="pm-badge">' + list.length + '</span></h3>'
+                + list.map(renderObligation).join('')
+                + '</div>').join('');
+
+        // Bound after each render: the cards are replaced wholesale, so
+        // there is no listener to leak and nothing to remove.
+        host.querySelectorAll('[data-po-edit]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                const id  = this.getAttribute('data-po-edit');
+                const row = (practiceObligations || []).find(
+                    x => String(O(x, 'PracticeObligationId')) === String(id));
+                if (row) openPracticeObligationForm(row);
+            });
+        });
+        host.querySelectorAll('[data-po-remove]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                removePracticeObligation(this.getAttribute('data-po-remove'));
+            });
+        });
+    }
+
+    // One practice-level obligation. Deliberately the same card shape as
+    // a published one -- it is the same kind of thing, and the operator
+    // should not have to learn a second layout -- plus the two actions
+    // only this half has, and the count that makes "applies everywhere"
+    // visible rather than promised.
+    function renderPracticeObligation(row) {
+        const id   = O(row, 'PracticeObligationId');
+        const name = O(row, 'ObligationName') || 'Obligation';
+        const text = O(row, 'ObligationDescription');
+        const count = Number(O(row, 'InstanceCount') || 0);
+
+        const meta = [
+            ['Type',       O(row, 'TypeName') || O(row, 'ObligationTypeCode')],
+            ['Frequency',  O(row, 'ExecutionFrequency')],
+            ['Owner',      O(row, 'Responsibility')],
+            ['Approval',   O(row, 'ApprovalAuthority')],
+            ['Assurance',  O(row, 'AssuranceType')]
+        ].filter(([, v]) => v);
+
+        // The declared evidence list. The definition stores type ids and the
+        // per-evidence Description (remarks), so resolve each id to its current
+        // master name and hand both to the shared renderEvidence() -- the same
+        // renderer the published card uses. This card used to map to type names
+        // only and dropped the Description, so a description typed on a custom
+        // obligation never showed; going through renderEvidence shows it here
+        // (as the line beneath the type badge) exactly as on a published one.
+        const evidence = (jsonArray(row, 'EvidenceJson') || []).map(e => ({
+            EvidenceType: labelOfEvidenceType(e.evidenceTypeId ?? e.EvidenceTypeId),
+            Remarks:      e.remarks ?? e.Remarks ?? ''
+        }));
+
+        return '<article class="pm-card">'
+            + '<h4>' + esc(name)
+            + ' <span class="pm-badge">Organization defined</span>'
+            + (count
+                ? ' <span class="pm-badge">on ' + count + ' instance' + (count === 1 ? '' : 's') + '</span>'
+                : ' <span class="pm-badge">no instances yet</span>')
+            + '</h4>'
+            + (text ? '<p class="pm-obligation-text">' + esc(text) + '</p>' : '')
+            + (meta.length
+                ? '<dl class="pm-detail-grid compact">'
+                  + meta.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('')
+                  + '</dl>'
+                : '')
+            + renderEvidence(evidence)
+            + '<div class="pm-card-actions">'
+              + '<button class="pm-button ghost small" type="button" data-po-edit="' + esc(id) + '">'
+                + '<i class="fa-solid fa-pen"></i> Edit</button>'
+              + '<button class="pm-button ghost small" type="button" data-po-remove="' + esc(id) + '">'
+                + '<i class="fa-solid fa-xmark"></i> Remove</button>'
+            + '</div>'
+            + '</article>';
     }
 
     function renderObligation(row) {
@@ -652,27 +1376,115 @@
         const detail = typedDetail(row);
         const evidence = jsonArray(row, 'EvidenceJson');
 
+        const name = O(row, 'ObligationName') || 'Obligation';
+        const text = obligationText(row, name);
+
         return '<article class="pm-card">'
-            + '<h4>' + esc(O(row, 'ObligationName') || 'Obligation') + '</h4>'
+            + '<h4>' + esc(name) + '</h4>'
+            + (text ? '<p class="pm-obligation-text">' + esc(text) + '</p>' : '')
             + (meta.length
                 ? '<dl class="pm-detail-grid compact">'
                   + meta.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('')
                   + '</dl>'
                 : '')
             + (detail ? '<div class="pm-typed-detail">' + detail + '</div>' : '')
-            + (evidence.length
-                ? '<div class="pm-evidence-list"><strong>Evidence:</strong> '
-                  + evidence.map(e => '<span class="pm-badge">'
-                      + esc(e.EvidenceType || e.evidenceType || e.EvidenceName || e.evidenceName || '')
-                      + '</span>').join(' ')
-                  + '</div>'
-                : '')
+            + renderEvidence(evidence)
             + '</article>';
+    }
+
+    // The Evidence block: one entry per piece of evidence, each its type name
+    // as a badge with the remark on the line beneath.
+    //
+    // Two guards on the data, because a row can reach here twice:
+    //
+    //  * ObligationEvidenceId is the same table row whether it arrived by the
+    //    Direct or the Link path, so the Set keys on it. Migration 302 already
+    //    de-duplicates this in the view -- this is what keeps the page correct
+    //    against a database that has not had 302 applied yet, and it is why
+    //    the evidence type appeared twice before either existed.
+    //  * An older payload without ObligationEvidenceId falls back to the type
+    //    name, which is what the eye was de-duplicating anyway.
+    //
+    // The remark is Remarks on the evidence row (roe.remarks, projected by the
+    // view since 224). It is genuinely optional -- when it is empty the entry
+    // is just the badge, exactly as the whole list looked before, and never
+    // the type name repeated in its place.
+    function renderEvidence(rows) {
+        const seen = new Set();
+        const items = [];
+        rows.forEach(e => {
+            const type = String(e.EvidenceType || e.evidenceType
+                             || e.EvidenceName || e.evidenceName || '').trim();
+            if (!type) return;
+            const key = e.ObligationEvidenceId ?? e.obligationEvidenceId ?? ('name:' + type);
+            if (seen.has(key)) return;
+            seen.add(key);
+            items.push({ type: type, remark: String(e.Remarks ?? e.remarks ?? '').trim() });
+        });
+        if (!items.length) return '';
+
+        return '<div class="pm-evidence-list">'
+            + '<strong>Evidence:</strong>'
+            // has-remark widens the entry to a full row so the remark gets the
+            // card's width. Without it the entry stays badge-sized and chips
+            // up alongside its neighbours.
+            + items.map(it => '<div class="pm-evidence-item' + (it.remark ? ' has-remark' : '') + '">'
+                + '<span class="pm-badge">' + esc(it.type) + '</span>'
+                + (it.remark ? '<p class="pm-evidence-remark">' + esc(it.remark) + '</p>' : '')
+                + '</div>').join('')
+            + '</div>';
+    }
+
+    // The obligation's authored text, or '' when there is nothing worth
+    // showing under the name.
+    //
+    // ObligationName is not always a name: sp_pm_view_obligations_typed falls
+    // back to LEFT(obligation_text, 300) for an obligation published without
+    // one. Printing the text under that heading would repeat the same words,
+    // and for anything under 300 characters repeat them exactly -- so when the
+    // heading is the text, or its opening, only the heading is drawn.
+    //
+    // Empty when the database is still on the pre-301 procedure and the
+    // column is absent, which leaves the card exactly as it was before.
+    function obligationText(row, name) {
+        const text = String(O(row, 'ObligationText') || '').trim();
+        if (!text) return '';
+        const heading = String(name || '').trim();
+        if (!heading || text === heading) return '';
+        if (text.startsWith(heading) || heading.startsWith(text)) return '';
+        return text;
     }
 
     // One renderer per obligation type, mirroring the shapes migration 122
     // emits. Anything unrecognised falls through to nothing rather than
     // printing raw JSON at the user.
+    // A frequency by name, from whichever the row carries.
+    //
+    // A PUBLISHED obligation arrives with the resolved name beside the id
+    // (migration 224's view projects both), so the first two reads find
+    // it. A practice-level one (migration 307) is written by the add form,
+    // which stores column names only -- so the id is all there is, and
+    // printing nothing there left an Assurance spec looking as though it
+    // had no cadence at all. Resolved against the same master list the
+    // form chose it from.
+    //
+    // An id that does not resolve returns the number rather than an empty
+    // string: that means the lookup has not loaded yet or the row points
+    // at something retired, and a blank would hide the fact.
+    function frequencyName(row, nameKeys, idKeys) {
+        for (const k of nameKeys) {
+            const v = row[k];
+            if (v !== null && v !== undefined && String(v).trim() !== '') return String(v);
+        }
+        for (const k of idKeys) {
+            const id = row[k];
+            if (id === null || id === undefined || String(id).trim() === '') continue;
+            const hit = pvLookups.frequencies.find(f => String(f.value) === String(id));
+            return hit && String(hit.label || '').trim() ? hit.label : String(id);
+        }
+        return '';
+    }
+
     function typedDetail(row) {
         const line = parts => '<div class="pm-typed-detail-row">'
             + parts.filter(Boolean).join(' ') + '</div>';
@@ -681,12 +1493,16 @@
             ['StateRulesJson',     r => line(['<strong>' + esc(r.attribute || '') + '</strong>',
                                               esc(r.operator || ''), esc(r.value || ''), esc(r.unit || '')])],
             ['ExecutionSpecsJson', r => line(['<strong>' + esc(r.action || '') + '</strong>',
-                                              esc(r.ExecutionFrequency || r.executionFrequency || ''),
+                                              esc(frequencyName(r,
+                                                  ['ExecutionFrequency', 'executionFrequency'],
+                                                  ['execution_frequency_id', 'executionFrequencyId'])),
                                               r.responsible_party ? '<em>' + esc(r.responsible_party) + '</em>' : '',
                                               r.due_within ? 'Due: ' + esc(r.due_within) : ''])],
             ['AssuranceSpecsJson', r => line(['<strong>' + esc(r.verification_method || '') + '</strong>',
                                               esc(r.scope || ''),
-                                              esc(r.AssuranceFrequency || r.assuranceFrequency || ''),
+                                              esc(frequencyName(r,
+                                                  ['AssuranceFrequency', 'assuranceFrequency'],
+                                                  ['assurance_frequency_id', 'assuranceFrequencyId'])),
                                               r.assurance_party ? '<em>' + esc(r.assurance_party) + '</em>' : ''])],
             ['EventResponsesJson', r => line(['<strong>If:</strong>', esc(r.trigger_event || ''),
                                               '<strong>Then:</strong>', esc(r.response_action || ''),

@@ -16,8 +16,29 @@
   const csrfToken = csrfMeta ? csrfMeta.content : "";
   const canEdit = permissions.has("EDIT") || permissions.has("ADD");
 
+  // Task Calendar -- Scheduler Edit Permission (change request 2026-09-23):
+  // canEdit above is the screen-level EDIT/ADD grant (same for every row);
+  // isSchedulerOwner() is the additional per-row gate -- only the Practice
+  // Instance Owner (or a system admin) may edit a given scheduler. Backend
+  // also enforces this (PracticeRepositoryService.ExecuteAsync, entityType
+  // 'assurance-schedule-overrides') so this is the UI-side mirror, applied
+  // wherever Edit Schedule can be reached: the Calendar side panel button
+  // and the Scheduler List row menu.
+  const sessionEmployeeId = String(window.pmEmployeeId || "");
+  const isSystemAdmin = !!window.pmIsSystemAdmin;
+  function isSchedulerOwner(ownerEmployeeId) {
+    if (isSystemAdmin) return true;
+    if (!sessionEmployeeId) return false;
+    const owner = ownerEmployeeId === null || ownerEmployeeId === undefined ? "" : String(ownerEmployeeId);
+    return owner !== "" && owner === sessionEmployeeId;
+  }
+
   /* ── State ── */
   let currentView = "month"; // month | week | day
+  // Display mode -- independent of currentView. Both modes render the same
+  // `events` array (see refresh()/render()); List never triggers its own
+  // fetch, so Calendar and List always show the same underlying data.
+  let currentMode = "calendar"; // calendar | list
   let currentDate = new Date();
   let events = [];
   let rules = [];
@@ -25,19 +46,22 @@
   let organizations = [];
   let selectedOrgId = "";
 
-  /* Unified Calendar filter state.
+  /* Calendar filter state (Status / Criticality / Search).
      Persisted to localStorage per user so returning to the page restores
-     the same view. Backwards-compat with legacy calendars: if the stored
-     shape doesn't have `sourceModules`, defaults kick in. */
-  const LS_FILTERS_KEY = "pmCalFilters.v1";
-  const ALL_MODULES = [
-    "PracticeInstance", "AssurancePlan", "AssurancePlanItem",
-    "AssuranceExecution", "AssuranceObservation", "AssuranceGap"
-  ];
+     the same view. */
+  // v3 (migration 336-340): this screen is purely the audit-schedule
+  // calendar. It shows only the two obligation-driven schedule types --
+  // Execution and Assurance -- and has no module selector, so sourceModules
+  // is no longer part of the (persisted) filter state. Key bumped so a v2
+  // set carrying the old module list is dropped.
+  const LS_FILTERS_KEY = "pmCalFilters.v3";
+  // Fixed source-module set for every calendar query. Sending exactly these
+  // makes the API skip the five Assurance-Management module blocks (their
+  // WantsModule gate is false) -- so Plan / Plan Item / Audit Execution /
+  // Observation / Gap never reach this calendar, and only the audit schedule
+  // (Execution + Assurance) does.
+  const CALENDAR_MODULES = ["Execution", "Assurance"];
   let filters = loadFilterState();
-  let definitionsCache = [];        // { id, code, name } list for the current org
-  let ownerRoleCache = [];          // roles for the current org
-  let ownerHolderCache = [];        // holders for the currently selected role
 
   function loadFilterState() {
     try {
@@ -45,28 +69,16 @@
       if (!raw) return defaultFilters();
       const parsed = JSON.parse(raw);
       return {
-        sourceModules  : Array.isArray(parsed.sourceModules) && parsed.sourceModules.length
-                         ? parsed.sourceModules : ALL_MODULES.slice(),
         statuses       : Array.isArray(parsed.statuses)       ? parsed.statuses       : [],
         criticalities  : Array.isArray(parsed.criticalities)  ? parsed.criticalities  : [],
-        ownerRoleId    : parsed.ownerRoleId    || null,
-        ownerRoleName  : parsed.ownerRoleName  || null,
-        ownerEmployeeId: parsed.ownerEmployeeId|| null,
-        ownerEmpName   : parsed.ownerEmpName   || null,
-        definitionId   : parsed.definitionId   || null,
         search         : typeof parsed.search === "string" ? parsed.search : ""
       };
     } catch { return defaultFilters(); }
   }
   function defaultFilters() {
-    // User chose "all 6 modules ON by default" in the setup step.
     return {
-      sourceModules  : ALL_MODULES.slice(),
       statuses       : [],
       criticalities  : [],
-      ownerRoleId    : null, ownerRoleName: null,
-      ownerEmployeeId: null, ownerEmpName : null,
-      definitionId   : null,
       search         : ""
     };
   }
@@ -77,6 +89,13 @@
 
   /* ── DOM refs ── */
   const grid = document.getElementById("calGrid");
+  const listView = document.getElementById("calListView");
+  const navHeader = document.getElementById("calNavHeader");
+  // Event-oriented filter panel (Status / Criticality / Search). It narrows
+  // the calendar's occurrence set, not the scheduler-config rows -- so it is
+  // hidden in List mode, where the Scheduler List carries its own search over
+  // `rules` (see renderList / setMode).
+  const filterPanel = document.getElementById("calFilterPanel");
   const titleEl = document.getElementById("calTitle");
   const orgFilter = document.getElementById("calOrganizationFilter");
   const sidePanel = document.getElementById("calSidePanel");
@@ -90,7 +109,7 @@
   function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
   function toDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
   function parseDate(s) { if (!s) return null; const d = new Date(s); return isNaN(d) ? null : d; }
-  function formatDate(d) { if (!d) return ""; return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }); }
+  function formatDate(d) { if (!d) return ""; return (window.gracFormatDisplayDateObj ? window.gracFormatDisplayDateObj(d) : d.toDateString()); }
 
   async function fetchJson(url, options = {}) {
     const controller = new AbortController();
@@ -127,19 +146,16 @@
     };
     if (selectedOrgId) payload.data.organizationId = Number(selectedOrgId);
 
-    // Unified filters -- server merges Practice Instance + 5 Assurance
-    // modules and honors these axes. Empty arrays mean "no restriction",
-    // so we only include filter keys that carry meaningful values (keeps
-    // request bodies small and log lines readable).
-    if (filters.sourceModules && filters.sourceModules.length && filters.sourceModules.length < ALL_MODULES.length)
-      payload.data.sourceModules = filters.sourceModules;
+    // Audit-schedule calendar: always scope to the two schedule types. This
+    // is fixed, not user-selectable -- sending it makes the API skip the five
+    // Assurance-Management module blocks entirely (WantsModule gate false), so
+    // only Execution + Assurance occurrences come back. Status / criticality /
+    // search stay as user filters below (empty array = no restriction).
+    payload.data.sourceModules = CALENDAR_MODULES;
     if (filters.statuses && filters.statuses.length)
       payload.data.statuses = filters.statuses;
     if (filters.criticalities && filters.criticalities.length)
       payload.data.criticalities = filters.criticalities;
-    if (filters.ownerRoleId)     payload.data.ownerRoleId     = Number(filters.ownerRoleId);
-    if (filters.ownerEmployeeId) payload.data.ownerEmployeeId = Number(filters.ownerEmployeeId);
-    if (filters.definitionId)    payload.data.definitionIds   = [Number(filters.definitionId)];
     if (filters.search && filters.search.trim())
       payload.data.search = filters.search.trim();
     try {
@@ -167,13 +183,10 @@
 
   function populateOrganizationDropdowns() {
     orgFilter.innerHTML = '<option value="">All organizations</option>';
-    const genOrg = document.getElementById("genOrganization");
-    if (genOrg) genOrg.innerHTML = '<option value="">Select organization</option>';
     organizations.forEach(o => {
       const id = o.Id || o.id || o.organization_id;
       const name = o.Name || o.name || o.organization_name || `Org ${id}`;
       orgFilter.insertAdjacentHTML("beforeend", `<option value="${id}">${name}</option>`);
-      if (genOrg) genOrg.insertAdjacentHTML("beforeend", `<option value="${id}">${name}</option>`);
     });
     // Auto-select if user has only one organization
     if (organizations.length === 1) {
@@ -214,14 +227,6 @@
     }
   }
 
-  async function saveScheduleRule(payload) {
-    return fetchJson(`${api}/assurance-schedule-rules`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
-      body: JSON.stringify({ data: payload })
-    });
-  }
-
   async function saveScheduleOverride(payload) {
     return fetchJson(`${api}/assurance-schedule-overrides`, {
       method: "POST",
@@ -230,22 +235,10 @@
     });
   }
 
-  async function loadPracticeInstances(orgId) {
-    try {
-      const result = await fetchJson(`${api}/practice-instances/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
-        body: JSON.stringify({ data: { organizationId: Number(orgId) } })
-      });
-      return (result.data ?? result.Data ?? [])[0] ?? (result.data ?? result.Data ?? []);
-    } catch { return []; }
-  }
-
   /* ── Rendering: Month View ── */
   function renderMonth() {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    titleEl.textContent = `${MONTHS[month]} ${year}`;
 
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -332,7 +325,7 @@
         html += `<div class="cal-range-bar-layer" style="grid-template-rows: repeat(${Math.min(lanes.length, 4)}, 18px);">`;
         barsThisWeek.slice(0, 12).forEach((bar, idx) => {
           const ev = bar.ev;
-          const src = (ev.SourceModule || ev.sourceModule || "PracticeInstance");
+          const src = (ev.SourceModule || ev.sourceModule || "Assurance");
           const kind = (ev.StatusKind || ev.statusKind || "info").toLowerCase();
           const title = ev.Title || ev.title || ev.PracticeInstance || "";
           const subtitle = ev.Subtitle || ev.subtitle || "";
@@ -367,9 +360,9 @@
           dayEvents.slice(0, chipMax).forEach((ev, idx) => {
             const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
             const status = (ev.Status || ev.status || "upcoming").toLowerCase();
-            const src = ev.SourceModule || ev.sourceModule || "PracticeInstance";
+            const src = ev.SourceModule || ev.sourceModule || "Assurance";
             const kind = (ev.StatusKind || ev.statusKind || "info").toLowerCase();
-            const label = ev.Title || ev.title || ev.PracticeInstance || ev.practiceInstance || "Assurance";
+            const label = ev.Title || ev.title || ev.PracticeInstance || ev.practiceInstance || "Audit";
             const subtitle = ev.Subtitle || ev.subtitle || ev.FrequencyName || ev.frequencyName || "";
             const initial = chipInitial(label);
             const tooltip = subtitle ? `${label} — ${subtitle}` : label;
@@ -427,6 +420,56 @@
     return escapeHtml(s);
   }
 
+  // Shared event-shape helpers -- used by the side panel AND the List
+  // View so both read the same event the same way (see showSidePanel()
+  // and renderList() below). Keeping this in one place instead of two
+  // near-identical inline blocks.
+  const SOURCE_LABELS = {
+    Execution:             "Execution",
+    Assurance:             "Assurance",
+    AssurancePlan:         "Plan",
+    AssurancePlanItem:     "Plan Item",
+    AssuranceExecution:    "Audit Execution",
+    AssuranceObservation:  "Observation",
+    AssuranceGap:          "Gap"
+  };
+  // Obligation schedule occurrences always carry a SourceModule (Execution /
+  // Assurance) from the API; the old "PracticeInstance" default is gone.
+  function sourceModuleOf(ev) { return ev.SourceModule || ev.sourceModule || "Assurance"; }
+  function sourceLabelOf(ev) { const src = sourceModuleOf(ev); return SOURCE_LABELS[src] || src; }
+  function ownerLabelOf(ev) {
+    const ownerRole = ev.OwnerRoleName || ev.ownerRoleName || "";
+    const ownerEmp = ev.OwnerDisplayName || ev.ownerDisplayName || ev.Owner || ev.owner || "";
+    return ownerRole && ownerEmp ? `${ownerRole} (${ownerEmp})` : (ownerRole || ownerEmp || "—");
+  }
+  // Short reference code for the List View's Task ID column. Built only
+  // from ids the assurance-calendar-events endpoint already returns
+  // (SourceRefId for the 5 Assurance modules, RuleId/PracticeInstanceId
+  // for Practice Instance occurrences) -- no new id, no schema change.
+  const REF_PREFIXES = {
+    Execution:            "EXE",
+    Assurance:            "ASR",
+    AssurancePlan:        "PLN",
+    AssurancePlanItem:    "ITM",
+    AssuranceExecution:   "AEX",
+    AssuranceObservation: "OBS",
+    AssuranceGap:         "GAP"
+  };
+  function eventRefCode(ev) {
+    const src = sourceModuleOf(ev);
+    const prefix = REF_PREFIXES[src] || src.slice(0, 3).toUpperCase();
+    const id = ev.SourceRefId ?? ev.sourceRefId ?? ev.RuleId ?? ev.ruleId
+             ?? ev.PracticeInstanceId ?? ev.practiceInstanceId;
+    return (id === undefined || id === null) ? "—" : `${prefix}-${id}`;
+  }
+  // "10 Sep 2026" -- matches the List View's date-group heading format.
+  function formatListDate(d) {
+    if (!d) return "";
+    return (window.gracFormatDisplayDateObj
+      ? window.gracFormatDisplayDateObj(d)
+      : `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`);
+  }
+
   /* ── Rendering: Week View ── */
   function renderWeek() {
     const today = new Date();
@@ -436,7 +479,6 @@
 
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6);
-    titleEl.textContent = `${MONTHS[weekStart.getMonth()]} ${weekStart.getDate()} – ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
 
     const eventMap = {};
     events.forEach(ev => {
@@ -470,7 +512,7 @@
         dayEvents.forEach((ev, idx) => {
           const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
           const status = (ev.Status || ev.status || "upcoming").toLowerCase();
-          const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
+          const label = ev.PracticeInstance || ev.practiceInstance || "Audit";
           const freq = ev.FrequencyName || ev.frequencyName || "";
           const initial = chipInitial(label);
           const tooltip = freq ? `${label} — ${freq}` : label;
@@ -492,7 +534,6 @@
     const today = new Date();
     const isToday = sameDay(currentDate, today);
     const key = toDateKey(currentDate);
-    titleEl.textContent = `${DAYS[currentDate.getDay()]}, ${MONTHS[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
 
     const dayEvents = events.filter(ev => {
       const d = parseDate(ev.Date || ev.date);
@@ -502,12 +543,12 @@
     let html = `<div class="cal-day-header">${isToday ? "Today — " : ""}${formatDate(currentDate)}</div>`;
     html += '<div class="cal-day-events">';
     if (dayEvents.length === 0) {
-      html += '<p style="color:var(--grac-muted);font-size:13px;padding:24px 0;">No assurance events scheduled for this day.</p>';
+      html += '<p style="color:var(--grac-muted);font-size:13px;padding:24px 0;">No audit events scheduled for this day.</p>';
     } else {
       dayEvents.forEach((ev, idx) => {
         const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
         const status = (ev.Status || ev.status || "upcoming").toLowerCase();
-        const label = ev.PracticeInstance || ev.practiceInstance || "Assurance";
+        const label = ev.PracticeInstance || ev.practiceInstance || "Audit";
         const freq = ev.FrequencyName || ev.frequencyName || "";
         const owner = ev.Owner || ev.owner || "";
         html += `<div class="cal-event criticality-${crit} status-${status}" data-event-idx="${idx}" data-date="${key}">`;
@@ -565,25 +606,20 @@
     sidePanelTitle.textContent = title;
     const status = ev.Status || ev.status || "Upcoming";
     const statusLower = status.toLowerCase();
-    const src = ev.SourceModule || ev.sourceModule || "PracticeInstance";
-    const srcLabel = ({
-      PracticeInstance:      "Practice Instance",
-      AssurancePlan:         "Assurance Plan",
-      AssurancePlanItem:     "Plan Item",
-      AssuranceExecution:    "Execution",
-      AssuranceObservation:  "Observation",
-      AssuranceGap:          "Gap"
-    })[src] || src;
+    const src = sourceModuleOf(ev);
+    const srcLabel = sourceLabelOf(ev);
     const subtitle = ev.Subtitle || ev.subtitle || "";
     const startDate = parseDate(ev.StartDate || ev.startDate || ev.Date || ev.date);
     const endDate = parseDate(ev.EndDate || ev.endDate);
     const entity = ev.EntityLabel || ev.entityLabel || "";
     const defCode = ev.DefinitionCode || ev.definitionCode || "";
-    const ownerRole = ev.OwnerRoleName || ev.ownerRoleName || "";
-    const ownerEmp = ev.OwnerDisplayName || ev.ownerDisplayName || ev.Owner || ev.owner || "";
-    const ownerLabel = ownerRole && ownerEmp
-        ? `${ownerRole} (${ownerEmp})`
-        : (ownerRole || ownerEmp || "—");
+    const ownerLabel = ownerLabelOf(ev);
+    // Linked Task Centre task (Gap / Observation events only -- see
+    // PracticeRepositoryService.QueryCalendarEventsAsync). Absent for
+    // every other module, so this stays a no-op for them.
+    const linkedTaskNumber = ev.LinkedTaskNumber || ev.linkedTaskNumber;
+    const linkedTaskStatus = ev.LinkedTaskStatus || ev.linkedTaskStatus;
+    const linkedTaskDeepLink = ev.LinkedTaskDeepLink || ev.linkedTaskDeepLink;
 
     let html = `<div class="cal-side-source-badge source-${src}"><i class="fa-solid fa-tag" aria-hidden="true"></i>${escapeHtml(srcLabel)}</div>`;
     if (subtitle) html += `<div style="color:var(--grac-muted, #758095); font-size:12px; margin-bottom:10px;">${escapeHtml(subtitle)}</div>`;
@@ -595,6 +631,9 @@
     if (ev.AssuranceMode || ev.assuranceMode) html += `<div class="cal-detail-row"><span class="cal-detail-label">Mode</span><span class="cal-detail-value">${escapeHtml(ev.AssuranceMode || ev.assuranceMode)}</span></div>`;
     html += `<div class="cal-detail-row"><span class="cal-detail-label">Owner</span><span class="cal-detail-value">${escapeHtml(ownerLabel)}</span></div>`;
     html += `<div class="cal-detail-row"><span class="cal-detail-label">Status</span><span class="cal-detail-value"><span class="cal-status-dot ${statusLower}"></span>${escapeHtml(status)}</span></div>`;
+    if (linkedTaskNumber) {
+      html += `<div class="cal-detail-row"><span class="cal-detail-label">Task</span><span class="cal-detail-value">${escapeHtml(linkedTaskNumber)}${linkedTaskStatus ? ` <span style="color:var(--grac-muted, #758095);">(${escapeHtml(linkedTaskStatus)})</span>` : ""}</span></div>`;
+    }
 
     if (ev.IsOverride || ev.isOverride) {
       html += `<div class="cal-detail-row"><span class="cal-detail-label">Override</span><span class="cal-detail-value">${escapeHtml(ev.OverrideType || ev.overrideType || "Modified")}</span></div>`;
@@ -603,17 +642,27 @@
       }
     }
 
-    // Action row: for PI events keep the legacy Edit Schedule button.
-    // For every module (including PI when the deep link exists) show an
-    // "Open in Assurance" link so users can jump into the module page.
+    // Action row: a schedule occurrence (Execution / Assurance -- it carries
+    // a RuleId) keeps the "Edit Schedule" button, which now only offers an
+    // Execution Date change (Skip This Occurrence was removed, change
+    // request 2026-09-23). The five Assurance-Management modules are not
+    // rule-based, so they get only the "Open in Assurance" deep link into
+    // the module page instead.
+    const isScheduleOccurrence = (ev.RuleId ?? ev.ruleId) != null;
+    const freqForEdit = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
+    // Task Calendar Scheduler Edit Permission (2026-09-23): only the
+    // Practice Instance Owner (or a system admin) sees the Edit trigger.
+    const occurrenceOwnerId = ev.OwnerEmployeeId ?? ev.ownerEmployeeId;
     html += `<div class="cal-side-actions">`;
-    if (canEdit && src === "PracticeInstance" && statusLower !== "past" && statusLower !== "skipped") {
+    if (canEdit && isScheduleOccurrence && statusLower !== "past" && statusLower !== "skipped" && !isDailyFrequency(freqForEdit) && isSchedulerOwner(occurrenceOwnerId)) {
       html += `<button class="pm-button small primary" id="calEditEvent" type="button"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit Schedule</button>`;
     }
     const deep = ev.DeepLink || ev.deepLink;
-    if (deep) {
-      const openLabel = src === "PracticeInstance" ? "Open Practice Instance" : `Open ${srcLabel}`;
-      html += `<a class="cal-side-deep-link" href="${escapeAttr(buildAppUrl(deep.replace(/^\//, "")))}" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>${escapeHtml(openLabel)}</a>`;
+    if (deep && !isScheduleOccurrence) {
+      html += `<a class="cal-side-deep-link" href="${escapeAttr(buildAppUrl(deep.replace(/^\//, "")))}" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>${escapeHtml(`Open ${srcLabel}`)}</a>`;
+    }
+    if (linkedTaskNumber && linkedTaskDeepLink) {
+      html += `<a class="cal-side-deep-link" href="${escapeAttr(buildAppUrl(linkedTaskDeepLink.replace(/^\//, "")))}" target="_blank" rel="noopener"><i class="fa-solid fa-list-check" aria-hidden="true"></i>Open Task ${escapeHtml(linkedTaskNumber)}</a>`;
     }
     html += `</div>`;
 
@@ -643,6 +692,18 @@
   //   Annual/Year  -> Jan 1 .. Dec 31 of the same year
   //   Daily        -> null (caller hides the picker altogether)
   //   Unknown      -> null (no min/max constraint)
+  // Task Calendar Edit Scheduler (change request 2026-09-23): a daily
+  // occurrence was already excluded from rescheduling before this change
+  // -- "tomorrow already has its own daily occurrence, so moving today's
+  // slot forward would just collide" (openEditDialog's own prior
+  // reasoning, see below). Now that Skip This Occurrence is gone too, a
+  // daily occurrence has no valid edit left at all, so Edit Schedule is
+  // withheld for it wherever it is offered (side panel button, Scheduler
+  // List row menu) rather than opening a dialog with nothing it can do.
+  function isDailyFrequency(freqRaw) {
+    return /^\s*(daily|day)\s*$/i.test(String(freqRaw || ""));
+  }
+
   function reschedulePeriodBounds(currentDate, freqRaw) {
     if (!currentDate) return null;
     const f = String(freqRaw || "").trim().toLowerCase();
@@ -679,7 +740,23 @@
   }
 
   /* ── Edit Dialog ── */
+  // Task Calendar Edit Scheduler (change request 2026-09-23): Skip This
+  // Occurrence is gone, so the only editable field left is the Execution
+  // Date -- there is no more Action select to drive. Reason and "apply
+  // to all future occurrences" are unchanged (confirmed with the
+  // requester, not assumed). A daily occurrence is withheld from every
+  // caller (side panel button, Scheduler List row menu) before this ever
+  // runs; the guard below stays only as a defensive backstop.
   function openEditDialog(ev) {
+    const freqRaw = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
+    if (isDailyFrequency(freqRaw)) return;
+    // Task Calendar Scheduler Edit Permission (2026-09-23): defensive
+    // re-check, same as the isDailyFrequency guard above -- both trigger
+    // points (side panel button, Scheduler List row menu) already gate on
+    // this, but the dialog refuses to open for a non-owner regardless of
+    // how it was reached.
+    if (!isSchedulerOwner(ev.OwnerEmployeeId ?? ev.ownerEmployeeId)) return;
+
     closeSidePanel();
     const dialog = document.getElementById("calEditDialog");
     const currentDateObj = parseDate(ev.Date || ev.date);
@@ -690,26 +767,7 @@
     document.getElementById("editReason").value = "";
     document.getElementById("editApplyFuture").checked = false;
 
-    // Rescheduling ("Move to a different date") does not make sense for
-    // a daily task -- tomorrow already has its own daily occurrence, so
-    // moving today's slot forward would just collide. For daily tasks we
-    // hide the Move option, force the Action to Skip, and hide the New
-    // Date field. Non-daily tasks keep the previous default of Move.
-    const freqRaw = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
-    const isDaily = /^\s*(daily|day)\s*$/i.test(String(freqRaw));
-    const actionSelect = document.getElementById("editAction");
-    const moveOption   = document.getElementById("editActionMoveOption");
-    if (moveOption) moveOption.hidden = isDaily;
-    if (moveOption) moveOption.disabled = isDaily;
-    if (isDaily) {
-      actionSelect.value = "Skip";
-      document.getElementById("editNewDateField").hidden = true;
-    } else {
-      actionSelect.value = "Move";
-      document.getElementById("editNewDateField").hidden = false;
-    }
-
-    // Constrain the New Date picker to the current occurrence's own
+    // Constrain the Execution Date picker to the current occurrence's own
     // frequency period. The <input type="date"> min/max attributes tell
     // the native picker to grey out / block anything outside the window
     // so users cannot pick, for example, next month's date when moving
@@ -724,76 +782,196 @@
     }
 
     dialog._eventData = ev;
+    renderEditObligationDetails({ loading: true });
+    wireViewPracticeButton(ev);
+    loadEditObligationDetails(ev);
     dialog.showModal();
   }
 
-  /* ── Generate Dialog ── */
-  async function openGenerateDialog() {
-    const dialog = document.getElementById("calGenerateDialog");
-    const genOrg = document.getElementById("genOrganization");
-    const instanceList = document.getElementById("genInstanceList");
-    document.getElementById("genAnchorDate").value = toDateKey(new Date());
-    instanceList.innerHTML = '<p class="pm-empty">Select an organization to see eligible practice instances.</p>';
-    dialog.showModal();
+  // ------------------------------------------------------------------
+  // Read-only Obligation / Scheduler Details panel (requirement #3).
+  // Frequency and Owner are already on every occurrence -- no fetch
+  // needed. Obligation Description, Action and Execution Frequency come
+  // from the obligation's own typed "Execution" spec (Shared/obligation-
+  // form.js's TYPE_SCHEMA.Execution), reached the same way that form
+  // reads it: GET .../resolve/instances/{id}/obligations, find this
+  // occurrence's row, parse its ExecutionSpecsJson[0] with the same
+  // normKey() case/underscore-insensitive match. Per the requester
+  // (Assurance-kind occurrences have no "Action" -- their typed detail is
+  // Verification Method / Assurance Frequency instead), Action and
+  // Execution Frequency are shown only when ScheduleKind is "Execution".
+  // Evidence Type / Evidence Details come from the sibling
+  // .../resolve/instances/{id}/evidence feed, matched to this obligation
+  // by SourceObligationId (published) or SourcePracticeInstanceObligationId
+  // (organisation-defined) -- ResolveWorkspaceModels.cs's own documented
+  // distinction between the two. Both are separate GETs, not folded into
+  // the calendar query itself -- same "no wrapper" precedent as Risk
+  // Category's separate save call: a second read for a field the
+  // existing endpoint already owns, rather than teaching
+  // QueryCalendarEventsAsync a new join.
+  // ------------------------------------------------------------------
+  const normKey = k => String(k).replace(/_/g, "").toLowerCase();
 
-    genOrg.onchange = async () => {
-      const orgId = genOrg.value;
-      if (!orgId) { instanceList.innerHTML = '<p class="pm-empty">Select an organization.</p>'; return; }
-      instanceList.innerHTML = '<p class="pm-empty">Loading practice instances...</p>';
-      const instances = await loadPracticeInstances(orgId);
-      const existingRuleInstanceIds = new Set(rules.map(r => String(r.PracticeInstanceId || r.practice_instance_id)));
-
-      if (!instances.length) { instanceList.innerHTML = '<p class="pm-empty">No practice instances found for this organization.</p>'; return; }
-
-      let html = "";
-      instances.forEach(inst => {
-        const id = inst.Id || inst.id || inst.practice_instance_id;
-        const name = inst.Name || inst.name || inst.instance_name || `Instance ${id}`;
-        const code = inst.Code || inst.code || inst.instance_code || "";
-        const freq = inst.AssuranceFrequency || inst.assurance_frequency || inst.ExecutionFrequency || "";
-        const freqId = inst.AssuranceFrequencyId || inst.assurance_frequency_id || "";
-        const alreadyScheduled = existingRuleInstanceIds.has(String(id));
-        const disabled = alreadyScheduled || !freqId ? "disabled" : "";
-        const rowClass = alreadyScheduled ? "cal-gen-row already-scheduled" : "cal-gen-row";
-        const noFreqNote = !freqId && !alreadyScheduled ? ' <em style="color:var(--grac-muted);font-size:11px;">(no assurance frequency set)</em>' : "";
-        html += `<div class="${rowClass}">
-          <input type="checkbox" value="${id}" data-freq-id="${freqId}" data-org-id="${orgId}" ${disabled} />
-          <label>${code ? code + " — " : ""}${name}${noFreqNote}</label>
-          <span class="cal-gen-freq">${freq}</span>
-        </div>`;
-      });
-      instanceList.innerHTML = html;
-    };
+  function parseJsonArraySafe(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; }
+    catch (_) { return []; }
   }
 
-  async function submitGenerate() {
-    const dialog = document.getElementById("calGenerateDialog");
-    const anchorDate = document.getElementById("genAnchorDate").value;
-    const msgEl = document.getElementById("calGenerateMessage");
-    const checkboxes = dialog.querySelectorAll('.cal-gen-row input[type="checkbox"]:checked');
+  function fieldFrom(item, name) {
+    if (!item) return null;
+    const key = Object.keys(item).find(k => normKey(k) === normKey(name));
+    return key !== undefined && item[key] !== null && item[key] !== "" ? item[key] : null;
+  }
 
-    if (!anchorDate) { showMsg(msgEl, "Please select an anchor date."); return; }
-    if (checkboxes.length === 0) { showMsg(msgEl, "Please select at least one practice instance."); return; }
+  // The resolve/instances/.../obligations and .../evidence feeds are the
+  // API tier's own Ok(new { data = ... }) results, which ASP.NET Core's
+  // default System.Text.Json output formatter serialises camelCase --
+  // unlike `ev` itself (QueryCalendarEventsAsync's raw Dictionary<string,
+  // object?>, always PascalCase). Same dual-case accessor
+  // Shared/obligation-form.js already uses for these same rows (its own
+  // `F` helper, "rows arrive camelCase from the Web tier and PascalCase
+  // from some gateway paths").
+  const rowGet = (row, k) => row?.[k] ?? row?.[k.charAt(0).toUpperCase() + k.slice(1)] ?? null;
 
-    let created = 0;
-    let errors = [];
-    for (const cb of checkboxes) {
-      try {
-        await saveScheduleRule({
-          practiceInstanceId: cb.value,
-          frequencyId: cb.dataset.freqId,
-          organizationId: cb.dataset.orgId,
-          anchorDate: anchorDate
-        });
-        created++;
-      } catch (e) {
-        errors.push(e.message);
+  async function loadEditObligationDetails(ev) {
+    const dialog = document.getElementById("calEditDialog");
+    const instanceId = ev.PracticeInstanceId || ev.practiceInstanceId;
+    const obligationRowId = ev.ObligationId || ev.obligationId;
+    if (!instanceId || !obligationRowId) { renderEditObligationDetails(null); return; }
+
+    try {
+      const obligationsUrl = buildAppUrl(`practice/api/workflow/resolve/instances/${encodeURIComponent(instanceId)}/obligations`);
+      const obligationsResp = await fetch(obligationsUrl, { credentials: "same-origin" });
+      const obligationsBody = await obligationsResp.json();
+      if (!obligationsResp.ok) { renderEditObligationDetails(null); return; }
+      const rows = Array.isArray(obligationsBody.data) ? obligationsBody.data : [];
+      const row = rows.find(r => String(rowGet(r, "adoptionId")) === String(obligationRowId));
+      // The dialog may have moved on to a different occurrence while this
+      // was in flight (fast double-click through the calendar).
+      if (dialog._eventData !== ev) return;
+      if (!row) { renderEditObligationDetails(null); return; }
+
+      const scheduleKind = ev.ScheduleKind || ev.scheduleKind || "Assurance";
+      let action = null, executionFrequency = null;
+      if (String(scheduleKind).toLowerCase() === "execution") {
+        const spec = parseJsonArraySafe(rowGet(row, "executionSpecsJson"))[0] || null;
+        action = fieldFrom(spec, "action");
+        executionFrequency = fieldFrom(spec, "ExecutionFrequency");
       }
-    }
 
-    if (errors.length) showMsg(msgEl, `Created ${created} schedule(s). Errors: ${errors.join("; ")}`, errors.length < checkboxes.length);
-    else { dialog.close(); await refresh(); }
+      const rowObligationId = rowGet(row, "obligationId");
+      const rowAdoptionId = rowGet(row, "adoptionId");
+      let evidenceRows = [];
+      try {
+        const evidenceUrl = buildAppUrl(`practice/api/workflow/resolve/instances/${encodeURIComponent(instanceId)}/evidence`);
+        const evidenceResp = await fetch(evidenceUrl, { credentials: "same-origin" });
+        const evidenceBody = await evidenceResp.json();
+        if (evidenceResp.ok && Array.isArray(evidenceBody.data)) {
+          evidenceRows = evidenceBody.data.filter(e =>
+            (rowObligationId && Number(rowGet(e, "sourceObligationId")) === Number(rowObligationId))
+            || (rowAdoptionId && Number(rowGet(e, "sourcePracticeInstanceObligationId")) === Number(rowAdoptionId)));
+        }
+      } catch (_) { /* Evidence is a nice-to-have on this panel; the rest of it still renders without it. */ }
+
+      if (dialog._eventData !== ev) return;
+      renderEditObligationDetails({
+        description: rowGet(row, "obligationDescription"),
+        action,
+        frequency: ev.FrequencyName || ev.frequencyName,
+        owner: ev.Owner || ev.owner,
+        executionFrequency,
+        scheduleKind,
+        evidence: evidenceRows
+      });
+    } catch (_) {
+      if (dialog._eventData === ev) renderEditObligationDetails(null);
+    }
   }
+
+  function renderEditObligationDetails(data) {
+    const host = document.getElementById("calEditObligationDetails");
+    if (!host) return;
+    if (data && data.loading) {
+      host.innerHTML = `<div class="cal-detail-row"><span class="cal-detail-value muted">Loading obligation details…</span></div>`;
+      return;
+    }
+    if (!data) {
+      host.innerHTML = `<div class="cal-detail-row"><span class="cal-detail-value muted">Obligation details are not available for this occurrence.</span></div>`;
+      return;
+    }
+    const row = (label, value, isMuted) => `<div class="cal-detail-row"><span class="cal-detail-label">${escapeHtml(label)}</span><span class="cal-detail-value${isMuted ? " muted" : ""}">${escapeHtml(value || "—")}</span></div>`;
+    let html = "";
+    html += row("Obligation Description", data.description);
+    if (String(data.scheduleKind || "").toLowerCase() === "execution") {
+      html += row("Action", data.action);
+      html += row("Execution Frequency", data.executionFrequency);
+    }
+    html += row("Frequency", data.frequency);
+    html += row("Owner", data.owner);
+    const evidence = data.evidence || [];
+    if (evidence.length) {
+      html += row("Evidence Type", evidence.map(e => rowGet(e, "evidenceType")).filter(Boolean).join(", "));
+      html += row("Evidence Details", evidence.map(e => {
+        const retention = rowGet(e, "retentionPeriod");
+        const bits = [rowGet(e, "evidenceName"), rowGet(e, "evidenceDescription"), retention ? `Retention: ${retention}` : null].filter(Boolean);
+        return bits.length ? bits.join(" — ") : (rowGet(e, "evidenceType") || "");
+      }).filter(Boolean).join("; "));
+    } else {
+      html += row("Evidence Type", null, true);
+      html += row("Evidence Details", null, true);
+    }
+    host.innerHTML = html;
+  }
+
+  // ------------------------------------------------------------------
+  // View Practice (requirement #4). Reuses the exact navigation-code +
+  // Practice/Index/practice-view flow practice.js's own navigateWithContext
+  // already uses for every other "View Practice" link in the app --
+  // practice-calendar.js runs in its own page/closure with no access to
+  // that function, so the same two calls (POST navigation-code, then
+  // window.location.assign) are reproduced here rather than left
+  // unreachable, matching the existing precedent of buildAppUrl itself
+  // being a small per-file copy rather than a shared module.
+  // ------------------------------------------------------------------
+  function wireViewPracticeButton(ev) {
+    const btn = document.getElementById("calEditViewPractice");
+    if (!btn) return;
+    const practiceId = ev.PracticeId || ev.practiceId;
+    btn.hidden = !practiceId;
+    btn.onclick = practiceId ? () => navigateToPractice(ev) : null;
+  }
+
+  async function navigateToPractice(ev) {
+    const practiceId = ev.PracticeId || ev.practiceId;
+    if (!practiceId) return;
+    const msgEl = document.getElementById("calEditMessage");
+    try {
+      const result = await fetchJson(`${api}/navigation-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({
+          sourceArea: "assurance-calendar",
+          targetArea: "practice-view",
+          filterType: "Practice",
+          filterId: Number(practiceId),
+          organizationId: Number(selectedOrgId) || null,
+          displayName: ev.PracticeInstance || ev.practiceInstance || ""
+        })
+      });
+      const code = result.code || result.Code || "";
+      window.location.assign(`${window.location.origin}${buildAppUrl(`Practice/Index/practice-view`)}?code=${encodeURIComponent(code)}`);
+    } catch (e) {
+      showMsg(msgEl, e.message);
+    }
+  }
+
+  // Migration 336-339: the "Generate Schedules" dialog was retired. It
+  // created instance-wide rules by hand; schedules are now per obligation,
+  // created automatically on obligation save and backfilled by
+  // sp_pm_reconcile_schedule_rules. openGenerateDialog / submitGenerate /
+  // saveScheduleRule / loadPracticeInstances all went with it.
 
   function showMsg(el, text, isWarning = false) {
     if (!el) return;
@@ -804,31 +982,35 @@
   }
 
   /* ── Edit Submit ── */
+  // Task Calendar Edit Scheduler (change request 2026-09-23): Move is the
+  // only action left -- Execution Date is always required, and the
+  // override is always saved as "Moved". The API's own shim
+  // (sp_pm_schedule_override_repository_manage, migration 377) hard-codes
+  // the same thing server-side, so overrideType is not even worth sending
+  // any more, but it is kept in the payload (fixed to "Moved") so the
+  // request shape stays self-documenting.
   async function submitEdit() {
     const dialog = document.getElementById("calEditDialog");
     const ev = dialog._eventData;
-    const action = document.getElementById("editAction").value;
     const newDate = document.getElementById("editNewDate").value;
     const reason = document.getElementById("editReason").value;
     const applyFuture = document.getElementById("editApplyFuture").checked;
     const msgEl = document.getElementById("calEditMessage");
 
-    if (action === "Move" && !newDate) { showMsg(msgEl, "Please select a new date."); return; }
+    if (!newDate) { showMsg(msgEl, "Please select an Execution Date."); return; }
 
     // Belt-and-braces guard: some browsers do not fully enforce the
     // <input type="date"> min / max attributes when a user *types* a
     // value (as opposed to picking one from the calendar popup). Re-check
     // the chosen date against the same reschedulePeriodBounds() window
     // used to configure the picker.
-    if (action === "Move") {
-      const freqRaw = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
-      const bounds = reschedulePeriodBounds(parseDate(ev.Date || ev.date), freqRaw);
-      if (bounds) {
-        const picked = parseDate(newDate);
-        if (!picked || picked < bounds.start || picked > bounds.end) {
-          showMsg(msgEl, `New Date must be within the current ${String(freqRaw).toLowerCase() || "occurrence"} period (${toDateKey(bounds.start)} - ${toDateKey(bounds.end)}).`);
-          return;
-        }
+    const freqRaw = ev.FrequencyType || ev.frequencyType || ev.FrequencyName || ev.frequencyName || "";
+    const bounds = reschedulePeriodBounds(parseDate(ev.Date || ev.date), freqRaw);
+    if (bounds) {
+      const picked = parseDate(newDate);
+      if (!picked || picked < bounds.start || picked > bounds.end) {
+        showMsg(msgEl, `Execution Date must be within the current ${String(freqRaw).toLowerCase() || "occurrence"} period (${toDateKey(bounds.start)} - ${toDateKey(bounds.end)}).`);
+        return;
       }
     }
 
@@ -837,8 +1019,8 @@
         scheduleRuleId: ev.RuleId || ev.ruleId,
         organizationId: selectedOrgId || undefined,
         originalDate: toDateKey(parseDate(ev.Date || ev.date)),
-        overrideType: action === "Move" ? "Moved" : "Skipped",
-        newDate: action === "Move" ? newDate : null,
+        overrideType: "Moved",
+        newDate: newDate,
         reason: reason,
         applyToFuture: applyFuture
       });
@@ -874,6 +1056,48 @@
     refresh();
   }
 
+  // Calendar / List toggle. Switching mode never re-fetches -- it only
+  // changes which of #calGrid / #calListView is shown and how the
+  // already-loaded `events` array is rendered. currentView (Month/Week/
+  // Day) still governs which date range is loaded either way.
+  function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll("#calModeToggle .pm-button").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.calMode === mode);
+    });
+    grid.hidden = mode === "list";
+    listView.hidden = mode !== "list";
+    // #calNavHeader now holds Prev/Today/Next/title AND the Month/Week/
+    // Day switch together as one row -- both belong to the calendar
+    // grid, so hiding the header hides the switch with it (it's nested
+    // inside, no separate toggle needed). currentView still governs the
+    // date range List loads (see the comment above); only the controls
+    // disappear.
+    if (navHeader) navHeader.hidden = mode === "list";
+    // The Status / Criticality / Search filter panel acts on calendar
+    // occurrences; it has no effect on the scheduler-config rows the List
+    // shows (the rules query is org-scoped only). Hide it in List so it can't
+    // read as a dead control -- the List provides its own search instead.
+    if (filterPanel) filterPanel.hidden = mode === "list";
+    render();
+  }
+
+  // Single source of truth for the toolbar title -- month/week/day/list
+  // all share it so switching mode never leaves a stale title behind.
+  function updateTitle() {
+    if (currentView === "month") {
+      titleEl.textContent = `${MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+    } else if (currentView === "week") {
+      const weekStart = new Date(currentDate);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      titleEl.textContent = `${MONTHS[weekStart.getMonth()]} ${weekStart.getDate()} – ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
+    } else {
+      titleEl.textContent = `${DAYS[currentDate.getDay()]}, ${MONTHS[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
+    }
+  }
+
   /* ── Refresh ── */
   async function refresh() {
     let rangeFrom, rangeTo;
@@ -896,9 +1120,389 @@
   }
 
   function render() {
+    updateTitle();
+    if (currentMode === "list") { renderList(); return; }
     if (currentView === "month") renderMonth();
     else if (currentView === "week") renderWeek();
     else renderDay();
+  }
+
+  /* ── Rendering: Scheduler List ──
+     One distinct row per configured schedule rule -- NOT a date-wise
+     re-presentation of the occurrence `events`. The source is `rules`
+     (data[1] from QueryCalendarEventsAsync = the raw, org-scoped, date-
+     range-independent assurance_schedule_rule set), so every active
+     scheduler appears exactly once regardless of the Calendar view's
+     month/week/day window.
+
+     Columns: Obligation Name, Type (Execution / Assurance), Frequency,
+     Owner, Next Schedule Date. "Next Schedule Date" is the first
+     occurrence on or after today, computed from the rule's own
+     anchor_date + frequency using advanceByFrequency() -- a direct mirror
+     of the occurrence stepping in PracticeRepositoryService, so the value
+     matches the dates the grid draws and reflects the scheduler
+     configuration rather than whatever happens to fall in the loaded
+     window. Client-side search + pagination over the rule set, rendered
+     with the app's standard .pm-table grid. Schedule generation itself is
+     untouched -- this only presents the existing scheduler data. */
+  let schedulerSearch = "";
+  let schedulerPage = 0;
+  const SCHEDULER_PAGE_SIZE = 15;
+
+  // Mirror of the C# occurrence stepping. AddMonths/AddYears clamp to the
+  // end of the target month (Jan-31 stepped one month -> Feb-28), so the
+  // JS-computed next date lands on the same day the grid would draw.
+  function addMonthsClamped(d, months) {
+    const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(d.getDate(), lastDay));
+    return target;
+  }
+  function advanceByFrequency(d, value, unit) {
+    const u = String(unit || "").toLowerCase();
+    if (u === "day")  { const nd = new Date(d); nd.setDate(nd.getDate() + value); return nd; }
+    if (u === "week") { const nd = new Date(d); nd.setDate(nd.getDate() + value * 7); return nd; }
+    if (u === "month") return addMonthsClamped(d, value);
+    if (u === "year")  return addMonthsClamped(d, value * 12);
+    return addMonthsClamped(d, value > 0 ? value : 1);
+  }
+  // First occurrence on/after today for a scheduler rule, or null when the
+  // rule is non-periodic (Event Driven / Continuous / Custom -> freqValue<=0
+  // or no unit -- the same rows the grid skips) or has already ended.
+  function nextScheduleDateForRule(rule) {
+    const anchor = parseDate(rule.anchor_date);
+    if (!anchor) return null;
+    const freqValue = Number(rule.frequency_value) || 0;
+    const freqUnit = rule.frequency_unit;
+    if (freqValue <= 0 || !freqUnit) return null;
+    const end = parseDate(rule.end_date);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let cur = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+    let guard = 0;
+    while (cur < today) {
+      cur = advanceByFrequency(cur, freqValue, freqUnit);
+      if (++guard > 5000) return null; // guard against a degenerate rule
+    }
+    if (end && cur > end) return null;
+    return cur;
+  }
+
+  // Project `rules` (snake_case rows straight from the reader) into display
+  // rows. Owner precedence: the schedule's own owner, then the obligation's
+  // responsibility, then the practice instance's primary owner.
+  function schedulerRows() {
+    return (rules || []).map(r => {
+      const kind = r.schedule_kind || "Assurance";
+      const obligation = (r.obligation_name && String(r.obligation_name).trim())
+        || (r.instance_name && String(r.instance_name).trim())
+        || "—";
+      const owner = (r.schedule_owner && String(r.schedule_owner).trim())
+        || (r.responsibility && String(r.responsibility).trim())
+        || (r.primary_owner && String(r.primary_owner).trim())
+        || "—";
+      // practiceInstance / frequencyName / organizationId are carried
+      // through (not shown as their own columns -- Obligation Name already
+      // covers this row's identity) so the row menu's Edit action can hand
+      // openEditDialog() the same shape of object a calendar occurrence
+      // carries (see PracticeRepositoryService.QueryCalendarEventsAsync's
+      // `practiceLabel = "{instanceCode} - {instanceName}"`), without a
+      // second lookup back into `rules`.
+      const instanceCode = (r.instance_code && String(r.instance_code).trim()) || "";
+      const instanceName = (r.instance_name && String(r.instance_name).trim()) || "";
+      const practiceInstance = instanceCode && instanceName ? `${instanceCode} - ${instanceName}`
+        : (instanceName || instanceCode || obligation);
+      return {
+        ruleId: r.schedule_rule_id,
+        organizationId: r.organization_id,
+        obligation,
+        kind,
+        frequency: (r.frequency_name && String(r.frequency_name).trim()) || "—",
+        owner,
+        next: nextScheduleDateForRule(r),
+        practiceInstance,
+        // Task Calendar Edit Scheduler (2026-09-23): carried through so
+        // the row menu's Edit action can hand openEditDialog() the same
+        // occurrence shape the Calendar grid itself produces (ObligationId,
+        // PracticeId, PracticeInstanceId, ScheduleKind, Criticality,
+        // AssuranceMode -- see QueryCalendarEventsAsync), without a second
+        // lookup back into `rules`.
+        obligationId: r.practice_instance_obligation_id,
+        practiceId: r.practice_id,
+        practiceInstanceId: r.practice_instance_id,
+        scheduleKind: kind,
+        criticality: (r.criticality && String(r.criticality).trim()) || "Medium",
+        assuranceMode: (r.assurance_mode && String(r.assurance_mode).trim()) || "Manual",
+        // Task Calendar Scheduler Edit Permission (2026-09-23): the
+        // Practice Instance Owner's employee id, so the row's Actions
+        // trigger can be gated the same way the Calendar side panel's
+        // Edit Schedule button is.
+        ownerEmployeeId: r.primary_owner_id
+      };
+    });
+  }
+
+  // Rows currently on screen, keyed by ruleId, for the 3-dot menu's Edit
+  // action to look up without a second pass over `rules`.
+  let schedulerRowsById = new Map();
+
+  function renderList() {
+    let rows = schedulerRows();
+
+    // Search across the visible text columns.
+    const q = schedulerSearch.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter(r =>
+        r.obligation.toLowerCase().includes(q) ||
+        r.kind.toLowerCase().includes(q) ||
+        r.frequency.toLowerCase().includes(q) ||
+        r.owner.toLowerCase().includes(q));
+    }
+
+    // Stable order: obligation name, then type.
+    rows.sort((a, b) => {
+      const o = a.obligation.toLowerCase().localeCompare(b.obligation.toLowerCase());
+      return o !== 0 ? o : a.kind.toLowerCase().localeCompare(b.kind.toLowerCase());
+    });
+
+    const total = rows.length;
+    const pageCount = Math.max(1, Math.ceil(total / SCHEDULER_PAGE_SIZE));
+    if (schedulerPage > pageCount - 1) schedulerPage = pageCount - 1;
+    if (schedulerPage < 0) schedulerPage = 0;
+    const start = schedulerPage * SCHEDULER_PAGE_SIZE;
+    const pageRows = rows.slice(start, start + SCHEDULER_PAGE_SIZE);
+
+    const toolbar = `<div class="cal-scheduler-toolbar">
+        <div class="cal-scheduler-search">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input type="search" id="calSchedulerSearch" placeholder="Search obligation, type, frequency or owner..."
+                 aria-label="Search schedulers" value="${escapeAttr(schedulerSearch)}" />
+        </div>
+        <span class="cal-scheduler-count">${total} schedule${total === 1 ? "" : "s"}</span>
+      </div>`;
+
+    if (total === 0) {
+      listView.innerHTML = toolbar +
+        `<p class="pm-empty">${q ? "No schedules match your search." : "No configured schedules yet. Schedules are created automatically when an Execution or Assurance obligation is saved on the Operationalize screen."}</p>`;
+      wireSchedulerSearch();
+      return;
+    }
+
+    // Cache this page's rows by ruleId so the 3-dot menu's Edit action
+    // (delegated click handler, wired once -- see wireSchedulerRowMenu)
+    // can find a row's data without walking `rules` again.
+    schedulerRowsById = new Map(pageRows.map(r => [String(r.ruleId), r]));
+
+    let body = "";
+    pageRows.forEach(r => {
+      const kindLabel = SOURCE_LABELS[r.kind] || r.kind;
+      // Actions column follows the same permission gate as the Calendar's
+      // own "Edit Schedule" button: the screen-level EDIT/ADD grant
+      // (canEdit, computed once at module load) AND, per row, the Practice
+      // Instance Owner check (isSchedulerOwner, change request 2026-09-23)
+      // -- a user without either sees no trigger at all, not an empty menu.
+      const actionsCell = (canEdit && isSchedulerOwner(r.ownerEmployeeId))
+        ? `<td>
+            <button type="button" class="pm-action-trigger" data-sched-menu="${escapeAttr(String(r.ruleId))}"
+                    aria-haspopup="menu" aria-expanded="false" title="Actions">
+              <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
+              <span class="visually-hidden">Actions</span>
+            </button>
+          </td>`
+        : "";
+      body += `<tr>
+        <td class="cal-sched-obligation">${escapeHtml(r.obligation)}</td>
+        <td><span class="cal-side-source-badge source-${escapeAttr(r.kind)}">${escapeHtml(kindLabel)}</span></td>
+        <td>${escapeHtml(r.frequency)}</td>
+        <td>${escapeHtml(r.owner)}</td>
+        <td class="cal-sched-next">${r.next ? escapeHtml(formatListDate(r.next)) : '<span class="cal-sched-none">—</span>'}</td>
+        ${actionsCell}
+      </tr>`;
+    });
+
+    const from = start + 1;
+    const to = start + pageRows.length;
+    const pager = pageCount > 1 ? `<div class="cal-scheduler-pager">
+        <button type="button" class="pm-button small" data-sched-page="prev" ${schedulerPage === 0 ? "disabled" : ""}>
+          <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Prev
+        </button>
+        <span class="cal-scheduler-pageinfo">${from}–${to} of ${total} &middot; Page ${schedulerPage + 1} of ${pageCount}</span>
+        <button type="button" class="pm-button small" data-sched-page="next" ${schedulerPage >= pageCount - 1 ? "disabled" : ""}>
+          Next <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+        </button>
+      </div>` : "";
+
+    listView.innerHTML = toolbar +
+      `<div class="pm-table-wrap cal-scheduler-table-wrap">
+        <table class="pm-table cal-scheduler-table">
+          <thead>
+            <tr>
+              <th>Obligation Name</th>
+              <th>Type</th>
+              <th>Frequency</th>
+              <th>Owner</th>
+              <th>Next Schedule Date</th>
+              ${canEdit ? '<th aria-label="Actions"></th>' : ""}
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>` + pager;
+
+    wireSchedulerSearch();
+    listView.querySelectorAll("[data-sched-page]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        schedulerPage += btn.dataset.schedPage === "prev" ? -1 : 1;
+        renderList();
+      });
+    });
+  }
+
+  // Re-attach the search input after each render (innerHTML replaced the old
+  // one) and restore focus + caret so typing is never interrupted.
+  function wireSchedulerSearch() {
+    const input = document.getElementById("calSchedulerSearch");
+    if (!input) return;
+    input.addEventListener("input", () => {
+      schedulerSearch = input.value;
+      schedulerPage = 0;
+      renderList();
+      const fresh = document.getElementById("calSchedulerSearch");
+      if (fresh) {
+        fresh.focus();
+        const len = fresh.value.length;
+        try { fresh.setSelectionRange(len, len); } catch { /* type=search rejects setSelectionRange in some browsers */ }
+      }
+    });
+  }
+
+  /* ── Scheduler (Schedule List) row menu -- PM standard 3-dot pattern ──
+     Same pattern document-uploads.js and the Task Center / Gap Center use:
+     one `pm-action-trigger` per row, click opens a floating
+     `.pm-action-menu` (shared practice-management.css classes, already
+     loaded by the layout -- no new CSS needed) positioned relative to the
+     trigger. Close on outside click, Escape, resize, or scroll. Wired
+     ONCE via delegation on `listView` (see wireSchedulerRowMenu, called
+     from the module's one-time "Wire up events" section) since renderList()
+     replaces listView's innerHTML on every render/page/search change. */
+  let schedOpenMenuEl = null;
+  let schedOpenMenuTrigger = null;
+
+  function closeSchedulerRowMenu() {
+    if (schedOpenMenuEl) { schedOpenMenuEl.remove(); schedOpenMenuEl = null; }
+    if (schedOpenMenuTrigger) {
+      schedOpenMenuTrigger.setAttribute("aria-expanded", "false");
+      schedOpenMenuTrigger = null;
+    }
+  }
+
+  function positionSchedulerRowMenu(trigger) {
+    if (!schedOpenMenuEl) return;
+    const r  = trigger.getBoundingClientRect();
+    const mr = schedOpenMenuEl.getBoundingClientRect();
+    const gap = 6;
+    let top = r.bottom + gap, left = r.right - mr.width;
+    if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+    if (left < 8) left = 8;
+    if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+    schedOpenMenuEl.style.top  = top  + "px";
+    schedOpenMenuEl.style.left = left + "px";
+  }
+
+  function openSchedulerRowMenu(trigger, items) {
+    closeSchedulerRowMenu();
+    schedOpenMenuTrigger = trigger;
+    trigger.setAttribute("aria-expanded", "true");
+    schedOpenMenuEl = document.createElement("div");
+    schedOpenMenuEl.className = "pm-action-menu";
+    schedOpenMenuEl.setAttribute("role", "menu");
+    for (const it of items) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "menuitem");
+      b.innerHTML = `<i class="fa-solid ${escapeHtml(it.icon)}" aria-hidden="true"></i> ${escapeHtml(it.label)}`;
+      if (it.disabled) { b.disabled = true; b.title = it.disabledReason || ""; }
+      b.addEventListener("click", ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeSchedulerRowMenu();
+        try { it.action(); } catch (err) { console.error("[practice-calendar] scheduler menu action failed", err); }
+      });
+      schedOpenMenuEl.appendChild(b);
+    }
+    document.body.appendChild(schedOpenMenuEl);
+    positionSchedulerRowMenu(trigger);
+  }
+
+  // Row menu contains only "Edit". Not visible at all unless canEdit AND
+  // the caller is the row's Practice Instance Owner (change request
+  // 2026-09-23) -- the trigger cell itself is omitted from the row when
+  // either is missing (see renderList()), so this only has to handle the
+  // one case where permission is present but there is nothing to edit: a
+  // rule with no upcoming occurrence (nextScheduleDateForRule returned
+  // null -- e.g. its end_date has already passed). Same rule the
+  // Calendar's own side panel applies via isScheduleOccurrence /
+  // statusLower checks, adapted to what a List row actually has (no
+  // per-occurrence status).
+  function buildSchedulerRowMenu(row) {
+    // Task Calendar Edit Scheduler (2026-09-23): a daily-frequency rule
+    // has no valid edit left (see isDailyFrequency's own comment) --
+    // same reasoning the Calendar side panel now applies, adapted to
+    // what a List row has (no per-occurrence status, so only the
+    // frequency and "is there an upcoming date at all" gate this).
+    const isDaily = isDailyFrequency(row.frequency);
+    const items = [{
+      icon: "fa-pen",
+      label: "Edit",
+      disabled: !row.next || isDaily,
+      disabledReason: !row.next ? "No upcoming occurrence to reschedule."
+        : (isDaily ? "Daily occurrences cannot be rescheduled." : ""),
+      // Reuses the Calendar's existing "Edit Schedule" dialog verbatim
+      // (openEditDialog / submitEdit / saveScheduleOverride) -- same
+      // dialog, same validation, same API. The only thing built here is
+      // a calendar-occurrence-shaped object from this row's rule data,
+      // since the List's `rules` rows and the Calendar's `events` rows are
+      // different shapes even though they both come from
+      // assurance-calendar-events/query (rules is that response's 2nd
+      // result set; events is the 1st, already occurrence-shaped).
+      action: () => openEditDialog({
+        RuleId: row.ruleId,
+        Date: row.next,
+        PracticeInstance: row.practiceInstance,
+        FrequencyName: row.frequency,
+        ObligationId: row.obligationId,
+        PracticeId: row.practiceId,
+        PracticeInstanceId: row.practiceInstanceId,
+        ScheduleKind: row.scheduleKind,
+        Owner: row.owner,
+        OwnerEmployeeId: row.ownerEmployeeId,
+        Criticality: row.criticality,
+        AssuranceMode: row.assuranceMode
+      })
+    }];
+    return items;
+  }
+
+  function wireSchedulerRowMenu() {
+    if (!listView) return;
+    listView.addEventListener("click", ev => {
+      const trigger = ev.target.closest(".pm-action-trigger[data-sched-menu]");
+      if (!trigger || !listView.contains(trigger)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const row = schedulerRowsById.get(trigger.dataset.schedMenu);
+      if (!row) return;
+      if (schedOpenMenuTrigger === trigger) { closeSchedulerRowMenu(); return; }
+      openSchedulerRowMenu(trigger, buildSchedulerRowMenu(row));
+    });
+    document.addEventListener("click", ev => {
+      if (!schedOpenMenuEl) return;
+      if (ev.target.closest(".pm-action-menu")) return;
+      if (ev.target.closest(".pm-action-trigger[data-sched-menu]")) return;
+      closeSchedulerRowMenu();
+    });
+    document.addEventListener("keydown", ev => { if (ev.key === "Escape") closeSchedulerRowMenu(); });
+    window.addEventListener("resize", closeSchedulerRowMenu);
+    window.addEventListener("scroll", closeSchedulerRowMenu, true);
   }
 
   /* ==================================================================
@@ -907,13 +1511,10 @@
      triggers a refresh (which re-fetches with the new payload).
      ================================================================== */
   function applyFilterStateToUI() {
-    // Chip active state (source modules, statuses, criticalities).
-    document.querySelectorAll('[data-cal-filter-group] [data-cal-chip-value]').forEach(btn => {
-      const group = btn.closest('[data-cal-filter-group]').dataset.calFilterGroup; // "sourceModules" / etc.
-      const value = btn.dataset.calChipValue;
-      const active = (filters[group] || []).includes(value);
-      btn.classList.toggle('active', active);
-    });
+    // Sync every multi-select combo (sourceModules / statuses /
+    // criticalities) to filters[group]: tick the matching checkboxes and
+    // refresh the trigger's summary text.
+    document.querySelectorAll('.pm-checkcombo[data-cal-filter-group]').forEach(syncComboFromState);
     // Search text.
     const searchEl = document.getElementById("calFilterSearch");
     if (searchEl) searchEl.value = filters.search || "";
@@ -921,153 +1522,100 @@
     // populate calls complete (see loadFilterDropdowns / attachOwnerPicker).
   }
 
-  function toggleChip(btn) {
-    const group = btn.closest('[data-cal-filter-group]').dataset.calFilterGroup;
-    const value = btn.dataset.calChipValue;
-    const list = filters[group] || [];
-    const idx = list.indexOf(value);
-    if (idx >= 0) list.splice(idx, 1); else list.push(value);
-    filters[group] = list;
-    btn.classList.toggle('active');
-    saveFilterState();
-    refresh();
+  /* ---- Multi-select filter combos (.pm-checkcombo) -----------------
+     These replace the old Modules / Status / Criticality chip rows so
+     the filter set fits on one row. Each combo's data-cal-filter-group
+     names the filters[] array it drives; each option checkbox carries
+     data-cal-chip-value (the same value vocabulary the chips used).
+     Ticking a box rebuilds filters[group] from the checked boxes and
+     refreshes -- functionally identical to the old toggleChip, so the
+     API payload and persisted state are unchanged. */
+  const COMBO_META = {
+    statuses     : { noun: "statuses",      allWhenFull: false },
+    criticalities: { noun: "criticalities", allWhenFull: false }
+  };
+  function comboBoxes(combo) {
+    return Array.from(combo.querySelectorAll('input[type="checkbox"][data-cal-chip-value]'));
   }
-
-  document.querySelectorAll('[data-cal-filter-group] [data-cal-chip-value]').forEach(btn => {
-    btn.addEventListener('click', () => toggleChip(btn));
-  });
-
-  // Owner picker (role + employee) -- self-contained inline picker since
-  // the Calendar page doesn't render _workflow-common.cshtml. Uses the
-  // same /practice/api/org-roles endpoints as the shared picker.
-  async function loadOwnerRoles(orgId) {
-    if (!orgId) return [];
-    try {
-      const r = await fetch(buildAppUrl(`practice/api/org-roles?organizationId=${encodeURIComponent(orgId)}`),
-        { credentials: "same-origin" });
-      if (!r.ok) return [];
-      const j = await r.json();
-      return j.data || j.Data || [];
-    } catch { return []; }
-  }
-  async function loadRoleHolders(orgId, roleId) {
-    if (!orgId || !roleId) return [];
-    try {
-      const r = await fetch(buildAppUrl(`practice/api/org-roles/${encodeURIComponent(roleId)}/holders?organizationId=${encodeURIComponent(orgId)}`),
-        { credentials: "same-origin" });
-      if (!r.ok) return [];
-      const j = await r.json();
-      return j.data || j.Data || [];
-    } catch { return []; }
-  }
-  function fillOwnerRoleSelect() {
-    const sel = document.getElementById("calFilterOwnerRole");
-    if (!sel) return;
-    sel.innerHTML = '<option value="">All roles</option>';
-    ownerRoleCache.forEach(r => {
-      const id   = r.roleId || r.RoleId || r.id;
-      const name = r.roleName || r.RoleName || r.name || `Role ${id}`;
-      const opt = document.createElement("option");
-      opt.value = String(id);
-      opt.textContent = name;
-      opt.setAttribute("data-name", name);
-      if (String(filters.ownerRoleId || "") === String(id)) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  }
-  function fillOwnerEmpSelect() {
-    const sel = document.getElementById("calFilterOwnerEmp");
-    if (!sel) return;
-    sel.innerHTML = filters.ownerRoleId
-      ? '<option value="">All holders</option>'
-      : '<option value="">-- pick a role first --</option>';
-    ownerHolderCache.forEach(h => {
-      const id   = h.employeeId || h.EmployeeId || h.id;
-      const name = h.employeeName || h.EmployeeName || h.name || `Employee ${id}`;
-      const opt = document.createElement("option");
-      opt.value = String(id);
-      opt.textContent = name;
-      opt.setAttribute("data-name", name);
-      if (String(filters.ownerEmployeeId || "") === String(id)) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  }
-  async function refreshOwnerPicker(alsoResetSelection) {
-    if (!selectedOrgId) {
-      ownerRoleCache = []; ownerHolderCache = [];
-      fillOwnerRoleSelect(); fillOwnerEmpSelect();
-      return;
-    }
-    ownerRoleCache = await loadOwnerRoles(selectedOrgId);
-    if (alsoResetSelection) {
-      filters.ownerRoleId = null; filters.ownerRoleName = null;
-      filters.ownerEmployeeId = null; filters.ownerEmpName = null;
-      ownerHolderCache = [];
-    } else if (filters.ownerRoleId) {
-      ownerHolderCache = await loadRoleHolders(selectedOrgId, filters.ownerRoleId);
+  function updateComboSummary(combo) {
+    const group = combo.dataset.calFilterGroup;
+    const meta = COMBO_META[group] || { noun: "items", allWhenFull: false };
+    const boxes = comboBoxes(combo);
+    const total = boxes.length;
+    // Only count values that actually exist as options in this combo.
+    const sel = (filters[group] || []).filter(v => boxes.some(b => b.dataset.calChipValue === v));
+    const textEl = combo.querySelector("[data-checkcombo-text]");
+    if (!textEl) return;
+    let label, isDefault;
+    if (sel.length === 0 || (meta.allWhenFull && sel.length === total)) {
+      // Empty status/criticality = no constraint (all shown); a full
+      // module set is the "all" default too -- both read as "All ...".
+      label = "All " + meta.noun; isDefault = true;
     } else {
-      ownerHolderCache = [];
+      label = sel.length + " of " + total; isDefault = false;
     }
-    fillOwnerRoleSelect();
-    fillOwnerEmpSelect();
+    textEl.innerHTML = "";
+    const span = document.createElement("span");
+    span.className = "pm-checkcombo-summary" + (isDefault ? " is-default" : "");
+    span.textContent = label;
+    textEl.appendChild(span);
   }
-
-  document.getElementById("calFilterOwnerRole")?.addEventListener("change", async e => {
-    const opt = e.target.options[e.target.selectedIndex];
-    filters.ownerRoleId = e.target.value ? Number(e.target.value) : null;
-    filters.ownerRoleName = opt ? (opt.getAttribute("data-name") || null) : null;
-    // Reset employee side when role changes.
-    filters.ownerEmployeeId = null; filters.ownerEmpName = null;
-    ownerHolderCache = filters.ownerRoleId
-      ? await loadRoleHolders(selectedOrgId, filters.ownerRoleId)
-      : [];
-    fillOwnerEmpSelect();
-    saveFilterState();
-    refresh();
-  });
-  document.getElementById("calFilterOwnerEmp")?.addEventListener("change", e => {
-    const opt = e.target.options[e.target.selectedIndex];
-    filters.ownerEmployeeId = e.target.value ? Number(e.target.value) : null;
-    filters.ownerEmpName = opt ? (opt.getAttribute("data-name") || null) : null;
-    saveFilterState();
-    refresh();
-  });
-
-  // Definition dropdown -- fetched once per org, cached across refreshes.
-  async function loadDefinitionsForOrg(orgId) {
-    if (!orgId) return [];
-    try {
-      const r = await fetch(buildAppUrl(`practice/api/org-assurance/definitions?organizationId=${encodeURIComponent(orgId)}&page=1&pageSize=200`),
-        { credentials: "same-origin" });
-      if (!r.ok) return [];
-      const j = await r.json();
-      return j.rows || j.Rows || [];
-    } catch { return []; }
+  function syncComboFromState(combo) {
+    const group = combo.dataset.calFilterGroup;
+    const set = new Set(filters[group] || []);
+    comboBoxes(combo).forEach(b => { b.checked = set.has(b.dataset.calChipValue); });
+    updateComboSummary(combo);
   }
-  function fillDefinitionSelect() {
-    const sel = document.getElementById("calFilterDefinition");
-    if (!sel) return;
-    sel.innerHTML = '<option value="">All definitions</option>';
-    definitionsCache.forEach(d => {
-      const id   = d.definitionId || d.DefinitionId;
-      const name = d.definitionName || d.DefinitionName || "";
-      const code = d.definitionCode || d.DefinitionCode || "";
-      const opt = document.createElement("option");
-      opt.value = String(id);
-      opt.textContent = code ? `${name} (${code})` : name;
-      if (String(filters.definitionId || "") === String(id)) opt.selected = true;
-      sel.appendChild(opt);
+  function filterComboOptions(combo, q) {
+    const needle = (q || "").trim().toLowerCase();
+    combo.querySelectorAll("[data-checkcombo-option]").forEach(opt => {
+      opt.hidden = needle ? !opt.textContent.toLowerCase().includes(needle) : false;
     });
   }
-  async function refreshDefinitionsFilter() {
-    definitionsCache = selectedOrgId ? await loadDefinitionsForOrg(selectedOrgId) : [];
-    fillDefinitionSelect();
+  function closeAllCombos(except) {
+    document.querySelectorAll('.pm-checkcombo[data-cal-filter-group].open').forEach(c => {
+      if (c === except) return;
+      c.classList.remove("open");
+      const menu = c.querySelector(".pm-checkcombo-menu");
+      const trig = c.querySelector(".pm-checkcombo-trigger");
+      if (menu) menu.hidden = true;
+      if (trig) trig.setAttribute("aria-expanded", "false");
+    });
   }
-  document.getElementById("calFilterDefinition")?.addEventListener("change", e => {
-    filters.definitionId = e.target.value ? Number(e.target.value) : null;
-    saveFilterState();
-    refresh();
-  });
+  function initCheckCombo(combo) {
+    const trigger = combo.querySelector(".pm-checkcombo-trigger");
+    const menu = combo.querySelector(".pm-checkcombo-menu");
+    const search = combo.querySelector(".pm-checkcombo-search");
+    const group = combo.dataset.calFilterGroup;
+    if (!trigger || !menu) return;
+
+    trigger.addEventListener("click", e => {
+      e.stopPropagation();
+      const willOpen = menu.hidden;
+      closeAllCombos(combo);
+      menu.hidden = !willOpen;
+      combo.classList.toggle("open", willOpen);
+      trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      if (willOpen && search) { search.value = ""; filterComboOptions(combo, ""); search.focus(); }
+    });
+    // Clicks inside the open menu must not bubble to the document closer.
+    menu.addEventListener("click", e => e.stopPropagation());
+    if (search) search.addEventListener("input", () => filterComboOptions(combo, search.value));
+
+    comboBoxes(combo).forEach(box => {
+      box.addEventListener("change", () => {
+        filters[group] = comboBoxes(combo).filter(b => b.checked).map(b => b.dataset.calChipValue);
+        updateComboSummary(combo);
+        saveFilterState();
+        refresh();
+      });
+    });
+  }
+
+  document.querySelectorAll('.pm-checkcombo[data-cal-filter-group]').forEach(initCheckCombo);
+  // One document-level closer for every combo (outside click + Escape).
+  document.addEventListener("click", () => closeAllCombos(null));
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeAllCombos(null); });
 
   // Search input -- debounced so we don't refetch on every keystroke.
   let searchDebounce = null;
@@ -1081,13 +1629,10 @@
   });
 
   // Reset button -- clears every filter to defaults + re-syncs the UI.
-  document.getElementById("calFilterReset")?.addEventListener("click", async () => {
+  document.getElementById("calFilterReset")?.addEventListener("click", () => {
     filters = defaultFilters();
     saveFilterState();
     applyFilterStateToUI();
-    // Owner + Definition selects need to be re-populated too.
-    await refreshOwnerPicker(true);
-    fillDefinitionSelect();
     refresh();
   });
 
@@ -1100,31 +1645,23 @@
   document.querySelectorAll(".cal-view-toggle .pm-button").forEach(btn => {
     btn.addEventListener("click", () => setView(btn.dataset.calView));
   });
-
-  orgFilter?.addEventListener("change", async () => {
-    selectedOrgId = orgFilter.value;
-    // 122 unified: owner + definition dropdowns are per-org. Reset the
-    // selected role/employee/definition so we don't carry a filter from
-    // Org A into Org B (would silently show 0 events).
-    await refreshOwnerPicker(true);
-    filters.definitionId = null;
-    saveFilterState();
-    await refreshDefinitionsFilter();
-    refresh();
+  document.querySelectorAll("#calModeToggle .pm-button").forEach(btn => {
+    btn.addEventListener("click", () => setMode(btn.dataset.calMode));
   });
 
-  document.getElementById("calGenerate")?.addEventListener("click", openGenerateDialog);
-  document.getElementById("calGenerateClose")?.addEventListener("click", () => document.getElementById("calGenerateDialog").close());
-  document.getElementById("calGenerateCancel")?.addEventListener("click", () => document.getElementById("calGenerateDialog").close());
-  document.getElementById("calGenerateSubmit")?.addEventListener("click", submitGenerate);
+  orgFilter?.addEventListener("change", () => {
+    selectedOrgId = orgFilter.value;
+    refresh();
+  });
 
   document.getElementById("calEditClose")?.addEventListener("click", () => document.getElementById("calEditDialog").close());
   document.getElementById("calEditCancel")?.addEventListener("click", () => document.getElementById("calEditDialog").close());
   document.getElementById("calEditSubmit")?.addEventListener("click", submitEdit);
 
-  document.getElementById("editAction")?.addEventListener("change", e => {
-    document.getElementById("editNewDateField").hidden = e.target.value === "Skip";
-  });
+  // Schedule List's 3-dot Edit action -- delegated, wired once (renderList()
+  // rebuilds listView's innerHTML on every render, so per-row listeners
+  // would leak and need re-wiring on every keystroke of the search box).
+  wireSchedulerRowMenu();
 
   // Close side panel on Escape
   document.addEventListener("keydown", e => {
@@ -1133,7 +1670,7 @@
 
   /* ── Init ── */
   (async () => {
-    // Step 1: restore chip / search UI from saved filter state so the
+    // Step 1: restore combo / search UI from saved filter state so the
     // page loads showing exactly what the user last saw (defaults on
     // first visit = all modules ON, no other constraints).
     applyFilterStateToUI();
@@ -1146,16 +1683,7 @@
     // fetch, so we don't need a second round-trip.
     await loadOrganizationsFromLookups();
 
-    // Step 3: for the current org, populate the Owner (role+employee)
-    // and Definition dropdowns in parallel with the first events fetch.
-    // These calls are per-org and cheap; running them concurrently keeps
-    // TTI snappy.
-    await Promise.all([
-      refreshOwnerPicker(false),
-      refreshDefinitionsFilter()
-    ]);
-
-    // Step 4: fetch events. loadCalendarEvents still checks the response
+    // Step 3: fetch events. loadCalendarEvents still checks the response
     // for an embedded organizations result set (legacy path) and will
     // populate the dropdowns from there if lookups came back empty.
     await refresh();

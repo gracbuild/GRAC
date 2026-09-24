@@ -8,7 +8,17 @@
       2. Save view   -- full-page Add/Edit form with Back-to-list
       3. Workflow    -- split pane: decision form on the left,
                         PDF viewer on the right (matches the
-                        legacy GRAC Plus review/approve screens)
+                        legacy GRAC Plus review/approve screens).
+                        Doubles as the plain read/view pane (no
+                        transition, decision/remark/submit hidden --
+                        see docWorkflowActions) opened from the row
+                        menu's "View" action, so the document is read
+                        in-page via a same-origin blob: iframe rather
+                        than opened as a raw file in a new browser tab
+                        -- that would hand the user the browser's own
+                        native PDF viewer chrome (download / print /
+                        "save to Drive"). No download or print control
+                        is offered from either mode of this pane.
 
     NOT in scope for this partial (arrives in Phase 2):
       * Acknowledgement creation and user-side acknowledgement screens.
@@ -171,9 +181,11 @@
 </section>
 
 @* =============================================================
-   VIEW 3 -- Workflow (Review / Approve) as split pane
-   Left: decision form. Right: PDF viewer of the current file.
-   Matches the legacy GRAC Plus review/approve screen layout.
+   VIEW 3 -- Workflow (Review / Approve) as split pane, and plain
+   read/view (row menu "View" action -- no transition).
+   Left: decision form (hidden for plain view). Right: PDF viewer of
+   the current file. Matches the legacy GRAC Plus review/approve
+   screen layout. No download/print control anywhere in this pane.
    ============================================================= *@
 <section class="pm-panel" id="docWorkflowView" hidden>
 
@@ -194,25 +206,34 @@
                 <input type="hidden" id="docWorkflowDocumentId" />
                 <input type="hidden" id="docWorkflowTransition" />
 
-                <label>
-                    <span>Decision</span>
-                    <select id="docWorkflowDecision">
-                        <option value="Approve">Approve</option>
-                        <option value="Reject">Reject</option>
-                    </select>
-                </label>
+                @* Decision / Remark / Submit are Review-Approve-only. Plain
+                   "View" (no workflow transition -- see showWorkflowView's
+                   isViewOnly branch in document-uploads.js) hides this whole
+                   block via the id below, leaving only the meta panel and
+                   the read-only PDF pane -- "Back to list" above still
+                   provides the way out, so nothing here is needed to close
+                   the pane. *@
+                <div id="docWorkflowActions">
+                    <label>
+                        <span>Decision</span>
+                        <select id="docWorkflowDecision">
+                            <option value="Approve">Approve</option>
+                            <option value="Reject">Reject</option>
+                        </select>
+                    </label>
 
-                <label>
-                    <span>Remark</span>
-                    <textarea id="docWorkflowRemark" rows="6" maxlength="5000"
-                              placeholder="Explain the decision..."></textarea>
-                </label>
+                    <label>
+                        <span>Remark</span>
+                        <textarea id="docWorkflowRemark" rows="6" maxlength="5000"
+                                  placeholder="Explain the decision..."></textarea>
+                    </label>
 
-                <p class="pm-form-message" id="docWorkflowMessage" role="status" aria-live="polite"></p>
+                    <p class="pm-form-message" id="docWorkflowMessage" role="status" aria-live="polite"></p>
 
-                <div class="pm-toolbar" style="justify-content: flex-end;">
-                    <button type="button" class="pm-button" data-doc-back>Cancel</button>
-                    <button type="submit" class="pm-button primary">Submit</button>
+                    <div class="pm-toolbar" style="justify-content: flex-end;">
+                        <button type="button" class="pm-button" data-doc-back>Cancel</button>
+                        <button type="submit" class="pm-button primary">Submit</button>
+                    </div>
                 </div>
             </form>
         </aside>
@@ -225,8 +246,6 @@
             <iframe id="docWorkflowPdf" title="Document preview" src="about:blank"></iframe>
             <div id="docWorkflowPdfEmpty" class="doc-workflow-pdf-fallback" hidden>
                 <p id="docWorkflowPdfMessage">Loading document preview...</p>
-                <a id="docWorkflowPdfLink" class="pm-button primary" href="#" target="_blank"
-                   rel="noopener">Open in new tab</a>
             </div>
         </div>
     </div>

@@ -33,10 +33,16 @@ builder.Services.AddPracticeCustomGapService();
 builder.Services.AddPracticeWorkflowService();
 // Role / asset-category scoped event assurance (migrations 123/124).
 builder.Services.AddPracticeEventScopeService();
+// Attribute-based Profiles for the same scoping -- Location / Department /
+// Role and whatever else is seeded later (migrations 329-332).
+builder.Services.AddPracticeEventProfileService();
 // Practice view page + Configure (one instance per team) -- migration 139.
 builder.Services.AddPracticeConfigureService();
 // Resolve workspace: owner-scoped list + obligations/dependencies -- 140/141.
 builder.Services.AddPracticeResolveWorkspace();
+// Practice-level obligations: authored once against a practice, fanned out
+// to every instance of it -- migration 307.
+builder.Services.AddPracticeObligationService();
 builder.Services.AddPracticeFeatureFlagService();
 builder.Services.AddPracticeOrganizationAccessService();
 builder.Services.AddPracticeInstanceWorkflow();
@@ -61,6 +67,12 @@ builder.Services.AddPracticeRiskCentreService();
 // New, INDEPENDENT module. Does not touch existing assurance/workflow/task engines.
 builder.Services.AddOrgAssuranceDefinitionService();
 builder.Services.AddOrgAssuranceQuestionService();
+// Phase 2 Audit Management -- audit/question-set adoption (277) and the
+// setup-status roll-up behind the flow tab chips (278).
+builder.Services.AddOrgAssuranceSetupService();
+// Reusable cascading Practice Picker (282): framework -> source structure
+// -> control -> practice. Read-only lookups.
+builder.Services.AddPracticePickerService();
 builder.Services.AddOrgAssurancePlanService();
 builder.Services.AddOrgAssuranceExecutionService();
 builder.Services.AddOrgAssuranceObservationService();

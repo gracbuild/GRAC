@@ -189,8 +189,8 @@
         <td>${escapeHtml(r.versionNumber)}</td>
         <td>${escapeHtml(r.documentStage)}</td>
         <td>${escapeHtml(r.documentStatus)}</td>
-        <td>${r.nextReviewDate ? new Date(r.nextReviewDate).toLocaleDateString() : "--"}</td>
-        <td>${r.lastActivityDt ? new Date(r.lastActivityDt).toLocaleString() : "--"}</td>
+        <td>${r.nextReviewDate ? window.gracFormatDateOnly(r.nextReviewDate) : "--"}</td>
+        <td>${r.lastActivityDt ? window.gracFormatDisplayDate(r.lastActivityDt) : "--"}</td>
         <td>
           <button type="button" class="pm-action-trigger" data-doc-menu="${r.documentId}"
                   aria-haspopup="menu" aria-expanded="false" title="Actions">
@@ -270,10 +270,17 @@
 
     // Base actions available for every document regardless of stage.
     const items = [
+      // Read-only view, in-page: fetches the file into a same-origin
+      // blob: URL and shows it in the workflow pane's PDF iframe with
+      // Decision/Remark/Submit hidden (see showWorkflowView's isViewOnly
+      // branch). Deliberately NOT window.open() of the raw file endpoint
+      // -- that would open the browser's own native PDF viewer in a new
+      // tab, which carries its own Download / Print / "Save to Drive"
+      // controls that this app has no way to suppress. Matches the same
+      // no-download/no-print pattern the Review/Approve pane and My
+      // Acknowledgements' read pane already use.
       { icon: "fa-eye", label: "View",
-        action: () => window.open(U(`${base}/${id}/file?inline=true`), "_blank") },
-      { icon: "fa-download", label: "Download",
-        action: () => window.open(U(`${base}/${id}/file`), "_blank") },
+        action: () => showWorkflowView(id, null, "View Document") },
       { icon: "fa-pen", label: "Edit",
         action: () => showSaveView(id) }
     ];
@@ -296,7 +303,8 @@
       label: status === "Active" ? "Retire" : "Reactivate",
       action: async () => {
         const verb = status === "Active" ? "Retire" : "Reactivate";
-        if (!confirm(`${verb} this document?`)) return;
+        if (!await window.gracUi.confirm(`${verb} this document?`,
+              { type: "warning", title: `${verb} document`, confirmText: verb })) return;
         await apiPost(`${id}/toggle-status?organizationId=${state.organizationId}`, {
           callerEmployeeId:  window.pmEmployeeId ? Number(window.pmEmployeeId) : null,
           callerDisplayName: window.pmUserName || null
@@ -463,12 +471,21 @@
   }
 
   // -------------------- workflow view (split pane with PDF) ------------
+  // transition is null/empty for a plain read-only "View" (row menu,
+  // every stage) -- Decision/Remark/Submit hide in that case, and only
+  // the read-only PDF pane + meta panel show. Non-empty transition is
+  // the existing Review/Approve decision flow, unchanged.
   async function showWorkflowView(documentId, transition, title) {
+    const isViewOnly = !transition;
     document.getElementById("docWorkflowDocumentId").value = documentId;
-    document.getElementById("docWorkflowTransition").value = transition;
+    document.getElementById("docWorkflowTransition").value = transition || "";
     document.getElementById("docWorkflowTitle").textContent = title;
-    document.getElementById("docWorkflowDecision").value = "Approve";
-    document.getElementById("docWorkflowRemark").value = "";
+    const actionsEl = document.getElementById("docWorkflowActions");
+    if (actionsEl) actionsEl.hidden = isViewOnly;
+    if (!isViewOnly) {
+      document.getElementById("docWorkflowDecision").value = "Approve";
+      document.getElementById("docWorkflowRemark").value = "";
+    }
     document.getElementById("docWorkflowMessage").textContent = "";
 
     // Load metadata for the left summary panel.
@@ -490,13 +507,12 @@
     // iframe. This bypasses X-Frame-Options / CSP frame-ancestors headers
     // set by upstream reverse proxies (IIS / nginx / CDN) which would
     // otherwise show "refused to connect" in the iframe on production.
-    // The plain server URL is kept as the "Open in new tab" fallback.
+    // The blob URL is loaded with #toolbar=0 so the browser PDF viewer
+    // shows no download/print/save controls in the read/view.
     const fileUrl = U(`${base}/${documentId}/file?inline=true`);
     const iframe  = document.getElementById("docWorkflowPdf");
     const empty   = document.getElementById("docWorkflowPdfEmpty");
     const msg2    = document.getElementById("docWorkflowPdfMessage");
-    const link    = document.getElementById("docWorkflowPdfLink");
-    if (link) link.setAttribute("href", fileUrl);
 
     // Reset viewer + release any earlier blob URL to avoid a memory leak.
     if (iframe) {
@@ -522,13 +538,13 @@
       const url = URL.createObjectURL(typed);
       if (iframe) {
         iframe.dataset.blobUrl = url;
-        iframe.setAttribute("src", url);
+        iframe.setAttribute("src", url + "#toolbar=0");
       }
-      // If it wasn't a PDF, also surface the fallback so the user can
-      // download it via the "Open in new tab" link on top of the preview.
+      // If it wasn't a PDF, surface a note that the preview may not render.
+      // No download/open-in-new-tab is offered from the read/view.
       if (!ct.includes("pdf") && empty) {
         empty.hidden = false;
-        msg2.textContent = `Preview may not render for this file type (${ct || "unknown"}). Use "Open in new tab" to download.`;
+        msg2.textContent = `Preview may not render for this file type (${ct || "unknown"}).`;
       }
     } catch (err) {
       console.error("[docs] pdf preview failed", err);
@@ -543,8 +559,14 @@
     const msg = document.getElementById("docWorkflowMessage");
     msg.textContent = "";
     const id  = document.getElementById("docWorkflowDocumentId").value;
+    const transition = document.getElementById("docWorkflowTransition").value;
+    // Defense in depth: the form/button are hidden (docWorkflowActions)
+    // whenever this pane is in plain-view mode, so this should be
+    // unreachable -- but never call the workflow endpoint without an
+    // actual transition to apply.
+    if (!transition) return;
     const payload = {
-      transition:        document.getElementById("docWorkflowTransition").value,
+      transition:        transition,
       decision:          document.getElementById("docWorkflowDecision").value,
       remark:            document.getElementById("docWorkflowRemark").value,
       callerEmployeeId:  window.pmEmployeeId ? Number(window.pmEmployeeId) : null,

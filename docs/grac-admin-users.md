@@ -3,8 +3,9 @@
 How a database account is given the reach that `admin@grac.local` has,
 and why that takes two independent grants rather than one.
 
-**Migrations:** `220_grac_admin_users.sql` / `220_..._rollback.sql`, on top
-of `027` (role_code, `organization_employee_role`), `032`/`034`
+**Migrations:** `220_grac_admin_users.sql` / `220_..._rollback.sql` and
+`223_grac_admin_default_access.sql` / `223_..._rollback.sql`, on top of
+`027` (role_code, `organization_employee_role`), `032`/`034`
 (`data_scope`, `force_password_change`), `133`+`208` (`sp_org_user_save`),
 `217` (`pm_grant_organization_default_access`).
 **Backend:** `Api/Services/PracticeAuthenticationService.cs`
@@ -41,6 +42,24 @@ That branch does three things no database sign-in does:
 Nothing in `grac_practice` backs it, so no employee row can *be* that
 account. What a database account can have is the equivalent, and the
 equivalent is two separate grants.
+
+> **Update (migration 322):** `database/322_organization1_admin_user.sql`
+> gives organisation 1 a real database row under this exact email —
+> `admin@grac.local`, name `Admin`. That row does **not** carry GLOBAL
+> scope or `PM_ADMIN`: it is an ordinary `ORGANIZATION`-scoped `Admin`
+> role confined to organisation 1, created through
+> `pm_create_organization_admin` (034), the same as any other
+> organisation's admin. The opening claim above — "no employee row can
+> *be* that account" — is therefore no longer literally true for
+> organisation 1's slice of it. `LoginController.Index` authenticates
+> against the database first, so signing in with this row's password now
+> reaches this narrower, org-1-only account instead of falling through to
+> ReviewLogin. Signing in with the ReviewLogin config's own password
+> still falls through exactly as before, because it will not verify
+> against this row's hash. See `322_organization1_admin_user.sql`'s
+> header for the full reasoning, and
+> `database/_setup_admin_employee_identity.sql` for the non-login-capable
+> alternative that script deliberately does not use.
 
 ## Two gates, and neither implies the other
 
@@ -81,18 +100,50 @@ holds the same role.
 Migration 220 creates `GRAC Admin` / `role_code = 'GRAC_ADMIN'` instead.
 The name is outside 034's filter, so the GLOBAL scope survives.
 
-### The cost of that choice
-
-`pm_grant_organization_default_access` tops up roles matching
-`role_name = 'Admin' OR role_code = 'ORG_ADMIN'`. `GRAC_ADMIN` is
-outside that filter, so **a menu added by a future module does not reach
-this role on its own**. Re-run section 2 of `220_grac_admin_users.sql`
-(idempotent) after any migration that seeds new menus, or widen the
-proc's filter if these roles become a permanent fixture.
-
-`role_code = 'ORG_ADMIN'` could not simply be reused: index
+`role_code = 'ORG_ADMIN'` could not simply be reused either: index
 `ux_pm_org_role_code` is `UNIQUE(organization_id, role_code)` and the
 organisation's own admin role already holds it.
+
+### The cost of that choice — and migration 223, which pays it off
+
+Choosing a different name had a price, and it came due almost
+immediately: Document Uploads, Document Acknowledgements and My
+Acknowledgements all answered **"No permission"** for the GRAC Admin
+users.
+
+Two migrations that never met:
+
+* The document module seeds its own menus **and grants them itself** —
+  149, 152 and 154 each MERGE a permission row `WHERE r.role_name =
+  N'Admin'`, a hardcoded role name. Every module seed since 042 follows
+  that pattern.
+* `pm_grant_organization_default_access` — the designated top-up path —
+  filtered on `role_name = 'Admin' OR role_code = 'ORG_ADMIN'`.
+
+`GRAC_ADMIN` matched neither. Migration 220 granted it every menu that
+existed **at the time** and said so in its own header: *"a menu_master
+row added by a FUTURE module will not reach this role on its own. Re-run
+section 2 of this script after any migration that seeds new menus."*
+That standing manual step is exactly what got missed.
+
+**Migration 223** adds one predicate to 217's proc —
+`OR r.role_code = N'GRAC_ADMIN'` — and runs it for every active
+organisation. Re-running 220 would have fixed the symptom and left the
+cause: the next module to seed a menu re-opens it, and nothing in the
+code would say so. 217 exists so that "which roles get default access"
+is answered in one place; `GRAC_ADMIN` belongs in that answer.
+
+What 223 does **not** change: a future module following the 149 pattern
+still grants only `role_name = 'Admin'` at seed time. From here on 217's
+proc catches what those seeds miss — for `GRAC_ADMIN` and `ORG_ADMIN`
+alike — and `pm_create_organization_admin` calls it on every
+organisation onboarding.
+
+> **Permissions are baked in at sign-in.**
+> `LoadPermissionsAsync` builds the token list once, during
+> authentication, and `SignIn` stores it in the session. A grant added
+> while somebody is logged in does nothing until their next sign-in.
+> Every grant migration in this family therefore ends by saying so.
 
 ## Why the accounts go through `sp_org_user_save`
 

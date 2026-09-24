@@ -1,0 +1,67 @@
+@*
+    Audit Configuration flow (migration 276) -- Phase 1.
+
+    Screen key : `org-audit-configuration`
+    Group      : Audit Management
+    Menu       : nav-assurance ("Audit Management") -> Audit Configuration
+                 (a clickable parent: a real page AND the parent of the
+                 five screens it hosts)
+
+    How the audit operates, once it is defined:
+        1. Evidence Configuration -> org-assurance-evidence-config
+        2. Workflow Configuration -> org-assurance-workflow-config
+        3. Scoring Configuration  -> org-assurance-scoring-config
+        4. Trigger                -> org-assurance-triggers
+        5. Scope Resolution       -> org-assurance-scope-resolution
+
+    ORDER, AND WHY
+      All five are keyed on (org_assurance_definition_id,
+      org_assurance_definition_version_id), so they share one audit
+      context and the first four are independent of each other -- the
+      order is the BRD reading order (Sec 5, 6, 7, 9), not a dependency
+      chain. Scope Resolution is last on purpose: it RESOLVES the scope
+      authored in the Audit Definition flow into a snapshot, so it is
+      the step that is meaningful only once the rest is in place. Its
+      snapshots are immutable, which makes it the natural closing
+      review step.
+
+    ASSURANCE PLANS IS DELIBERATELY NOT A STEP HERE
+      org_assurance_plan is organization-scoped and its items each
+      reference a definition, so one plan spans several audits. Nesting
+      it inside a per-audit stepper would invert that relationship, so
+      it stays its own item under Audit Management.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var flow = new AuditFlowShell(Model, "oaAuditConfigurationFlow",
+    new AuditFlowStep[]
+    {
+        new AuditFlowStep(
+            "evidence",
+            "Evidence",
+            "What evidence the audit collects, how it is collected, and what is mandatory.",
+            "Partials/org-assurance-evidence-config"),
+        new AuditFlowStep(
+            "workflow",
+            "Workflow",
+            "The stages the audit moves through, who owns each one, and the SLA.",
+            "Partials/org-assurance-workflow-config"),
+        new AuditFlowStep(
+            "scoring",
+            "Scoring",
+            "How results are scored: model type, thresholds and outcome bands.",
+            "Partials/org-assurance-scoring-config"),
+        new AuditFlowStep(
+            "trigger",
+            "Trigger",
+            "What starts the audit -- a schedule, an event, a continuous source, or a person.",
+            "Partials/org-assurance-triggers"),
+        new AuditFlowStep(
+            "scope-resolution",
+            "Scope Resolution",
+            "Resolve the authored scope into an immutable snapshot of the entities the audit will cover.",
+            "Partials/org-assurance-scope-resolution")
+    });
+}
+
+<partial name="Partials/_audit-flow-shell" model="flow" />

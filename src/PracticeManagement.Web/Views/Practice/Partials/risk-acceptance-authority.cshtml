@@ -1,0 +1,195 @@
+@*
+    Risk Acceptance Approval Authority -- migration 271.
+
+    Screen key : `risk-acceptance-authority`
+    Group      : Organization
+    Menu       : nav-organization -> Risk Acceptance Approval Authority
+
+    AN ORGANIZATION CONFIGURATION SCREEN, NOT A RISK MODULE ONE.
+    It follows org-sla-config's conventions -- pm-page-heading compact,
+    an org picker in a pm-toolbar, a pm-panel and a pm-table-wrap grid --
+    so it reads as a native Organization page rather than a Risk screen
+    that happens to live under a different menu.
+
+    WHAT IT CONFIGURES
+    Who may approve ACCEPTING a risk, per rating level, separately for
+    the inherent score and the residual one. Those are different
+    decisions: accepting a Critical risk as-is is not the same act as
+    accepting one whose residual score is Low after treatment, and they
+    are routinely different people.
+
+    THE LEVELS ARE NOT A FIXED LIST
+    Rows come from this organisation's own risk_matrix_cell. rating_code
+    is free text by design (204) and the matrix is per-organisation, so a
+    four-band matrix shows four rows and a five-band one shows five, with
+    no code change. Hard-coding five would have produced rows the matrix
+    can never emit and omitted 'Medium', which it emits constantly.
+
+    IT DOES NOT REPLACE org_risk_config
+    212's approver_role_id still applies wherever a level has no row.
+    Levels using it are labelled, so an unconfigured row reads as
+    "falls back to X" rather than as "nobody approves this".
+
+    Backend:
+        GET  /practice/api/risk-centre/acceptance-authority?organizationId=
+        POST /practice/api/risk-centre/acceptance-authority
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>
+            Who may approve accepting a risk, per rating level &mdash; separately for the
+            inherent score and the residual score after treatment.
+        </p>
+    </div>
+</div>
+
+<section class="pm-panel" id="raaRoot">
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <span>Organization</span>
+            <select id="raaPickOrg"
+                    style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:260px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="raaReloadBtn" type="button">Reload</button>
+        </div>
+    </div>
+
+    @* The 212 settings this page defers to. Shown because an
+       unconfigured level is not "unapproved" -- it falls back here, and
+       hiding that would make the grid look emptier than it is.
+
+       Styled locally as .raa-note rather than reusing Risk Centre's
+       .risk-gate: that class is declared inside risk-centre.cshtml's own
+       <style> block, which this page never loads, so borrowing the name
+       would have rendered an unstyled div. *@
+    <div id="raaFallback" class="raa-note" style="display:none;"></div>
+
+    <div id="raaMessage" hidden
+         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap" style="margin-top:12px;">
+        <table id="raaTable">
+            <thead>
+                @* Widths live in CSS, not inline, so the two authority
+                   columns share ONE rule and cannot drift apart. *@
+                <tr>
+                    <th class="raa-col-level">Risk level</th>
+                    <th class="raa-col-auth">Inherent risk &mdash; approval authority</th>
+                    <th class="raa-col-same">Residual same as inherent</th>
+                    <th class="raa-col-auth">Residual risk &mdash; approval authority</th>
+                </tr>
+            </thead>
+            <tbody id="raaTableBody">
+                <tr><td colspan="4" class="pm-empty-row">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="ra-actionbar" style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px;">
+        <p class="pm-hint" style="margin:0;">
+            Leaving a level unset is allowed &mdash; it falls back to the organisation's
+            general risk approver. Every change is recorded with its old and new value.
+        </p>
+        <div style="display:flex; gap:8px;">
+            <button type="button" class="pm-button" id="raaResetBtn">Discard changes</button>
+            <button type="button" class="pm-button primary" id="raaSaveBtn">
+                <i class="fa-solid fa-floppy-disk"></i> Save
+            </button>
+        </div>
+    </div>
+</section>
+
+<style>
+    /* The fallback notice. Declared here rather than borrowed from Risk
+       Centre's .risk-gate, which lives in that partial's own style block
+       and is not loaded on this page. */
+    #raaRoot .raa-note {
+        padding: 10px 12px; border-radius: 6px; font-size: 12px;
+        background: #ebf8ff; border: 1px solid #bee3f8; color: #2a4365;
+        margin-bottom: 10px;
+    }
+    /* No general approver configured: an unset level then has no
+       authority at all, which is a warning rather than information. */
+    #raaRoot .raa-note.is-blocked {
+        background: #fffaf0; border-color: #fbd38d; color: #7b341e;
+    }
+
+    /* ---- Column widths -------------------------------------------
+       table-layout: fixed is what makes the two authority columns
+       PROVABLY equal. Left on auto, the browser sizes each column by
+       its content, and the inherent column carries an extra
+       "Currently X (organisation default)" hint on some rows -- so the
+       two halves of a matrix that is meant to read as a pair drifted
+       apart by however long that role name happened to be.
+
+       Fixed layout also means the declared widths are honoured exactly
+       rather than treated as suggestions.
+
+       16 + 34 + 16 + 34 = 100. Percentages, not pixels, so the table
+       uses the full width it is given at any size. */
+    #raaRoot #raaTable {
+        width: 100%;
+        table-layout: fixed;
+        /* Below this the dropdowns start truncating role names; the
+           surrounding .pm-table-wrap scrolls instead of crushing them. */
+        min-width: 760px;
+    }
+    #raaRoot .raa-col-level { width: 16%; }
+    /* ONE rule for BOTH authority columns -- they cannot disagree. */
+    #raaRoot .raa-col-auth  { width: 34%; }
+    #raaRoot .raa-col-same  { width: 16%; }
+
+    /* The header sits over a centred checkbox, so it is centred too.
+       Previously the cell was centred and its header was not, which
+       read as the column being misaligned. */
+    #raaRoot .raa-col-same,
+    #raaRoot .raa-same-cell { text-align: center; }
+
+    /* Scoped to #raaRoot. The grid is the page, so it gets a little
+       breathing room the generic table does not have. */
+    #raaRoot #raaTable th { vertical-align: bottom; }
+    #raaRoot #raaTable td { vertical-align: top; padding-top: 7px; padding-bottom: 7px; }
+
+    /* width:100% inside equal columns makes the two dropdowns equal by
+       construction rather than by matching two numbers by hand. */
+    #raaRoot #raaTable select {
+        width: 100%; padding: 5px 8px; border: 1px solid #cbd5e1;
+        border-radius: 4px; font: inherit; font-size: 13px; background: #fff;
+    }
+    #raaRoot #raaTable select:disabled { background: #f1f5f9; color: #64748b; }
+
+    /* Fixed layout will not widen a column for a long level name, so
+       let it wrap rather than spill. */
+    #raaRoot .raa-level { font-weight: 600; overflow-wrap: anywhere; }
+    /* A level running on the org-wide role rather than its own setting.
+       Said in the row, because the dropdown alone cannot show it. */
+    #raaRoot .raa-fallback { font-size: 11px; color: #92400e; display: block; margin-top: 2px; }
+
+    /* The checkbox sits between two dropdowns, so it lines up with THEM
+       rather than with the top of its cell -- the cells are top-aligned
+       because the fallback hint below a dropdown must not push the
+       controls out of line with each other. */
+    #raaRoot .raa-same-cell input[type="checkbox"] { margin-top: 8px; }
+
+    #raaRoot tr.raa-dirty > td:first-child { box-shadow: inset 3px 0 0 #2b6cb0; }
+
+    /* Responsive. The table keeps its 760px floor and .pm-table-wrap
+       scrolls below that, so nothing is ever crushed. On a medium
+       window the two label columns give their space to the dropdowns,
+       which are the part that actually needs it -- and they give it
+       EQUALLY, so the two authority columns stay identical. */
+    @@media (max-width: 1200px) {
+        #raaRoot .raa-col-level { width: 14%; }
+        #raaRoot .raa-col-auth  { width: 36%; }
+        #raaRoot .raa-col-same  { width: 14%; }
+    }
+</style>
+
+<script src="~/js/RiskCentre/risk-acceptance-authority.js" asp-append-version="true"></script>

@@ -1,0 +1,250 @@
+@*
+    Gap View  (migration 325)
+
+    Route: /Practice/Index/gap-view?gapId=NNN[&orgId=...&title=...]
+
+    PURPOSE
+    -------
+    A read-only, single page that shows everything about one Gap: its
+    full details, plus the Task / Exception / Risk raised against it,
+    each a clickable card that opens that artefact's OWN existing full
+    view in a new browser tab. This is a companion to gap-detail.cshtml
+    (the Analysis workspace), not a replacement -- gap-detail is where an
+    analyst works a gap; this page is where anyone (an owner, an
+    approver, an auditor) comes to see the whole picture at a glance
+    without touching the analysis form.
+
+    ACTIONS MENU (change request, 2026-09-22; folded-in update, same day):
+    the "Actions" button below the heading offers the same items Gap
+    Centre's row 3-dot menu does for this gap -- Analysis, View Existing
+    Tasks, Close Gap (Custom gaps only) -- built and gated by the exact
+    same shared code Gap Centre itself now calls:
+    window.gracGapActions.buildMenu() for the item list + applicability/
+    disabled rules, and window.gracGapActions.closeGap() for the Close
+    Gap confirm+POST (wwwroot/js/Shared/gap-actions.js). No action,
+    navigation target or permission/applicability rule is re-implemented
+    here -- see that file's header comment for the rules themselves. See
+    wwwroot/js/GapLifecycle/gap-view.js for how this page wires the
+    Actions button using the gap header this page already has (GET
+    /practice/api/gap-lifecycle/gaps/{id}/header) plus one on-demand
+    task-count lookup (the same GET /practice/api/tasks search Task
+    Centre's own search box calls) -- no new endpoint, no new stored
+    procedure.
+
+    "View" is deliberately NOT offered from this menu: it is this page
+    itself (Gap Centre's row menu points here). "Analysis" USED to be a
+    standalone "Open Analysis" button here instead of a menu item,
+    because buildMenu()'s own Analysis/View pair only offers "Analysis"
+    before the gap is analysed -- Gap View needed it to stay reachable
+    for an ALREADY analysed gap too (gap-detail.cshtml's own read-only
+    display of a completed analysis), and folding it straight into
+    buildMenu()'s pair would have lost that. It is a menu item now, but
+    not through buildMenu(): gap-view.js adds it directly, unconditionally,
+    at the top of the list -- same reachability the button gave, just
+    under Actions instead of sitting beside it.
+
+    DATA SOURCES -- everything below reuses an existing API. Nothing new
+    was added to the database except one column (custom_gap.entered_dt,
+    projected as IdentifiedDate by migration 325's re-issue of
+    sp_custom_gap_header):
+      * Gap Details       -> GET /practice/api/gap-lifecycle/gaps/{id}/header
+                              (the exact header gap-detail.cshtml itself uses)
+      * Task/Exception/Risk
+        relationship        -> GET /practice/api/gap-lifecycle/gaps/{id}/linked-artefacts
+                              (the exact call gap-detail.cshtml's chip strip
+                              uses -- one Task/Exception/RiskCandidate row
+                              each, the current gap's own, never another
+                              gap's or the same source shared by chance)
+      * Task card detail  -> GET /practice/api/tasks/{id}          (Task Center's own single-record read)
+      * Exception card    -> GET /practice/api/exception-centre/{id} (Exception Analysis's own single-record read)
+      * Risk card detail  -> GET /practice/api/risk-centre/{candidateId}, and
+                              GET /practice/api/risk-centre/register/{riskId} once
+                              registered (Risk Centre's own single-record reads)
+      * Failed Obligation(s) -> the same /linked-artefacts response's
+                              failedObligations array (migration 317)
+
+    "Open in a new tab" reuses each Centre's OWN full view:
+      * Task     -> tasks screen, #taskId=<id>       (new hash deep-link,
+                    opens the same View dialog the row menu already opens)
+      * Exception-> exception-analysis?exceptionId=<id> (already routed)
+      * Risk     -> risk-centre screen, #riskId=<id> (new hash deep-link,
+                    opens the same read-only full page the row menu
+                    already opens) -- only once the risk candidate has
+                    been registered; before that there is no full view to
+                    open yet and the card says so instead of linking.
+
+    No duplicate business logic, no duplicate full-view pages -- every
+    read above is a call to something that already existed before this
+    migration, and every "open in new tab" target is a screen that
+    already existed. gap-view.js does only the reading and the layout.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="gvHeading">Gap View</h1>
+        <p id="gvSubHeading">Everything recorded for this gap, read-only.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <button type="button" class="pm-button" id="gvActionsBtn" aria-haspopup="true" aria-expanded="false">
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
+        @* "Open Analysis" was a separate button here; it is now the
+           "Analysis" item at the top of the Actions menu above, offered
+           unconditionally (see openActionsMenu() in gap-view.js) so it
+           stays reachable for an already-analysed gap too, exactly as
+           this button used to be. *@
+        <a class="pm-button" href="~/Practice/Index/gaps">
+            <i class="fa-solid fa-arrow-left"></i> Back to Gap Centre
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="gvUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="gvUnavailableTitle">Gap not found.</h2>
+        <p id="gvUnavailableBody">Open this page from Gap Centre's Actions menu.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="gvRoot" hidden>
+
+    <div class="pm-toolbar" style="justify-content:space-between">
+        <div>
+            <span class="pm-badge gap-state-chip" id="gvStatusChip">-</span>
+            <strong id="gvGapTitle" style="margin-left:8px"></strong>
+        </div>
+        <button class="pm-button icon" id="gvRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <h3 class="gv-section">Gap Details</h3>
+    <dl class="gv-facts" id="gvFacts"></dl>
+
+    @* Practice / Practice Instance -- shown as a fact + a link to the
+       instance's own existing read-only workspace (same destination
+       gap-detail.cshtml's "View Practice Instance" link and gaps.cshtml's
+       row menu already use) rather than re-deriving Framework / Source
+       Statement / Control inline. That data already lives on the
+       instance's own page; duplicating the joins here would be a second
+       place for it to go stale. Hidden for Custom/Assurance gaps and an
+       un-materialized Implementation row -- nothing to link to. *@
+    <p class="pm-hint gv-instance-link-wrap" id="gvInstanceLinkWrap" hidden>
+        <a id="gvInstanceLink" href="#" target="_blank" rel="noopener">
+            <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+            <span id="gvInstanceLinkText">View Practice Instance</span>
+        </a>
+    </p>
+
+    @* Obligation(s) -- migration 317 data, same strip design as
+       gap-detail.cshtml's (own read, same response). Only an
+       automatically generated Implementation gap has rows here. Since
+       367, this lists every obligation currently displayed under the
+       gap (Not Implemented, Partially Implemented, Not Set) -- not only
+       the one whose failure originally raised it -- because analysis is
+       blocked until all of them are resolved. *@
+    <div class="gv-obligations-strip" id="gvObligationsStrip" hidden>
+        <h4>Obligation(s)</h4>
+        <p class="pm-hint">The Obligation(s) under this Practice that are not yet Implemented.</p>
+        <div class="gv-linked-chips" id="gvObligationsChips"></div>
+    </div>
+
+    <h3 class="gv-section">Related Actions</h3>
+    <p class="pm-hint" id="gvRelatedEmpty" hidden>Nothing has been generated against this gap yet.</p>
+    <div class="gv-cards" id="gvCards"></div>
+
+</section>
+
+<style>
+    #gvRoot .gv-section {
+        margin: 18px 0 8px; font-size: 13px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .04em; color: #4a5568;
+    }
+    #gvRoot .gv-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
+        gap: 8px 20px; margin: 0 0 4px;
+        padding: 12px 14px; background: #f7fafc; border-radius: 6px;
+    }
+    #gvRoot .gv-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+    }
+    #gvRoot .gv-facts dd {
+        margin: 0 0 6px; font-size: 13px; color: #2d3748; overflow-wrap: anywhere;
+        white-space: pre-wrap;
+    }
+    #gvRoot .gv-facts dd.gv-empty { color: #a0aec0; font-style: italic; }
+
+    .gv-instance-link-wrap { margin: 10px 0 0; text-align: right; }
+    .gv-instance-link-wrap a { font-weight: 600; }
+
+    .gv-obligations-strip { margin: 16px 0 0; }
+    .gv-obligations-strip h4 { font-size: 12px; text-transform: uppercase; color: #718096;
+                                margin: 0 0 4px 0; letter-spacing: 0.02em; }
+    .gv-obligations-strip .pm-hint { margin: 0 0 10px; }
+
+    .gv-linked-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+    .gv-linked-chips .gv-chip {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: 10px 14px; border: 1px solid #cbd5e0; border-radius: 6px;
+        background: #fff; min-width: 220px;
+    }
+    .gv-linked-chips .chip-type {
+        font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: #9b2c2c;
+    }
+    .gv-linked-chips .chip-title { font-size: 13px; font-weight: 600; color: #2d3748; }
+    .gv-linked-chips .chip-status {
+        display: inline-block; align-self: flex-start; padding: 2px 8px; border-radius: 999px;
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        background: #fff5f5; color: #9b2c2c;
+    }
+
+    /* Related-actions cards -- Task / Exception / Risk, one column each
+       on a wide screen, stacking to one column narrow. A clickable card
+       is a <button> styled as a card (keyboard + screen-reader correct)
+       rather than an <a>, since the destination is built at click time
+       from data the card already fetched, not a plain href. */
+    .gv-cards {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+    }
+    .gv-card {
+        display: flex; flex-direction: column; gap: 8px; text-align: left;
+        padding: 14px 16px; border: 1px solid #cbd5e0; border-radius: 8px;
+        background: #fff; font: inherit; cursor: default;
+        transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    .gv-card.is-clickable { cursor: pointer; }
+    .gv-card.is-clickable:hover,
+    .gv-card.is-clickable:focus-visible {
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-color: #3182ce; outline: none;
+    }
+    .gv-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .gv-card-type {
+        font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: #718096;
+    }
+    .gv-card.type-task      .gv-card-type { color: #2c5282; }
+    .gv-card.type-exception .gv-card-type { color: #744210; }
+    .gv-card.type-risk      .gv-card-type { color: #742a2a; }
+    .gv-card-open-hint {
+        font-size: 11px; color: #3182ce; font-weight: 600; white-space: nowrap;
+    }
+    .gv-card.is-clickable .gv-card-open-hint::after { content: " \2197"; } /* small NE arrow */
+    .gv-card-title { font-size: 14px; font-weight: 700; color: #1a202c; }
+    .gv-card-status {
+        display: inline-block; align-self: flex-start; padding: 2px 10px; border-radius: 999px;
+        font-size: 11px; font-weight: 700; background: #edf2f7; color: #4a5568;
+    }
+    .gv-card-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 12px; }
+    .gv-card-meta dt { color: #a0aec0; text-transform: uppercase; font-size: 10px; letter-spacing: 0.03em; }
+    .gv-card-meta dd { margin: 0; color: #4a5568; }
+    .gv-card-note { font-size: 11px; color: #a0aec0; font-style: italic; }
+</style>
+
+<script src="~/js/GapLifecycle/gap-view.js" asp-append-version="true"></script>
+<script src="~/js/Shared/gap-actions.js" asp-append-version="true"></script>

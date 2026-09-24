@@ -149,7 +149,7 @@
                         '<td>' + window.__wfCommon.escape(e.checklistName || '') + '</td>',
                         '<td>' + window.__wfCommon.escape(e.triggerSource || '') + '</td>',
                         '<td>' + window.__wfCommon.escape(e.ownerEmployeeId != null ? String(e.ownerEmployeeId) : '') + '</td>',
-                        '<td>' + window.__wfCommon.escape(e.dueDate ? String(e.dueDate).substring(0, 10) : '') + '</td>',
+                        '<td>' + window.__wfCommon.escape(e.dueDate ? (typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(e.dueDate)||''):String(e.dueDate).substring(0,10)) : '') + '</td>',
                         '<td>' + window.__wfCommon.badge(e.status) + '</td>',
                         '<td>' + (isClosed ? '' : ('<button type="button" class="pm-button" data-complete-id="' + e.eventInstanceId + '"><i class="fa-solid fa-check"></i> Complete</button>')) + '</td>'
                     ].join('');
@@ -158,7 +158,8 @@
                 body.querySelectorAll('[data-complete-id]').forEach(function (btn) {
                     btn.addEventListener('click', async function () {
                         const id = btn.getAttribute('data-complete-id');
-                        if (!confirm('Mark event assurance #' + id + ' complete?')) return;
+                        if (!await window.gracUi.confirm('Mark event assurance #' + id + ' complete?',
+                              { title: 'Complete event assurance', confirmText: 'Mark complete' })) return;
                         try {
                             const r = await fetch(U('/practice/api/workflow/event-instances/') + encodeURIComponent(id) + '/complete', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -170,7 +171,12 @@
                     });
                 });
             }
-            window.__wfCommon.updatePager('event-assurance', payload);
+            // pageSize is not in the API payload -- it is the request's
+            // own PAGE_SIZE -- and without it the pager cannot tell the
+            // last page from a full one. rowCount makes a short last page
+            // read "41-47 of 47" instead of assuming a full page.
+            window.__wfCommon.updatePager('event-assurance',
+                Object.assign({}, payload, { pageSize: PAGE_SIZE, rowCount: rows.length }));
         } catch (err) { setBody('<tr><td colspan="8" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
     }
     function setBody(html) { document.getElementById('eaBody').innerHTML = html; }

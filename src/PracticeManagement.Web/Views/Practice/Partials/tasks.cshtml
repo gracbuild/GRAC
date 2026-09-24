@@ -41,10 +41,10 @@
 
     <div class="pm-tabs" role="tablist" aria-label="Task Center tabs">
         @*
-            Assurance is split in two. The data-tab key for the original tab
-            stays "assurance" -- deep links, pagesByTab and taskBody-assurance
-            all key on it, and renaming it would break the Gap Center hand-off
-            for a label change.
+            The note that used to sit here explained why the Assurance
+            tab kept the data-tab key "assurance" for deep links. Migration
+            255 merged that tab into the one list, so the key is gone and
+            the old names are mapped in applyDeepLinkFromHash instead.
         *@
         @*
             Candidates come first because that is the order the work
@@ -53,16 +53,57 @@
             does an Approved Task exist. Putting the gate after the
             outputs would read backwards.
         *@
-        <button role="tab" data-tab="candidates"                     aria-selected="false">Task Candidates <span class="pm-badge" id="tabCountCandidates">0</span></button>
-        <button role="tab" data-tab="implementation" class="active" aria-selected="true">Implementation Tasks <span class="pm-badge" id="tabCountImpl">0</span></button>
-        <button role="tab" data-tab="assurance"                     aria-selected="false">Continuous Assurance <span class="pm-badge" id="tabCountAssurance">0</span></button>
+        @* Task Candidates tab retired from Task Centre. The candidate
+           workflow (BRD §5) still exists in the API + DB -- other
+           surfaces raise / accept / reject candidates via their own
+           calls -- but Task Centre no longer surfaces the queue here.
+           The panel markup + JS below stays for now; nothing renders it
+           because no tab reaches it. *@
+        @* Migration 255: Implementation / Continuous Assurance / Custom
+           collapsed into one Tasks tab with Source as a column and a
+           filter. They read the same endpoint and the same eleven
+           columns, split only by task type.
+
+           This also retires the reason 253 widened the Custom tab to
+           cover 'Rectification': with no type filter on the list, a gap
+           remediation task is simply a task with Source = Gap. The
+           widening in sp_task_list and sp_task_center_counts is left in
+           place -- harmless, and still correct for any caller that does
+           pass taskTypeCode=Custom.
+
+           Event Driven Assurance stays its own tab: it is not
+           practice_task, it reads the event engine directly. See
+           conflict 4 in docs/task-centre-v2.md. *@
+        <button role="tab" data-tab="all" class="active" aria-selected="true">Tasks <span class="pm-badge" id="tabCountAll">0</span></button>
         <button role="tab" data-tab="event-driven"                  aria-selected="false">Event Driven Assurance <span class="pm-badge" id="tabCountEventDriven">0</span></button>
-        <button role="tab" data-tab="custom"                        aria-selected="false">Custom Tasks <span class="pm-badge" id="tabCountCustom">0</span></button>
     </div>
 
     <div class="pm-toolbar">
         <select id="taskFilterOrganization">
             <option value="">All organizations</option>
+        </select>
+        @* Migration 255. Values are practice_task.source_type_code, which
+           sp_task_list already accepts as @source_type_code -- no API or
+           procedure change was needed for this filter.
+
+           The list is ck_pm_practice_task_source_type as widened by
+           migration 215, exactly: Gap / Exception / Risk / RiskRegister /
+           ContinuousAssurance / EventAssurance / Custom. An option that
+           is not in that CHECK would be a filter that can never match. *@
+        @* Migration 256: options are filled from sp_task_centre_source_counts
+           so each carries a count, matching Gap Centre's Source filter.
+           The static list below is the fallback shown before the counts
+           arrive, and if the endpoint fails — the filter still works
+           unlabelled rather than emptying itself. *@
+        <select id="taskFilterSource" title="Filter by the module that raised the task">
+            <option value="">All sources</option>
+            <option value="Gap">Gap</option>
+            <option value="Exception">Exception</option>
+            <option value="Risk">Risk candidate</option>
+            <option value="RiskRegister">Risk register</option>
+            <option value="ContinuousAssurance">Continuous Assurance</option>
+            <option value="EventAssurance">Event Assurance</option>
+            <option value="Custom">Custom</option>
         </select>
         <input id="taskCenterSearch" type="text" placeholder="Search subject / instance / practice..." />
         <button class="pm-button icon" id="taskRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
@@ -102,43 +143,30 @@
         </div>
     </div>
 
-    <!-- Implementation Tasks tab -->
-    <div class="pm-tab-panel" data-panel="implementation">
+    @* Migration 255: Implementation / Continuous Assurance / Custom were
+       three views of practice_task split by task type, all reading the
+       same endpoint with the same eleven columns. One grid now, with
+       Source as a column and a filter. Event Driven Assurance keeps its
+       own tab below -- it is not practice_task at all, it reads the
+       event engine directly (see conflict 4 in docs/task-centre-v2.md).
+
+       Column labels are the generic ones. "Task Name" covered
+       implementation and custom already; "Assurance Activity" was the
+       same cell under a different heading. *@
+    <div class="pm-tab-panel" data-panel="all">
         <div class="pm-table-wrap">
             <table>
                 <thead>
                     <tr>
-                        <th>Task #</th><th>Task Name</th><th>Practice Instance</th><th>Practice</th>
+                        <th>Task #</th><th>Task Name</th><th>Source</th><th>Related Record</th>
                         <th>Assigned To</th><th>Priority</th><th>Target Date</th>
                         <th>SLA Status</th><th>Children</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
-                <tbody id="taskBody-implementation"><tr><td colspan="11" class="pm-empty">Select an organization to load tasks.</td></tr></tbody>
+                <tbody id="taskBody-all"><tr><td colspan="11" class="pm-empty">Select an organization to load tasks.</td></tr></tbody>
             </table>
         </div>
-        <div class="pm-pager" data-pager="implementation">
-            <button class="pm-button" data-pg="prev" type="button">Previous</button>
-            <span data-pg="label">Page 1</span>
-            <button class="pm-button" data-pg="next" type="button">Next</button>
-            <span data-pg="total" class="pm-pager-total">0 total</span>
-        </div>
-    </div>
-
-    <!-- Assurance Tasks tab -->
-    <div class="pm-tab-panel" data-panel="assurance" hidden>
-        <div class="pm-table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Task #</th><th>Assurance Activity</th><th>Practice Instance</th><th>Practice</th>
-                        <th>Assigned To</th><th>Priority</th><th>Due Date</th>
-                        <th>SLA Status</th><th>Children</th><th>Status</th><th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="taskBody-assurance"><tr><td colspan="11" class="pm-empty">No Assurance tasks yet. Auto-generation lands in a later phase.</td></tr></tbody>
-            </table>
-        </div>
-        <div class="pm-pager" data-pager="assurance">
+        <div class="pm-pager" data-pager="all">
             <button class="pm-button" data-pg="prev" type="button">Previous</button>
             <span data-pg="label">Page 1</span>
             <button class="pm-button" data-pg="next" type="button">Next</button>
@@ -156,101 +184,25 @@
         <partial name="Partials/_event-assurance-panel" />
     </div>
 
-    <!-- Custom Tasks tab -->
-    <div class="pm-tab-panel" data-panel="custom" hidden>
-        <div class="pm-table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Task #</th><th>Task Name</th><th>Related Entity</th><th>Related Record</th>
-                        <th>Assigned To</th><th>Priority</th><th>Target Date</th>
-                        <th>SLA Status</th><th>Children</th><th>Status</th><th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="taskBody-custom"><tr><td colspan="11" class="pm-empty">No custom tasks yet. Click + New Task to create one.</td></tr></tbody>
-            </table>
-        </div>
-        <div class="pm-pager" data-pager="custom">
-            <button class="pm-button" data-pg="prev" type="button">Previous</button>
-            <span data-pg="label">Page 1</span>
-            <button class="pm-button" data-pg="next" type="button">Next</button>
-            <span data-pg="total" class="pm-pager-total">0 total</span>
-        </div>
-    </div>
-
 </section>
 
 @* Add Implementation Task modal — exposes window.__openAddImplTask *@
 <partial name="Partials/_add-implementation-task-modal" model="Model" />
 
-@*
-    Task detail view (BRD §16) — "operational and service-request-like".
-    Filled by renderTaskDetail() from a single GET /practice/api/tasks/{id},
-    which returns header + activity + evidence + children + Exception
-    Centre requests in one round trip.
-*@
-<dialog id="taskDetailDialog" style="border:none; border-radius:8px; padding:0; max-width:980px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <div style="margin:0; padding:20px 24px; max-height:82vh; overflow:auto;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
-            <h2 id="taskDetailTitle" style="margin:0; font-size:17px;">Task</h2>
-            <button type="button" id="taskDetailClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer; line-height:1;">&times;</button>
-        </div>
-        <div id="taskDetailBody"></div>
-    </div>
-</dialog>
+@* Shared Edit / Complete / Close / Add Evidence dialogs -- moved into
+   Partials/_task-action-dialogs.cshtml + Shared/task-actions.js
+   (window.gracTaskActions) so Task View's own Actions menu can reuse
+   these exact forms, API calls, validation and success/error handling
+   instead of a second copy, per the change request. See that partial's
+   header comment. *@
+<partial name="Partials/_task-action-dialogs" />
 
 @* New Task dialog — locked to task_type_code = 'Custom' *@
-<dialog id="newTaskDialog" style="border:none; border-radius:8px; padding:0; max-width:620px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="newTaskForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">New Task (Custom)</h2>
-            <button type="button" id="newTaskClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
-        </div>
-        <div id="newTaskMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; margin-bottom:14px;">
-            <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div>
-            <div id="newTaskOrgLabel" style="font-weight:600; color:#0f172a;">—</div>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr; gap:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Task Name <span style="color:#b91c1c;">*</span>
-                <input id="newTaskTitle" type="text" maxlength="250" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
-            </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
-                <textarea id="newTaskDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
-            </label>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Assigned To <span style="color:#b91c1c;">*</span>
-                    <select id="newTaskAssignee" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
-                        <option value="">Loading employees...</option>
-                    </select>
-                </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
-                    <select id="newTaskPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
-                        <option value="Low">Low</option>
-                        <option value="Medium" selected>Medium</option>
-                        <option value="High">High</option>
-                        <option value="Critical">Critical</option>
-                    </select>
-                </label>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Start Date
-                    <input id="newTaskStartDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
-                </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Target Date
-                    <input id="newTaskTargetDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
-                </label>
-            </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
-                <textarea id="newTaskRemarks" rows="2" maxlength="1000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
-            </label>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
-            <button type="button" id="newTaskCancel" class="pm-button">Cancel</button>
-            <button type="submit" id="newTaskSubmit" class="pm-button primary">Create Task</button>
-        </div>
-    </form>
-</dialog>
+
+@* Shared pager (and escape/badge helpers) — exposes window.__wfCommon.
+   Self-guards on re-render, so rendering it here is safe even when the
+   host page has already pulled it in for another partial. *@
+<partial name="Partials/_workflow-common" />
 
 <script>
 (function () {
@@ -273,28 +225,33 @@
     // after every inline layout script has run).
     const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
-    // Row-menu feature flags.
-    // These items had `alert('...will land in Phase X')` bodies -- they were
-    // reserved slots for future work with no active pages behind them, so
-    // clicking them was pure noise. Hidden here per the "no dead options"
-    // pass. Flip a flag to `true` when the target subsystem ships to bring
-    // the option back with zero further code changes.
-    const TASK_ROW_MENU_FLAGS = {
-        edit:                  false, // opens once the Task edit dialog / workflow subsystem lands
-        viewAssuranceActivity: false, // opens once the Assurance drill-down lands
-        viewWorkflowHistory:   false  // opens once workflow-history viewer lands
-    };
 
     let selectedOrgId = null;
-    let activeTab     = 'implementation';   // was 'gaps' — Gaps moved to its own module
+    // Migration 255: 'all' is the merged practice_task list.
+    let activeTab     = 'all';
     // 'event-driven' has no pager: sp_event_checklist_inbox_list returns the
     // open set for the organization, not a page.
-    let pagesByTab    = { candidates: 1, implementation: 1, assurance: 1, custom: 1 };
+    let pagesByTab    = { candidates: 1, all: 1 };
     const EVENT_TAB   = 'event-driven';
     const PAGE_SIZE   = 25;
     let searchDebounce = null;
     let openMenuEl      = null;
     let openMenuTrigger = null;
+
+    // ---- Sub-task tree state -----------------------------------------
+    // Declared HERE, with the rest of the module state, and not beside
+    // the functions that use them: init() is called at script-parse time
+    // (see the readyState test at the top of this IIFE), so a `let` in
+    // the middle of the file sits in its temporal dead zone during that
+    // call. Nothing reaches these before the first fetch resolves today,
+    // which is exactly the kind of accident that stops being true later.
+    //
+    // childRowCache is per parent and is dropped on every grid refresh,
+    // so restoring an expansion re-fetches and shows current data.
+    // expandedTaskIds SURVIVES the refresh -- it is what the user had
+    // open, not what was fetched.
+    const childRowCache  = new Map();   // taskId -> rows[]
+    let   expandedTaskIds = new Set();  // taskId (string)
 
     async function init() {
         const orgs = await loadOrgs();
@@ -315,12 +272,20 @@
             clearTimeout(searchDebounce);
             searchDebounce = setTimeout(function () { pagesByTab[activeTab] = 1; reloadCurrentTab(); }, 300);
         });
+        // Migration 255: Source replaces the three task-type tabs.
+        const srcSel = document.getElementById('taskFilterSource');
+        if (srcSel) srcSel.addEventListener('change', function () {
+            pagesByTab[activeTab] = 1;
+            reloadCurrentTab();
+        });
         document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (btn) {
             btn.addEventListener('click', function () { switchTab(btn.getAttribute('data-tab')); });
         });
         wirePagers();
-        wireNewTaskDialog();
-        wireTaskDetailDialog();
+        window.gracTaskActions.init({
+            getOrganizationId: () => selectedOrgId,
+            onChanged:         () => { reloadCurrentTab(); refreshCounts(); }
+        });
         wireRowMenu();
 
         // The Event Driven panel reads the organization from Task Center's own
@@ -349,15 +314,35 @@
         const params = new URLSearchParams(raw);
         const tab = (params.get('tab') || '').toLowerCase();
         const q   = params.get('search') || '';
-        if (tab === 'candidates' || tab === 'implementation' || tab === 'assurance' || tab === 'custom' || tab === EVENT_TAB) {
-            activeTab = tab;
+
+        // Deep-link support for Gap View → Task Center hand-off (migration
+        // 325). #taskId=<id> used to open the task's View dialog directly
+        // in-place. The row menu's own "View" action now opens the
+        // dedicated Task View full page instead, so this old hash link is
+        // redirected there too -- one destination for "View a task",
+        // reached by any of the ways into this hash. Anything that still
+        // sends #taskId= (an old bookmark, another screen not yet updated)
+        // keeps working; it just lands on the better page.
+        const taskId = Number(params.get('taskId'));
+        if (Number.isFinite(taskId) && taskId > 0) {
+            window.location.href = U('/Practice/Index/task-view') + '?taskId=' + encodeURIComponent(taskId);
+            return;
+        }
+        // Migration 255: the old per-type tab names still arrive on
+        // deep links from Gap Center and elsewhere. They all mean the one
+        // merged list now, so map them onto 'all' rather than 404-ing the
+        // link into whatever tab happened to be open.
+        const LEGACY_TAB = { implementation: 'all', assurance: 'all', custom: 'all' };
+        const mapped = LEGACY_TAB[tab] || tab;
+        if (mapped === 'candidates' || mapped === 'all' || mapped === EVENT_TAB) {
+            activeTab = mapped;
             document.querySelectorAll('.pm-tabs [role="tab"]').forEach(function (b) {
-                const on = b.getAttribute('data-tab') === tab;
+                const on = b.getAttribute('data-tab') === mapped;
                 b.classList.toggle('active', on);
                 b.setAttribute('aria-selected', on ? 'true' : 'false');
             });
             document.querySelectorAll('.pm-tab-panel').forEach(function (p) {
-                p.hidden = p.getAttribute('data-panel') !== tab;
+                p.hidden = p.getAttribute('data-panel') !== mapped;
             });
         }
         if (q) {
@@ -400,18 +385,25 @@
     async function onOrgChange() {
         closeRowMenu();
         selectedOrgId = document.getElementById('taskFilterOrganization').value || null;
-        pagesByTab = { candidates: 1, implementation: 1, assurance: 1, custom: 1 };
-        // If the New Task dialog happens to be open, refresh its assignees.
-        const dlg = document.getElementById('newTaskDialog');
-        if (dlg && dlg.open && selectedOrgId) {
-            populateAssignees(document.getElementById('newTaskAssignee'), selectedOrgId);
-        }
+        // Migration 255: must match the declaration above. This reset kept
+        // the pre-255 shape and wiped the 'all' key on every org change,
+        // so loadTasks sent "&page=undefined" and the API rejected the
+        // request with HTTP 400 before it ever reached sp_task_list.
+        pagesByTab = { candidates: 1, all: 1 };
+        // No dialog to refresh here any more: the common Task form loads
+        // its assignee list on every open, so an organisation change
+        // cannot leave it showing the previous organisation's employees.
         await refreshCounts();
         await reloadCurrentTab();
     }
 
     async function refreshCounts() {
         if (!selectedOrgId) { setCounts(null); setCandidateCounts(null); return; }
+        // Migration 256: the Source options carry counts too, so they are
+        // refreshed here rather than at each of refreshCounts' five call
+        // sites -- closing a task, creating one and switching org all
+        // already come through this function.
+        loadTaskSourceFilter();
         const org = encodeURIComponent(selectedOrgId);
         // Two independent endpoints (tasks, candidates) — fetched together
         // so one failing does not blank the other's badge.
@@ -427,9 +419,18 @@
     function setCounts(c) {
         // gapsCount intentionally NOT surfaced here — Gap Center owns that
         // metric now. Task Center only shows counts for actual tasks.
-        document.getElementById('tabCountImpl').textContent      = c ? c.implementationCount : 0;
-        document.getElementById('tabCountAssurance').textContent = c ? c.assuranceCount      : 0;
-        document.getElementById('tabCountCustom').textContent    = c ? c.customCount         : 0;
+        //
+        // Migration 255: one badge for the merged list. The counts
+        // procedure still returns the three type buckets separately, so
+        // they are summed here rather than changing the procedure --
+        // Task Center is the only caller that wanted them merged, and
+        // sp_task_center_counts is read by other things.
+        const badge = document.getElementById('tabCountAll');
+        if (badge) {
+            badge.textContent = c
+                ? ((c.implementationCount || 0) + (c.assuranceCount || 0) + (c.customCount || 0))
+                : 0;
+        }
     }
     // The Candidates badge counts OPEN candidates (New + Validated) —
     // approved ones already appear as tasks in the other tabs, and
@@ -471,14 +472,24 @@
     }
     async function reloadCurrentTab() {
         closeRowMenu();
+        // THE one place the sub-task cache is dropped.
+        //
+        // Every write in this screen ends here -- complete, close, edit,
+        // add sub task, assign, the governance approvals -- so hooking
+        // the cache to this single refresh path is what stops a
+        // re-expanded parent showing sub tasks as they were before the
+        // action. The alternative, an invalidateChildRows(id) call in
+        // each of a dozen handlers, is a dozen chances to forget one.
+        invalidateChildRows();
         if (!selectedOrgId) return;
-        if (activeTab === 'candidates')     return loadCandidates();
-        if (activeTab === 'implementation') return loadTasks('Implementation');
-        if (activeTab === 'assurance')      return loadTasks('Assurance');
-        if (activeTab === EVENT_TAB)        return window.__eventAssurance
-                                                 ? window.__eventAssurance.load()
-                                                 : undefined;
-        if (activeTab === 'custom')         return loadTasks('Custom');
+        if (activeTab === 'candidates') return loadCandidates();
+        if (activeTab === EVENT_TAB)    return window.__eventAssurance
+                                             ? window.__eventAssurance.load()
+                                             : undefined;
+        // Migration 255: no task-type argument. The list is every
+        // practice_task row for the organization; Source is a column and
+        // an optional filter rather than three separate fetches.
+        return loadTasks();
     }
 
     // -----------------------------------------------------------------
@@ -519,6 +530,14 @@
                 tr.setAttribute('data-candidate-state', c.statusCode || '');
                 tr.setAttribute('data-candidate-ready', c.isReadyToApprove ? '1' : '0');
                 tr.setAttribute('data-candidate-priority', c.proposedPriority || '');
+                // Row click-to-View (change request, 2026-09-22): a
+                // candidate's "View" is buildCandidateRowMenu()'s own
+                // openCandidateView() quick-look modal, not a page -- it
+                // has not been validated/approved into a task yet, so
+                // there is no Task View for it. Same class as the main
+                // list for one consistent cursor affordance; see
+                // wireRowMenu() below for what the click actually opens.
+                tr.className = 'pm-row-clickable';
                 tr.innerHTML = [
                     '<td>' + escape(c.candidateNumber || ('TC-' + c.taskCandidateId)) + '</td>',
                     '<td>' + escape(c.candidateTitle) + '</td>',
@@ -556,27 +575,52 @@
              + note;
     }
 
-    async function loadTasks(typeCode) {
-        const q = document.getElementById('taskCenterSearch').value.trim();
-        const key = typeCode.toLowerCase();
-        const tabKey = key === 'implementation' ? 'implementation'
-                     : key === 'assurance'      ? 'assurance'
-                     :                              'custom';
-        const p = pagesByTab[tabKey];
+    // Migration 255: no taskTypeCode. sp_task_list already treats a NULL
+    // @@task_type_code as "every type", and @@source_type_code was already
+    // one of its 195 filters -- so the merged list and its Source filter
+    // needed no procedure or API change at all.
+    //
+    // (Those are doubled on purpose. Razor parses an at-sign inside
+    // <script> even within a JS comment, so a single one in front of a
+    // SQL parameter name compiles as a C# expression and fails with
+    // CS0103. Double it to emit one literally.)
+    async function loadTasks() {
+        const q      = document.getElementById('taskCenterSearch').value.trim();
+        const srcEl  = document.getElementById('taskFilterSource');
+        const source = srcEl ? (srcEl.value || '') : '';
+        const p = pagesByTab.all;
         const url = U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId)
-                  + '&taskTypeCode=' + encodeURIComponent(typeCode)
                   + '&page=' + p + '&pageSize=' + PAGE_SIZE
-                  + (q ? '&search=' + encodeURIComponent(q) : '');
-        const body = document.getElementById('taskBody-' + tabKey);
+                  + (q ? '&search=' + encodeURIComponent(q) : '')
+                  + (source ? '&sourceTypeCode=' + encodeURIComponent(source) : '');
+        const body = document.getElementById('taskBody-all');
         if (body) body.innerHTML = '<tr><td colspan="11" class="pm-empty">Loading...</td></tr>';
         try {
             const r = await fetch(url, { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            renderTaskRows(tabKey, await r.json());
+            if (!r.ok) {
+                // Surface the server's reason rather than the bare status.
+                const b = await r.json().catch(function () { return {}; });
+                throw new Error(b.error || ('HTTP ' + r.status));
+            }
+            renderTaskRows('all', await r.json());
         } catch (err) {
             if (body) body.innerHTML = '<tr><td colspan="11" class="pm-empty">Failed to load: ' + escape(err.message) + '</td></tr>';
         }
     }
+
+    // The source_type_code vocabulary from ck_pm_practice_task_source_type
+    // (migration 215), mapped to what an operator calls it. An unmapped
+    // code falls through as-is rather than rendering blank.
+    const TASK_SOURCE_LABELS = {
+        Gap:                 'Gap',
+        Exception:           'Exception',
+        Risk:                'Risk candidate',
+        RiskRegister:        'Risk register',
+        ContinuousAssurance: 'Continuous Assurance',
+        EventAssurance:      'Event Assurance',
+        Custom:              'Custom'
+    };
+
     function renderTaskRows(tabKey, payload) {
         const body = document.getElementById('taskBody-' + tabKey);
         if (!body) return;
@@ -586,35 +630,263 @@
             body.innerHTML = '<tr><td colspan="11" class="pm-empty">No tasks yet.</td></tr>';
         } else {
             for (let i = 0; i < rows.length; i++) {
-                const r = rows[i];
-                const tr = document.createElement('tr');
-                tr.setAttribute('data-task-id',       String(r.taskId));
-                tr.setAttribute('data-task-state',    r.currentStatusCode || '');
-                tr.setAttribute('data-task-terminal', r.currentStatusIsTerminal ? '1' : '0');
-                // v2 attributes drive the row menu without a second fetch.
-                tr.setAttribute('data-task-child',    r.isChild ? '1' : '0');
-                tr.setAttribute('data-task-eligible', r.isEligibleForCompletion ? '1' : '0');
-                tr.setAttribute('data-task-priority', r.priority || '');
-                tr.setAttribute('data-task-due',      r.slaDueAt || '');
-                tr.setAttribute('data-task-ext',      r.extensionStatusCode || '');
-                tr.setAttribute('data-task-prio-req', r.priorityChangeStatusCode || '');
-                tr.innerHTML = [
-                    '<td>' + escape(r.taskNumber || ('T-' + r.organizationId + '-' + r.taskId)) + '</td>',
-                    '<td>' + escape(r.subjectTitle) + pendingBadges(r) + '</td>',
-                    '<td>' + escape(r.linkedInstanceId ? 'Instance ' + r.linkedInstanceId : (r.subjectEntityType + ' ' + r.subjectEntityId)) + '</td>',
-                    '<td>' + escape(r.linkedPracticeId ? 'Practice ' + r.linkedPracticeId : '') + '</td>',
-                    '<td>' + ownerCell(r) + '</td>',
-                    '<td>' + escape(r.priority) + '</td>',
-                    '<td>' + dueCell(r) + '</td>',
-                    '<td>' + slaStatusBadge(r) + '</td>',
-                    '<td>' + childCell(r) + '</td>',
-                    '<td>' + formatBadge(r.currentStatusName) + '</td>',
-                    '<td>' + actionTrigger(tabKey, i) + '</td>'
-                ].join('');
-                body.appendChild(tr);
+                body.appendChild(taskRowEl(rows[i], tabKey, i, 0));
             }
+            // WHAT WAS OPEN STAYS OPEN.
+            //
+            // Every action in this screen ends in reloadCurrentTab(), so
+            // without this, completing a sub task would rebuild the grid
+            // collapsed and hide the very row the user just acted on --
+            // a regression introduced by the tree itself, not something
+            // the flat grid could suffer from.
+            //
+            // Not awaited: each parent's children are an independent
+            // fetch, and the grid is already on screen. Ids that are not
+            // on this page (the filter or the page moved) are pruned so
+            // the set cannot grow without bound.
+            restoreExpandedRows(body, tabKey);
         }
         updatePager(tabKey, payload);
+    }
+
+    function restoreExpandedRows(body, tabKey) {
+        if (!expandedTaskIds.size) return;
+        const present = new Set();
+        body.querySelectorAll('tr[data-depth="0"]').forEach(function (tr) {
+            const id = tr.getAttribute('data-task-id');
+            if (!expandedTaskIds.has(id)) return;
+            present.add(id);
+            const btn = tr.querySelector('.task-tree-toggle[data-task-expand]');
+            // No button means the last sub task was removed or completed
+            // out of existence -- childCount is 0 now, so there is
+            // nothing to reopen and the id drops out below.
+            if (btn) toggleTaskRow(btn);
+        });
+        expandedTaskIds = present;
+    }
+
+    // -----------------------------------------------------------------
+    // PARENT -> SUB TASK HIERARCHY  (BRD §11, §12)
+    //
+    // ONE ROW BUILDER, ONE ENDPOINT, ONE ROW MENU. Nothing below is a
+    // second implementation of anything:
+    //
+    //   * The grid list is UNCHANGED. sp_task_list returns top-level
+    //     tasks only (`@@include_children = 0` -> `parent_task_id IS
+    //     NULL`), so pagination, search, the Source filter, sorting and
+    //     the count badges all still describe parent tasks -- exactly as
+    //     they did. A sub task never consumes a row of a page.
+    //
+    //   * Sub tasks come from THE SAME endpoint with `parentTaskId=N`,
+    //     which sp_task_list has accepted since 195 ("asking for one
+    //     parent's children implies you want children"). The Web proxy
+    //     forwards the whole query string, so no controller, no service
+    //     and no procedure changed for this.
+    //
+    //   * Because that returns full TaskListRows, every cell renderer
+    //     and every data-task-* attribute is reused verbatim -- which is
+    //     what gives each sub task a working 3-dots menu with View,
+    //     Complete and Close: buildTaskRowMenu() reads the row it was
+    //     clicked on and neither knows nor cares about depth.
+    //
+    // depth exists so the renderer is not one level deep by accident.
+    // The MODEL is one level -- sp_task_child_create throws 55674, "child
+    // tasks cannot themselves have children" -- so childCount on a sub
+    // task is always 0 and no toggle is drawn. If that rule is ever
+    // relaxed, this renders the extra levels without being touched.
+    // -----------------------------------------------------------------
+    const MAX_TREE_DEPTH = 6;   // a guard against a cycle in the data,
+                                // not a product limit.
+
+    function taskRowEl(r, tabKey, index, depth) {
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-task-id',       String(r.taskId));
+        tr.setAttribute('data-task-state',    r.currentStatusCode || '');
+        tr.setAttribute('data-task-terminal', r.currentStatusIsTerminal ? '1' : '0');
+        // v2 attributes drive the row menu without a second fetch.
+        tr.setAttribute('data-task-child',    r.isChild ? '1' : '0');
+        tr.setAttribute('data-task-eligible', r.isEligibleForCompletion ? '1' : '0');
+        tr.setAttribute('data-task-priority', r.priority || '');
+        tr.setAttribute('data-task-due',      r.slaDueAt || '');
+        tr.setAttribute('data-task-ext',      r.extensionStatusCode || '');
+        tr.setAttribute('data-task-prio-req', r.priorityChangeStatusCode || '');
+        // Migration 255: the row menu used to branch on which tab
+        // was open. With one list the type has to travel on the
+        // row instead.
+        tr.setAttribute('data-task-type',     r.taskTypeCode || '');
+        // Read by openAddChildTask() to fill the read-only Parent
+        // Task field on the common form -- naming a task the user
+        // is already looking at should not need a fetch.
+        tr.setAttribute('data-task-number',   r.taskNumber || '');
+        tr.setAttribute('data-task-title',    r.subjectTitle || '');
+        // ---- tree bookkeeping ----
+        // depth positions the row; parent lets collapse find its whole
+        // subtree by walking forward while depth is greater than its own.
+        tr.setAttribute('data-depth', String(depth));
+        if (depth > 0) {
+            tr.className = 'task-subrow';
+            tr.setAttribute('data-parent-task-id', String(r.parentTaskId || ''));
+        }
+        // Row click-to-View (change request, 2026-09-22): "View" is
+        // unconditional on every task (window.gracTaskActions.buildMenu()
+        // offers it with no applicable/disabled gate at all), including a
+        // sub task -- each has its own Task View -- so every row gets the
+        // clickable class, parent or child alike.
+        tr.classList.add('pm-row-clickable');
+
+        const kids = r.childCount || 0;
+        tr.innerHTML = [
+            '<td>' + treeCell(r, kids, depth, tabKey) + '</td>',
+            '<td>' + escape(r.subjectTitle) + pendingBadges(r) + '</td>',
+            // Migration 255: Source is the column that replaced
+            // the three type tabs. The task type stays visible
+            // beneath it -- merging the tabs removed the type as
+            // a heading, so the row has to carry it.
+            '<td>' + sourceCell(r) + '</td>',
+            '<td>' + escape(r.linkedInstanceId ? 'Instance ' + r.linkedInstanceId
+                            : (r.subjectEntityType ? r.subjectEntityType + ' ' + r.subjectEntityId : '')) + '</td>',
+            '<td>' + ownerCell(r) + '</td>',
+            '<td>' + escape(r.priority) + '</td>',
+            '<td>' + dueCell(r) + '</td>',
+            '<td>' + slaStatusBadge(r) + '</td>',
+            '<td>' + childCell(r) + '</td>',
+            '<td>' + formatBadge(r.currentStatusName) + '</td>',
+            '<td>' + actionTrigger(tabKey, index) + '</td>'
+        ].join('');
+        return tr;
+    }
+
+    // The Task # cell carries the hierarchy: the indent, the branch
+    // glyph on a sub task, and the toggle on a parent that has any.
+    //
+    // A task with NO sub tasks gets a spacer of exactly the toggle's
+    // width instead of the toggle, so its number still lines up with the
+    // numbers of the parents above and below it. No glyph, no chevron,
+    // no hierarchy indicator -- which is what "display it normally" has
+    // to mean in a table, where a missing element would shift the column.
+    function treeCell(r, kids, depth, tabKey) {
+        const num = escape(r.taskNumber || ('T-' + r.organizationId + '-' + r.taskId));
+        const pad = depth > 0
+            ? '<span class="task-tree-indent" style="width:' + (depth * 18) + 'px"></span>'
+              + '<span class="task-tree-branch" aria-hidden="true"></span>'
+            : '';
+        const toggle = kids > 0 && depth < MAX_TREE_DEPTH
+            ? '<button type="button" class="task-tree-toggle" data-task-expand="' + escape(r.taskId) + '"'
+              + ' data-tab-key="' + escape(tabKey) + '" data-depth="' + depth + '"'
+              + ' aria-expanded="false"'
+              + ' title="' + kids + ' sub task' + (kids === 1 ? '' : 's') + '">'
+              + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>'
+              + '<span class="visually-hidden">Show sub tasks</span>'
+              + '</button>'
+            : '<span class="task-tree-toggle is-empty" aria-hidden="true"></span>';
+        return '<span class="task-tree-cell">' + pad + toggle
+             + '<span class="task-tree-num">' + num + '</span></span>';
+    }
+
+    // Expand / collapse one parent row.
+    //
+    // FETCHED ONCE, then cached on the row. Collapsing removes the child
+    // rows from the DOM rather than hiding them: they are re-inserted
+    // from the cache on the next expand, and a hidden <tr> inside a
+    // <tbody> that other code counts is the kind of thing that goes
+    // wrong quietly later.
+    //
+    // Removal walks FORWARD while depth is greater than the parent's,
+    // which takes the whole subtree -- a grandchild's rows go with its
+    // parent's without this function knowing how deep it went.
+    function collapseTaskRow(tr) {
+        expandedTaskIds.delete(tr.getAttribute('data-task-id'));
+        const depth = Number(tr.getAttribute('data-depth') || 0);
+        let n = tr.nextElementSibling;
+        while (n && Number(n.getAttribute('data-depth') || 0) > depth) {
+            const next = n.nextElementSibling;
+            n.remove();
+            n = next;
+        }
+        const btn = tr.querySelector('.task-tree-toggle[data-task-expand]');
+        if (btn) {
+            btn.setAttribute('aria-expanded', 'false');
+            btn.classList.remove('is-open');
+        }
+    }
+
+    async function toggleTaskRow(btn) {
+        const tr = btn.closest('tr');
+        if (!tr) return;
+        if (btn.getAttribute('aria-expanded') === 'true') { collapseTaskRow(tr); return; }
+
+        const taskId = btn.getAttribute('data-task-expand');
+        const tabKey = btn.getAttribute('data-tab-key') || 'all';
+        const depth  = Number(btn.getAttribute('data-depth') || 0);
+
+        let rows = childRowCache.get(String(taskId));
+        if (!rows) {
+            btn.classList.add('is-busy');
+            try {
+                // THE SAME LIST ENDPOINT. pageSize 200 is sp_task_list's
+                // own ceiling; a work package with more than 200 sub
+                // tasks is not a case this grid should paginate inside a
+                // row, and the parent's Children column still states the
+                // true count.
+                const url = U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId)
+                          + '&parentTaskId=' + encodeURIComponent(taskId)
+                          + '&page=1&pageSize=200';
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                if (!resp.ok) {
+                    const b = await resp.json().catch(function () { return {}; });
+                    throw new Error(b.error || ('HTTP ' + resp.status));
+                }
+                const payload = await resp.json();
+                rows = (payload && payload.rows) || [];
+                childRowCache.set(String(taskId), rows);
+            } catch (err) {
+                // Reported in the row itself, not an alert: the failure
+                // belongs to this one expansion and the rest of the grid
+                // is still good.
+                const warn = document.createElement('tr');
+                warn.className = 'task-subrow';
+                warn.setAttribute('data-depth', String(depth + 1));
+                warn.innerHTML = '<td colspan="11" class="pm-empty">Sub tasks could not be loaded: '
+                               + escape(err.message) + '</td>';
+                tr.insertAdjacentElement('afterend', warn);
+                btn.setAttribute('aria-expanded', 'true');
+                btn.classList.add('is-open');
+                return;
+            } finally {
+                btn.classList.remove('is-busy');
+            }
+        }
+
+        // Inserted in order directly after the parent. anchor moves so
+        // row 2 lands after row 1 rather than all of them landing first,
+        // which would reverse them.
+        let anchor = tr;
+        if (!rows.length) {
+            const none = document.createElement('tr');
+            none.className = 'task-subrow';
+            none.setAttribute('data-depth', String(depth + 1));
+            none.innerHTML = '<td colspan="11" class="pm-empty">No sub tasks.</td>';
+            anchor.insertAdjacentElement('afterend', none);
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                const kid = taskRowEl(rows[i], tabKey, i, depth + 1);
+                anchor.insertAdjacentElement('afterend', kid);
+                anchor = kid;
+            }
+        }
+        btn.setAttribute('aria-expanded', 'true');
+        btn.classList.add('is-open');
+        expandedTaskIds.add(String(taskId));
+    }
+
+    // The cache is per parent and goes stale the moment anything is
+    // written to a sub task -- completing one, closing one, adding one.
+    // Called from the places that already refresh the grid, so a
+    // re-expand shows what was just done rather than what was fetched
+    // before it.
+    function invalidateChildRows(taskId) {
+        if (taskId === undefined || taskId === null) childRowCache.clear();
+        else childRowCache.delete(String(taskId));
     }
 
     function actionTrigger(tab, index) {
@@ -644,6 +916,13 @@
 
     function fmtDate(v) {
         if (!v) return '';
+        // Project-wide date format (dd-MMM-yyyy, +HH:mm when a real time is
+        // present). gracFormatDisplayDate returns the value unchanged when it
+        // is not a date; only then fall back to the old yyyy-MM-dd slice.
+        if (typeof window.gracFormatDisplayDate === 'function') {
+            const out = window.gracFormatDisplayDate(v);
+            if (out !== v) return out;
+        }
         const d = new Date(v);
         return isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toISOString().slice(0, 10);
     }
@@ -672,8 +951,15 @@
     function childCell(r) {
         const total = r.childCount || 0;
         if (r.isChild) {
-            return '<span style="font-size:11px; color:#64748b;">child of '
-                 + escape(r.parentTaskNumber || ('#' + r.parentTaskId)) + '</span>';
+            // No longer "child of T-4-91". A sub task now only ever
+            // appears indented beneath its own parent row, so naming the
+            // parent again in a column is repeating what the tree
+            // already says. What the reader cannot see from the indent is
+            // whether this one BLOCKS the parent -- BRD §12: only
+            // mandatory sub tasks do -- so that is what the cell says.
+            return r.isMandatoryChild === false
+                ? '<span class="task-sub-tag is-optional">Optional</span>'
+                : '<span class="task-sub-tag is-mandatory">Mandatory</span>';
         }
         if (!total) return '';
         const open = r.mandatoryChildOpenCount || 0;
@@ -706,6 +992,74 @@
 
     // In-flight governance requests (BRD §7, §8) — the operator must be
     // able to see that a decision is parked without opening the task.
+    // Migration 255. Source on top, task type underneath: the type used
+    // to BE the tab, so with the tabs gone the row is the only place it
+    // can live. A task with no source_type_code (pre-192 rows) shows its
+    // type alone rather than an empty cell.
+    // Migration 256: rebuild the Source options with a count each, the
+    // way Gap Centre's filter already did. The whole vocabulary is
+    // returned including zeroes -- filtering to Event Assurance and
+    // seeing "(0)" tells you something; not finding it in the list does
+    // not. Selection is preserved across the rebuild.
+    async function loadTaskSourceFilter() {
+        const sel = document.getElementById('taskFilterSource');
+        if (!sel || !selectedOrgId) return;
+        const keep = sel.value || '';
+        try {
+            const r = await fetch(
+                U('/practice/api/tasks/source-counts?organizationId=') + encodeURIComponent(selectedOrgId),
+                { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const b = await r.json();
+            const rows = (b && b.sources) || [];
+            // No rows means the count procedure is missing or failed.
+            // Leave the static options in place -- an unlabelled filter
+            // still filters; an emptied one cannot.
+            if (!rows.length) return;
+
+            sel.innerHTML = '';
+            const all = document.createElement('option');
+            all.value = '';
+            all.textContent = 'All sources (' + (b.totalCount || 0) + ')';
+            sel.appendChild(all);
+
+            rows.forEach(function (row) {
+                const code = row.sourceTypeCode || row.SourceTypeCode || '';
+                if (!code) return;
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = (TASK_SOURCE_LABELS[code] || code)
+                                + ' (' + (row.taskCount || row.TaskCount || 0) + ')';
+                sel.appendChild(opt);
+            });
+
+            // Tasks with no source at all are counted but cannot be
+            // filtered to -- sp_task_list has no way to ask for "source
+            // is null". Shown as a disabled note so the numbers add up
+            // instead of looking like they are missing rows.
+            const unsourced = b.unsourcedCount || 0;
+            if (unsourced > 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.disabled = true;
+                opt.textContent = '— ' + unsourced + ' with no source recorded';
+                sel.appendChild(opt);
+            }
+            sel.value = keep;
+            if (sel.value !== keep) sel.value = '';
+        } catch (err) {
+            console.error('task-center: source counts failed', err);
+        }
+    }
+
+    function sourceCell(r) {
+        const code  = r.sourceTypeCode || '';
+        const label = TASK_SOURCE_LABELS[code] || code;
+        const type  = r.taskTypeName || r.taskTypeCode || '';
+        return (label ? '<span class="pm-badge">' + escape(label) + '</span>' : '')
+             + (type  ? '<div style="font-size:11px; color:#64748b;">' + escape(type) + '</div>' : '');
+    }
+
     function pendingBadges(r) {
         let out = '';
         if (r.extensionStatusCode === 'Pending')
@@ -715,23 +1069,40 @@
                  + escape(r.requestedPriority || '') + ' pending</span>';
         return out;
     }
+    // -----------------------------------------------------------------
+    // Pager
+    //
+    // Both tabs delegate to the shared implementation in
+    // _workflow-common.cshtml. This screen still owns pagesByTab -- each
+    // tab remembers its own page across tab switches -- and only reports
+    // the direction; the helper owns the label, the row range and the
+    // Prev/Next disabling.
+    //
+    // The old local copy incremented past the last page with no bound,
+    // and dereferenced [data-pg="prev"] without a null check.
+    // -----------------------------------------------------------------
     function wirePagers() {
+        const wf = window.__wfCommon;
+        if (!wf) { console.error('__wfCommon missing - _workflow-common partial not rendered'); return; }
         document.querySelectorAll('.pm-pager').forEach(function (nav) {
             const tab = nav.getAttribute('data-pager');
             if (!tab) return;
-            nav.querySelector('[data-pg="prev"]').addEventListener('click', function () {
-                if (pagesByTab[tab] > 1) { pagesByTab[tab]--; reloadCurrentTab(); }
-            });
-            nav.querySelector('[data-pg="next"]').addEventListener('click', function () {
-                pagesByTab[tab]++; reloadCurrentTab();
+            wf.wirePager(tab, function (delta) {
+                const target = (pagesByTab[tab] || 1) + delta;
+                if (target < 1) return;
+                pagesByTab[tab] = target;
+                reloadCurrentTab();
             });
         });
     }
     function updatePager(tab, payload) {
-        const nav = document.querySelector('.pm-pager[data-pager="' + tab + '"]');
-        if (!nav) return;
-        nav.querySelector('[data-pg="label"]').textContent = 'Page ' + (payload && payload.pageNumber || 1);
-        nav.querySelector('[data-pg="total"]').textContent = (payload && payload.totalCount || 0) + ' total';
+        const wf = window.__wfCommon;
+        if (!wf) return;
+        const rows = (payload && payload.rows) || [];
+        wf.updatePager(tab, Object.assign({}, payload, {
+            pageSize: PAGE_SIZE,
+            rowCount: rows.length
+        }));
     }
     function escape(v) {
         if (v === null || v === undefined) return '';
@@ -759,6 +1130,36 @@
         openMenuEl.style.top = top + 'px';
         openMenuEl.style.left = left + 'px';
     }
+    // =================================================================
+    // THREE STATES, NOT TWO.
+    //
+    // The menu answers "what can I do with this row right now?", and that
+    // question has three answers, not two:
+    //
+    //   applicable: false   This action can NEVER apply to this item.
+    //                       Completing a task that is already closed;
+    //                       giving a sub task its own sub tasks. HIDDEN --
+    //                       a permanently grey row is noise that the
+    //                       reader has to re-evaluate every time.
+    //
+    //   disabled + reason   Applicable, but blocked BY SOMETHING THAT CAN
+    //                       CHANGE. Mandatory sub tasks still open; the
+    //                       analysis not finished yet. SHOWN and greyed,
+    //                       because the reader needs to know the action
+    //                       exists and what would unblock it.
+    //
+    //   (neither)           Available now.
+    //
+    // The distinction is roughly: a TERMINAL or STRUCTURAL fact hides;
+    // an unmet PREREQUISITE disables. Both were previously collapsed into
+    // `disabled`, so a closed task showed seven grey rows that would never
+    // become anything else.
+    //
+    // NOTE ON AUTHORITY: this is presentation only. Every rule mirrored
+    // here is also enforced by the API and by SQL -- sp_task_complete's
+    // §12 gate, sp_task_update's closed-task refusal, the state machine.
+    // Hiding an item removes a button, never a check.
+    // =================================================================
     function openRowMenu(trigger, items) {
         closeRowMenu();
         openMenuTrigger = trigger;
@@ -766,11 +1167,35 @@
         openMenuEl = document.createElement('div');
         openMenuEl.className = 'pm-action-menu';
         openMenuEl.setAttribute('role', 'menu');
-        for (const it of items) {
+
+        const shown = items.filter(function (it) { return it && it.applicable !== false; });
+
+        if (!shown.length) {
+            // Better than an empty popover: says the row is read-only
+            // rather than looking like a rendering fault.
+            const p = document.createElement('div');
+            p.className = 'pm-action-menu-empty';
+            p.style.cssText = 'padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;';
+            p.textContent = 'No actions available';
+            openMenuEl.appendChild(p);
+        }
+
+        for (const it of shown) {
             const b = document.createElement('button');
             b.type = 'button'; b.setAttribute('role', 'menuitem');
             b.innerHTML = '<i class="fa-solid ' + escape(it.icon) + '" aria-hidden="true"></i> ' + escape(it.label);
-            if (it.disabled) { b.disabled = true; b.title = it.disabledReason || ''; }
+            if (it.disabled) {
+                b.disabled = true;
+                b.title = it.disabledReason || '';
+                // A greyed item that cannot say why is a dead end. Caught
+                // here so it shows up in development rather than as a
+                // silent shrug in production.
+                if (!it.disabledReason) {
+                    console.warn('[task-center] menu item "' + it.label
+                               + '" is disabled with no reason. Either give it a disabledReason'
+                               + ' or mark it applicable:false so it is hidden.');
+                }
+            }
             b.addEventListener('click', function (e) {
                 e.preventDefault(); e.stopPropagation();
                 closeRowMenu();
@@ -791,91 +1216,73 @@
         // Gap Center (Views/Practice/Partials/gaps.cshtml) which builds
         // its own 3-dot menu with View Practice Instance / Add
         // Implementation Task / View Existing Tasks.
-        const taskId = tr.getAttribute('data-task-id');
-        const currentState = tr.getAttribute('data-task-state') || '';
-        const isTerminal = tr.getAttribute('data-task-terminal') === '1';
-        const base = [
-            { icon: 'fa-eye',              label: 'View',
-                action: function () { openTaskViewDrawer(taskId); } }
-        ];
-        // Edit is gated behind the workflow subsystem -- shown only when
-        // TASK_ROW_MENU_FLAGS.edit flips to true (see top of file).
-        if (TASK_ROW_MENU_FLAGS.edit) {
-            base.push({ icon: 'fa-pen', label: 'Edit',
-                disabled: isTerminal, disabledReason: 'Task is closed.',
-                action: function () { /* wired when workflow subsystem lands */ } });
-        }
-        base.push(
-            { icon: 'fa-arrows-turn-right',label: 'Update Status',
-                disabled: isTerminal, disabledReason: 'Task is closed.',
-                action: function () { openUpdateTaskStatus(taskId, currentState); } },
-            { icon: 'fa-user-plus',        label: 'Assign / Reassign',
-                disabled: isTerminal, disabledReason: 'Task is closed.',
-                action: function () { openAssignTask(taskId); } }
-        );
+        const taskId      = tr.getAttribute('data-task-id');
+        const isTerminal  = tr.getAttribute('data-task-terminal') === '1';
+        const isChild     = tr.getAttribute('data-task-child') === '1';
+        const isEligible  = tr.getAttribute('data-task-eligible') === '1';
+        const taskTitle   = tr.getAttribute('data-task-title') || '';
+        const taskNumber  = tr.getAttribute('data-task-number') || ('#' + taskId);
+        const taskType    = tr.getAttribute('data-task-type') || '';
 
-        // -------------------------------------------------------------
-        // Task Centre v2 governance actions.
+        // ---------------------------------------------------------------
+        // The item list itself -- what shows, what is hidden, what is
+        // shown-but-disabled-with-a-reason -- now comes from the SHARED
+        // window.gracTaskActions.buildMenu(), not from a copy of this
+        // logic. Task View's own "Actions" menu builds from the same
+        // function with the same fields, so both screens agree on
+        // permission and applicability rules by construction rather than
+        // by two implementations happening to match. See
+        // wwwroot/js/Shared/task-actions.js for the rules themselves
+        // (unchanged from what used to live directly in this function --
+        // BRD §7, §8, §11, §12, §16) and for why each dialog
+        // (Edit / Complete / Close / Add Evidence) is opened through
+        // window.gracTaskActions rather than a local function.
         //
-        // The disabled reasons deliberately quote the BRD rule rather
-        // than saying "not allowed": when the system refuses, the
-        // operator should learn WHY, because these are governance
-        // decisions, not UI limitations.
-        // -------------------------------------------------------------
-        const isChild    = tr.getAttribute('data-task-child') === '1';
-        const isEligible = tr.getAttribute('data-task-eligible') === '1';
-        const priority   = tr.getAttribute('data-task-priority') || '';
-        const dueAt      = tr.getAttribute('data-task-due') || '';
-        const extStatus  = tr.getAttribute('data-task-ext') || '';
-        const prioReq    = tr.getAttribute('data-task-prio-req') || '';
-
-        base.push(
-            { icon: 'fa-comment-dots', label: 'Add Update / Comment',
-                disabled: isTerminal, disabledReason: 'Task is closed.',
-                action: function () { openAddUpdate(taskId); } },
-
-            { icon: 'fa-flag', label: 'Change Priority',
-                disabled: isTerminal || isChild || prioReq === 'Pending',
-                disabledReason: isChild ? 'Child tasks inherit the parent priority — change it on the parent.'
-                              : prioReq === 'Pending' ? 'A priority reduction is already awaiting approval.'
-                              : 'Task is closed.',
-                action: function () { openChangePriority(taskId, priority); } },
-
-            { icon: 'fa-calendar-plus', label: 'Request SLA Extension',
-                disabled: isTerminal || isChild || extStatus === 'Pending',
-                disabledReason: isChild ? 'Child tasks inherit the parent SLA — raise the request on the parent.'
-                              : extStatus === 'Pending' ? 'An SLA extension is already awaiting approval.'
-                              : 'Task is closed.',
-                action: function () { openRequestExtension(taskId, dueAt); } },
-
-            { icon: 'fa-diagram-project', label: 'Add Child Task',
-                disabled: isTerminal || isChild,
-                disabledReason: isChild ? 'Child tasks cannot themselves have children.' : 'Task is closed.',
-                action: function () { openAddChildTask(taskId); } },
-
-            { icon: 'fa-circle-check', label: 'Complete Task',
-                disabled: isTerminal || !isEligible,
-                disabledReason: isTerminal ? 'Already completed.'
-                              : 'Mandatory child tasks are still open.',
-                action: function () { completeTaskAction(taskId); } }
+        // "View" stays a LOCAL handler: it is the one item Task Center
+        // still owns outright, since it navigates to the dedicated Task
+        // View page rather than opening a shared dialog. "Add Child
+        // Task" also stays local -- openAddChildTask() below -- because
+        // it already had its own shared component (window.gracTaskForm)
+        // before this change and did not need to move again.
+        // ---------------------------------------------------------------
+        return window.gracTaskActions.buildMenu(
+            { taskId: taskId, taskNumber: taskNumber, taskTitle: taskTitle, taskType: taskType,
+              isTerminal: isTerminal, isChild: isChild, isEligible: isEligible },
+            {
+                onView: function () {
+                    window.location.href = U('/Practice/Index/task-view') + '?taskId=' + encodeURIComponent(taskId);
+                },
+                onEdit:        function () { window.gracTaskActions.openEdit(taskId); },
+                onComplete:    function () { window.gracTaskActions.openComplete(taskId, taskNumber, taskTitle); },
+                onAddChild:    function () { openAddChildTask(taskId); },
+                onAddEvidence: function () { window.gracTaskActions.openEvidenceUpload(taskId, taskNumber); },
+                onAddUpdate:   function () { window.gracTaskActions.openAddUpdate(taskId); },
+                // Both flags are false in window.gracTaskActions.FLAGS today,
+                // so buildMenu() never shows these two -- the handlers are
+                // supplied anyway so the item appears automatically, with
+                // zero further code changes here, the day either flag flips.
+                onViewAssuranceActivity: function () { /* wired when Assurance drill-down lands */ },
+                onViewWorkflowHistory:   function () { /* wired when workflow-history viewer lands */ },
+                onClose:       function () { window.gracTaskActions.openClose(taskId, taskNumber, taskTitle); }
+            }
         );
-        // View Assurance Activity is gated behind the Phase-6 drill-down.
-        if (activeTab === 'assurance' && TASK_ROW_MENU_FLAGS.viewAssuranceActivity) {
-            base.push({ icon: 'fa-shield-halved', label: 'View Assurance Activity',
-                action: function () { /* wired when Assurance drill-down lands */ } });
-        }
-        // View Workflow History is gated behind the workflow-history viewer.
-        if (TASK_ROW_MENU_FLAGS.viewWorkflowHistory) {
-            base.push({ icon: 'fa-clock-rotate-left', label: 'View Workflow History',
-                action: function () { /* wired when workflow-history viewer lands */ } });
-        }
-        if (activeTab !== 'assurance') {
-            base.push({ icon: 'fa-lock',
-                label: activeTab === 'custom' ? 'Close / Inactivate' : 'Close Task',
-                disabled: isTerminal, disabledReason: 'Already closed.',
-                action: function () { closeTaskAction(taskId); } });
-        }
-        return base;
+    }
+    // -----------------------------------------------------------------
+    // Shared org-employees fetch — used by Validate Candidate below.
+    // (Task Edit's own copy of this now lives in the shared
+    // window.gracTaskActions module alongside the rest of the Edit
+    // dialog -- this one stays local because Task Candidates are their
+    // own screen, unrelated to the Task View / Task Center Actions-menu
+    // change, and were not touched by it.)
+    // Hits the existing /practice/api/organizations/{id}/employees endpoint.
+    // -----------------------------------------------------------------
+    async function fetchOrgEmployees(orgId) {
+        if (!orgId) return [];
+        const url = U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees';
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' from ' + url);
+        const arr = await r.json();
+        return Array.isArray(arr) ? arr : [];
     }
     // -----------------------------------------------------------------
     // Task Candidate row menu + actions  (BRD §5)
@@ -892,9 +1299,14 @@
             { icon: 'fa-user-check', label: 'Validate (owner / priority)',
                 action: function () { openValidateCandidate(id, priority); } },
 
+            // DISABLED, not hidden, and deliberately so: approving is
+            // exactly what this candidate is for, and the only thing in
+            // the way is a prerequisite the reader can go and satisfy
+            // with the Validate action directly above. Hiding it would
+            // remove the signpost pointing at what to do next.
             { icon: 'fa-circle-check', label: 'Approve → create task',
                 disabled: !ready,
-                disabledReason: 'A confirmed owner is required before a candidate can become an accountable task.',
+                disabledReason: 'A confirmed owner is required before a candidate can become an accountable task. Use Validate first.',
                 action: function () { approveCandidate(id); } },
 
             { icon: 'fa-ban', label: 'Discard',
@@ -949,16 +1361,16 @@
     // free, reduction approved) only starts once a commitment exists.
     async function openValidateCandidate(id, currentPriority) {
         const emps = await fetchOrgEmployees(selectedOrgId).catch(function () { return []; });
-        const owner = prompt('Validate candidate #' + id
-            + '\n\nConfirm the owner. Options:\n'
-            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('\n')
-            + '\n\nEnter employee id (blank = leave unchanged):');
+        const owner = await window.gracUi.prompt('Confirm the owner. Options: '
+            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('; ')
+            + '. Enter employee id (blank = leave unchanged):',
+            { title: 'Validate candidate #' + id, inputLabel: 'Employee id', confirmText: 'Continue' });
         if (owner === null) return;
 
-        const priority = prompt('Proposed priority'
-            + '\nCurrent: ' + (currentPriority || 'Medium')
-            + '\n\nThe SLA is derived from this and cannot be typed in.'
-            + '\n\nEnter Low, Medium, High or Critical (blank = leave unchanged):');
+        const priority = await window.gracUi.prompt('Current: ' + (currentPriority || 'Medium')
+            + '. The SLA is derived from this and cannot be typed in. '
+            + 'Enter Low, Medium, High or Critical (blank = leave unchanged):',
+            { title: 'Proposed priority', inputLabel: 'Priority', confirmText: 'Continue' });
         if (priority === null) return;
 
         const payload = {};
@@ -970,16 +1382,19 @@
     }
 
     async function approveCandidate(id) {
-        if (!confirm('Approve candidate #' + id + '?\n\nThis creates an Approved Task with the confirmed owner and priority, and derives the SLA from the organisation policy in force right now.')) return;
+        if (!await window.gracUi.confirm('This creates an Approved Task with the confirmed owner '
+              + 'and priority, and derives the SLA from the organisation policy in force right now.',
+              { title: 'Approve candidate #' + id, confirmText: 'Approve' })) return;
         await postCandidateAction(id, '/approve', {}, function (b) {
             return 'Task ' + (b.approvedTaskId || '?') + ' created from this candidate.';
         });
     }
 
     async function discardCandidate(id) {
-        const reason = prompt('Discard candidate #' + id
-            + '\n\nThe source record is NOT closed or changed — only this proposed task is dropped.'
-            + '\n\nReason:');
+        const reason = await window.gracUi.prompt(
+            'The source record is NOT closed or changed — only this proposed task is dropped.',
+            { type: 'warning', title: 'Discard candidate #' + id,
+              inputLabel: 'Reason', confirmText: 'Discard' });
         if (!reason || !reason.trim()) return;
         await postCandidateAction(id, '/discard', { discardReason: reason.trim() }, 'Candidate discarded.');
     }
@@ -988,13 +1403,42 @@
         const root = document.getElementById('taskCenterRoot');
         if (root) {
             root.addEventListener('click', function (e) {
+                // The sub-task toggle shares this one delegated listener
+                // rather than being bound per row: the grid is rebuilt on
+                // every page, filter and search change, and per-row
+                // listeners would have to be rebound each time -- the
+                // same reasoning the row menu is delegated for.
+                const expander = e.target.closest('.task-tree-toggle[data-task-expand]');
+                if (expander && root.contains(expander)) {
+                    e.preventDefault(); e.stopPropagation();
+                    closeRowMenu();          // it is anchored to a row that is about to move
+                    toggleTaskRow(expander);
+                    return;
+                }
                 const trigger = e.target.closest('.pm-action-trigger');
-                if (!trigger || !root.contains(trigger)) return;
-                e.preventDefault(); e.stopPropagation();
-                const tr = trigger.closest('tr');
-                if (!tr) return;
-                if (openMenuTrigger === trigger) { closeRowMenu(); return; }
-                openRowMenu(trigger, buildRowMenu(tr));
+                if (trigger && root.contains(trigger)) {
+                    e.preventDefault(); e.stopPropagation();
+                    const tr = trigger.closest('tr');
+                    if (!tr) return;
+                    if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+                    openRowMenu(trigger, buildRowMenu(tr));
+                    return;
+                }
+                // Row click-to-View (change request, 2026-09-22): a task
+                // row (parent or sub task alike) opens Task View, exactly
+                // what its own "View" menu item does; a candidate row
+                // opens its quick-look modal instead (buildCandidateRowMenu's
+                // own View item, openCandidateView) -- neither has an
+                // in-row link today, but !e.target.closest('a') is kept
+                // for the same reason the other screens keep it.
+                const tr = e.target.closest('tr.pm-row-clickable');
+                if (!tr || !root.contains(tr) || e.target.closest('a')) return;
+                if (tr.hasAttribute('data-candidate-id')) {
+                    openCandidateView(tr.getAttribute('data-candidate-id'));
+                } else if (tr.hasAttribute('data-task-id')) {
+                    window.location.href = U('/Practice/Index/task-view')
+                        + '?taskId=' + encodeURIComponent(tr.getAttribute('data-task-id'));
+                }
             });
         }
         document.addEventListener('click', function (e) {
@@ -1019,542 +1463,81 @@
     // + children + governance requests, so the drawer never fans out
     // into five round trips.
     // -----------------------------------------------------------------
-    async function openTaskViewDrawer(taskId) {
-        const dlg  = document.getElementById('taskDetailDialog');
-        const bodyEl = document.getElementById('taskDetailBody');
-        if (!dlg || !bodyEl) return;
-        bodyEl.innerHTML = '<p class="pm-empty">Loading task #' + escape(taskId) + '...</p>';
-        showDialog(dlg);
-        try {
-            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            renderTaskDetail(await r.json());
-        } catch (err) {
-            bodyEl.innerHTML = '<p class="pm-empty">Failed to load: ' + escape(err.message) + '</p>';
-        }
-    }
-
-    function detailField(label, value) {
-        return '<div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">'
-             + escape(label) + '</div><div style="font-weight:600; color:#0f172a;">'
-             + (value || '<span style="font-weight:400; color:#94a3b8;">&mdash;</span>') + '</div></div>';
-    }
-
-    function renderTaskDetail(d) {
-        const bodyEl = document.getElementById('taskDetailBody');
-        const h = d && d.header;
-        if (!h) { bodyEl.innerHTML = '<p class="pm-empty">Task not found.</p>'; return; }
-
-        document.getElementById('taskDetailTitle').textContent =
-            (h.taskNumber || ('Task #' + h.taskId)) + ' — ' + (h.subjectTitle || '');
-
-        const parts = [];
-
-        // ---- identity / origin (BRD §16) ----
-        parts.push('<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px;">');
-        parts.push(detailField('Type',     escape(h.taskTypeName || h.taskTypeCode)));
-        parts.push(detailField('Status',   escape(h.currentStatusName || '')));
-        parts.push(detailField('Priority', escape(h.priority || '')
-                   + (h.priorityChangeStatusCode === 'Pending'
-                      ? ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">'
-                        + escape(h.requestedPriority || '') + ' pending</span>' : '')));
-        parts.push(detailField('Owner',    ownerCell(h)));
-        parts.push(detailField('Origin',   h.sourceTypeCode
-                   ? escape(h.sourceTypeCode + ' #' + (h.sourceRecordId || '')) : ''));
-        parts.push(detailField('Parent',   h.parentTaskId
-                   ? '<a href="#" data-open-task="' + escape(h.parentTaskId) + '">'
-                     + escape(h.parentTaskNumber || ('#' + h.parentTaskId)) + '</a>' : ''));
-        parts.push('</div>');
-
-        // ---- SLA block (BRD §8, §13) ----
-        // Standard and extended are shown side by side precisely because
-        // the BRD insists the extension must not erase the original.
-        parts.push('<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px;">');
-        parts.push('<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;">');
-        parts.push(detailField('Standard SLA', h.standardSlaDays != null ? escape(h.standardSlaDays + ' days') : ''));
-        parts.push(detailField('Standard Due', escape(fmtDate(h.standardDueAt))));
-        parts.push(detailField('Approved Extended Due', escape(fmtDate(h.approvedExtendedDueAt))));
-        parts.push(detailField('SLA Status', slaStatusBadge(h)));
-        parts.push('</div>');
-        if (h.extensionStatusCode === 'Pending') {
-            parts.push('<div style="margin-top:8px; font-size:12px; color:#854d0e;">'
-                     + 'Extension to ' + escape(fmtDate(h.requestedDueAt))
-                     + ' is awaiting Exception Centre approval. The due date is unchanged until then.'
-                     + '</div>');
-        }
-        if (h.slaSourceCode === 'TYPE_DEFAULT') {
-            parts.push('<div style="margin-top:8px; font-size:12px; color:#64748b;">'
-                     + 'No organisation SLA policy matched this priority — the task-type default was used. '
-                     + 'Configure an SLA for this classification in Org SLA Configuration.'
-                     + '</div>');
-        }
-        parts.push('</div>');
-
-        // ---- description ----
-        if (h.subjectDescription) {
-            parts.push('<div style="margin-bottom:14px;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Action required</div>'
-                     + '<div style="white-space:pre-wrap; color:#0f172a;">' + escape(h.subjectDescription) + '</div></div>');
-        }
-
-        // ---- children (BRD §11, §12) ----
-        const children = d.children || [];
-        if (children.length) {
-            parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Child tasks ('
-                     + children.length + ')</h3><div class="pm-table-wrap"><table><thead><tr>'
-                     + '<th>Task #</th><th>Activity</th><th>Owner</th><th>Mandatory</th><th>Target</th><th>Status</th>'
-                     + '</tr></thead><tbody>');
-            for (const c of children) {
-                parts.push('<tr><td><a href="#" data-open-task="' + escape(c.taskId) + '">'
-                         + escape(c.taskNumber || ('#' + c.taskId)) + '</a></td>'
-                         + '<td>' + escape(c.subjectTitle) + '</td>'
-                         + '<td>' + escape(c.assignedToEmployeeName || c.assignedToEmployeeId || '') + '</td>'
-                         + '<td>' + (c.isMandatoryChild === false ? 'Optional' : 'Mandatory') + '</td>'
-                         + '<td>' + escape(fmtDate(c.childTargetDate)) + '</td>'
-                         + '<td>' + formatBadge(c.currentStatusName) + '</td></tr>');
-            }
-            parts.push('</tbody></table></div>');
-            if (!h.isEligibleForCompletion && !h.closedAt) {
-                parts.push('<p style="font-size:12px; color:#854d0e; margin:6px 0 0;">'
-                         + escape(h.mandatoryChildOpenCount) + ' mandatory child task(s) still open — '
-                         + 'the parent cannot be completed until they are done.</p>');
-            }
-        }
-
-        // ---- governance requests (BRD §7, §8) ----
-        const reqs = d.governanceRequests || [];
-        if (reqs.length) {
-            parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Exception Centre requests</h3>'
-                     + '<div class="pm-table-wrap"><table><thead><tr>'
-                     + '<th>Type</th><th>Asked for</th><th>Status</th><th>Requested by</th><th>Decision</th>'
-                     + '</tr></thead><tbody>');
-            for (const q of reqs) {
-                const asked = q.requestTypeCode === 'TASK_PRIORITY_REDUCTION'
-                    ? escape((q.priorityOriginal || '') + ' → ' + (q.priorityRequested || ''))
-                    : escape(fmtDate(q.dueAtOriginal) + ' → ' + fmtDate(q.dueAtRequested));
-                parts.push('<tr><td>' + escape(q.requestTypeCode === 'TASK_PRIORITY_REDUCTION' ? 'Priority reduction' : 'SLA extension') + '</td>'
-                         + '<td>' + asked + '</td>'
-                         + '<td>' + formatBadge(q.statusCode) + '</td>'
-                         + '<td>' + escape(q.requestedByName || '') + '</td>'
-                         + '<td>' + escape(q.approvedByName || q.rejectedByName || '') + '</td></tr>');
-            }
-            parts.push('</tbody></table></div>');
-        }
-
-        // ---- evidence (BRD §16) ----
-        const files = d.attachments || [];
-        parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Evidence</h3>');
-        if (files.length) {
-            parts.push('<ul style="margin:0 0 8px; padding-left:18px;">');
-            for (const f of files) {
-                parts.push('<li><a href="' + U('/practice/api/tasks/attachments/') + escape(f.taskAttachmentId) + '">'
-                         + escape(f.fileName) + '</a> <span style="color:#64748b; font-size:11px;">('
-                         + Math.max(1, Math.round((f.fileSizeBytes || 0) / 1024)) + ' KB'
-                         + (f.uploadedByName ? ', ' + escape(f.uploadedByName) : '') + ')</span></li>');
-            }
-            parts.push('</ul>');
-        } else {
-            parts.push('<p style="color:#94a3b8; font-size:12px; margin:0 0 8px;">No evidence attached yet.</p>');
-        }
-        if (!h.closedAt) {
-            parts.push('<div style="display:flex; gap:8px; align-items:center; margin-bottom:14px;">'
-                     + '<input type="file" id="taskEvidenceFile" style="font-size:12px;" />'
-                     + '<button type="button" class="pm-button" id="taskEvidenceUpload" data-task-id="'
-                     + escape(h.taskId) + '">Upload evidence</button></div>');
-        }
-
-        // ---- activity feed (BRD §16) ----
-        const acts = d.activity || [];
-        parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Activity</h3>');
-        if (!acts.length) {
-            parts.push('<p style="color:#94a3b8; font-size:12px;">No activity recorded yet.</p>');
-        } else {
-            parts.push('<ul style="list-style:none; margin:0; padding:0;">');
-            for (const a of acts) {
-                const change = (a.fromValue || a.toValue)
-                    ? ' <span style="color:#64748b;">' + escape(a.fromValue || '') + ' → ' + escape(a.toValue || '') + '</span>'
-                    : '';
-                parts.push('<li style="border-left:2px solid #e2e8f0; padding:4px 0 8px 10px; margin-bottom:2px;">'
-                         + '<div style="font-size:12px; font-weight:600; color:#0f172a;">'
-                         + escape(a.activityTypeCode) + change + '</div>'
-                         + (a.remark ? '<div style="font-size:12px; color:#334155; white-space:pre-wrap;">' + escape(a.remark) + '</div>' : '')
-                         + '<div style="font-size:11px; color:#94a3b8;">'
-                         + escape(a.actorDisplayName || 'system') + ' · ' + escape(fmtDate(a.enteredDt))
-                         + '</div></li>');
-            }
-            parts.push('</ul>');
-        }
-
-        bodyEl.innerHTML = parts.join('');
-        wireTaskDetailBody();
-    }
-
-    function wireTaskDetailBody() {
-        const bodyEl = document.getElementById('taskDetailBody');
-        if (!bodyEl) return;
-        bodyEl.querySelectorAll('[data-open-task]').forEach(function (a) {
-            a.addEventListener('click', function (e) {
-                e.preventDefault();
-                openTaskViewDrawer(a.getAttribute('data-open-task'));
-            });
-        });
-        const upload = document.getElementById('taskEvidenceUpload');
-        if (upload) upload.addEventListener('click', function () { uploadEvidence(upload.getAttribute('data-task-id')); });
-    }
-
-    async function uploadEvidence(taskId) {
-        const input = document.getElementById('taskEvidenceFile');
-        if (!input || !input.files || !input.files.length) { alert('Choose a file first.'); return; }
-        const fd = new FormData();
-        fd.append('file', input.files[0]);
-        try {
-            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/attachments', {
-                method: 'POST', credentials: 'same-origin', body: fd
-            });
-            if (r.ok) { openTaskViewDrawer(taskId); }
-            else {
-                const b = await r.json().catch(function () { return {}; });
-                alert(b.error || ('Upload failed (HTTP ' + r.status + ')'));
-            }
-        } catch (err) { alert('Network error: ' + err.message); }
-    }
-    async function openUpdateTaskStatus(taskId, currentState) {
-        const next = prompt('Update status for Task #' + taskId
-            + '\nCurrent: ' + (currentState || '—')
-            + '\nEnter new status code (Assigned, InProgress, PendingReview, Escalated, Cancelled):');
-        if (!next) return;
-        try {
-            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/transition', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                body: JSON.stringify({ toStatusCode: next.trim() })
-            });
-            const b = await r.json().catch(function () { return {}; });
-            if (r.ok) { reloadCurrentTab(); refreshCounts(); }
-            else     { alert((b.error || 'Transition failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
-        } catch (err) { alert('Network error: ' + err.message); }
-    }
-    async function openAssignTask(taskId) {
-        try {
-            const emps = await fetchOrgEmployees(selectedOrgId);
-            if (!emps.length) { alert('No active employees for this organization.'); return; }
-            const options = emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName + (e.employeeCode ? ' (' + e.employeeCode + ')' : ''); }).join('\n');
-            const picked = prompt('Assign Task #' + taskId + ' to employee id.\nOptions:\n' + options + '\n\nEnter employee id:');
-            if (!picked) return;
-            const empId = Number(picked.trim());
-            if (!empId) { alert('Invalid employee id.'); return; }
-            const resp = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/assign', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                body: JSON.stringify({ assignedToEmployeeId: empId })
-            });
-            const b = await resp.json().catch(function () { return {}; });
-            if (resp.ok) { reloadCurrentTab(); }
-            else         { alert((b.error || 'Assign failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
-        } catch (err) { alert('Network error: ' + err.message); }
-    }
-    async function closeTaskAction(taskId) {
-        if (!confirm('Close Task #' + taskId + '? This cannot be undone via the UI.')) return;
-        try {
-            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/close', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                body: JSON.stringify({ reasonCode: 'MANUAL_CLOSE', reasonText: 'Closed from Task Center 3-dot menu.' })
-            });
-            const b = await r.json().catch(function () { return {}; });
-            if (r.ok) { reloadCurrentTab(); refreshCounts(); }
-            else     { alert((b.error || 'Close failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : '')); }
-        } catch (err) { alert('Network error: ' + err.message); }
-    }
-
-    // -----------------------------------------------------------------
-    // Task Centre v2 row actions  (BRD §7, §8, §11, §12, §16)
-    //
-    // These use prompt()/confirm() to match the existing row actions in
-    // this file (Update Status, Assign, Close all do). Replacing the
-    // whole interaction style is a separate UI pass — mixing modal
-    // dialogs into a prompt()-based menu would be worse than either.
-    // -----------------------------------------------------------------
-    async function postTaskAction(taskId, path, payload, okMessage) {
-        try {
-            const r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + path, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin', body: JSON.stringify(payload || {})
-            });
-            const b = await r.json().catch(function () { return {}; });
-            if (r.ok) {
-                if (okMessage) alert(typeof okMessage === 'function' ? okMessage(b) : okMessage);
-                reloadCurrentTab();
-                refreshCounts();
-                return true;
-            }
-            // reasonCode carries the BRD rule that refused the action —
-            // surface it, because "why" matters more than "no".
-            alert((b.error || 'Request failed') + (b.reasonCode ? '\n[' + b.reasonCode + ']' : ''));
-            return false;
-        } catch (err) {
-            alert('Network error: ' + err.message);
-            return false;
-        }
-    }
-
-    async function openAddUpdate(taskId) {
-        const remark = prompt('Add an update or comment to Task #' + taskId + ':');
-        if (!remark || !remark.trim()) return;
-        await postTaskAction(taskId, '/activity',
-            { activityTypeCode: 'Update', remark: remark.trim() }, null);
-    }
 
     // BRD §7: increases apply immediately; reductions need an approved
     // Exception. The prompt spells that out so nobody is surprised when
     // "High → Medium" does not take effect.
-    async function openChangePriority(taskId, current) {
-        const next = prompt('Change priority for Task #' + taskId
-            + '\nCurrent: ' + (current || '—')
-            + '\n\nAn INCREASE applies immediately and recalculates the SLA.'
-            + '\nA REDUCTION needs Exception Centre approval and changes nothing until approved.'
-            + '\n\nEnter new priority (Low, Medium, High, Critical):');
-        if (!next || !next.trim()) return;
-        const value = next.trim();
-        const rank  = { low: 1, medium: 2, high: 3, critical: 4 };
-        const isReduction = (rank[value.toLowerCase()] || 0) < (rank[String(current).toLowerCase()] || 0);
-
-        let reason = null;
-        if (isReduction) {
-            reason = prompt('A reduction weakens the original commitment, so Exception Centre must approve it.\n\nReason for reducing priority:');
-            if (!reason || !reason.trim()) { alert('A reason is required to request a priority reduction.'); return; }
-        }
-        await postTaskAction(taskId, '/priority',
-            { newPriority: value, reason: reason ? reason.trim() : null },
-            function (b) {
-                return b.statusCode === 'PendingApproval'
-                    ? 'Priority reduction sent to Exception Centre (request #' + (b.exceptionRequestId || '?') + ').\nThe task priority and SLA are unchanged until it is approved.'
-                    : 'Priority updated and the standard SLA recalculated.';
-            });
-    }
 
     // BRD §8: an extension is a request, never an override. The date does
     // not move until Exception Centre approves.
-    async function openRequestExtension(taskId, currentDue) {
-        const due = prompt('Request an SLA extension for Task #' + taskId
-            + '\nCurrent due date: ' + (fmtDate(currentDue) || '—')
-            + '\n\nThe standard SLA is retained; if approved, an Approved Extended Due Date is recorded.'
-            + '\nEarly completion never needs approval.'
-            + '\n\nRequested due date (YYYY-MM-DD):');
-        if (!due || !due.trim()) return;
-        const parsed = new Date(due.trim() + 'T00:00:00Z');
-        if (isNaN(parsed.getTime())) { alert('Enter the date as YYYY-MM-DD.'); return; }
 
-        const reason = prompt('Reason for the extension (complexity, dependencies, ...):');
-        if (!reason || !reason.trim()) { alert('A reason is required.'); return; }
-
-        const emps = await fetchOrgEmployees(selectedOrgId).catch(function () { return []; });
-        const requester = prompt('Requesting employee id.\nOptions:\n'
-            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('\n')
-            + '\n\nEnter employee id:');
-        if (!requester || !Number(requester.trim())) { alert('A requesting employee is required.'); return; }
-
-        await postTaskAction(taskId, '/sla-extension', {
-            requestedDueAt:         parsed.toISOString(),
-            extensionReason:        reason.trim(),
-            requestedByEmployeeId:  Number(requester.trim())
-        }, function (b) {
-            return 'SLA extension sent to Exception Centre (request #' + (b.exceptionRequestId || '?') + ').\nThe due date is unchanged until it is approved.';
-        });
-    }
-
-    // BRD §11: the child inherits priority and SLA — neither is asked for.
+    // "Add Sub Task" from a task's row menu.
+    //
+    // This was FOUR chained window.prompt() boxes and a confirm(): title,
+    // then a newline-joined employee list to read an id out of, then
+    // mandatory-or-not. It could not show which task it was adding to, it
+    // had no validation, and an employee id had to be typed by hand.
+    //
+    // The parent is known here -- it is the row the menu was opened on --
+    // so the common form is opened with it fixed and read-only. The user
+    // is never asked to choose a parent they already chose.
     async function openAddChildTask(parentTaskId) {
-        const title = prompt('Add a child task under Task #' + parentTaskId
-            + '\n\nThe child inherits the parent priority, SLA and due date.'
-            + '\n\nChild task title:');
-        if (!title || !title.trim()) return;
+        const orgSel = document.getElementById('taskFilterOrganization');
+        const orgName = (orgSel && orgSel.options[orgSel.selectedIndex]
+                         && orgSel.options[orgSel.selectedIndex].textContent) || null;
 
-        const emps = await fetchOrgEmployees(selectedOrgId).catch(function () { return []; });
-        const owner = prompt('Owner for this child task (may differ from the parent).\nOptions:\n'
-            + emps.map(function (e) { return e.employeeId + ' — ' + e.employeeName; }).join('\n')
-            + '\n\nEnter employee id, or leave blank to resolve automatically:');
+        // Title and number for the read-only Parent Task field, taken from
+        // the row already on screen -- no round trip to name a task the
+        // user is looking at.
+        const tr = document.querySelector('tr[data-task-id="' + parentTaskId + '"]');
+        const parent = {
+            taskId: Number(parentTaskId),
+            taskNumber: tr ? (tr.getAttribute('data-task-number') || null) : null,
+            title: tr ? (tr.getAttribute('data-task-title') || null) : null
+        };
 
-        const mandatory = confirm('Is this child MANDATORY for parent completion?\n\nOK = mandatory (blocks parent completion)\nCancel = optional');
-
-        await postTaskAction(parentTaskId, '/children', {
-            subjectTitle:         title.trim(),
-            assignedToEmployeeId: owner && Number(owner.trim()) ? Number(owner.trim()) : null,
-            isMandatory:          mandatory
-        }, 'Child task created.');
+        window.gracTaskForm.open({
+            mode: 'subtask',
+            organizationId: Number(selectedOrgId),
+            organizationName: orgName,
+            parentTask: parent,
+            onSaved: function () { refreshCounts(); reloadCurrentTab(); }
+        });
     }
 
     // BRD §12: the parent owner confirms completion of the overall
     // objective — completion is never implied by the last child closing.
-    async function completeTaskAction(taskId) {
-        try {
-            const e = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/eligibility',
-                                  { credentials: 'same-origin' });
-            if (e.ok) {
-                const el = await e.json();
-                if (el && el.isEligible === false) { alert('Cannot complete: ' + (el.reason || 'not eligible.')); return; }
-                if (el && el.childCount > 0 &&
-                    !confirm('All mandatory child tasks are complete.\n\nConfirm that the overall objective of this task is achieved?')) return;
-            }
-        } catch (_) { /* eligibility is advisory — the proc enforces it */ }
 
-        const remark = prompt('Completion remark for Task #' + taskId + ' (optional):') || null;
-        await postTaskAction(taskId, '/complete', { completionRemark: remark }, 'Task completed.');
-    }
-
-    function wireTaskDetailDialog() {
-        const dlg = document.getElementById('taskDetailDialog');
-        if (!dlg) return;
-        const closeB = document.getElementById('taskDetailClose');
-        if (closeB) closeB.addEventListener('click', function () { hideDialog(dlg); });
-        // Backdrop click closes, matching the New Task dialog's behaviour.
-        dlg.addEventListener('click', function (e) {
-            const r = dlg.getBoundingClientRect();
-            if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) hideDialog(dlg);
-        });
-    }
-
-    function showDialog(dlg) {
-        if (!dlg) return;
-        if (typeof dlg.showModal === 'function') dlg.showModal();
-        else { dlg.setAttribute('open', 'open'); dlg.style.display = 'block'; }
-    }
-    function hideDialog(dlg) {
-        if (!dlg) return;
-        if (typeof dlg.close === 'function') dlg.close();
-        else { dlg.removeAttribute('open'); dlg.style.display = 'none'; }
-    }
-
-    // -----------------------------------------------------------------
-    // Shared org-employees fetch — reused by Assign / Reassign and New Task.
-    // Hits the existing /practice/api/organizations/{id}/employees endpoint.
-    // -----------------------------------------------------------------
-    async function fetchOrgEmployees(orgId) {
-        if (!orgId) return [];
-        const url = U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees';
-        const r = await fetch(url, { credentials: 'same-origin' });
-        if (!r.ok) throw new Error('HTTP ' + r.status + ' from ' + url);
-        const arr = await r.json();
-        return Array.isArray(arr) ? arr : [];
-    }
-    async function populateAssignees(selectEl, orgId, keepValue) {
-        selectEl.innerHTML = '<option value="">Loading employees...</option>';
-        selectEl.disabled  = true;
-        try {
-            const arr = await fetchOrgEmployees(orgId);
-            selectEl.innerHTML = '';
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = arr.length ? '— select an employee —' : 'No active employees for this organization';
-            selectEl.appendChild(placeholder);
-            for (const emp of arr) {
-                const opt = document.createElement('option');
-                opt.value = String(emp.employeeId);
-                let label = emp.employeeName || '';
-                if (emp.employeeCode) label += ' (' + emp.employeeCode + ')';
-                opt.textContent = label;
-                if (emp.email) opt.title = emp.email;
-                selectEl.appendChild(opt);
-            }
-            if (keepValue) selectEl.value = String(keepValue);
-        } catch (err) {
-            selectEl.innerHTML = '<option value="">Failed to load: ' + escape(err.message) + '</option>';
-        } finally { selectEl.disabled = false; }
-    }
 
     // -----------------------------------------------------------------
     // New Task (Custom) dialog wiring
     // -----------------------------------------------------------------
-    function setNewTaskMsg(text, kind) {
-        const el = document.getElementById('newTaskMessage');
-        if (!el) return;
-        if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
-        el.style.display = 'block'; el.textContent = text;
-        if (kind === 'error') { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
-        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
-        else { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
-    }
+    // Both entry points now open THE common Task / Sub Task form
+    // (Shared/task-form.js + _task-form-dialog.cshtml). The Task Center
+    // no longer owns a task form of its own -- the layout in the
+    // screenshot moved into the shared partial unchanged, so this screen
+    // looks identical while every other screen gets the same thing.
     function openNewTaskDialog() {
         if (!selectedOrgId) {
             alert('Select an organization first — the Assigned To dropdown scopes to that organization.');
             return;
         }
-        const dlg = document.getElementById('newTaskDialog');
-        if (!dlg) return;
-        setNewTaskMsg(null);
-        ['newTaskTitle','newTaskDescription','newTaskStartDate','newTaskTargetDate','newTaskRemarks']
-            .forEach(function (id) { const el = document.getElementById(id); if (el) el.value = ''; });
-        const pr = document.getElementById('newTaskPriority'); if (pr) pr.value = 'Medium';
-        const sub = document.getElementById('newTaskSubmit'); if (sub) sub.disabled = false;
         const orgSel = document.getElementById('taskFilterOrganization');
-        const lbl = document.getElementById('newTaskOrgLabel');
-        if (lbl) lbl.textContent = (orgSel && orgSel.options[orgSel.selectedIndex] && orgSel.options[orgSel.selectedIndex].textContent) || ('Organization ' + selectedOrgId);
-        // Always refresh — org may have changed since last open.
-        populateAssignees(document.getElementById('newTaskAssignee'), selectedOrgId);
-        if (typeof dlg.showModal === 'function') dlg.showModal();
-        else { dlg.setAttribute('open','open'); dlg.style.display='block'; }
-        setTimeout(function () { const t = document.getElementById('newTaskTitle'); if (t) t.focus(); }, 40);
-    }
-    function closeNewTaskDialog() {
-        const dlg = document.getElementById('newTaskDialog');
-        if (!dlg) return;
-        if (typeof dlg.close === 'function') dlg.close();
-        else { dlg.removeAttribute('open'); dlg.style.display = 'none'; }
-    }
-    function wireNewTaskDialog() {
-        const dlg = document.getElementById('newTaskDialog');
-        if (!dlg) return;
-        const closeB = document.getElementById('newTaskClose');
-        const canB   = document.getElementById('newTaskCancel');
-        const form   = document.getElementById('newTaskForm');
-        if (closeB) closeB.addEventListener('click', closeNewTaskDialog);
-        if (canB)   canB.addEventListener('click',   closeNewTaskDialog);
-        dlg.addEventListener('click', function (e) {
-            const r = dlg.getBoundingClientRect();
-            if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeNewTaskDialog();
-        });
-        if (!form) return;
-        form.addEventListener('submit', async function (e) {
-            e.preventDefault();
-            const title    = document.getElementById('newTaskTitle').value.trim();
-            const assignee = document.getElementById('newTaskAssignee').value;
-            if (!title)    { setNewTaskMsg('Task Name is required.', 'error'); return; }
-            if (!assignee) { setNewTaskMsg('Assigned To is required — select an employee.', 'error'); return; }
-            const submit = document.getElementById('newTaskSubmit');
-            submit.disabled = true; setNewTaskMsg('Saving...');
-            const targetDate = document.getElementById('newTaskTargetDate').value;
-            const startDate  = document.getElementById('newTaskStartDate').value;
-            const payload = {
-                organizationId:       Number(selectedOrgId),
-                taskTypeCode:         'Custom',
-                subjectEntityType:    'Custom',
-                subjectEntityId:      0,
-                subjectTitle:         title,
-                subjectDescription:   document.getElementById('newTaskDescription').value.trim() || null,
-                priority:             document.getElementById('newTaskPriority').value,
-                assignedToEmployeeId: Number(assignee),
-                targetDate:           targetDate ? new Date(targetDate + 'T00:00:00Z').toISOString() : null,
-                startDate:            startDate  ? new Date(startDate  + 'T00:00:00Z').toISOString() : null,
-                remarks:              document.getElementById('newTaskRemarks').value.trim() || null
-            };
-            try {
-                const r = await fetch(U('/practice/api/tasks'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin', body: JSON.stringify(payload)
-                });
-                const b = await r.json().catch(function () { return {}; });
-                if (r.ok) {
-                    setNewTaskMsg('Task #' + (b.taskId || '?') + ' created.', 'ok');
-                    setTimeout(function () {
-                        closeNewTaskDialog();
-                        refreshCounts();
-                        if (activeTab === 'custom') reloadCurrentTab();
-                    }, 900);
-                } else {
-                    setNewTaskMsg((b.error || 'Request failed') + (b.reasonCode ? ' [' + b.reasonCode + ']' : ''), 'error');
-                    submit.disabled = false;
-                }
-            } catch (err) {
-                setNewTaskMsg('Network error: ' + err.message, 'error');
-                submit.disabled = false;
-            }
+        const orgName = (orgSel && orgSel.options[orgSel.selectedIndex]
+                         && orgSel.options[orgSel.selectedIndex].textContent) || null;
+        window.gracTaskForm.open({
+            mode: 'task',
+            organizationId: Number(selectedOrgId),
+            organizationName: orgName,
+            onSaved: function () { refreshCounts(); reloadCurrentTab(); }
         });
     }
 })();
 </script>
+
+@* THE common Task / Sub Task creation form. Both "New Task" and the row
+   menu's "Add Sub Task" open this; the Task Center no longer carries a
+   task form of its own. *@
+<partial name="Partials/_task-form-dialog" />
+<script src="~/js/Shared/task-form.js" asp-append-version="true"></script>
+<script src="~/js/Shared/task-actions.js" asp-append-version="true"></script>

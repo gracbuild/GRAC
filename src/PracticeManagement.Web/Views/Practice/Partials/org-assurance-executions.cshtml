@@ -523,7 +523,7 @@
         const body = document.getElementById('oaExListBody');
         if (!state.orgId) {
             body.innerHTML = '<tr><td colspan="5" class="pm-empty">Pick an organization to load executions.</td></tr>';
-            wf.updatePager('oa-ex-list', { pageNumber: 1, totalCount: 0 });
+            wf.updatePager('oa-ex-list', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="5" class="pm-empty">Loading...</td></tr>';
@@ -569,7 +569,7 @@
             const total    = Number(row.totalEntityCount     || row.TotalEntityCount     || 0);
             const isSel    = state.selectedExecId && String(state.selectedExecId) === String(id);
             return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '') + '>'
-                 + '<td><div style="font-weight:600;">' + wf.escape(name) + '</div>'
+                 + '<td><div>' + wf.escape(name) + '</div>'
                  + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div></td>'
                  + '<td>' + wf.escape(defName) + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(defCode) + (ver ? ' &middot; v' + ver : '') + '</div></td>'
                  + '<td>' + wf.badge(status) + '</td>'
@@ -692,7 +692,8 @@
     }
 
     async function doDelete(id) {
-        if (!window.confirm('Delete this execution? This cannot be undone.')) return;
+        if (!await window.gracUi.confirm('Delete this execution? This cannot be undone.',
+              { type: 'warning', title: 'Delete execution', confirmText: 'Delete' })) return;
         try {
             const qs = new URLSearchParams({ organizationId: String(state.orgId) });
             const url = U(API + '/executions/' + id + '?' + qs.toString());
@@ -813,7 +814,7 @@
         const body = document.getElementById('oaExEntityBody');
         if (!state.selectedExecId) {
             body.innerHTML = '<tr><td colspan="7" class="pm-empty">No execution selected.</td></tr>';
-            wf.updatePager('oa-ex-entities', { pageNumber: 1, totalCount: 0 });
+            wf.updatePager('oa-ex-entities', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
@@ -1219,12 +1220,14 @@
         el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
     }
     function formatDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         if (isNaN(d.getTime())) return String(v);
         return d.toISOString().slice(0, 10);
     }
     function formatDateTime(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         if (isNaN(d.getTime())) return String(v);

@@ -56,6 +56,7 @@
     }
 
     function fmtDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         return isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toISOString().slice(0, 10);

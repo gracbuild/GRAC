@@ -10,19 +10,42 @@
 
   const state = {
     organizationId: null,
-    statusCode: "Pending",
+    // All statuses by default. Defaulting to Pending made a request
+    // vanish from the grid the moment it was submitted for approval —
+    // the row moves to SubmittedForApproval, which the filter excluded,
+    // so the analyst saw "No Pending exception requests" and assumed the
+    // submission had failed. The filter still narrows on demand.
+    statusCode: null,
     // Migration 184: tab selection. GAP_CANDIDATE = classical
     // exception request (approve requires effective_until + note; reject
     // auto-raises a risk). SLA_CANDIDATE = SLA-override request from a
     // gap (approve applies the days to the gap; reject is neutral).
     requestType: "GAP_CANDIDATE",
-    activeRequest: null,
-    evidenceTypesCache: [],
+    // activeRequest, evidenceTypesCache, frequenciesCache removed (change
+    // request, 2026-09-22): those existed only for the Approve/Reject
+    // dialogs, which now live entirely in Shared/exception-actions.js
+    // (window.gracExceptionActions) -- see that file's own header
+    // comment. exceptionTypesCache/employeesCache/practicesCache stay:
+    // Add Custom Exception still uses them.
     exceptionTypesCache: [],
     employeesCache: [],
-    frequenciesCache: [],
     practicesCache: []
   };
+
+  // pm-grid handle. sp_exception_request_list has paged at 25 since 193,
+  // but this screen sent no page parameter, so request 26 onwards could
+  // not be reached. null when pm-grid.js has not loaded; every use is
+  // optional-chained, so the list still fetches its first page.
+  let pager = null;
+
+  // Migration 328 -- the Add Custom Exception dialog's own Practice
+  // Picker. One instance, attached once and reset() between opens --
+  // the same singleton pattern Risk Centre's own mapPicker uses for its
+  // Map Practice dialog. addCustomPractices is the running "Add to
+  // list" result: {practiceId, practiceName} entries, in add order, no
+  // duplicates by practiceId.
+  let addCustomPicker = null;
+  let addCustomPractices = [];
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
@@ -31,6 +54,11 @@
     if (!document.getElementById("excListView")) return;
     document.getElementById("excListView").hidden = false;
     bindEvents();
+    // Shared Approve/Reject dialogs + row-menu actions (change request,
+    // 2026-09-22) -- see Shared/exception-actions.js's own header
+    // comment. onChanged: refresh mirrors what onApproveSubmit/
+    // onRejectSubmit/onApproveSlaQuick used to do inline.
+    if (window.gracExceptionActions) window.gracExceptionActions.init({ onChanged: refresh });
     await populateOrgFilter();
     const sel = document.getElementById("excFilterOrganization");
     if (sel.options.length > 1 && !state.organizationId) {
@@ -41,67 +69,88 @@
   }
 
   function bindEvents() {
+    // Mounted before the first refresh() so the very first fetch already
+    // carries a page number. reset(true) is silent -- it moves the pager
+    // without firing onChange -- because refresh() is called right after.
+    pager = window.__pmGrid ? window.__pmGrid.attach({
+      hostId:   "excPager",
+      onChange: refresh          // refetch -- never slice locally
+    }) : null;
+
     document.getElementById("excFilterOrganization").addEventListener("change", e => {
       state.organizationId = e.target.value ? Number(e.target.value) : null;
       // Org-scoped combos must reload for the new org.
       state.employeesCache = [];
       state.practicesCache = [];
+      // A different organisation is a different data set.
+      pager?.reset(true);
       refresh();
     });
     document.getElementById("excFilterStatus").addEventListener("change", e => {
       state.statusCode = e.target.value || null;
+      pager?.reset(true);
       refresh();
     });
+    // Refresh is NOT a filter change: it re-reads the page the user is
+    // on, so it must not reset.
     document.getElementById("excRefreshBtn").addEventListener("click", refresh);
     document.getElementById("excExpireDueBtn").addEventListener("click", onExpireDue);
 
-    // Migration 184 -- tab switcher. Underlined active tab, single-open.
-    document.querySelectorAll(".pm-tab[data-req-type]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const type = btn.dataset.reqType;
-        if (state.requestType === type) return;
-        state.requestType = type;
-        document.querySelectorAll(".pm-tab[data-req-type]").forEach(b => {
-          const active = b === btn;
-          b.classList.toggle("active", active);
-          b.setAttribute("aria-selected", active ? "true" : "false");
-          b.style.borderBottomColor = active ? "#2563eb" : "transparent";
-          b.style.color             = active ? "#0f172a" : "#64748b";
-          b.style.fontWeight        = active ? "600" : "normal";
-        });
+    // Migration 255 -- the 184 tab switcher is replaced by a Type filter.
+    // Same state field, same query parameter; only the control changed,
+    // so the fetch, the grid and the per-row approve routing below are
+    // untouched. An empty value means "all types", which the two tabs
+    // could never express.
+    const typeSel = document.getElementById("excFilterType");
+    if (typeSel) {
+      state.requestType = typeSel.value || null;
+      typeSel.addEventListener("change", e => {
+        state.requestType = e.target.value || null;
+        pager?.reset(true);
         refresh();
       });
-    });
-    // Bootstrap the active style for the default (Gap Candidate) tab.
-    const initTab = document.querySelector('.pm-tab[data-req-type="GAP_CANDIDATE"]');
-    if (initTab) {
-      initTab.style.borderBottomColor = "#2563eb";
-      initTab.style.color             = "#0f172a";
-      initTab.style.fontWeight        = "600";
     }
 
-    document.getElementById("excApproveForm").addEventListener("submit", onApproveSubmit);
-    document.getElementById("excRejectForm").addEventListener("submit", onRejectSubmit);
-    document.querySelectorAll("[data-close-exc-approve]").forEach(el =>
-      el.addEventListener("click", () => hide("excApproveModal")));
-    document.querySelectorAll("[data-close-exc-reject]").forEach(el =>
-      el.addEventListener("click", () => hide("excRejectModal")));
+    // Approve/Reject form submits, their close buttons, the Approve
+    // form's own Reject hand-off button, and the evidence-method toggle
+    // are now wired by window.gracExceptionActions.init() (called from
+    // init() above) -- see Shared/exception-actions.js's own wire().
 
-    // Toggle Manual (file) vs Automated (location+locator) vs none.
-    document.getElementById("excApproveMethod").addEventListener("change", renderApproveMethodFields);
-  }
+    // Migration 327 -- "+ Add Custom Exception."
+    const addCustomBtn = document.getElementById("excAddCustomBtn");
+    if (addCustomBtn) addCustomBtn.addEventListener("click", openAddCustomDialog);
+    document.querySelectorAll("[data-close-exc-add-custom]").forEach(el =>
+      el.addEventListener("click", () => hide("excAddCustomModal")));
+    const addCustomForm = document.getElementById("excAddCustomForm");
+    if (addCustomForm) addCustomForm.addEventListener("submit", onAddCustomSubmit);
 
-  function renderApproveMethodFields() {
-    const m = document.getElementById("excApproveMethod").value;
-    document.getElementById("excApproveFileWrap").hidden     = (m !== "Manual");
-    document.getElementById("excApproveLocationWrap").hidden = (m !== "Automated");
-    document.getElementById("excApproveLocatorWrap").hidden  = (m !== "Automated");
-    // Evidence type only meaningful when we actually attach something.
-    document.getElementById("excApproveEvidenceTypeWrap").hidden = (m === "");
+    // Migration 329 -- "Add a practice" opens the picker in its own popup
+    // (#newExcPracticeModal) instead of the picker sitting inline in the
+    // form; the actual add-to-list happens on the popup's own Confirm
+    // button, which closes the popup afterward -- the same shape Risk
+    // Centre's own "Map a practice" dialog uses for #riskMapPickerConfirm.
+    const addCustomPracticeBtn = document.getElementById("newExcPracticeAddBtn");
+    if (addCustomPracticeBtn) addCustomPracticeBtn.addEventListener("click", openAddCustomPracticeDialog);
+    document.querySelectorAll("[data-close-exc-practice]").forEach(el =>
+      el.addEventListener("click", closeAddCustomPracticeDialog));
+    const addCustomPracticeConfirm = document.getElementById("newExcPracticeConfirm");
+    if (addCustomPracticeConfirm) addCustomPracticeConfirm.addEventListener("click", onAddCustomPracticeConfirm);
+    // Delegated: the list's own remove buttons are re-rendered on every
+    // add/remove, so a direct listener would need rebinding each time.
+    const addCustomPracticeList = document.getElementById("newExcPracticeList");
+    if (addCustomPracticeList) addCustomPracticeList.addEventListener("click", ev => {
+      const btn = ev.target.closest("[data-remove-practice]");
+      if (!btn) return;
+      const removeId = Number(btn.dataset.removePractice);
+      addCustomPractices = addCustomPractices.filter(p => p.practiceId !== removeId);
+      renderAddCustomPracticeList();
+    });
   }
 
   async function onExpireDue() {
-    if (!confirm("Expire all Approved exceptions whose Valid Until date has passed?")) return;
+    if (!await window.gracUi.confirm(
+          "Expire all Approved exceptions whose Valid Until date has passed?",
+          { type: "warning", title: "Expire due exceptions", confirmText: "Expire" })) return;
     try {
       const r = await fetch(U(`${base}/expire-due`), {
         method: "POST", credentials: "same-origin",
@@ -117,6 +166,12 @@
     } catch (err) { alert("Network error: " + err.message); }
   }
 
+  // Migration 257: the next three loaders fill combos that lived on the
+  // Approve modal's "Request details" block, which moved to the analysis
+  // page. Nothing calls them now. Kept -- with their populate* guards
+  // already returning early when the element is absent -- because the
+  // approve form may yet need a read-only lookup, and deleting a working
+  // fetch is easier than writing it again.
   async function loadExceptionTypes() {
     if (state.exceptionTypesCache.length) { populateExceptionTypeSelect(); return; }
     try {
@@ -125,10 +180,13 @@
     } catch (_) { state.exceptionTypesCache = []; }
     populateExceptionTypeSelect();
   }
-  function populateExceptionTypeSelect() {
-    const sel = document.getElementById("excApproveType");
+  function populateExceptionTypeSelect() { renderExceptionTypeOptions("excApproveType", "-- select --"); }
+
+  // 327: the Add Custom Exception dialog's own Exception Type field.
+  function renderExceptionTypeOptions(selectId, placeholder) {
+    const sel = document.getElementById(selectId);
     if (!sel) return;
-    sel.innerHTML = `<option value="">-- select --</option>`;
+    sel.innerHTML = `<option value="">${placeholder}</option>`;
     state.exceptionTypesCache.forEach(t => {
       const o = document.createElement("option");
       o.value = t.exceptionTypeCode;
@@ -146,10 +204,16 @@
     } catch (_) { state.employeesCache = []; }
     populateOwnerSelect();
   }
-  function populateOwnerSelect() {
-    const sel = document.getElementById("excApproveOwner");
+  function populateOwnerSelect() { renderEmployeeOptions("excApproveOwner", "-- unassigned --"); }
+
+  // 327: the Add Custom Exception dialog needs this same org-scoped
+  // employee list for two selects (Owner, Requested By). Pulled out of
+  // populateOwnerSelect so every select renders off the one cache and
+  // markup instead of a third copy.
+  function renderEmployeeOptions(selectId, placeholder) {
+    const sel = document.getElementById(selectId);
     if (!sel) return;
-    sel.innerHTML = `<option value="">-- unassigned --</option>`;
+    sel.innerHTML = `<option value="">${placeholder}</option>`;
     state.employeesCache.forEach(e => {
       const o = document.createElement("option");
       o.value = e.employeeId;
@@ -158,6 +222,13 @@
     });
   }
 
+  // Like loadExceptionTypes/loadEmployees above: nothing calls this now.
+  // 327 added it for the Add Custom Exception dialog's flat Related
+  // Practice select; 328 replaced that select with the cascading
+  // Practice Picker (see openAddCustomDialog), so this flat org-wide
+  // list is unused again. Kept dormant for the same reason as the two
+  // lookups above it -- the Approve modal's excApproveLinkedPracticeId
+  // combo may yet want a read-only render of it.
   async function loadPractices() {
     if (state.practicesCache.length || !state.organizationId) { populatePracticeSelect(); return; }
     try {
@@ -167,10 +238,12 @@
     } catch (_) { state.practicesCache = []; }
     populatePracticeSelect();
   }
-  function populatePracticeSelect() {
-    const sel = document.getElementById("excApproveLinkedPracticeId");
+  function populatePracticeSelect() { renderPracticeOptions("excApproveLinkedPracticeId", "-- select --"); }
+
+  function renderPracticeOptions(selectId, placeholder) {
+    const sel = document.getElementById(selectId);
     if (!sel) return;
-    sel.innerHTML = `<option value="">-- select --</option>`;
+    sel.innerHTML = `<option value="">${placeholder}</option>`;
     state.practicesCache.forEach(p => {
       const o = document.createElement("option");
       o.value = p.practiceId;
@@ -180,44 +253,12 @@
     });
   }
 
-  async function loadFrequencies() {
-    if (state.frequenciesCache.length) { populateFrequencySelect(); return; }
-    // The frequency master doesn't yet have a shared endpoint; the
-    // exception centre exposes one via its own path only when needed.
-    // For now embed the common frequencies as a fallback so approve
-    // works even if no endpoint exists yet.
-    state.frequenciesCache = [
-      { frequencyId: -1, frequencyName: "(free-text later)" }
-    ];
-    populateFrequencySelect();
-  }
-  function populateFrequencySelect() {
-    const sel = document.getElementById("excApproveReviewFrequency");
-    if (!sel) return;
-    sel.innerHTML = `<option value="">-- select --</option>`;
-    state.frequenciesCache.forEach(f => {
-      const o = document.createElement("option");
-      o.value = f.frequencyId; o.textContent = f.frequencyName;
-      sel.appendChild(o);
-    });
-  }
-
-  async function loadEvidenceTypes() {
-    if (state.evidenceTypesCache.length) return;
-    try {
-      const r = await fetch(U(`${base}/lookups/evidence-types`), { credentials: "same-origin" });
-      state.evidenceTypesCache = r.ok ? (await r.json()) || [] : [];
-    } catch (_) { state.evidenceTypesCache = []; }
-    const sel = document.getElementById("excApproveEvidenceType");
-    if (!sel) return;
-    sel.innerHTML = `<option value="">-- select --</option>`;
-    state.evidenceTypesCache.forEach(t => {
-      const o = document.createElement("option");
-      o.value = t.evidenceTypeCode;
-      o.textContent = t.evidenceTypeName;
-      sel.appendChild(o);
-    });
-  }
+  // loadFrequencies/populateFrequencySelect/loadEvidenceTypes removed
+  // (change request, 2026-09-22): they filled fields that only ever
+  // existed on the Approve modal, which now lives entirely in the
+  // shared partial + Shared/exception-actions.js, which carries its own
+  // copies (its own header comment explains why they are duplicated
+  // rather than exported from here).
 
   async function populateOrgFilter() {
     const sel = document.getElementById("excFilterOrganization");
@@ -240,40 +281,55 @@
   async function refresh() {
     const tbody = document.getElementById("excTableBody");
     if (!state.organizationId) {
-      tbody.innerHTML = `<tr><td colspan="8" class="pm-empty-row">Select an organization.</td></tr>`;
+      pager?.clear();
+      tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">Select an organization.</td></tr>`;
       return;
     }
-    tbody.innerHTML = `<tr><td colspan="8" class="pm-empty-row">Loading...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">Loading...</td></tr>`;
     const qs = new URLSearchParams({ organizationId: state.organizationId });
     if (state.statusCode)  qs.set("statusCode",  state.statusCode);
     if (state.requestType) qs.set("requestType", state.requestType);
+    // The endpoint's parameter is "page", not "pageNumber".
+    if (pager) {
+      qs.set("page",     pager.page());
+      qs.set("pageSize", pager.size());
+    }
     const data = await apiGet(`?${qs}`);
     const rows = data?.rows || [];
+    // Row count as well as the total, so a short last page reads
+    // "26-31 of 31" rather than assuming every page is full.
+    pager?.setTotal(data?.totalRows, rows.length);
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="pm-empty-row">
-        No ${escapeHtml(state.statusCode || "")} exception requests.</td></tr>`;
+      // No status filter now means "all", so the label must not leave a
+      // double space where the status word used to sit.
+      const scope = state.statusCode ? `${escapeHtml(state.statusCode)} ` : "";
+      tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">
+        No ${scope}exception requests.</td></tr>`;
       return;
     }
     tbody.innerHTML = "";
     rows.forEach(r => {
       const tr = document.createElement("tr");
+      // Row click-to-View (change request, 2026-09-22): "View" is
+      // unconditional on every exception request (buildMenu()'s own
+      // onView item carries no applicable/disabled gate beyond a valid
+      // id, which every real row has), so every row gets it -- see
+      // wireRowMenu() below for the click itself.
+      tr.className = "pm-row-clickable";
       const chip = statusChip(r.statusCode);
       const effective = formatEffective(r);
       tr.innerHTML = `
-        <td>${escapeHtml(r.requestTitle)}</td>
-        <td>${escapeHtml(r.exceptionTypeName || "--")}</td>
-        <td><a href="${U('/Practice/Index/gap-detail')}?gapId=${r.customGapId}&orgId=${state.organizationId}">
-              ${escapeHtml(r.gapTitle || `Gap #${r.customGapId}`)}</a></td>
-        <td>${new Date(r.requestedOn).toLocaleString()}<br>
-            <span class="pm-hint">${escapeHtml(r.requestedByName || "system")}</span></td>
+        <td>${escapeHtml(displayRequestTitle(r.requestTitle))}</td>
+        <td>${window.gracFormatDisplayDate(r.requestedOn)}</td>
         <td>${chip}</td>
+        <td>${escapeHtml(r.requestedByName || "system")}</td>
         <td>${effective}</td>
         <td>${escapeHtml(r.approvedByName || "--")}</td>
-        <td>${r.attachmentCount || 0}</td>
         <td>
           <button type="button" class="pm-action-trigger" data-exc-menu="${r.exceptionRequestId}"
                   data-exc-status="${r.statusCode}"
                   data-exc-type="${r.requestTypeCode || 'GAP_CANDIDATE'}"
+                  data-exc-gap-id="${r.customGapId || ''}"
                   aria-haspopup="menu" aria-expanded="false" title="Actions">
             <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
           </button>
@@ -289,7 +345,11 @@
               : code === "Withdrawn" ? "exc-withdrawn"
               : code === "Expired"  ? "exc-rejected"
               : "exc-pending";
-    return `<span class="exc-status-chip ${cls}">${escapeHtml(code || "")}</span>`;
+    // Migration 257: the stored code is one word; the grid reads better
+    // with the space, and "SubmittedForApproval" is wide enough to wreck
+    // a column.
+    const label = code === "SubmittedForApproval" ? "Submitted" : (code || "");
+    return `<span class="exc-status-chip ${cls}" title="${escapeHtml(code || "")}">${escapeHtml(label)}</span>`;
   }
 
   // Effective window with a "days remaining" badge -- makes expiring
@@ -300,8 +360,8 @@
     const now   = new Date();
     const oneDay = 24 * 60 * 60 * 1000;
     const days = Math.ceil((until - now) / oneDay);
-    const fromTxt = r.effectiveFrom ? new Date(r.effectiveFrom).toLocaleDateString() : "--";
-    const untilTxt = until.toLocaleDateString();
+    const fromTxt = r.effectiveFrom ? window.gracFormatDateOnly(r.effectiveFrom) : "--";
+    const untilTxt = window.gracFormatDisplayDateObj(until);
     let badge = "";
     if (r.statusCode === "Expired") {
       badge = ` <span class="exc-status-chip exc-rejected">Expired</span>`;
@@ -355,31 +415,66 @@
     root.dataset.wired = "1";
     root.addEventListener("click", ev => {
       const trigger = ev.target.closest(".pm-action-trigger[data-exc-menu]");
-      if (!trigger) return;
+      if (!trigger) {
+        // Row click-to-View (change request, 2026-09-22): a plain click
+        // anywhere else on the row opens Exception View, the same
+        // destination the row's own "View" menu item navigates to.
+        // Excludes the Related Gap link in its own column (its own
+        // destination, gap-detail, not this row's) -- every other cell is
+        // plain text or a badge with nothing of its own to click.
+        const tr = ev.target.closest("tr.pm-row-clickable");
+        if (!tr || !root.contains(tr) || ev.target.closest("a")) return;
+        const rowTrigger = tr.querySelector(".pm-action-trigger[data-exc-menu]");
+        if (!rowTrigger) return;
+        window.location.href = U("/Practice/Index/exception-view")
+          + "?exceptionId=" + encodeURIComponent(rowTrigger.dataset.excMenu);
+        return;
+      }
       ev.preventDefault(); ev.stopPropagation();
       if (openMenuTrigger === trigger) { closeRowMenu(); return; }
       const id = Number(trigger.dataset.excMenu);
       const status = trigger.dataset.excStatus;
-      const isPending = status === "Pending";
-      // Migration 184 -- SLA_CANDIDATE approvals go to a distinct
-      // endpoint (no effective-until dialog fields).
       const reqType = trigger.dataset.excType || "GAP_CANDIDATE";
-      const approveAction = reqType === "SLA_CANDIDATE"
-        ? () => onApproveSlaQuick(id)
-        : () => openApproveModal(id);
-      openRowMenu(trigger, [
-        { icon: "fa-check", label: "Approve",
-          disabled: !isPending, disabledReason: `Only Pending can be approved (current: ${status}).`,
-          action: approveAction },
-        { icon: "fa-ban", label: "Reject",
-          disabled: !isPending, disabledReason: `Only Pending can be rejected (current: ${status}).`,
-          action: () => openRejectModal(id) },
-        { icon: "fa-route", label: "Open source gap",
-          action: () => {
-            const btn = trigger.closest("tr").querySelector("a[href*='gap-detail']");
-            if (btn) window.location.href = btn.getAttribute("href");
-          } }
-      ]);
+      // Migration change request 2026-09-22: sourced straight off the
+      // row's own data-exc-gap-id (set in refresh() from r.customGapId)
+      // instead of sniffing the Gap column's rendered <a href> -- the
+      // same value, read directly rather than re-derived from markup.
+      const gapId = Number(trigger.dataset.excGapId) || null;
+
+      // Migration 257 / change request 2026-09-22: the item list and
+      // every applicability/disabled rule now come from
+      // window.gracExceptionActions.buildMenu() (Shared/exception-actions.js)
+      // -- Exception View's own "Actions" button calls the exact same
+      // function, so there is exactly one implementation of these rules,
+      // used from both screens. See that module's own header comment for
+      // the lifecycle/permission rules themselves.
+      if (!window.gracExceptionActions) {
+        console.error("[exception-centre] Shared/exception-actions.js did not load -- row menu unavailable.");
+        return;
+      }
+      const items = window.gracExceptionActions.buildMenu(
+        { exceptionId: id, requestTypeCode: reqType, statusCode: status, customGapId: gapId },
+        {
+          onView: () => {
+            window.location.href = U("/Practice/Index/exception-view")
+              + "?exceptionId=" + encodeURIComponent(id);
+          },
+          onAnalysis: () => {
+            window.location.href = U("/Practice/Index/exception-analysis")
+              + "?exceptionId=" + encodeURIComponent(id);
+          },
+          onApprove: (reqType === "SLA_CANDIDATE" || reqType === "TASK_SLA_EXTENSION" || reqType === "TASK_PRIORITY_REDUCTION")
+            ? () => window.gracExceptionActions.approveSlaQuick(id)
+            : () => window.gracExceptionActions.openApprove(id),
+          onOpenSourceGap: () => {
+            window.location.href = U("/Practice/Index/gap-detail")
+              + "?gapId=" + encodeURIComponent(gapId)
+              + "&orgId=" + encodeURIComponent(state.organizationId || "");
+          }
+        }
+      );
+
+      openRowMenu(trigger, items);
     });
     document.addEventListener("click", ev => {
       if (!openMenuEl) return;
@@ -392,167 +487,248 @@
     window.addEventListener("scroll", closeRowMenu, true);
   }
 
-  // ---- Approve ----
-  async function openApproveModal(id) {
-    const req = await apiGet(`/${id}`);
-    if (!req) { alert("Request not found."); return; }
-    state.activeRequest = req;
-    document.getElementById("excApproveId").value = id;
-    document.getElementById("excApproveEffectiveFrom").value  = "";
-    document.getElementById("excApproveEffectiveUntil").value = "";
-    document.getElementById("excApproveNote").value = "";
-    document.getElementById("excApproveCompensatingControl").value = "";
-    document.getElementById("excApproveFile").value = "";
-    document.getElementById("excApproveMethod").value = "";
-    document.getElementById("excApproveLocation").value = "";
-    document.getElementById("excApproveLocator").value = "";
-    document.getElementById("excApproveMessage").textContent = "";
-    document.getElementById("excApproveMeta").innerHTML = metaOf(req);
+  // Approve, History, Reject: openApproveModal/HISTORY_LABEL/
+  // loadApproveHistory/isoDate/onApproveSubmit/openRejectModal/
+  // onRejectSubmit all removed (change request, 2026-09-22) -- they now
+  // live entirely in Shared/exception-actions.js as openApprove/
+  // loadApproveHistory/onApproveSubmit/openReject/onRejectSubmit, driven
+  // off the same partial's markup, called from this file's wireRowMenu()
+  // (Approve) and that module's own wire() (the Approve form's Reject
+  // hand-off button). See that module's header comment.
 
-    // Load all combos in parallel (cached across opens).
-    await Promise.all([
-      loadEvidenceTypes(),
-      loadExceptionTypes(),
-      loadEmployees(),
-      loadFrequencies(),
-      loadPractices()
-    ]);
-    document.getElementById("excApproveEvidenceType").value = "";
-    document.getElementById("excApproveReviewFrequency").value = "";
+  // ---- Add Custom Exception (migration 327) ----
+  //
+  // "Exception Management -> Add Custom Exception -> Enter Basic Details
+  // -> Save -> Exception Request Created -> Existing Exception Approval /
+  // Processing Flow." The fields here are exactly what
+  // sp_exception_request_create already accepted -- nothing new is
+  // captured that the existing Exception data model does not already
+  // have a column for.
+  async function openAddCustomDialog() {
+    if (!state.organizationId) { alert("Select an organization first."); return; }
+    const msg = document.getElementById("excAddCustomMessage");
+    if (msg) msg.textContent = "";
 
-    // Prefill request-level fields from whatever was already captured.
-    document.getElementById("excApproveType").value                 = req.exceptionTypeCode || "";
-    document.getElementById("excApproveOwner").value                = req.ownerEmployeeId ? String(req.ownerEmployeeId) : "";
-    document.getElementById("excApproveJustification").value        = req.justification || req.requestReason || "";
-    document.getElementById("excApproveRiskImpact").value           = req.riskImpact || "";
-    document.getElementById("excApproveLinkedPracticeId").value     = req.linkedPracticeId ? String(req.linkedPracticeId) : "";
-    document.getElementById("excApproveLinkedRequirementRef").value = req.linkedRequirementRef || "";
-
-    renderApproveMethodFields();
-    show("excApproveModal");
-  }
-
-  async function onApproveSubmit(ev) {
-    ev.preventDefault();
-    const msg = document.getElementById("excApproveMessage");
-    msg.textContent = "";
-    const id = Number(document.getElementById("excApproveId").value);
-    const effectiveUntil = document.getElementById("excApproveEffectiveUntil").value;
-    const note           = document.getElementById("excApproveNote").value.trim();
-    if (!effectiveUntil || !note) { msg.textContent = "Effective until date and approval note are required."; return; }
-
-    const efFrom     = document.getElementById("excApproveEffectiveFrom").value || null;
-    const compCtrl   = document.getElementById("excApproveCompensatingControl").value.trim() || null;
-    const freqIdVal  = Number(document.getElementById("excApproveReviewFrequency").value) || null;
-    // -1 is the placeholder in the fallback list -- treat as no selection.
-    const reviewFreq = (freqIdVal && freqIdVal > 0) ? freqIdVal : null;
-
-    const result = await apiPost(`/${id}/approve`, {
-      effectiveFrom:  efFrom,
-      effectiveUntil: effectiveUntil,
-      approvalNote:   note,
-      compensatingControl: compCtrl,
-      reviewFrequencyId:   reviewFreq,
-      exceptionTypeCode:      document.getElementById("excApproveType").value || null,
-      justification:          document.getElementById("excApproveJustification").value.trim() || null,
-      riskImpact:             document.getElementById("excApproveRiskImpact").value.trim() || null,
-      ownerEmployeeId:        Number(document.getElementById("excApproveOwner").value) || null,
-      linkedPracticeId:       Number(document.getElementById("excApproveLinkedPracticeId").value) || null,
-      linkedRequirementRef:   document.getElementById("excApproveLinkedRequirementRef").value.trim() || null
+    ["newExcTitle", "newExcDescription", "newExcJustification",
+     "newExcValidFrom", "newExcValidUntil"].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = "";
     });
-    if (!result || result.success === false) {
-      const err = (result && result.error) || "Approve failed.";
-      msg.textContent = err; alert(err);
+
+    const orgSel = document.getElementById("excFilterOrganization");
+    const orgLabel = (orgSel && orgSel.options[orgSel.selectedIndex]
+                      && orgSel.options[orgSel.selectedIndex].textContent)
+                     || `Organization ${state.organizationId}`;
+    const orgMeta = document.getElementById("excAddCustomOrgMeta");
+    if (orgMeta) orgMeta.innerHTML = `<dt>Organization</dt><dd>${escapeHtml(orgLabel)}</dd>`;
+
+    const submit = document.getElementById("excAddCustomSubmit");
+    if (submit) submit.disabled = false;
+
+    // Reuses the same org-scoped caches (and the same lookup endpoints)
+    // the Approve modal's dormant combos already fetch from -- one cache
+    // per organization, not one per dialog.
+    await Promise.all([loadExceptionTypes(), loadEmployees()]);
+    renderExceptionTypeOptions("newExcType", "-- select --");
+    renderEmployeeOptions("newExcOwner", "-- unassigned --");
+
+    // Migration 328/329 -- Related Control / Practice(s) is the reusable
+    // cascading Practice Picker, opened from its own popup (see
+    // openAddCustomPracticeDialog below) rather than sitting inline here.
+    // Reset the running list every time this dialog opens.
+    addCustomPractices = [];
+    renderAddCustomPracticeList();
+
+    show("excAddCustomModal");
+    setTimeout(() => { const t = document.getElementById("newExcTitle"); if (t) t.focus(); }, 40);
+  }
+
+  // 329 -- "Add a practice" popup, opened on top of the still-open Add
+  // Custom Exception dialog. Same reuse-across-opens sequence Risk
+  // Centre's own mapPicker singleton uses: retarget the organisation,
+  // exclude whatever is already in the list, and reload the cascade from
+  // the framework level.
+  function openAddCustomPracticeDialog() {
+    const hint = document.getElementById("newExcPracticeAddHint");
+    if (hint) hint.textContent = "";
+    if (!window.__practicePicker || !document.getElementById("newExcPracticePickerHost")) {
+      if (hint) hint.textContent = "Practice picker unavailable -- practice-picker.js did not load.";
+      show("newExcPracticeModal");
       return;
     }
-
-    // Optional evidence-style attachment after approve succeeded.
-    // Manual -> file. Automated -> location + locator. Same shape as
-    // practice_instance_evidence collection method.
-    const method = document.getElementById("excApproveMethod").value;
-    if (method) {
-      const fd = new FormData();
-      fd.append("CollectionMethodCode", method);
-      const evType = document.getElementById("excApproveEvidenceType").value;
-      if (evType) fd.append("EvidenceTypeCode", evType);
-
-      if (method === "Manual") {
-        const file = document.getElementById("excApproveFile").files?.[0];
-        if (!file) { alert("Approved, but Manual attachment needs a file. Skipping upload."); }
-        else       { fd.append("File", file, file.name); }
-      } else if (method === "Automated") {
-        const loc = document.getElementById("excApproveLocation").value.trim();
-        const lct = document.getElementById("excApproveLocator").value.trim();
-        if (!loc || !lct) {
-          alert("Approved, but Automated attachment needs Location and Locator. Skipping upload.");
-        } else {
-          fd.append("EvidenceLocation", loc);
-          fd.append("EvidenceLocator",  lct);
-        }
-      }
-      // Only fire the upload if we actually populated the required side.
-      if ((method === "Manual" && fd.has("File")) ||
-          (method === "Automated" && fd.has("EvidenceLocation"))) {
-        try {
-          const r = await fetch(U(`${base}/${id}/attachments`), {
-            method: "POST", body: fd, credentials: "same-origin"
-          });
-          const b = await r.json().catch(() => ({}));
-          if (!r.ok || b.success === false) {
-            alert("Approved, but attachment upload failed: " + (b.error || `HTTP ${r.status}`));
-          }
-        } catch (err) {
-          alert("Approved, but attachment upload failed: " + err.message);
-        }
-      }
+    const excluded = addCustomPractices.map(p => p.practiceId);
+    if (addCustomPicker) {
+      addCustomPicker.setOrganizationId(state.organizationId);
+      addCustomPicker.setExcluded(excluded);
+      addCustomPicker.reset();
+    } else {
+      addCustomPicker = window.__practicePicker.attach({
+        host:               "newExcPracticePickerHost",
+        organizationId:     state.organizationId,
+        required:           false,
+        excludePracticeIds: excluded
+      });
     }
-    hide("excApproveModal");
-    alert("Exception approved.");
-    await refresh();
+    show("newExcPracticeModal");
   }
 
-  // ---- Reject ----
-  async function openRejectModal(id) {
-    const req = await apiGet(`/${id}`);
-    if (!req) { alert("Request not found."); return; }
-    state.activeRequest = req;
-    document.getElementById("excRejectId").value = id;
-    document.getElementById("excRejectReason").value = "";
-    document.getElementById("excRejectMessage").textContent = "";
-    document.getElementById("excRejectMeta").innerHTML = metaOf(req);
-    show("excRejectModal");
+  function closeAddCustomPracticeDialog() {
+    hide("newExcPracticeModal");
   }
 
-  async function onRejectSubmit(ev) {
+  // 329: one practice at a time from the picker. Confirm both adds it to
+  // the running list AND closes the popup -- the same shape Risk Centre's
+  // own Map Practice confirm uses (closeMapPracticeDialog() after a
+  // successful map). Reopen "Add a practice" to add another.
+  function onAddCustomPracticeConfirm() {
+    const hint = document.getElementById("newExcPracticeAddHint");
+    if (!addCustomPicker) return;
+    const picked = addCustomPicker.getState();
+    if (!picked || !picked.isComplete || !picked.practiceId) {
+      if (hint) hint.textContent = "Pick a Framework, Source Structure, Control and Practice first.";
+      return;
+    }
+    const practiceId = picked.practiceId;
+    if (addCustomPractices.some(p => p.practiceId === practiceId)) {
+      if (hint) hint.textContent = "That practice is already in the list.";
+      return;
+    }
+    const practiceName = picked.practiceName || `Practice #${practiceId}`;
+    addCustomPractices.push({ practiceId, practiceName });
+    renderAddCustomPracticeList();
+    closeAddCustomPracticeDialog();
+  }
+
+  function renderAddCustomPracticeList() {
+    const ul = document.getElementById("newExcPracticeList");
+    if (!ul) return;
+    if (!addCustomPractices.length) {
+      ul.innerHTML = `<li class="pm-hint">No practices added yet.</li>`;
+      return;
+    }
+    ul.innerHTML = addCustomPractices.map(p => `
+      <li>
+        <span>${escapeHtml(p.practiceName)}</span>
+        <button type="button" data-remove-practice="${p.practiceId}" title="Remove">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </li>`).join("");
+  }
+
+  async function onAddCustomSubmit(ev) {
     ev.preventDefault();
-    const msg = document.getElementById("excRejectMessage");
+    const msg = document.getElementById("excAddCustomMessage");
     msg.textContent = "";
-    const id = Number(document.getElementById("excRejectId").value);
-    const reason = document.getElementById("excRejectReason").value.trim();
-    if (!reason) { msg.textContent = "Rejection reason is required."; return; }
-    const result = await apiPost(`/${id}/reject`, { rejectionReason: reason });
-    if (!result || result.success === false) {
-      const err = (result && result.error) || "Reject failed.";
-      msg.textContent = err; alert(err);
+    const title = document.getElementById("newExcTitle").value.trim();
+    if (!title) { msg.textContent = "Exception Title / Subject is required."; return; }
+
+    const submit = document.getElementById("excAddCustomSubmit");
+    submit.disabled = true; msg.textContent = "Saving...";
+
+    // requestedByEmployeeId is NOT sent from here -- the Web-tier proxy
+    // stamps it from the signed-in session (sir's follow-up: automatic,
+    // no manual input), the same way Approve/Reject stamp their own
+    // employee-id field server-side rather than trusting the client.
+    const payload = {
+      organizationId:         state.organizationId,
+      requestTitle:           title,
+      requestReason:          document.getElementById("newExcDescription").value.trim() || null,
+      justification:          document.getElementById("newExcJustification").value.trim() || null,
+      exceptionTypeCode:      document.getElementById("newExcType").value || null,
+      ownerEmployeeId:        Number(document.getElementById("newExcOwner").value) || null,
+      // Migration 328 -- every practice added via the cascading Practice
+      // Picker's "Add to list" row, in add order. The API derives the
+      // single legacy linked_practice_id from the first entry; this
+      // dialog no longer sends that field itself.
+      linkedPracticeIds:      addCustomPractices.length ? addCustomPractices.map(p => p.practiceId) : null,
+      // Related Obligation/Requirement and Related Gap ID removed from this
+      // form (change request 2026-09-24) -- always null on creation now;
+      // see the .cshtml comment where the two fields used to sit.
+      linkedRequirementRef:   null,
+      customGapId:            null,
+      proposedEffectiveFrom:  document.getElementById("newExcValidFrom").value || null,
+      proposedEffectiveUntil: document.getElementById("newExcValidUntil").value || null
+    };
+
+    // Posts to the collection route itself (base, no suffix) -- the same
+    // "POST the list route to create" shape CustomGapController uses for
+    // its own Open action.
+    const url = U(base);
+    let result;
+    try {
+      const r = await fetch(url, {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      });
+      const data = await r.json().catch(() => ({}));
+      result = r.ok ? { success: true, ...data } : { success: false, error: data.error || `HTTP ${r.status}` };
+    } catch (err) { result = { success: false, error: err.message }; }
+
+    if (!result.success) {
+      msg.textContent = result.error || "Save failed.";
+      submit.disabled = false;
       return;
     }
-    hide("excRejectModal");
-    alert("Exception rejected.");
-    await refresh();
+
+    msg.textContent = `Custom Exception #${result.exceptionRequestId} created.`;
+    setTimeout(async () => {
+      hide("excAddCustomModal");
+      // The new row is Pending / CUSTOM -- make sure the current filters
+      // do not immediately hide it from the analyst who just created it.
+      const typeSel = document.getElementById("excFilterType");
+      if (typeSel && typeSel.value && typeSel.value !== "CUSTOM") { typeSel.value = "CUSTOM"; state.requestType = "CUSTOM"; }
+      const statusSel = document.getElementById("excFilterStatus");
+      if (statusSel && statusSel.value && statusSel.value !== "Pending") { statusSel.value = ""; state.statusCode = null; }
+      pager?.reset(true);
+      await refresh();
+    }, 700);
   }
 
   // ---- helpers ----
-  function metaOf(r) {
-    return `<dt>Request</dt><dd>${escapeHtml(r.requestTitle || "")}</dd>` +
-           `<dt>Gap</dt><dd>${escapeHtml(r.gapTitle || `#${r.customGapId}`)}</dd>` +
-           (r.requestReason ? `<dt>Reason</dt><dd>${escapeHtml(r.requestReason)}</dd>` : "") +
-           `<dt>Requested</dt><dd>${new Date(r.requestedOn).toLocaleString()} by ${escapeHtml(r.requestedByName || "system")}</dd>`;
+  // metaOf(r) removed (change request, 2026-09-22): it rendered the
+  // approver's read of the case onto the Approve/Reject dialogs, which
+  // now live in Shared/exception-actions.js as its own copy of the same
+  // function.
+  // Background-scroll lock (change request 2026-09-24): .pm-modal is a
+  // fixed, full-viewport overlay (practice-management.css), but nothing
+  // ever stopped the PAGE behind it from also scrolling while a modal is
+  // open -- sir's "scrolling ozhivakkanam" (avoid the scrolling). Scoped
+  // to this file's own two modals only (excAddCustomModal, and the
+  // practice picker that nests on top of it) rather than touching the
+  // shared .pm-modal rule other views (gap-detail, risk-centre) also use.
+  // anyOpen() covers the nesting: closing the picker while Add Custom
+  // Exception is still open behind it must not unlock the page.
+  function anyOpen() {
+    var a = document.getElementById("excAddCustomModal");
+    var b = document.getElementById("newExcPracticeModal");
+    return (a && !a.hidden) || (b && !b.hidden);
   }
-  function show(id) { document.getElementById(id).hidden = false; }
-  function hide(id) { document.getElementById(id).hidden = true; }
+  function show(id) {
+    document.getElementById(id).hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+  function hide(id) {
+    document.getElementById(id).hidden = true;
+    if (!anyOpen()) document.body.style.overflow = "";
+  }
   function escapeHtml(s) {
     if (s == null) return "";
     return String(s).replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[ch]));
+  }
+
+  // Change request 2026-09-22: the Request column showed "Exception: <gap
+  // title>" verbatim -- that prefix is baked into the STORED request_title
+  // by sp_exception_request_create (COALESCE default of "Exception: " +
+  // gap title when no explicit title is given; see database/328_custom_
+  // exception_multi_practice.sql). This is a display-only strip for the
+  // grid: it does not touch r.requestTitle itself or the row object, so
+  // every other reader of requestTitle (e.g. the Add Custom Exception
+  // payload further down) still sees/sends the real stored value
+  // unchanged. Case-insensitive and whitespace-tolerant so a hand-typed
+  // custom title like "exception:no space" still strips cleanly, but a
+  // title that merely CONTAINS "Exception:" mid-string (not as its
+  // opening word) is left alone.
+  function displayRequestTitle(title) {
+    return String(title || "").replace(/^\s*Exception:\s*/i, "");
   }
 
   async function apiGet(path) {
@@ -579,28 +755,7 @@
     } catch (err) { return { success: false, error: err.message }; }
   }
 
-  // Migration 184 -- SLA_CANDIDATE approve. No effective-until dialog;
-  // the requested days already sit on the row. Styled confirm via
-  // window.gracConfirm (grac-dialog.js) so we match the app's dialog
-  // look-and-feel instead of using the raw browser confirm().
-  async function onApproveSlaQuick(id) {
-    const confirmFn = window.gracConfirm || (msg => Promise.resolve(confirm(msg)));
-    const ok = await confirmFn({
-      type:        "confirm",
-      title:       "Approve SLA override",
-      message:     "Approve this SLA override and apply the requested days to the gap?",
-      confirmText: "Approve",
-      cancelText:  "Cancel"
-    });
-    if (!ok) return;
-    const result = await apiPost(`/${id}/approve-sla`, {
-      approvedByEmployeeId: Number(window.pmEmployeeId || 0) || null,
-      callerDisplayName:    window.pmEmail || "system"
-    });
-    if (!result.success) {
-      (window.gracAlert || alert)({ type: "error", title: "Approve failed", message: result.error || "Unknown error." });
-      return;
-    }
-    await refresh();
-  }
+  // onApproveSlaQuick removed (change request, 2026-09-22): it now lives
+  // in Shared/exception-actions.js as approveSlaQuick, called from this
+  // file's wireRowMenu() and from Exception View's own Actions menu.
 })();

@@ -1,0 +1,541 @@
+@*
+    Add Source Statements -- screen key `custom-source-statements` (change
+    request 2026-09, Release -> Source Structure -> Source Statements)
+
+    No menu row of its own -- same convention as ownership-management /
+    practice-instances / gap-detail: reached by a link from the Standards &
+    Frameworks screen (organization-controls), permissioned through that
+    screen (PracticeController.ScreenPermissionArea maps this key onto
+    "organization-controls", the same permission that already governs the
+    custom-release / custom-release-source-structure / custom-statement
+    entity types in PermissionAreaMap.cs).
+
+    WHY THIS SCREEN EXISTS
+    Authoring a Custom Release's own Source Structure and Source Statements
+    used to live inside the Organization+Release toolbar screen
+    (organization-controls / source-statements), which requires picking an
+    Organization first and mixes Custom releases into the same dropdown as
+    every subscribed framework release. That screen is untouched by this
+    change -- it still works exactly as before for viewing/marking
+    applicability on subscribed-framework statements.
+
+    This screen is a separate, self-contained flow purpose-built for
+    authoring a Custom Release: no Organization selector at all (a Custom
+    Release already belongs to exactly one organization, shown inline in
+    the Release dropdown's label), and a strict Release -> Source Structure
+    -> Source Statements sequence -- each step only unlocks once its parent
+    is chosen, and a Source Structure just added is selectable immediately,
+    with no extra manual step.
+
+    Reuses the existing entities end to end -- no new API, no new table, no
+    duplicate release data:
+      * "lookups" (organizations, already scoped to the caller) + one
+        "subscribed-frameworks" query per organization -- exactly what the
+        Organization+Release toolbar already calls -- filtered client-side
+        to SubscriptionType "Custom".
+      * "custom-release-source-structure" query/save -- identical to the
+        Source Structure panel on the old screen.
+      * "custom-release-statements" query + "custom-statement" save --
+        identical to the Add Control Statement dialog on the old screen,
+        just with structureNodeId locked to whichever node was selected in
+        step 2 instead of being a free-choosing dropdown.
+
+    Self-contained: its own tiny helpers, talks to the gateway directly,
+    same pattern as ownership-management.cshtml.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var permissions = ViewBag.Permissions as string[] ?? [];
+    var canAdd = permissions.Contains("ADD") || permissions.Contains("EDIT");
+}
+
+<style>
+    #cssRoot { max-width: 900px; }
+    #cssRoot .css-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 16px; }
+    #cssRoot .css-msg { margin: 0 0 14px; padding: 8px 12px; border-radius: 6px; font-size: 13px; display: none; }
+    #cssRoot .css-msg.info  { display: block; background: #eef4ff; color: #25345a; border: 1px solid #cdddff; }
+    #cssRoot .css-msg.error { display: block; background: #fdecec; color: #8a1c1c; border: 1px solid #f5c2c2; }
+    #cssRoot .css-msg.success { display: block; background: #e9f8ef; color: #1f6b3b; border: 1px solid #bfe6cd; }
+    #cssRoot .css-step { border: 1px solid var(--grac-line, #e2e7f0); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; background: #fff; }
+    #cssRoot .css-step.disabled { opacity: .55; pointer-events: none; }
+    #cssRoot .css-step h3 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+    #cssRoot .css-step .css-step-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a); font-size: 11px; font-weight: 700; }
+    #cssRoot .css-step-sub { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 12px; }
+    #cssRoot .css-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+    #cssRoot .css-field { display: flex; flex-direction: column; gap: 4px; min-width: 320px; flex: 1 1 320px; }
+    #cssRoot .css-field label { font-size: 12px; font-weight: 600; color: var(--grac-ink, #25345a); }
+    #cssRoot .css-field select, #cssRoot .css-field input, #cssRoot .css-field textarea { padding: 7px 10px; border: 1px solid var(--grac-line, #d7deea); border-radius: 6px; min-height: 36px; font: inherit; }
+    #cssRoot .css-field textarea { min-height: 70px; resize: vertical; }
+    #cssRoot .css-inline-form { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--grac-line, #d7deea); display: none; }
+    #cssRoot .css-inline-form.open { display: block; }
+    #cssRoot .css-inline-form .css-row + .css-row { margin-top: 10px; }
+    #cssRoot .css-actions-bar { display: flex; gap: 10px; margin-top: 12px; }
+    #cssRoot table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+    #cssRoot th, #cssRoot td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--grac-line, #eef1f6); vertical-align: middle; }
+    #cssRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--grac-muted, #758095); }
+    #cssRoot .css-empty { padding: 18px; text-align: center; color: var(--grac-muted, #758095); }
+    #cssRoot .css-context { font-size: 12px; color: var(--grac-muted, #758095); margin: 2px 0 12px; }
+    #cssRoot .css-required { color: #c0392b; }
+</style>
+
+<div id="cssRoot">
+    <p class="css-hint">
+        Author a Custom Release's own Source Structure and Source Statements. Pick the Custom
+        Release first -- its Organization is shown alongside it, so there is nothing to select
+        separately.
+    </p>
+
+    <div class="css-msg" id="cssMessage" role="status"></div>
+
+    <section class="css-step" id="cssStepRelease">
+        <h3><span class="css-step-num">1</span> Release</h3>
+        <p class="css-step-sub">Only Custom Releases are listed here.</p>
+        <div class="css-row">
+            <div class="css-field">
+                <label for="cssRelease">Custom Release<span class="css-required"> *</span></label>
+                <select id="cssRelease"><option value="">Loading custom releases...</option></select>
+            </div>
+        </div>
+    </section>
+
+    <section class="css-step disabled" id="cssStepStructure">
+        <h3><span class="css-step-num">2</span> Source Structure</h3>
+        <p class="css-step-sub">Select an existing Source Structure for this Release, or add a new one.</p>
+        <div class="css-row">
+            <div class="css-field">
+                <label for="cssStructure">Source Structure<span class="css-required"> *</span></label>
+                <select id="cssStructure"><option value="">Select a Custom Release first</option></select>
+            </div>
+        </div>
+        @if (canAdd)
+        {
+        <div class="css-actions-bar">
+            <button type="button" class="pm-button" id="cssAddStructureBtn">Add Source Structure</button>
+        </div>
+        <div class="css-inline-form" id="cssStructureForm">
+            <div class="css-row">
+                <div class="css-field">
+                    <label for="cssStructureParent">Parent Node</label>
+                    <select id="cssStructureParent"><option value="">— Root level (no parent) —</option></select>
+                </div>
+                <div class="css-field">
+                    <label for="cssStructureRef">Node Reference</label>
+                    <input id="cssStructureRef" placeholder="e.g. SS-001">
+                </div>
+            </div>
+            <div class="css-row">
+                <div class="css-field">
+                    <label for="cssStructureTitle">Node Title<span class="css-required"> *</span></label>
+                    <input id="cssStructureTitle" placeholder="Title of the source structure node">
+                </div>
+            </div>
+            <div class="css-row">
+                <div class="css-field">
+                    <label for="cssStructureDesc">Description</label>
+                    <textarea id="cssStructureDesc" placeholder="Optional description"></textarea>
+                </div>
+            </div>
+            <div class="css-actions-bar">
+                <button type="button" class="pm-button primary" id="cssStructureSave">Save Source Structure</button>
+                <button type="button" class="pm-button" id="cssStructureCancel">Cancel</button>
+            </div>
+        </div>
+        }
+    </section>
+
+    <section class="css-step disabled" id="cssStepStatements">
+        <h3><span class="css-step-num">3</span> Source Statements</h3>
+        <p class="css-step-sub" id="cssStatementsSub">Select a Source Structure first.</p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Statement Reference</th>
+                        <th>Statement Title</th>
+                        <th>Applicability Status</th>
+                    </tr>
+                </thead>
+                <tbody id="cssStatementRows">
+                    <tr><td colspan="3" class="css-empty">Select a Source Structure to see its Source Statements.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        @if (canAdd)
+        {
+        <div class="css-actions-bar">
+            <button type="button" class="pm-button" id="cssAddStatementBtn">Add Source Statement</button>
+        </div>
+        <div class="css-inline-form" id="cssStatementForm">
+            <div class="css-row">
+                <div class="css-field">
+                    <label for="cssStatementRef">Statement Reference</label>
+                    <input id="cssStatementRef" placeholder="e.g. CS-001">
+                </div>
+                <div class="css-field">
+                    <label for="cssStatementTitle">Statement Title<span class="css-required"> *</span></label>
+                    <input id="cssStatementTitle" placeholder="Title of the source statement">
+                </div>
+            </div>
+            <div class="css-row">
+                <div class="css-field">
+                    <label for="cssStatementText">Statement Text</label>
+                    <textarea id="cssStatementText" placeholder="Full text of the source statement"></textarea>
+                </div>
+            </div>
+            <div class="css-row">
+                <div class="css-field">
+                    <label for="cssStatementClassification">Statement Classification</label>
+                    <input id="cssStatementClassification" placeholder="Optional">
+                </div>
+                <div class="css-field">
+                    <label for="cssStatementKeywords">Keywords</label>
+                    <input id="cssStatementKeywords" placeholder="Comma-separated keywords">
+                </div>
+            </div>
+            <div class="css-actions-bar">
+                <button type="button" class="pm-button primary" id="cssStatementSave">Save Source Statement</button>
+                <button type="button" class="pm-button" id="cssStatementCancel">Cancel</button>
+            </div>
+        </div>
+        }
+    </section>
+</div>
+
+<script>
+(function () {
+    "use strict";
+    // ---- tiny self-contained helpers (no external deps, same pattern as
+    // ownership-management.cshtml) ---------------------------------------
+    const base = String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "");
+    const U    = p => base + p;
+    const api  = U("/practice-management-gateway");
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const esc  = v => String(v ?? "").replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const val = (row, ...keys) => {
+        for (const k of keys) {
+            if (row[k] !== undefined && row[k] !== null) return row[k];
+            const lk = k.charAt(0).toLowerCase() + k.slice(1);
+            if (row[lk] !== undefined && row[lk] !== null) return row[lk];
+        }
+        return "";
+    };
+    function firstTable(body) {
+        const data = (body && (body.data ?? body.Data)) || [];
+        if (!Array.isArray(data)) return [];
+        if (data.length === 0) return [];
+        if (typeof data[0] === "object" && !Array.isArray(data[0])) return data;
+        return Array.isArray(data[0]) ? data[0] : [];
+    }
+
+    async function getJson(url, options) {
+        const res = await fetch(url, Object.assign({ credentials: "same-origin" }, options));
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* non-JSON */ }
+        if (!res.ok || (body && (body.success === false || body.Success === false))) {
+            const m = (body && (body.message || body.Message || body.error)) || ("Request failed (HTTP " + res.status + ")");
+            throw new Error(m);
+        }
+        return body;
+    }
+    const postQuery = (entity, data, search) => getJson(`${api}/${entity}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+        body: JSON.stringify({ search: search || "", data: data || {} })
+    });
+    const postSave = (entity, data) => getJson(`${api}/${entity}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+        body: JSON.stringify({ id: 0, data: data || {} })
+    });
+    const getJsonPlain = url => getJson(url);
+
+    const msgEl = document.getElementById("cssMessage");
+    const setMsg = (text, kind) => {
+        msgEl.className = "css-msg" + (kind ? " " + kind : "");
+        msgEl.textContent = text || "";
+        if (!text) msgEl.style.display = "none";
+    };
+
+    // ---- state -----------------------------------------------------------
+    // Each release option carries everything the structure/statement calls
+    // need: organizationId + subscriptionId (the two fields every one of the
+    // reused entities is keyed on), plus a label built from the ALREADY
+    // access-scoped "organizations" lookup so no Organization selector is
+    // needed anywhere on this screen.
+    let releases = [];          // { organizationId, subscriptionId, label }
+    let structureNodes = [];    // rows from custom-release-source-structure
+    let statementRows = [];     // rows from custom-release-statements (all, for the selected release)
+    let selectedRelease = null;
+    let selectedStructureId = "";
+
+    const releaseSelect = document.getElementById("cssRelease");
+    const structureStep = document.getElementById("cssStepStructure");
+    const structureSelect = document.getElementById("cssStructure");
+    const statementsStep = document.getElementById("cssStepStatements");
+    const statementsSub = document.getElementById("cssStatementsSub");
+    const statementRowsHost = document.getElementById("cssStatementRows");
+
+    const addStructureBtn = document.getElementById("cssAddStructureBtn");
+    const structureForm = document.getElementById("cssStructureForm");
+    const structureParentSelect = document.getElementById("cssStructureParent");
+    const structureRefInput = document.getElementById("cssStructureRef");
+    const structureTitleInput = document.getElementById("cssStructureTitle");
+    const structureDescInput = document.getElementById("cssStructureDesc");
+    const structureSaveBtn = document.getElementById("cssStructureSave");
+    const structureCancelBtn = document.getElementById("cssStructureCancel");
+
+    const addStatementBtn = document.getElementById("cssAddStatementBtn");
+    const statementForm = document.getElementById("cssStatementForm");
+    const statementRefInput = document.getElementById("cssStatementRef");
+    const statementTitleInput = document.getElementById("cssStatementTitle");
+    const statementTextInput = document.getElementById("cssStatementText");
+    const statementClassificationInput = document.getElementById("cssStatementClassification");
+    const statementKeywordsInput = document.getElementById("cssStatementKeywords");
+    const statementSaveBtn = document.getElementById("cssStatementSave");
+    const statementCancelBtn = document.getElementById("cssStatementCancel");
+
+    // ---- step 1: Release (Custom Releases only, org name inline) --------
+    async function loadReleases() {
+        releaseSelect.innerHTML = `<option value="">Loading custom releases...</option>`;
+        try {
+            const lookupsBody = await getJsonPlain(`${api}/lookups`);
+            const orgRows = firstTable(lookupsBody).filter(r => String(val(r, "LookupKey")) === "organizations");
+            if (!orgRows.length) {
+                releaseSelect.innerHTML = `<option value="">No organizations available</option>`;
+                return;
+            }
+            const perOrg = await Promise.all(orgRows.map(async org => {
+                const orgId = Number(val(org, "Value"));
+                const orgLabel = String(val(org, "Label") || "");
+                if (!orgId) return [];
+                try {
+                    const result = await postQuery("subscribed-frameworks", { organizationId: orgId });
+                    return firstTable(result)
+                        .filter(r => String(val(r, "SubscriptionType") || "").toLowerCase() === "custom")
+                        .map(r => ({
+                            organizationId: orgId,
+                            subscriptionId: Number(val(r, "SubscriptionId") || 0),
+                            releaseVersion: String(val(r, "ReleaseVersion") || ""),
+                            label: `${orgLabel} — ${val(r, "ReleaseVersion") || val(r, "FrameworkRelease") || "Custom Release"}`
+                        }));
+                } catch (_) {
+                    // One organization's subscribed-frameworks call failing
+                    // (e.g. no access) must not blank out every other
+                    // organization's releases.
+                    return [];
+                }
+            }));
+            releases = perOrg.flat().filter(r => r.subscriptionId).sort((a, b) => a.label.localeCompare(b.label));
+            releaseSelect.innerHTML = releases.length
+                ? `<option value="">— Select a Custom Release —</option>${releases.map((r, i) => `<option value="${i}">${esc(r.label)}</option>`).join("")}`
+                : `<option value="">No Custom Releases found</option>`;
+        } catch (error) {
+            releaseSelect.innerHTML = `<option value="">Unable to load releases</option>`;
+            setMsg(error.message || "Unable to load Custom Releases.", "error");
+        }
+    }
+
+    releaseSelect.addEventListener("change", () => {
+        const index = releaseSelect.value;
+        selectedRelease = index === "" ? null : releases[Number(index)] || null;
+        selectedStructureId = "";
+        structureForm.classList.remove("open");
+        statementForm?.classList.remove("open");
+        if (!selectedRelease) {
+            structureStep.classList.add("disabled");
+            statementsStep.classList.add("disabled");
+            structureSelect.innerHTML = `<option value="">Select a Custom Release first</option>`;
+            renderStatements([]);
+            statementsSub.textContent = "Select a Source Structure first.";
+            return;
+        }
+        structureStep.classList.remove("disabled");
+        statementsStep.classList.add("disabled");
+        renderStatements([]);
+        statementsSub.textContent = "Select a Source Structure first.";
+        loadStructureNodes();
+        loadAllStatementsForRelease();
+    });
+
+    // ---- step 2: Source Structure ----------------------------------------
+    function structureOptionsMarkup(selectedId, excludeId) {
+        return structureNodes
+            .filter(n => !excludeId || String(val(n, "StructureNodeId")) !== String(excludeId))
+            .map(n => {
+                const id = val(n, "StructureNodeId");
+                const label = `${val(n, "NodeReference") ? val(n, "NodeReference") + " - " : ""}${val(n, "NodeTitle")}`;
+                const indent = "  ".repeat(Math.max(0, (Number(val(n, "NodeLevel")) || 1) - 1));
+                return `<option value="${esc(id)}"${String(selectedId) === String(id) ? " selected" : ""}>${indent}${esc(label)}</option>`;
+            }).join("");
+    }
+
+    async function loadStructureNodes(preserveSelection) {
+        if (!selectedRelease) return;
+        const previousIds = new Set(structureNodes.map(n => String(val(n, "StructureNodeId"))));
+        structureSelect.innerHTML = `<option value="">Loading...</option>`;
+        try {
+            const result = await postQuery("custom-release-source-structure", {
+                organizationId: selectedRelease.organizationId,
+                subscriptionId: selectedRelease.subscriptionId
+            });
+            structureNodes = firstTable(result);
+            if (structureParentSelect) structureParentSelect.innerHTML = `<option value="">— Root level (no parent) —</option>${structureOptionsMarkup("")}`;
+            let autoSelectId = preserveSelection ? selectedStructureId : "";
+            if (!autoSelectId) {
+                // Just-saved node: whichever id in the fresh list was not in
+                // the list before this reload. That is the node the user
+                // just added, whatever its generated id turned out to be --
+                // the save call itself never returns the new row.
+                const justAdded = structureNodes.find(n => !previousIds.has(String(val(n, "StructureNodeId"))));
+                if (justAdded) autoSelectId = String(val(justAdded, "StructureNodeId"));
+            }
+            structureSelect.innerHTML = structureNodes.length
+                ? `<option value="">— Select a Source Structure —</option>${structureOptionsMarkup(autoSelectId)}`
+                : `<option value="">No Source Structure yet — add one below</option>`;
+            if (autoSelectId && structureNodes.some(n => String(val(n, "StructureNodeId")) === autoSelectId)) {
+                structureSelect.value = autoSelectId;
+                selectedStructureId = autoSelectId;
+                onStructureSelected();
+            } else {
+                selectedStructureId = "";
+                statementsStep.classList.add("disabled");
+                renderStatements([]);
+                statementsSub.textContent = "Select a Source Structure first.";
+            }
+        } catch (error) {
+            structureSelect.innerHTML = `<option value="">Unable to load</option>`;
+            setMsg(error.message || "Unable to load Source Structure.", "error");
+        }
+    }
+
+    structureSelect.addEventListener("change", () => {
+        selectedStructureId = structureSelect.value || "";
+        onStructureSelected();
+    });
+
+    function onStructureSelected() {
+        if (!selectedStructureId) {
+            statementsStep.classList.add("disabled");
+            renderStatements([]);
+            statementsSub.textContent = "Select a Source Structure first.";
+            return;
+        }
+        statementsStep.classList.remove("disabled");
+        const node = structureNodes.find(n => String(val(n, "StructureNodeId")) === selectedStructureId);
+        const nodeLabel = node ? `${val(node, "NodeReference") ? val(node, "NodeReference") + " - " : ""}${val(node, "NodeTitle")}` : "";
+        statementsSub.textContent = nodeLabel ? `Source Statements under "${nodeLabel}".` : "Source Statements under the selected Source Structure.";
+        renderStatements(statementRows.filter(r => String(val(r, "StructureNodeId") || "") === selectedStructureId));
+    }
+
+    addStructureBtn?.addEventListener("click", () => {
+        structureRefInput.value = "";
+        structureTitleInput.value = "";
+        structureDescInput.value = "";
+        structureParentSelect.value = "";
+        structureForm.classList.add("open");
+    });
+    structureCancelBtn?.addEventListener("click", () => structureForm.classList.remove("open"));
+
+    structureSaveBtn?.addEventListener("click", async () => {
+        if (!selectedRelease) return;
+        const title = structureTitleInput.value.trim();
+        if (!title) {
+            setMsg("Node Title is required.", "error");
+            structureTitleInput.focus();
+            return;
+        }
+        structureSaveBtn.disabled = true;
+        try {
+            await postSave("custom-release-source-structure", {
+                organizationId: selectedRelease.organizationId,
+                subscriptionId: selectedRelease.subscriptionId,
+                parentNodeId: structureParentSelect.value || "",
+                nodeReference: structureRefInput.value.trim(),
+                nodeTitle: title,
+                description: structureDescInput.value.trim(),
+                nodeAction: "ADD"
+            });
+            structureForm.classList.remove("open");
+            setMsg("Source Structure added. It is now available for selection.", "success");
+            await loadStructureNodes();
+        } catch (error) {
+            setMsg(error.message || "Unable to save Source Structure.", "error");
+        } finally {
+            structureSaveBtn.disabled = false;
+        }
+    });
+
+    // ---- step 3: Source Statements ---------------------------------------
+    async function loadAllStatementsForRelease() {
+        if (!selectedRelease) return;
+        try {
+            const result = await postQuery("custom-release-statements",
+                { organizationId: selectedRelease.organizationId, subscriptionId: selectedRelease.subscriptionId, pageNumber: 1, pageSize: 2000 });
+            statementRows = firstTable(result);
+            if (selectedStructureId) onStructureSelected();
+        } catch (error) {
+            statementRows = [];
+            setMsg(error.message || "Unable to load Source Statements.", "error");
+        }
+    }
+
+    function renderStatements(items) {
+        statementRowsHost.innerHTML = items.length
+            ? items.map(r => `<tr>
+                <td>${esc(val(r, "StatementReference"))}</td>
+                <td>${esc(val(r, "StatementTitle"))}</td>
+                <td>${esc(val(r, "ApplicabilityStatus") || "Not Updated")}</td>
+              </tr>`).join("")
+            : `<tr><td colspan="3" class="css-empty">No Source Statements under this Source Structure yet.</td></tr>`;
+    }
+
+    addStatementBtn?.addEventListener("click", () => {
+        if (!selectedStructureId) {
+            setMsg("Select a Source Structure first.", "error");
+            return;
+        }
+        statementRefInput.value = "";
+        statementTitleInput.value = "";
+        statementTextInput.value = "";
+        statementClassificationInput.value = "";
+        statementKeywordsInput.value = "";
+        statementForm.classList.add("open");
+    });
+    statementCancelBtn?.addEventListener("click", () => statementForm.classList.remove("open"));
+
+    statementSaveBtn?.addEventListener("click", async () => {
+        if (!selectedRelease || !selectedStructureId) return;
+        const title = statementTitleInput.value.trim();
+        if (!title) {
+            setMsg("Statement Title is required.", "error");
+            statementTitleInput.focus();
+            return;
+        }
+        statementSaveBtn.disabled = true;
+        try {
+            await postSave("custom-statement", {
+                organizationId: selectedRelease.organizationId,
+                subscriptionId: selectedRelease.subscriptionId,
+                structureNodeId: selectedStructureId,
+                statementReference: statementRefInput.value.trim(),
+                statementTitle: title,
+                statementText: statementTextInput.value.trim(),
+                classification: statementClassificationInput.value.trim(),
+                keywords: statementKeywordsInput.value.trim(),
+                statementAction: "ADD"
+            });
+            statementForm.classList.remove("open");
+            setMsg("Source Statement added under the selected Source Structure.", "success");
+            await loadAllStatementsForRelease();
+        } catch (error) {
+            setMsg(error.message || "Unable to save Source Statement.", "error");
+        } finally {
+            statementSaveBtn.disabled = false;
+        }
+    });
+
+    // ---- bootstrap ---------------------------------------------------------
+    loadReleases().catch(error => setMsg(error.message || "Unable to load Custom Releases.", "error"));
+})();
+</script>

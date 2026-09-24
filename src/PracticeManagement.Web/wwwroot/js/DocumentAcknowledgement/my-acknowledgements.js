@@ -127,7 +127,7 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td><a href="#" class="my-ack-open">${escapeHtml(r.acknowledgementName)}</a></td>
-        <td>${r.dueDate ? new Date(r.dueDate).toLocaleDateString() : "--"}</td>
+        <td>${r.dueDate ? window.gracFormatDateOnly(r.dueDate) : "--"}</td>
         <td>${r.myDocCount}</td>
         <td>${r.myAckCount}</td>
         <td>${r.myPendingCount}</td>
@@ -151,7 +151,7 @@
     state.activeBatchMeta = batch;
     document.getElementById("myAckDocsTitle").textContent = batch.acknowledgementName || "Batch";
     document.getElementById("myAckDocsMeta").innerHTML =
-      `<dt>Due</dt><dd>${batch.dueDate ? new Date(batch.dueDate).toLocaleDateString() : "--"}</dd>` +
+      `<dt>Due</dt><dd>${batch.dueDate ? window.gracFormatDateOnly(batch.dueDate) : "--"}</dd>` +
       `<dt>Status</dt><dd>${progressChip(batch.myStatusLabel)}</dd>` +
       `<dt>My Documents</dt><dd>${batch.myDocCount}</dd>` +
       `<dt>Acknowledged</dt><dd>${batch.myAckCount} (${Number(batch.myCompletionPct).toFixed(0)}%)</dd>`;
@@ -202,7 +202,7 @@
         <td>${escapeHtml(d.documentName)} <span class="pm-hint">v${escapeHtml(d.versionNumber)}</span></td>
         <td>${escapeHtml(d.versionNumber)}</td>
         <td><span class="ack-status-chip ${isAck ? "ack-status-ack" : "ack-status-pending"}">${escapeHtml(d.statusCode)}</span></td>
-        <td>${d.acknowledgedOn ? new Date(d.acknowledgedOn).toLocaleString() : "--"}</td>
+        <td>${d.acknowledgedOn ? window.gracFormatDisplayDate(d.acknowledgedOn) : "--"}</td>
         ${empCol}
         <td>${btn}</td>`;
       tr.querySelector(".my-ack-act").addEventListener("click", () => openAcknowledge(d));
@@ -225,7 +225,7 @@
       `<dt>Name</dt><dd>${escapeHtml(docRow.documentName)}</dd>` +
       `<dt>Version</dt><dd>${escapeHtml(docRow.versionNumber)}</dd>` +
       `<dt>Batch</dt><dd>${escapeHtml(docRow.acknowledgementName)}</dd>` +
-      `<dt>Due</dt><dd>${docRow.dueDate ? new Date(docRow.dueDate).toLocaleDateString() : "--"}</dd>` +
+      `<dt>Due</dt><dd>${docRow.dueDate ? window.gracFormatDateOnly(docRow.dueDate) : "--"}</dd>` +
       `<dt>My status</dt><dd>${escapeHtml(docRow.statusCode)}</dd>`;
 
     // Show remark from a previous acknowledgement in the textarea.
@@ -251,7 +251,7 @@
       submit.disabled = true;
       submit.title    = "Already acknowledged.";
       done.hidden     = false;
-      doneDt.textContent = docRow.acknowledgedOn ? new Date(docRow.acknowledgedOn).toLocaleString() : "--";
+      doneDt.textContent = docRow.acknowledgedOn ? window.gracFormatDisplayDate(docRow.acknowledgedOn) : "--";
       document.getElementById("myAckActRemark").disabled = true;
     } else {
       submit.disabled = false;
@@ -267,8 +267,6 @@
     const iframe  = document.getElementById("myAckActPdf");
     const empty   = document.getElementById("myAckActPdfEmpty");
     const msg2    = document.getElementById("myAckActPdfMessage");
-    const link    = document.getElementById("myAckActPdfLink");
-    if (link) link.setAttribute("href", fileUrl);
     if (iframe) {
       if (iframe.dataset.blobUrl) { try { URL.revokeObjectURL(iframe.dataset.blobUrl); } catch (_) {} }
       iframe.removeAttribute("data-blob-url");
@@ -292,11 +290,11 @@
       const url = URL.createObjectURL(typed);
       if (iframe) {
         iframe.dataset.blobUrl = url;
-        iframe.setAttribute("src", url);
+        iframe.setAttribute("src", url + "#toolbar=0");
       }
       if (!ct.includes("pdf") && empty) {
         empty.hidden = false;
-        msg2.textContent = `Preview may not render for this file type (${ct || "unknown"}). Use "Open in new tab" to download.`;
+        msg2.textContent = `Preview may not render for this file type (${ct || "unknown"}).`;
       }
     } catch (err) {
       console.error("[my-ack] pdf preview failed", err);

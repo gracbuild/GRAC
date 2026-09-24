@@ -307,6 +307,49 @@
     gap: 8px 12px;
 }
 
+/* Location Add/Edit/View (layout compaction, 2026-09-20) -- 3 columns
+   instead of the shared 2-column default so related fields (Organization/
+   Name/Type, Location Head/Time Zone/Region, City/State/Country) sit side
+   by side and the now-larger Location field set (Time Zone plus the
+   6-field address block, on top of the original Organization/Name/Type/
+   Head/Region/Status) needs fewer rows to show in full -- the point being
+   to fit the whole form on one screen without scrolling. Toggled by
+   practice.js only when screen.Key/entity === "locations" (same
+   opt-in-modifier-class pattern as .pm-dialog-fullpage below), so every
+   other one of the ~30 forms sharing #recordFields/.pm-form-grid keeps
+   its default 2-column layout untouched. View mode renders into the same
+   grid (viewFieldMarkup's .pm-view-field boxes), so it gets the same
+   3-column arrangement for free -- Add, Edit and View stay consistent. */
+.pm-form-grid.pm-form-grid-locations {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 14px;
+    /* Reverted 2026-09-20: an earlier attempt made the DIALOG itself a
+       flex column (display:flex + max-height on the <dialog> element) so
+       only #recordFields would scroll. That broke the dialog's native
+       showModal() centering and backdrop entirely on real testing --
+       author `display:flex` on a `dialog:modal` interacting with the
+       browser's own auto-centering (position:fixed + inset-block:0 +
+       margin:auto from the UA stylesheet) is evidently not safe to rely
+       on across engines. Capping #recordFields ITSELF instead -- an
+       ordinary block child, not the native <dialog> box -- is lower
+       risk: it cannot affect how the dialog positions or backdrops
+       itself, only how tall its own content area is allowed to grow
+       before it scrolls internally. Only engages if content still
+       doesn't fit after the 3-column compaction above (the normal case
+       now does fit); the header and Save/Cancel footer are ordinary
+       siblings of #recordFields, so they are never pushed off screen by
+       this cap. */
+    max-height: calc(100vh - 180px);
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+@media (max-width: 900px) {
+    .pm-form-grid.pm-form-grid-locations {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .pm-form-grid .form-field,
 .pm-form-grid label {
     color: #536077;
@@ -384,6 +427,18 @@
     margin: 4px 0 0;
 }
 
+/* View -> Edit (change request 2026-09-20): groups the Edit button with
+   the Close (X) button at the top-right of the dialog heading, instead of
+   spreading them apart under .pm-dialog-heading's own space-between. Edit
+   is hidden outside View mode (see practice.js), so this wrapper usually
+   holds Close alone and adds nothing visible. */
+.pm-dialog-heading-actions {
+    align-items: center;
+    display: flex;
+    flex-shrink: 0;
+    gap: 10px;
+}
+
 .pm-dialog-actions {
     align-items: center;
     display: flex;
@@ -428,6 +483,18 @@
     white-space: nowrap;
 }
 
+/* Grid font-weight standard (2026-09-24): every data cell renders at the
+   regular weight, so no Practice / Statement / Obligation name or other row
+   value shows as bold. Column headers (thead th) keep their bold from the
+   `.pm-table-wrap th` rule above; in-body grouping / heading rows (e.g.
+   .pm-statement-row, .pm-control-group-row, .pm-source-node-row, tree parents)
+   keep their own weight via their higher-specificity rules further down.
+   Renderers must not re-bold a data value (no <strong>/<b>/inline weight on a
+   data cell); this is the single source of truth for grid row weight. */
+.pm-table-wrap tbody td {
+    font-weight: 400;
+}
+
 .pm-table-wrap tbody tr:nth-child(even) td {
     background: #fbfcff;
 }
@@ -437,10 +504,44 @@
     color: var(--grac-row-hover-text, inherit);
 }
 
+/* Row click-to-View (change request, 2026-09-22): the hover rule above
+   already applies to every row regardless of whether clicking it does
+   anything, so it cannot double as an affordance for "this row is
+   clickable". This class is that affordance -- applied only to a row
+   that actually has a click destination beyond its own 3-dot menu (a
+   full View page on Gap/Task/Exception/Risk Register grids, or Risk
+   Candidates' own quick-look modal), never blanket-applied to every row
+   in a table. See each screen's own wireRowMenu()/wireDelegation() for
+   what the click resolves to, and why a row without this class (an
+   un-materialized Gap row, for instance) is left with the plain cursor:
+   it has nowhere new to go. */
+.pm-table-wrap tbody tr.pm-row-clickable {
+    cursor: pointer;
+}
+
 .pm-table-wrap th:last-child,
 .pm-table-wrap td:last-child {
     text-align: center;
     width: 58px;
+}
+
+/* Bulk-applicability select column. Narrow and centred like the Actions
+   column it mirrors at the other end of the row. The cell is rendered on
+   every row of a bulk-capable grid, empty where applicability has already
+   been decided, so the columns stay aligned whether or not a given row can
+   be ticked. */
+.pm-table-wrap th.pm-select-cell,
+.pm-table-wrap td.pm-select-cell {
+    width: 34px;
+    text-align: center;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.pm-table-wrap td.pm-select-cell input[type="checkbox"] {
+    cursor: pointer;
+    margin: 0;
+    vertical-align: middle;
 }
 
 /* organization-controls (Repository Subscriptions Level 1) + source-statements
@@ -462,10 +563,17 @@
  *   Level 2 drill-down still lives under the organization-controls URL, so
  *   we target both screen keys.
  */
-.pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(2),
-.pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(2),
-.pm-table-wrap[data-screen-key="source-statements"] td:nth-child(2),
-.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(2) {
+/* The two `:not()`s exclude the grids that size their own columns:
+ *  - "releases"       — Level 1 summary; its columns 2/3 are Owner and a
+ *                       two-digit count, so a 220px minimum is wrong there.
+ *  - "statement-tree" — Level 2 tree; sizes by class (.pm-cell-ref /
+ *                       .pm-cell-title) because its column order changed.
+ * What is left is the custom-release flat grid, which these positional rules
+ * were also written for. */
+.pm-table-wrap[data-screen-key="organization-controls"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) td:nth-child(2),
+.pm-table-wrap[data-screen-key="organization-controls"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) th:nth-child(2),
+.pm-table-wrap[data-screen-key="source-statements"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) td:nth-child(2),
+.pm-table-wrap[data-screen-key="source-statements"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) th:nth-child(2) {
     max-width: 320px;
     min-width: 220px;
     white-space: normal;
@@ -473,15 +581,78 @@
     overflow-wrap: anywhere;
 }
 
-.pm-table-wrap[data-screen-key="organization-controls"] td:nth-child(3),
-.pm-table-wrap[data-screen-key="organization-controls"] th:nth-child(3),
-.pm-table-wrap[data-screen-key="source-statements"] td:nth-child(3),
-.pm-table-wrap[data-screen-key="source-statements"] th:nth-child(3) {
+.pm-table-wrap[data-screen-key="organization-controls"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) td:nth-child(3),
+.pm-table-wrap[data-screen-key="organization-controls"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) th:nth-child(3),
+.pm-table-wrap[data-screen-key="source-statements"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) td:nth-child(3),
+.pm-table-wrap[data-screen-key="source-statements"]:not([data-grid-level="releases"]):not([data-grid-level="statement-tree"]) th:nth-child(3) {
     max-width: 360px;
     min-width: 220px;
     white-space: normal;
     word-break: break-word;
     overflow-wrap: anywhere;
+}
+
+/* Grouped header — Repository Subscriptions Level 1 puts the five statement
+ * counts under one "Governance Overview" cell so each count column only has to
+ * be as wide as its number, not as wide as "Not Applicable Statements". */
+.pm-table-wrap thead th.pm-th-group {
+    border-bottom: 1px solid #e5e9f0;
+    border-left: 1px solid #e5e9f0;
+    border-right: 1px solid #e5e9f0;
+    color: #47566f;
+    text-align: center;
+}
+
+/* width:auto only overrides the 58px that .pm-table-wrap th:last-child would
+ * otherwise put on the last count header (it is the last cell of its row).
+ * No column in this grid is pinned to a width: leaving them all automatic is
+ * what keeps the slack shared out evenly instead of piling into one column. */
+.pm-table-wrap thead th.pm-th-metric {
+    text-align: center;
+    white-space: nowrap;
+    width: auto;
+}
+
+/* Numbers read better under a centred heading than ragged-left. */
+.pm-table-wrap[data-grid-level="releases"] tbody td:nth-child(n+3):nth-child(-n+7) {
+    text-align: center;
+}
+
+/* Nothing here declares a width. Pinning columns to width:1% hands every spare
+ * pixel to whichever column is left automatic — first it was Framework /
+ * Release, then Owner — and that column ends up with a visible hole in it.
+ * With all of them automatic the browser shares the slack across the row. */
+.pm-table-wrap[data-grid-level="releases"] th:first-child,
+.pm-table-wrap[data-grid-level="releases"] td:first-child {
+    max-width: 420px;
+    white-space: nowrap;
+}
+
+/* Inline placeholder for an empty cell value (e.g. an unassigned owner).
+ * Not .pm-empty -- that one is the full-width "no rows found" style and its
+ * 20px padding / centring knocks the placeholder out of line with the real
+ * values in the column. */
+.pm-cell-muted {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+/* Statement tree (Repository Subscriptions Level 2) column widths. Keyed off
+ * classes, not nth-child, because the column order changes between the tree
+ * and the custom-release flat grid. */
+.pm-table-wrap[data-grid-level="statement-tree"] th.pm-cell-ref,
+.pm-table-wrap[data-grid-level="statement-tree"] td.pm-cell-ref {
+    min-width: 150px;
+    white-space: nowrap;
+}
+
+.pm-table-wrap[data-grid-level="statement-tree"] th.pm-cell-title,
+.pm-table-wrap[data-grid-level="statement-tree"] td.pm-cell-title {
+    max-width: 420px;
+    min-width: 240px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    word-break: break-word;
 }
 
 .pm-empty {
@@ -514,6 +685,27 @@
     display: flex;
     gap: 10px;
 }
+
+/* ------------------------------------------------------------------
+   pm-grid pager (wwwroot/js/pm-grid.js)
+   Deliberately almost nothing: the component renders .pm-pager markup so
+   it inherits the shape the generic grid has always had, and these are
+   only the two things a shared, mounted pager needs that a hand-written
+   one in a Razor page did not.
+   ------------------------------------------------------------------ */
+
+/* Mounted into an empty <div>, so it has no margin of its own the way
+   the Razor pager did sitting inside a panel. */
+.pm-grid-pager { margin-top: 4px; }
+
+/* An empty pager (nothing loaded yet) would otherwise collapse and make
+   the grid jump when the first page arrives. */
+.pm-grid-pager [data-pg-info] { min-width: 96px; text-align: center; }
+
+/* "Rows" rather than a bare select: the generic pager's options read
+   "25 / page", which says what it is without a label, but a mounted
+   pager can sit under a narrow grid where that is the only clue. */
+.pm-grid-pager .pm-grid-pager-label { color: #8792a6; font-weight: 600; }
 
 .pm-pager label {
     align-items: center;
@@ -956,7 +1148,7 @@
 .pm-table-wrap tbody tr.pm-tree-parent td {
     background: #f6f9fd;
     color: #172033;
-    font-weight: 650;
+    font-weight: 400;
 }
 
 .pm-table-wrap tbody tr.pm-source-node-row td:first-child,
@@ -972,7 +1164,7 @@
 .pm-table-wrap tbody tr.pm-tree-child td {
     background: #fff;
     color: #344054;
-    font-weight: 500;
+    font-weight: 400;
 }
 
 /* Inline sub-heading between practice groups (Framework Statement
@@ -1099,6 +1291,32 @@
     position: relative;
 }
 
+/* Committee Members' inline "New Designation" panel reuses
+   .pm-inline-actions as a wrapper, but toggles it via the [hidden]
+   attribute (unlike the 3-dot-menu uses above, which are always
+   visible). Same gotcha as .pm-modal[hidden] below: a plain author
+   rule setting display beats the browser's own [hidden] default, so
+   this needs the same !important override to actually hide. */
+.pm-inline-actions[hidden] {
+    display: none !important;
+}
+
+/* Committee Members' add-row (change request 2026-09-22, second
+   revision): its own standalone .pm-dependency-grid table now, separate
+   from the member list below (which moved into .pm-table-wrap -- see
+   that rule further down and renderCommitteeMembersSection's own comment
+   in practice.js for why). .pm-form-grid select (this table sits inside
+   #recordFields.pm-form-grid) is block-level with a 6px margin-top by
+   default, which is what used to misalign the Employee/Designation
+   selects and the Add button on this one-line row; this override keeps
+   both selects flush with the button beside them. Kept even after the
+   Designation "+ Add New Designation..." option moved inside the combo
+   itself (no longer a second control in that cell to misalign against)
+   because the selects still need it against the Add button. */
+.pm-dependency-grid table tr[data-committee-member-add-row] select {
+    margin-top: 0;
+}
+
 /* Action-menu popover - mirrors CM's .action-menu. */
 .pm-action-menu {
     background: #fff;
@@ -1214,7 +1432,7 @@
 }
 
 .pm-framework-summary-row td:first-child {
-    font-weight: 700;
+    font-weight: 400;
 }
 
 /* Organization Onboarding - Repository Subscription tree.
@@ -1350,6 +1568,36 @@
     line-height: 1.25;
 }
 
+/* Select + "Manage" button pairing (change request 2026-09-22) -- Source
+   Structure Node / Statement Classification on Add Control Statement. */
+.pm-field-with-action {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+}
+
+.pm-field-with-action select {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Manage Source Structure / Statement Classification popup (change request
+   2026-09-22). Sized a step larger than the default dialog{} (920px) since
+   it nests over an already-open Add Control Statement dialog and needs to
+   read comfortably in front of it, with the list wrap given real minimum
+   height so a couple of rows don't leave it looking cramped. */
+dialog.pm-manage-structure-dialog {
+    width: min(960px, 94vw);
+}
+
+dialog.pm-manage-structure-dialog form {
+    padding: 24px;
+}
+
+dialog.pm-manage-structure-dialog .pm-dialog-heading {
+    margin-bottom: 18px;
+}
+
 /* Combo container. */
 .pm-checkcombo {
     position: relative;
@@ -1390,6 +1638,88 @@
     background: #f8fafc;
     color: #98a2b3;
     cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------
+   Empty state for a field that would otherwise render as bare text.
+
+   A dependency category with no records used to drop out of the form
+   as a loose <span>: no border, no height, so the row collapsed and
+   sat out of line with every row above it that held a picker. The
+   message was right; the shape was not.
+
+   This is that message inside the SAME box the picker would have
+   occupied -- same border, radius, min-height, padding and font as
+   .pm-checkcombo-trigger, so a column of categories stays on one grid
+   whether or not the data exists. It borrows the disabled trigger's
+   fill and ink above rather than inventing a third look, because a
+   field with nothing to choose from IS the disabled case as far as
+   the reader is concerned.
+
+   Static text on purpose: a <div>, not a control. Nothing to focus,
+   nothing to submit, and no change to any save path -- it is what
+   renders INSTEAD of an input, never alongside one.
+
+   Used by the dependency tables on Operationalize, Risk Analysis and
+   the read-only Risk Details page. Any other field that has to say
+   "nothing here yet" in a form row should use it too.
+   ------------------------------------------------------------------ */
+.pm-field-empty {
+    align-items: center;
+    background: #f8fafc;
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    color: #98a2b3;
+    cursor: default;
+    display: flex;
+    font-size: 13px;
+    font-weight: 500;
+    min-height: 40px;
+    padding: 6px 10px;
+    text-align: left;
+    width: 100%;
+}
+
+/* Same box, but for a state that is a fault rather than simply empty
+   -- e.g. a category the catalogue on this database does not carry.
+   Amber matches .rw-warn, which this replaces on Operationalize. */
+.pm-field-empty.warn {
+    color: #b45309;
+}
+
+/* ------------------------------------------------------------------
+   Read-only value box for Organization Administration's Organization
+   tab (change request 2026-09-20). That screen used to reuse the Add/
+   Edit form's own <input>/<select> markup with `disabled` set -- a
+   real form control the browser still chrome's up as one (focus ring,
+   caret, dropdown arrow) even though nothing on it can be changed, so
+   it read as "a form that's broken", not "a view page". This is the
+   plain label/value box it renders instead: same box shape, border,
+   radius and 13px type .pm-form-grid inputs already use, so it sits on
+   the same grid without looking like a different component -- just
+   with no interactive chrome, because there's nothing to interact with.
+   Pairs with .pm-field-empty above for the "nothing here yet" case
+   (reused as-is, not duplicated) and .pm-field's existing label style
+   for the caption above each value.
+   ------------------------------------------------------------------ */
+.pm-view-value {
+    background: #f8fafc;
+    border: 1px solid #e5e9f0;
+    border-radius: 7px;
+    color: var(--grac-ink, #172033);
+    display: block;
+    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    min-height: 34px;
+    padding: 7px 10px;
+    word-break: break-word;
+}
+
+.pm-view-field.full .pm-view-value,
+.pm-view-field.full .pm-field-empty {
+    white-space: pre-wrap;
 }
 
 .pm-checkcombo-trigger.field-error {
@@ -1545,6 +1875,7 @@
     .pm-dashboard-kpi-grid,
     .pm-grid,
     .pm-form-grid,
+    .pm-form-grid.pm-form-grid-locations,
     .pm-mini-metrics {
         grid-template-columns: 1fr;
     }
@@ -1743,6 +2074,79 @@
     font-size: 12px;
     font-weight: 650;
     white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------
+   Modal overlay  (hoisted from the views, 2026-08)
+
+   .pm-modal / .pm-modal-panel / .pm-modal-footer were defined
+   IDENTICALLY inside three separate views -- exception-centre,
+   gap-detail and risk-centre -- so any view that used the classes
+   without carrying its own copy rendered its "modal" as an ordinary
+   block in the page flow. exception-analysis did exactly that.
+
+   Only the shared layout is hoisted. Two things stay per view on
+   purpose:
+     * .pm-modal-close -- the global rule below is a bordered 32px
+       button; those three views deliberately override it with a
+       borderless glyph. Hoisting would have silently restyled them.
+     * .pm-modal-wide  -- genuinely different per view (900px in
+       exception-centre, 820px in risk-centre).
+   ------------------------------------------------------------------ */
+.pm-modal {
+    align-items: flex-start;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 40px 20px;
+    position: fixed;
+    z-index: 1100;
+}
+
+/* [hidden] must beat the display:flex above, hence !important. */
+.pm-modal[hidden] {
+    display: none !important;
+}
+
+.pm-modal-panel {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+    max-height: calc(100vh - 80px);
+    max-width: 560px;
+    overflow-y: auto;
+    padding: 20px;
+    width: 100%;
+}
+
+.pm-modal-panel.pm-modal-wide {
+    max-width: 900px;
+}
+
+.pm-modal-panel > header {
+    align-items: center;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.pm-modal-panel > header h2 {
+    color: #2d3748;
+    font-size: 18px;
+    margin: 0;
+}
+
+.pm-modal-footer {
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+    padding-top: 12px;
 }
 
 .pm-modal-close {
@@ -2209,4 +2613,1072 @@
     color: var(--grac-muted, #758095);
     font-size: 11px;
     font-style: italic;
+}
+
+/* ------------------------------------------------------------------
+   Audit Management flow shell (migration 276)
+   Chrome for Views/Practice/Partials/_audit-flow-shell.cshtml. Reuses
+   .pm-tabs and .pm-setup-tab-panel above; everything here is additive
+   and scoped to .oa-flow-* so no existing screen is affected.
+   ------------------------------------------------------------------ */
+.oa-flow-shell .oa-flow-steps button {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+}
+
+/* Step number chip. Mirrors the active colours of .pm-tabs button. */
+.oa-flow-shell .oa-step-no {
+    align-items: center;
+    background: #e8edf6;
+    border-radius: 50%;
+    color: #536077;
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 700;
+    height: 18px;
+    justify-content: center;
+    width: 18px;
+}
+
+.oa-flow-shell .oa-flow-steps button.active .oa-step-no {
+    background: var(--grac-blue, #2465ca);
+    color: #fff;
+}
+
+.oa-flow-caption {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    margin: -4px 0 12px;
+}
+
+/* Each hosted partial renders its own page heading. Inside the shell the
+   container already shows one, so the nested ones are suppressed rather
+   than edited out of the eight partials -- that keeps those files
+   byte-identical whether they are opened standalone or hosted here. */
+.oa-flow-panel .pm-page-heading {
+    display: none;
+}
+
+/* Hosted partials also bring their own .pm-panel. Drop the doubled
+   frame so a panel inside the shell does not read as a card in a card. */
+.oa-flow-panel > .pm-panel {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+}
+
+.oa-flow-nav {
+    align-items: center;
+    border-top: 1px solid var(--grac-line, #e2e7f0);
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.oa-flow-position {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.oa-flow-nav button[disabled] {
+    cursor: default;
+    opacity: .45;
+}
+
+/* ------------------------------------------------------------------
+   Audit Management flow -- Phase 2 (migrations 277 / 278)
+   Shared context bar, step status chips, question-set adoption panel.
+   Additive and scoped to .oa-* so no existing screen is affected.
+   ------------------------------------------------------------------ */
+.oa-flow-context {
+    align-items: end;
+    background: #f6f8fc;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+}
+
+.oa-flow-context label {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    gap: 2px;
+    color: #475569;
+}
+
+.oa-flow-context select {
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    min-width: 240px;
+    padding: 6px 8px;
+}
+
+.oa-flow-ctx-state {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    padding-bottom: 6px;
+}
+
+/* Step status chip. Sits after the tab label. */
+.oa-step-chip {
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    margin-left: 6px;
+    padding: 2px 7px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.oa-step-chip.is-complete { background: #dcfce7; color: #166534; }
+.oa-step-chip.is-partial  { background: #fef3c7; color: #92400e; }
+.oa-step-chip.is-empty    { background: #eef1f6; color: #64748b; }
+
+/* Question-set adoption panel (the 277 edge). */
+.oa-adopt-panel {
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    margin-bottom: 14px;
+    padding: 12px;
+}
+
+.oa-adopt-grid {
+    align-items: center;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr auto 1fr auto;
+}
+
+@media (max-width: 900px) {
+    .oa-adopt-grid { grid-template-columns: 1fr; }
+}
+
+.oa-adopt-grid select {
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 4px;
+    width: 100%;
+}
+
+.oa-adopt-label {
+    color: #475569;
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.oa-adopt-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.oa-adopt-hint {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    margin: 4px 0 0;
+}
+
+.oa-adopt-footer {
+    align-items: center;
+    border-top: 1px solid var(--grac-line, #e2e7f0);
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-top: 12px;
+    padding-top: 10px;
+}
+
+/* The adoption panel is the shell's own chrome, not a hosted screen, so
+   it keeps its frame where .oa-flow-panel > .pm-panel drops one. */
+.oa-flow-panel > .oa-adopt-panel {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0);
+    padding: 12px;
+}
+
+/* ------------------------------------------------------------------
+   Audit Definition workspace -- Phase 3 (migration 279)
+   One audit list, and a 3-tab page per audit. Mode is driven entirely
+   by [data-mode] on .oa-ws, so the hosted screens stay untouched.
+   ------------------------------------------------------------------ */
+
+/* --- list mode: only the audit list is visible --- */
+.oa-ws[data-mode="list"] .oa-ws-detail { display: none; }
+.oa-ws[data-mode="list"] #oaWsPanel-scope,
+.oa-ws[data-mode="list"] #oaWsPanel-questions { display: none; }
+/* The definitions screen's list panel is the master list. Its form
+   (the dialog) stays closed in this mode by the screen's own logic. */
+.oa-ws[data-mode="list"] #oaWsPanel-details { display: block; }
+
+/* --- detail mode: tabs, and the list is out of the way --- */
+.oa-ws[data-mode="detail"] .oa-ws-panel { display: none; }
+.oa-ws[data-mode="detail"] .oa-ws-panel.active { display: block; }
+/* Hide the audit list itself while an audit is open -- the tab shows the
+   form, not the list it came from. #oaDefRoot is the list panel. */
+.oa-ws[data-mode="detail"] #oaDefRoot { display: none; }
+
+/* Hosted screens render their own page heading; the workspace already
+   shows one. Same rule as the flow shell. */
+.oa-ws-panel .pm-page-heading { display: none; }
+
+/* --- the definition form, rendered inline instead of as a modal --- */
+/* The screen calls dialog.show() (non-modal) when window.__oaDefInlineForm
+   is set, so the element is [open] but in the normal flow. Reset the
+   dialog's UA chrome so it reads as a plain form section. */
+.oa-ws[data-mode="detail"] #oaDefDialog[open] {
+    border: 0;
+    box-shadow: none;
+    display: block;
+    inset: auto;
+    margin: 0;
+    max-width: none;
+    padding: 0;
+    position: static;
+    width: 100%;
+}
+/* In list mode the dialog behaves normally (modal) -- nothing to override. */
+.oa-ws[data-mode="detail"] #oaDefDialog[open] > form { padding: 4px 0 0; }
+
+/* The inline form's own close/cancel buttons have nothing to close back
+   to, so they are hidden rather than left as dead controls. */
+.oa-ws[data-mode="detail"] #oaDefClose,
+.oa-ws[data-mode="detail"] #oaDefCancel { display: none; }
+
+/* Scope Builder and Question Sets keep their pickers when opened on their
+   own routes; inside the workspace the audit is already chosen, so the
+   duplicate picker row is suppressed. Driven by the workspace instead. */
+.oa-ws[data-mode="detail"] #oaScopeBackBtn { display: none; }
+
+.oa-ws-panel > .pm-panel {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+}
+
+/* ------------------------------------------------------------------
+   Audit Definition workspace -- layout refinement
+   ------------------------------------------------------------------
+   Alignment and presentation only. No field is added, removed, renamed
+   or re-ordered, and the standalone /Practice/org-assurance-definitions
+   route still renders the same form as a centred 720-px MODAL -- every
+   rule below is scoped to .oa-ws[data-mode="detail"], the workspace's
+   own detail state.
+
+   WHY !important IS UNAVOIDABLE HERE
+     org-assurance-definitions.cshtml styles the <dialog> and every field
+     inline (max-width:720px; width:94% on the dialog, padding/border on
+     each input). Inline styles outrank any stylesheet selector, so a
+     plain rule is silently ignored -- which is exactly why the form sat
+     720 px wide against the left edge with dead space to its right. The
+     alternative was editing those inline styles, but they are shared
+     with the modal presentation and changing them would break it.
+   ------------------------------------------------------------------ */
+
+/* --- Tab strip: evenly spaced, no numerals ------------------------- */
+.oa-ws .oa-flow-steps {
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.oa-ws .oa-flow-steps button {
+    font-size: 13.5px;
+    font-weight: 700;
+    padding: 10px 18px;
+}
+
+/* The chip only appears once an audit is selected; keep it from
+   crowding the label when it does. */
+.oa-ws .oa-flow-steps .oa-step-chip {
+    margin-left: 8px;
+}
+
+.oa-ws .oa-flow-caption {
+    margin: 0 0 10px;
+}
+
+/* --- Form card: fills the panel, so its edges match the page heading
+       card above it instead of floating in the left third ----------- */
+.oa-ws[data-mode="detail"] #oaDefDialog[open] {
+    background: #fff;
+    border: 1px solid var(--grac-line, #e2e7f0) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 2px 7px rgba(37, 52, 90, .04) !important;
+    max-width: none !important;
+    width: 100% !important;
+}
+
+/* Content inside the card is capped for readability -- a 1700-px-wide
+   text input is worse than a little white space -- but stays LEFT
+   aligned so the header, the tab strip and the first field share one
+   left edge, which is what the page is asked to line up on. */
+.oa-ws[data-mode="detail"] #oaDefDialog[open] > #oaDefForm {
+    margin: 0 !important;
+    max-width: none;          /* fill the card -- no dead strip on the right */
+    padding: 14px 20px 16px !important;
+}
+
+/* Form title matches the page's typographic scale. */
+.oa-ws[data-mode="detail"] #oaDefDialogTitle {
+    font-size: 15px !important;
+    font-weight: 700;
+    letter-spacing: .1px;
+}
+
+/* --- Field grid ---------------------------------------------------- */
+/* BOTH field rows now declare the same 1fr/2fr/1fr tracks in markup, so
+   one rule covers them and the columns share vertical guides:
+
+       Code (25%)      | Name (50%)                  | Eff. Date (25%)
+       Audit Cat (25%) | Owner: role + employee (50%)| (empty)
+
+   Audit Category lines up under Code and the Owner pair spans exactly
+   Name's width. The trailing empty cell is deliberate -- an aligned gap
+   beats a second row on its own unrelated rhythm. */
+.oa-ws #oaDefForm > div[style*="grid-template-columns:1fr 2fr 1fr"] {
+    gap: 14px !important;
+}
+
+/* The two Owner selects inside the middle track. */
+.oa-ws #oaDefForm > div[style*="grid-template-columns:1fr 2fr 1fr"] > div > div {
+    gap: 16px !important;
+}
+
+/* Objective / Description are single-column rows, so on a wide monitor
+   they would run to ~1800px -- past a comfortable reading measure.
+   Cap the free-text fields only; every gridded field still fills its
+   track, so the left and right edges of the form stay flush. */
+.oa-ws #oaDefForm > label > textarea {
+    max-width: 1100px;
+}
+
+/* Consistent vertical rhythm between every field block. */
+.oa-ws #oaDefForm > label,
+.oa-ws #oaDefForm > div[style*="grid-template-columns"] {
+    margin-top: 10px !important;
+}
+
+/* --- Labels and controls ------------------------------------------ */
+.oa-ws #oaDefForm label,
+.oa-ws #oaDefForm > div > div > span,
+.oa-ws #oaDefForm > div > label > span {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .1px;
+}
+
+.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm select,
+.oa-ws #oaDefForm textarea {
+    border: 1px solid var(--grac-line, #e2e7f0) !important;
+    border-radius: 6px !important;
+    box-sizing: border-box;
+    font-size: 13px;
+    margin-top: 5px !important;
+    padding: 8px 10px !important;
+    width: 100%;
+}
+
+.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm select {
+    height: 36px;
+}
+
+.oa-ws #oaDefForm textarea {
+    height: 56px;            /* ~2 lines; resize:vertical still works */
+    line-height: 1.4;
+    min-height: 56px;
+}
+
+.oa-ws #oaDefForm input:focus,
+.oa-ws #oaDefForm select:focus,
+.oa-ws #oaDefForm textarea:focus {
+    border-color: #467CEB !important;
+    box-shadow: 0 0 0 3px rgba(70, 124, 235, .18);
+    outline: none;
+}
+
+/* --- Action row ---------------------------------------------------- */
+/* Cancel is hidden inside the workspace (nothing to cancel back to), so
+   Save would otherwise sit alone against a 1120-px rule. Give the row a
+   divider and keep it on the form's right edge. */
+.oa-ws #oaDefForm > div[style*="justify-content:flex-end"] {
+    border-top: 1px solid var(--grac-line, #e2e7f0);
+    margin-top: 14px !important;
+    padding-top: 12px;
+}
+
+/* --- Responsive ---------------------------------------------------- */
+@media (max-width: 900px) {
+    .oa-ws #oaDefForm > div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* The Owner pair nested inside the middle track. Keyed on the row's
+       new 1fr/2fr/1fr tracks -- the old selector matched the outer row's
+       previous minmax() string and stopped resolving when both rows were
+       put on the same tracks, which would have left the two selects
+       side by side and cramped on a phone. */
+    .oa-ws #oaDefForm > div[style*="grid-template-columns:1fr 2fr 1fr"] > div > div {
+        grid-template-columns: 1fr !important;
+    }
+
+    .oa-ws .oa-flow-steps button {
+        padding: 10px 12px;
+    }
+}
+
+/* ------------------------------------------------------------------
+   Audit Definition -- fit the Definition Details step in one viewport
+   ------------------------------------------------------------------
+   Spacing only. No field, label, required mark, validation rule or
+   submit path is touched, and `resize: vertical` stays on both
+   textareas so anyone who wants more room still has it.
+
+   Where the height went, and what each line reclaims:
+     card padding      20/22 -> 14/16     ~12px
+     row rhythm        14    -> 10  (x3)  ~12px
+     Objective + Description  90 -> 56 each  ~68px
+     action row        20+16 -> 14+12     ~10px
+     step caption      14    -> 10         ~4px
+     form title        12    ->  8         ~4px
+   ~110px in total, which is what was pushing Save below the fold at a
+   standard desktop height.
+   ------------------------------------------------------------------ */
+
+/* Form title row -- tighten the gap to the first field. */
+.oa-ws #oaDefForm > div[style*="justify-content:space-between"] {
+    margin-bottom: 8px !important;
+}
+
+/* Label-to-control gap, applied once for every control type. */
+.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm select,
+.oa-ws #oaDefForm textarea {
+    margin-top: 4px !important;
+}
+
+/* Equal control height across the two field rows, so Audit Category,
+   Owner and the role select sit on one baseline with the inputs above. */
+.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm select {
+    height: 34px;
+    padding: 6px 10px !important;
+}
+
+/* Objective / Description keep the same left and right edges as the
+   gridded rows above -- they are single-column rows in the same form,
+   so they inherit the form's content box exactly. */
+.oa-ws #oaDefForm > label {
+    display: flex;
+    flex-direction: column;
+}
+
+/* On a short viewport the textareas give up their remaining height
+   before anything else does -- the fields and Save matter more than
+   two extra lines of free text. */
+@media (max-height: 820px) {
+    .oa-ws #oaDefForm textarea {
+        height: 48px;
+        min-height: 48px;
+    }
+
+    .oa-ws[data-mode="detail"] #oaDefDialog[open] > #oaDefForm {
+        padding: 12px 20px 14px !important;
+    }
+}
+
+/* ------------------------------------------------------------------
+   Practice Picker (migration 282) -- reusable cascading component
+   Markup is rendered by wwwroot/js/practice-picker.js. Scoped to .pp-*
+   so it can drop into any form without colliding with that form's own
+   grid; the host element controls where it sits.
+   ------------------------------------------------------------------ */
+.pp-root {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+    .pp-root { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+    .pp-root { grid-template-columns: 1fr; }
+}
+
+.pp-level {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;                 /* long option text must not widen the track */
+}
+
+.pp-label {
+    color: var(--grac-ink, #172033);
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.pp-required {
+    color: #b91c1c;
+    margin-left: 2px;
+}
+
+.pp-root select {
+    border: 1px solid var(--grac-line, #e2e7f0);
+    border-radius: 6px;
+    font-size: 13px;
+    height: 34px;
+    padding: 6px 10px;
+    width: 100%;
+}
+
+.pp-root select:focus {
+    border-color: #467CEB;
+    box-shadow: 0 0 0 3px rgba(70, 124, 235, .18);
+    outline: none;
+}
+
+/* A disabled level is a waiting level, not a broken one -- keep it
+   legible rather than greying it into the background. */
+.pp-root select:disabled {
+    background: #f6f8fc;
+    color: var(--grac-muted, #758095);
+    cursor: default;
+}
+
+.pp-hint {
+    color: var(--grac-muted, #758095);
+    font-size: 11px;
+    margin-top: 3px;
+    min-height: 14px;             /* reserved, so rows do not jump on load */
+}
+
+.pp-message {
+    color: var(--grac-muted, #758095);
+    font-size: 12px;
+    grid-column: 1 / -1;
+    margin: 0;
+    min-height: 16px;
+}
+
+.pp-message.is-error { color: #b42318; }
+.pp-message.is-warn  { color: #92400e; }
+
+/* Inside a dialog the picker gets a full row per level. The Risk Centre
+   mounts it in #riskMapPracticeModal for exactly this reason -- inline in
+   the scope panel's narrow column the labels wrapped and the four selects
+   were unusable. Two columns keeps the dialog compact without cramping. */
+#riskMapPickerHost .pp-root {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 4px 0 10px;
+}
+
+@media (max-width: 720px) {
+    #riskMapPickerHost .pp-root { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------------------------
+   Risk scope -> "Existing Controls" (migration 284)
+   Provenance trail and the tasks grouped under each mapped practice.
+   Scoped to .risk-map-* so nothing else on the page is affected.
+   ------------------------------------------------------------------ */
+/* The breadcrumb trail is gone: provenance is rendered as labelled
+   facts (.rmp-facts) inside each practice block, because the crumbs
+   never said which level was which. Layout for the blocks lives with
+   the rest of the risk page in risk-centre.cshtml; only the task status
+   chip stays here, beside the other shared badge sizing.
+
+   Self-sufficient on purpose. The markup carries `pm-badge t-status`,
+   but .pm-badge is NOT DEFINED anywhere in this project -- 66 uses
+   across the views and scripts, zero rules -- so it contributes
+   nothing and the status rendered as bare text. Everything the chip
+   looks like has to come from .t-status. Leaving .pm-badge in the
+   markup: defining it globally would restyle 66 unrelated places and
+   belongs in its own change. */
+/* ------------------------------------------------------------------
+   Tag Picker (wwwroot/js/tag-picker.js, migrations 285/286)
+   Multi-select with chips and inline create. Shaped to match
+   .pm-form-grid's inputs -- same border, radius and 13px type -- so it
+   sits in a form row beside a <select> without looking bolted on.
+   ------------------------------------------------------------------ */
+.tag-picker { position: relative; }
+
+.tp-control {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+    min-height: 34px;
+    padding: 4px 8px;
+}
+
+.tp-control:focus-within { border-color: #90cdf4; box-shadow: 0 0 0 3px #ebf8ff; outline: none; }
+
+/* flex:1 with a min-width so the box keeps a usable typing area no
+   matter how many chips are in front of it, instead of collapsing to a
+   few pixels on the last line. */
+.tp-input {
+    border: 0; flex: 1 1 120px; font-family: inherit; font-size: 13px;
+    min-width: 120px; outline: none; padding: 3px 2px;
+}
+
+.tp-chips { display: contents; }
+
+.tp-chip {
+    align-items: center; background: #edf2f7; border-radius: 999px;
+    color: #2d3748; display: inline-flex; font-size: 12px; gap: 4px;
+    line-height: 1.4; padding: 2px 4px 2px 10px;
+}
+
+/* A legacy "Others" value carried forward. Dashed, because it is not a
+   list entry yet -- saving the risk is what makes it one. */
+.tp-chip.is-pending { background: #fffaf0; border: 1px dashed #fbd38d; color: #7b341e; }
+
+.tp-chip-x {
+    background: transparent; border: 0; color: #a0aec0; cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 0 4px;
+}
+.tp-chip-x:hover { color: #e53e3e; }
+
+.tp-menu {
+    background: #fff; border: 1px solid #d5dce7; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, .12);
+    left: 0; max-height: 240px; overflow-y: auto;
+    position: absolute; right: 0; top: 100%; z-index: 40;
+    margin-top: 4px; padding: 4px;
+}
+
+.tp-opt {
+    background: transparent; border: 0; border-radius: 6px; color: #2d3748;
+    cursor: pointer; display: block; font-size: 13px; padding: 7px 10px;
+    text-align: left; width: 100%;
+}
+.tp-opt:hover { background: #f7fafc; }
+.tp-opt.is-muted, .tp-opt.is-busy { color: #a0aec0; cursor: default; font-style: italic; }
+.tp-opt.is-muted:hover, .tp-opt.is-busy:hover { background: transparent; }
+
+/* The create row leads, and is tinted, because it is the one action
+   that changes the org's list rather than just this risk. */
+.tp-opt-create { background: #f0f7ff; color: #2b6cb0; font-weight: 600; }
+.tp-opt-create:hover { background: #e1efff; }
+
+.tp-own { color: #a0aec0; font-size: 11px; }
+
+.tp-message { color: #718096; font-size: 11px; margin: 4px 0 0; }
+.tp-message.is-error { color: #c53030; }
+
+.rmp-task-table .t-status {
+    background: #edf2f7;
+    border-radius: 10px;
+    color: #4a5568;
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+.risk-map-empty {
+    border: 1px dashed var(--grac-line, #e2e7f0);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
+    text-align: left;
+}
+
+.risk-map-empty strong { font-size: 13px; }
+.risk-map-empty span   { color: var(--grac-muted, #758095); font-size: 12px; }
+
+/* ------------------------------------------------------------------
+   Add/Edit Practice: Source Statement mapping picker + true full-page
+   dialog (change request 2026-09-16/17, Organization Requirements
+   screen). dialog.pm-dialog-fullpage is a modifier class practice.js
+   toggles on the shared #recordDialog ONLY for organization-requirements
+   add/edit -- every other entity form that reuses #recordDialog keeps the
+   plain `dialog { width: min(920px, 94vw); border-radius: 10px; ... }`
+   default in control-management.css untouched. Do not raise this file's
+   specificity to beat that rule for anything other than that one
+   modifier class.
+
+   First pass here just widened the dialog (min(1440px, 96vw)); it still
+   read as a popup -- rounded card, drop shadow, dimmed backdrop, visible
+   gaps around it with the sidebar/topbar showing through the dim. Second
+   pass pinned it to inset:0 across the whole viewport with no radius or
+   shadow -- that fixed the "looks like a popup" complaint but overshot
+   it: a native <dialog> promotes into the browser's top layer above
+   EVERYTHING regardless of z-index, so inset:0 also blanked out the
+   master layout's sidebar and topbar entirely, which is not what "fit
+   the master page" meant -- the user's own words on seeing that were
+   "ithu master page illathe anu vannirikunnathu" (this has come up
+   without the master page at all).
+
+   This pass keeps the sidebar and topbar visible and sizes the dialog to
+   exactly the CONTENT area beside/below them -- the same box
+   .content-wrapper occupies -- so the form reads as this screen's own
+   full-page view inside the app chrome, not a takeover of the browser
+   viewport. The inset values below are not invented: they mirror the
+   exact left-gutter reservation master-layout.css itself gives
+   .content-wrapper/.main-header for each sidebar state (section 7b/7c
+   there) -- same selectors, same 250px / 4.6rem, so the dialog's left
+   edge tracks the sidebar's real width including the mid-collapse hover
+   flyout, instead of drifting out of sync with a second hardcoded set of
+   numbers. Below 768px AdminLTE's own sidebar goes off-canvas (an
+   overlay drawer, not a push), so .content-wrapper reserves no space for
+   it there either -- the dialog matches that down to full width. */
+dialog.pm-dialog-fullpage {
+    border-radius: 0;
+    bottom: 0;
+    box-shadow: none;
+    height: calc(100vh - var(--ml-topbar-h, 56px));
+    left: 250px;
+    margin: 0;
+    max-height: calc(100vh - var(--ml-topbar-h, 56px));
+    max-width: calc(100vw - 250px);
+    position: fixed;
+    right: 0;
+    top: var(--ml-topbar-h, 56px);
+    /* practice.js opens this dialog with .show(), not .showModal(), for
+       exactly this class (see openForm()'s isFullpage branch) -- a
+       non-modal <dialog> is NOT promoted into the browser's top layer,
+       so it needs an explicit stacking position like any other fixed
+       element. .main-sidebar/.main-header sit at z-index 1038/1037
+       (lib/FrontEnd/dist/css/adminlte.min.css); this only ever needs to
+       sit above ordinary .content-wrapper content, never above the
+       chrome (it's inset to never overlap it), so a value comfortably
+       below that range is deliberate, not just "high enough". */
+    width: calc(100vw - 250px);
+    z-index: 1020;
+}
+
+/* Sidebar collapsed to its 4.6rem icon rail (the hamburger toggle) --
+   mirrors master-layout.css's own !important rule for this state
+   (AdminLTE's >=992px rule, and this file's >=768px re-statement of it),
+   so this has to win the same way: matching !important, on a selector at
+   least as specific. */
+body.sidebar-collapse dialog.pm-dialog-fullpage {
+    left: 4.6rem !important;
+    max-width: calc(100vw - 4.6rem) !important;
+    width: calc(100vw - 4.6rem) !important;
+}
+
+/* Hovering/focusing a collapsed sidebar flyouts it back out to 250px
+   (master-layout.css section 7c) without leaving sidebar-collapse --
+   follow it back out so the dialog's edge doesn't sit under the
+   flyout. */
+body.sidebar-collapse.sidebar-hover-push dialog.pm-dialog-fullpage {
+    left: 250px !important;
+    max-width: calc(100vw - 250px) !important;
+    width: calc(100vw - 250px) !important;
+}
+
+/* AdminLTE's own default breakpoint for the sidebar going off-canvas
+   (an overlay drawer over the content, not beside it) -- content
+   reserves no space for it here regardless of collapse state, so
+   neither should the dialog. */
+@media (max-width: 767.98px) {
+    dialog.pm-dialog-fullpage,
+    body.sidebar-collapse dialog.pm-dialog-fullpage,
+    body.sidebar-collapse.sidebar-hover-push dialog.pm-dialog-fullpage {
+        left: 0 !important;
+        max-width: 100vw !important;
+        width: 100vw !important;
+    }
+}
+
+/* ::backdrop only exists for a dialog opened with .showModal() -- a
+   non-modal .show() dialog (what pm-dialog-fullpage now uses, see
+   openForm() in practice.js) never creates one at all, so this rule is
+   inert for this class today. It's kept, not deleted, as a guard: if
+   .pm-dialog-fullpage is ever opened with .showModal() again (by a
+   future edit that doesn't know the history here), a painted, clickable
+   backdrop would silently reintroduce the exact bug this rule already
+   fixed once -- transparent keeps it invisible, pointer-events:none
+   keeps it from swallowing clicks meant for whatever it's covering,
+   same reasoning as before. It is NOT what makes the sidebar/topbar
+   clickable today, though -- that turned out to be a different problem
+   than a click-blocking backdrop (see the comment on the show()/
+   showModal() branch in openForm()): .showModal() makes the entire REST
+   of the document inert -- excluded from hit-testing and focus, not
+   merely covered -- for as long as the dialog is open, regardless of
+   what the backdrop does. No amount of CSS on ::backdrop undoes that;
+   only not using showModal() does. */
+dialog.pm-dialog-fullpage::backdrop {
+    background: transparent;
+    pointer-events: none;
+}
+
+dialog.pm-dialog-fullpage form {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    padding: 28px 40px;
+}
+
+/* #recordFields is the field grid; it, not the dialog/form shell, is what
+   scrolls once the picker below makes the form taller than the dialog. */
+dialog.pm-dialog-fullpage #recordFields {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.pm-statement-mapping {
+    border-top: 1px solid #e7ecf5;
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    padding-top: 16px;
+}
+
+.pm-statement-mapping-header {
+    align-items: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.pm-statement-mapping-header h3 {
+    color: var(--grac-ink, #172033);
+    font-size: 15px;
+    font-weight: 750;
+    margin: 0 0 2px;
+}
+
+.pm-statement-mapping-header p {
+    color: #6b7994;
+    font-size: 12.5px;
+    margin: 0;
+}
+
+.pm-statement-mapping-header select {
+    border: 1px solid #d5dce7;
+    border-radius: 7px;
+    font-size: 13px;
+    height: 34px;
+    min-width: 260px;
+    padding: 6px 9px;
+}
+
+/* Genuine collapsible tree, ported from the ControlManagement admin app's
+   Repository/Index/source-control-mappings screen (repository.js's
+   buildTree/flattenTree/renderMappingTree + these same rules in that
+   project's repository-actions.css, class names prefixed pm- to fit this
+   codebase's convention and avoid clashing with anything already using
+   the bare names). That screen maps repository-level requirements to
+   repository-level statements; this one maps an organization's practice to
+   its own subscribed-release statements, so only the visual/interaction
+   pattern is reused, not the data layer. */
+/* Shown only when loadAllMappingReleases() (practice.js) gets a mix of
+   successes and failures across the org's subscribed releases -- one
+   release's release-statements/query call can 51042 ("not subscribed for
+   this organization") even though it just came back from
+   subscribed-frameworks/query, if its repository_subscription row has
+   drifted out of sync. Names what didn't load instead of silently
+   dropping it from the tree with no explanation. */
+.pm-map-warning {
+    background: #fff6e5;
+    border-radius: 7px;
+    color: #8a5a00;
+    font-size: 12px;
+    font-weight: 650;
+    margin-bottom: 10px;
+    padding: 7px 10px;
+}
+
+.pm-map-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
+.pm-map-panels {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 1fr 1fr;
+}
+
+.pm-map-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 11px;
+    min-height: 340px;
+    overflow: hidden;
+}
+
+.pm-map-panel-head {
+    align-items: center;
+    background: #fff;
+    border-bottom: 1px solid #e4eaf2;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr minmax(140px, 200px);
+    padding: 10px;
+}
+
+.pm-map-panel-head strong,
+.pm-map-panel-head small {
+    display: block;
+}
+
+.pm-map-panel-head strong {
+    color: #172033;
+    font-size: 13px;
+}
+
+.pm-map-panel-head small {
+    color: #667085;
+    font-size: 11px;
+}
+
+.pm-map-panel-head input {
+    font-size: 12px;
+    padding: 6px 8px;
+    width: 100%;
+}
+
+.pm-map-hint {
+    color: #6b7a90;
+    display: block;
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+.pm-map-tree {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    max-height: 340px;
+    overflow: auto;
+    padding: 8px;
+}
+
+.pm-map-tree-row {
+    align-items: center;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: #344054;
+    display: grid;
+    font-size: 12px;
+    gap: 6px;
+    grid-template-columns: 20px 18px minmax(0,1fr);
+    min-height: 28px;
+    padding: 4px 7px 4px calc(7px + var(--tree-depth) * 16px);
+}
+
+.pm-map-tree-row:hover {
+    background: #eaf4ff;
+}
+
+.pm-map-tree-row.parent {
+    color: #172033;
+    font-weight: 700;
+}
+
+/* Each subscribed release's own synthetic root row (buildStatementMapRecords'
+   `rel-<releaseId>` nodes) -- tinted so the Framework/Release branch reads as
+   a distinct top level from the Source Structure folders nested under it. */
+.pm-map-tree-row.release-row {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+}
+
+.pm-map-tree-row.release-row .pm-map-parent-dot.pm-map-folder-dot {
+    color: #4338ca;
+}
+
+.pm-map-tree-row.release-row .pm-map-node-text {
+    color: #312e81;
+}
+
+.pm-map-tree-toggle,
+.pm-map-tree-spacer {
+    display: grid;
+    height: 18px;
+    place-items: center;
+    width: 18px;
+}
+
+.pm-map-tree-toggle {
+    background: #edf4ff;
+    border: 0;
+    border-radius: 5px;
+    color: #2563eb;
+    cursor: pointer;
+}
+
+.pm-map-tree-toggle i {
+    font-size: 9px;
+}
+
+.pm-map-tree-row input[type="checkbox"] {
+    margin: 0;
+}
+
+.pm-map-parent-dot.pm-map-folder-dot {
+    color: #6b7a90;
+    font-size: 12px;
+    justify-self: center;
+}
+
+.pm-map-node-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pm-map-tree-row.parent .pm-map-node-text {
+    color: #1f2d3d;
+    font-weight: 600;
+}
+
+.pm-map-empty {
+    color: #667085;
+    padding: 30px;
+    text-align: center;
+}
+
+.pm-map-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+    /* Below 767.98px the dialog is already full-viewport (the sidebar
+       goes off-canvas there too, see the @media block above the dialog
+       rules) -- this just tightens the page padding so the form isn't
+       wasting space on a phone-sized screen. */
+    dialog.pm-dialog-fullpage form {
+        padding: 16px;
+    }
+
+    .pm-map-panels {
+        grid-template-columns: 1fr;
+    }
 }

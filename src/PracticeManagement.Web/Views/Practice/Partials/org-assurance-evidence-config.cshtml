@@ -56,7 +56,7 @@
             </select>
         </label>
         <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
-            <span>Assurance Definition</span>
+            <span>Audit</span>
             <select id="oaEvPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
                 <option value="">Select an organization first</option>
             </select>
@@ -503,7 +503,7 @@
             document.getElementById('oaEvDefVersion').textContent = '';
             document.getElementById('oaEvHeading').textContent    = 'Evidence Config';
             document.getElementById('oaEvSubtitle').textContent   =
-                'Pick an organization and an assurance definition to configure evidence.';
+                'Pick an organization and an audit to configure evidence.';
             return;
         }
         document.getElementById('oaEvDefName').textContent =
@@ -578,14 +578,15 @@
     function wireRowEvents() {
         const body = document.getElementById('oaEvBody');
         body.querySelectorAll('button[data-role]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
+            btn.addEventListener('click', async function () {
                 const idx  = Number(btn.getAttribute('data-idx'));
                 const role = btn.getAttribute('data-role');
                 if (Number.isNaN(idx)) return;
                 if (role === 'edit') {
                     openItemDialog(idx);
                 } else if (role === 'remove') {
-                    if (!confirm('Remove this evidence item?')) return;
+                    if (!await window.gracUi.confirm('Remove this evidence item?',
+                          { type: 'warning', title: 'Remove evidence item', confirmText: 'Remove' })) return;
                     state.items.splice(idx, 1);
                     renderItems();
                 }

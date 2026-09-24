@@ -57,11 +57,49 @@ public sealed class PracticeLoginService(
             return null;
         }
 
-        var envelope = Deserialize(responseJson);
+        var envelope = Deserialize<PracticeLoginResult>(responseJson);
         if (envelope is null || !envelope.Success || envelope.Data is null)
             return null;
 
         return envelope.Data;
+    }
+
+    /// <summary>
+    /// Resolve the employee row behind a login id WITHOUT a password.
+    /// <para>
+    /// Only the ReviewLogin (bootstrap) sign-in calls this, and only with the
+    /// CONFIGURED email it has just verified against configuration. That path
+    /// has no employee record behind it, so its session used to carry no
+    /// employee id -- and every procedure that requires an actor
+    /// (approve, reject, owner stamps) refused the request. Null is a
+    /// supported answer: no employee row simply means the session stays as
+    /// it was.
+    /// </para>
+    /// </summary>
+    public async Task<ResolvedIdentityResult?> ResolveIdentityAsync(string loginId, CancellationToken cancellationToken)
+    {
+        var request = new SecureRepositoryRequest
+        {
+            EntityType = "resolve-identity",
+            Action = "RESOLVE",
+            Data = JsonSerializer.SerializeToElement(new { loginId })
+        };
+
+        string responseJson;
+        try
+        {
+            responseJson = await client.ResolveIdentityAsync(BootstrapToken(loginId), request, cancellationToken);
+        }
+        catch (PracticeApiException ex)
+        {
+            // Never fatal to a sign-in that has already been verified. The
+            // admin gets in; only the actor stamp is missing.
+            logger.LogWarning(ex, "Identity resolve for {LoginId} could not reach the practice API.", loginId);
+            return null;
+        }
+
+        var envelope = Deserialize<ResolvedIdentityResult>(responseJson);
+        return envelope is { Success: true } ? envelope.Data : null;
     }
 
     public async Task<bool> SetPasswordAsync(long employeeId, string newPassword, CancellationToken cancellationToken)
@@ -84,7 +122,8 @@ public sealed class PracticeLoginService(
             return false;
         }
 
-        var envelope = Deserialize(responseJson);
+        // No Data on this one; the shape is shared, the payload is not.
+        var envelope = Deserialize<PracticeLoginResult>(responseJson);
         return envelope?.Success == true;
     }
 
@@ -92,12 +131,12 @@ public sealed class PracticeLoginService(
     // Subject is only for correlation in logs.
     private string BootstrapToken(string subject) => tokenService.Issue(subject, BootstrapRoles);
 
-    private static AuthEnvelope? Deserialize(string json)
+    private static Envelope<T>? Deserialize<T>(string json) where T : class
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            return JsonSerializer.Deserialize<AuthEnvelope>(json,
+            return JsonSerializer.Deserialize<Envelope<T>>(json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }
         catch (JsonException)
@@ -107,10 +146,24 @@ public sealed class PracticeLoginService(
     }
 
     // Mirrors the API's PracticeRepositoryResult { Success, Message, Data }.
-    // Data carries the AuthenticatedUser, whose field names line up 1:1 with
-    // PracticeLoginResult, so it deserializes straight into it.
-    private sealed record AuthEnvelope(bool Success, string? Message, PracticeLoginResult? Data);
+    // Generic in Data because three endpoints now share the shape: sign-in
+    // returns the AuthenticatedUser (whose field names line up 1:1 with
+    // PracticeLoginResult), resolve-identity returns the smaller identity,
+    // and set-password returns none.
+    private sealed record Envelope<T>(bool Success, string? Message, T? Data) where T : class;
 }
+
+/// <summary>
+/// The API's ResolvedIdentity, seen from the Web tier. Identity only --
+/// no permissions, no data scope, no role. Widening it would make a
+/// password-free lookup look like a sign-in.
+/// </summary>
+public sealed record ResolvedIdentityResult(
+    long   EmployeeId,
+    string EmployeeCode,
+    string EmployeeName,
+    string Email,
+    long   OrganizationId);
 
 public sealed record PracticeLoginResult(
     long EmployeeId,

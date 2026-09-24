@@ -171,7 +171,8 @@
                     });
                 });
             }
-            window.__wfCommon.updatePager('events', payload);
+            window.__wfCommon.updatePager('events',
+                Object.assign({}, payload, { pageSize: PAGE_SIZE, rowCount: rows.length }));
         } catch (err) { setBody('<tr><td colspan="6" class="pm-empty">Failed: ' + window.__wfCommon.escape(err.message) + '</td></tr>'); }
     }
     function setBody(html) { document.getElementById('evBody').innerHTML = html; }

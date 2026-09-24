@@ -129,22 +129,138 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             shim = isManage
                 ? "grac_practice.sp_org_team_repository_manage"
                 : "grac_practice.sp_org_team_repository_get";
+        // Location (change request 2026-09-20, migration 361): needs the
+        // new Time Zone + address columns the monolith's fixed 'locations'
+        // projection does not know about. Same split as users/teams above.
+        else if (entityType.Equals("locations", StringComparison.OrdinalIgnoreCase))
+            shim = isManage
+                ? "grac_practice.sp_org_location_repository_manage"
+                : "grac_practice.sp_org_location_repository_get";
+        // Time Zone lookup (migration 361): feeds Location's Time Zone
+        // dropdown from GRAC_New.time_zone_master. Read-only, same shim
+        // pattern as asset-taxonomy / connection-types below.
+        else if (isQuery && entityType.Equals("time-zones", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_time_zone_lookup";
+        // Migration 241: asset save has to write the new asset_subcategory_id
+        // and asset_type_id columns, and the monolith predates them. There
+        // is no _get shim -- list/query stays on the monolith, which already
+        // returns the two new columns transparently.
+        else if (isManage && entityType.Equals("dependency-assets", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_org_dependency_assets_repository_manage";
+        // Migration 241: the Add Asset form needs the whole 3-level taxonomy
+        // for its cascade. Rather than extending the master-lookup UNION on
+        // the monolith, entity 'asset-taxonomy' routes to a small dedicated
+        // proc that returns categories, subcategories and asset types with
+        // parent ids in the fourth column.
+        else if (isQuery && entityType.Equals("asset-taxonomy", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_asset_taxonomy_lookup";
+        // Migration 244: connection-type master feeds the "Connection type"
+        // dropdown that appears on the operationalize obligation card when
+        // assurance_type is Automated. Same shim pattern as asset-taxonomy.
+        else if (isQuery && entityType.Equals("connection-types", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_connection_type_lookup";
+        // Migration 248: id-valued implementation-status lookup. The
+        // generic /lookups payload emits status_code as Value, which the
+        // Resolve save path cannot round-trip into an INT column -- the
+        // parse returns NULL and the row silently keeps no status. This
+        // shim returns implementation_status_id as Value so the dropdown
+        // posts a number the schema accepts.
+        else if (isQuery && entityType.Equals("implementation-status-id", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_implementation_status_id_lookup";
+        // Migration 342: functional-users-only owner list. Same shim pattern
+        // as the three above -- a dedicated lookup entity so the shared
+        // users/users-id lists (which also feed non-owner pickers) stay
+        // untouched. The UI intersects this with the org-scoped users lists
+        // to build the functional-only Owner dropdowns.
+        else if (isQuery && entityType.Equals("owners", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_owners_lookup";
+        // Migration 362: Team Members. Two dedicated, read-only lookup
+        // entities -- same shim pattern as owners/asset-taxonomy/etc above.
+        // 'team-department-employees' feeds the Add/Edit Team member-
+        // selection tree (Department -> active Employee, across every
+        // organization the caller can see; the UI filters to the org
+        // currently open, same as sp_get_owners_lookup). 'team-members'
+        // returns the currently-selected members of ONE team (@p_id) so
+        // Edit can pre-check the tree and View can show a read-only list.
+        // Neither touches sp_org_team_list or the shared users/users-id
+        // lookups.
+        else if (isQuery && entityType.Equals("team-department-employees", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_team_department_employee_tree";
+        else if (isQuery && entityType.Equals("team-members", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_team_member_list";
+        // Migration 370: Committee Members + Committee Designation Master.
+        // 'committees' save moves off the monolith the same way
+        // users/teams already did (133/134) -- the new member-list logic
+        // lives in sp_org_committee_save, wrapped in the same 7-parameter
+        // gateway shim shape as sp_org_team_repository_manage. Only SAVE
+        // is intercepted; RETIRE and any other action still fall through
+        // to dbo.pm_manage_practice_repository's untouched 'committees'
+        // branch (see sp_org_committee_repository_manage itself). The
+        // 'committees' LIST/query path is deliberately NOT mapped here --
+        // dbo.pm_get_practice_repository's 'committees' branch (300) still
+        // feeds the Committees grid unchanged, exactly as 362 left
+        // sp_org_team_list alone. 'committee-members' and
+        // 'committee-designations' are auxiliary, read-only lookups for
+        // the Committee Members section (Add/Edit/View), same shim
+        // pattern as team-department-employees/team-members above.
+        // 'committee-designations' is also the one write path here --
+        // the inline "Add Designation" quick-create reached from a
+        // Committee Member row -- handled by its own self-contained
+        // manage shim (this entity never existed in the monolith, so
+        // there is nothing to delegate a RETIRE action to).
+        else if (isManage && entityType.Equals("committees", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_org_committee_repository_manage";
+        else if (isQuery && entityType.Equals("committee-members", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_committee_member_list";
+        else if (isQuery && entityType.Equals("committee-designations", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_committee_designation_lookup";
+        else if (isManage && entityType.Equals("committee-designations", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_org_committee_designation_manage";
+        // Migration 345: Ownership Management. One entity, both paths --
+        // the query lists everything a user currently owns across the app,
+        // the manage path applies a transactional batch of owner
+        // reassignments. Same shim mechanism as 'users' above.
+        else if (entityType.Equals("user-ownership", StringComparison.OrdinalIgnoreCase))
+            shim = isManage
+                ? "grac_practice.sp_pm_user_ownership_reassign"
+                : "grac_practice.sp_pm_user_ownership_list";
+        // Task Calendar Edit Scheduler (change request 2026-09-23): Skip
+        // This Occurrence is removed, and the restriction to Execution-
+        // Date-only must hold at the database, not only in the browser
+        // (029/002's own 'assurance-schedule-overrides' SAVE branch still
+        // accepts overrideType:'Skipped' from any caller that posts one
+        // directly). Same shim mechanism as 'committees' (370) -- QUERY
+        // is untouched, only SAVE is intercepted.
+        else if (isManage && entityType.Equals("assurance-schedule-overrides", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_pm_schedule_override_repository_manage";
 
         if (shim is null) return procedure;
         return await ShimExistsAsync(connection, shim, cancellationToken) ? shim : procedure;
     }
 
+    // objectType defaults to "P" so every existing caller is unchanged.
+    // It is passed for the one caller that probes a scalar FUNCTION
+    // (fn_employee_role_names, migration 291) rather than a procedure;
+    // a second copy of this probe would have been a fourth in the file.
+    // The cache is keyed on name AND type, because "does X exist as a
+    // procedure" and "does X exist as a function" are different
+    // questions and must not share an answer.
     private static async Task<bool> ShimExistsAsync(DbConnection connection, string shim,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string objectType = "P")
     {
-        if (ShimAvailability.TryGetValue(shim, out var cached)) return cached;
+        var cacheKey = shim + ":" + objectType;
+        if (ShimAvailability.TryGetValue(cacheKey, out var cached)) return cached;
 
         bool exists;
         try
         {
             await using var probe = connection.CreateCommand();
             probe.CommandType = CommandType.Text;
-            probe.CommandText = "SELECT CASE WHEN OBJECT_ID(@name, N'P') IS NULL THEN 0 ELSE 1 END";
+            // Parameterising the TYPE is not possible inside OBJECT_ID's
+            // second argument, so it is whitelisted rather than
+            // interpolated from anything a caller could influence.
+            var type = objectType == "FN" ? "FN" : "P";
+            probe.CommandText = $"SELECT CASE WHEN OBJECT_ID(@name, N'{type}') IS NULL THEN 0 ELSE 1 END";
             Add(probe, "@name", shim);
             var raw = await probe.ExecuteScalarAsync(cancellationToken);
             exists = raw is not null && raw != DBNull.Value && Convert.ToInt32(raw) == 1;
@@ -156,7 +272,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             exists = false;
         }
 
-        ShimAvailability[shim] = exists;
+        ShimAvailability[cacheKey] = exists;
         return exists;
     }
 
@@ -211,6 +327,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     if (entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
                         || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
                         || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
+                        || entityType.Equals("custom-statement-classification", StringComparison.OrdinalIgnoreCase)
                         || entityType.Equals("repository-subscriptions", StringComparison.OrdinalIgnoreCase)
                         || entityType.Equals("subscription-owner", StringComparison.OrdinalIgnoreCase))
                     {
@@ -243,6 +360,34 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 }
             }
 
+            // Task Calendar -- Scheduler Edit Permission (change request
+            // 2026-09-23): only the Practice Instance Owner (or a system
+            // admin) may save an Execution Date change on a scheduler.
+            // Same ownership test the rest of the app already applies via
+            // primary_owner_id (see 141/145/222/236/287/290/315 -- "@is_admin
+            // = 1 OR pi.primary_owner_id = @caller_employee_id"), just run
+            // here against the one schedule rule being saved instead of used
+            // as a list filter. This sits ahead of ResolveProcedureAsync's
+            // shim dispatch below, so it holds even if a client bypasses the
+            // UI's own hiding of the Edit option -- the UI-side hide (Calendar
+            // side panel + Scheduler List row menu) is a convenience, not the
+            // enforcement.
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("assurance-schedule-overrides", StringComparison.OrdinalIgnoreCase)
+                && action.Equals("SAVE", StringComparison.OrdinalIgnoreCase)
+                && !JsonSecurityIsSystemAdmin(payload))
+            {
+                var scheduleRuleId = JsonInt(payload, "scheduleRuleId") ?? 0;
+                var callerEmployeeIdForOwnership = JsonSecurityEmployeeId(payload) ?? 0L;
+                if (scheduleRuleId <= 0 || callerEmployeeIdForOwnership <= 0
+                    || !await HasScheduleOwnershipAsync(connection, scheduleRuleId, callerEmployeeIdForOwnership, cancellationToken))
+                {
+                    logger.LogWarning("PracticeManagement API blocked scheduler edit: caller is not the Practice Instance Owner. EntityType={EntityType} EmployeeId={EmployeeId} ScheduleRuleId={ScheduleRuleId}",
+                        entityType, callerEmployeeIdForOwnership, scheduleRuleId);
+                    return new(false, "Only the Practice Instance Owner can edit this scheduler.");
+                }
+            }
+
             if (procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase)
                 && entityType.Equals("menu-master", StringComparison.OrdinalIgnoreCase))
             {
@@ -268,11 +413,37 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 CaptureSqlDiagnostic(procedure, entityType, action, id, search, status, payload, directTables);
                 return new(true, "Success", directTables);
             }
+            if (procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("practice-statement-mappings", StringComparison.OrdinalIgnoreCase))
+            {
+                var directTables = await QueryPracticeStatementMappingsAsync(connection, payload, cancellationToken);
+                CaptureSqlDiagnostic(procedure, entityType, action, id, search, status, payload, directTables);
+                return new(true, "Success", directTables);
+            }
             if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
                 && entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase))
             {
                 await SaveStatementApplicabilityAsync(connection, payload, enteredBy, cancellationToken);
                 return new(true, "Saved successfully.");
+            }
+            // Bulk applicability. Both loop the SAME routine the single-record
+            // save uses, once per selected id -- there is no second copy of the
+            // rules, and a rule added to the single-record path applies to bulk
+            // the moment it is added.
+            //
+            // They sit here, above the monolith dispatch, so they inherit every
+            // check already performed on this request: permission area, the
+            // organization-access test, and the employee-scope guard that
+            // refuses release and statement writes to non-Admin scopes.
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("statement-applicability-bulk", StringComparison.OrdinalIgnoreCase))
+            {
+                return await SaveStatementApplicabilityBulkAsync(connection, payload, enteredBy, cancellationToken);
+            }
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("requirement-applicability-bulk", StringComparison.OrdinalIgnoreCase))
+            {
+                return await SaveRequirementApplicabilityBulkAsync(connection, payload, enteredBy, cancellationToken);
             }
             if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
                 && entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase))
@@ -304,6 +475,23 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 && entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase))
             {
                 await SaveCustomReleaseSourceStructureAsync(connection, payload, enteredBy, cancellationToken);
+                return new(true, "Saved successfully.");
+            }
+            // Statement Classification management for Custom Release authoring
+            // (change request 2026-09-22, part 2). Deliberately a SEPARATE
+            // entity/table from custom-release-source-structure -- see the
+            // comment above QueryCustomStatementClassificationAsync for why.
+            if (procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("custom-statement-classification", StringComparison.OrdinalIgnoreCase))
+            {
+                var directTables = await QueryCustomStatementClassificationAsync(connection, payload, cancellationToken);
+                CaptureSqlDiagnostic(procedure, entityType, action, id, search, status, payload, directTables);
+                return new(true, "Success", directTables);
+            }
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && entityType.Equals("custom-statement-classification", StringComparison.OrdinalIgnoreCase))
+            {
+                await SaveCustomStatementClassificationAsync(connection, payload, enteredBy, cancellationToken);
                 return new(true, "Saved successfully.");
             }
             // 'evidence-obligations-typed' is the 7-type taxonomy read-path
@@ -633,6 +821,12 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             52300 => "partyType",
             52301 or 52302 => "providerVendorId",
             52303 => "engagementEndDate",
+            // 52304 added by migration 366: Department is now mandatory on
+            // every User save (was previously only ever validated via
+            // 51050, "not a valid Department for this organization", which
+            // only fires when a value IS supplied). 52304 is the new
+            // "no value supplied at all" case.
+            52304 => "departmentId",
             // 51152 (password missing on create) is deliberately unmapped —
             // the Users form has no password input to mark. It reaches the
             // user at form level, where it reads as the deployment problem it
@@ -991,6 +1185,14 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     N'Custom' ArtifactName,
                     s.custom_release_name ReleaseVersion,
                     N'Organization / ' + s.custom_release_name FrameworkRelease,
+                    -- Added for the Add/Edit Custom Release form's Edit mode: the
+                    -- release summary row (sourceStatementState.releases) is the
+                    -- only data the client has for a row's "Edit" action, so it
+                    -- must carry enough to pre-fill every field the form has, not
+                    -- just Owner.
+                    s.effective_dt EffectiveDate,
+                    s.end_dt EndDate,
+                    s.custom_release_notes ReleaseNotes,
                     0 TotalStatementsCount,
                     0 ApplicableStatementsCount,
                     0 ImplementedStatementsCount,
@@ -1066,6 +1268,31 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 WHERE m.organization_id=@organization_id
                   AND m.status='Active'
                 GROUP BY m.framework_statement_id
+            ),
+            -- Statement-level implementation roll-up. Same path and same counting
+            -- rule as the statement_implementation CTE in
+            -- QuerySubscribedFrameworksAsync's Level 1 summary (instances, not
+            -- practices), so the drill-down's ImplementationStatus can never
+            -- disagree with the summary's ImplementedStatementsCount:
+            --   framework_statement -> organization_statement_practice_mapping
+            --   -> organization_requirement -> practice -> practice_instance.
+            statement_implementation AS (
+                SELECT m.framework_statement_id FrameworkStatementId,
+                       COUNT(DISTINCT pi.practice_instance_id) InstanceCount,
+                       COUNT(DISTINCT CASE WHEN ism.status_code=N'Implemented' THEN pi.practice_instance_id END) ImplementedInstanceCount
+                FROM grac_practice.organization_statement_practice_mapping m
+                JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
+                    AND q.status='Active'
+                JOIN grac_practice.practice p ON p.organization_requirement_id=q.organization_requirement_id
+                    AND p.organization_id=m.organization_id
+                    AND p.status='Active'
+                JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                    AND pi.organization_id=m.organization_id
+                    AND pi.status='Active'
+                LEFT JOIN grac_practice.implementation_status_master ism ON ism.implementation_status_id=pi.implementation_status_id
+                WHERE m.organization_id=@organization_id
+                  AND m.status='Active'
+                GROUP BY m.framework_statement_id
             )
             SELECT N'Node' RowType,
                    n.SourceStructureNodeId,
@@ -1082,6 +1309,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                    CAST(NULL AS NVARCHAR(MAX)) StatementText,
                    CAST(NULL AS INT) StatementDisplayOrder,
                    CAST(NULL AS NVARCHAR(40)) ApplicabilityStatus,
+                   CAST(NULL AS NVARCHAR(40)) ImplementationStatus,
                    CAST(NULL AS BIGINT) OwnerId,
                    CAST(NULL AS NVARCHAR(300)) OwnerName,
                    CAST(0 AS BIGINT) ApplicablePracticeCount,
@@ -1104,6 +1332,20 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                    fs.statement_text StatementText,
                    fs.display_order StatementDisplayOrder,
                    COALESCE(aps.status_name,N'Not Updated') ApplicabilityStatus,
+                   -- Implementation is never stored on the statement. It is derived
+                   -- from the practice instances mapped to it, and the first branch
+                   -- is deliberately the same test Level 1 uses to count a statement
+                   -- as Implemented (Applicable + at least one instance + every
+                   -- instance Implemented).
+                   CASE
+                       WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
+                            AND COALESCE(si.InstanceCount,0)>0
+                            AND si.InstanceCount=si.ImplementedInstanceCount THEN N'Implemented'
+                       WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
+                            AND COALESCE(si.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
+                       WHEN COALESCE(aps.status_name,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
+                       ELSE N'Not Implemented'
+                   END ImplementationStatus,
                    ofs.owner_id OwnerId,
                    owner.employee_name OwnerName,
                    COALESCE(spc.ApplicablePracticeCount,0) ApplicablePracticeCount,
@@ -1122,6 +1364,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             LEFT JOIN grac_practice.organization_employee owner ON owner.employee_id=ofs.owner_id
             LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=ofs.applicability_status_id
             LEFT JOIN statement_practice_counts spc ON spc.FrameworkStatementId=fs.framework_statement_id
+            LEFT JOIN statement_implementation si ON si.FrameworkStatementId=fs.framework_statement_id
             WHERE fs.release_id=@release_id
               AND fs.status='Active'
               AND (@p_search=''
@@ -1137,6 +1380,43 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         return await ReadTablesAsync(command, cancellationToken);
     }
 
+    // Source Statement mapping picker on the Add/Edit Practice form
+    // (Organization Requirements screen, change request 2026-09). Returns
+    // the OrgStatementIds currently Active-mapped to one practice
+    // (organization_requirement_id), so the picker can pre-select them in
+    // Edit mode. Mirrors the join database/316_practice_detail_source_
+    // statements.sql already uses to build sp_practice_detail_get's
+    // MappedSourceStatementsJson for the read-only Practice View page --
+    // same fact, queried directly here instead of parsed out of that JSON
+    // column, so the picker can compare it against ids client-side.
+    private static async Task<List<List<Dictionary<string, object?>>>> QueryPracticeStatementMappingsAsync(
+        DbConnection connection, string payload, CancellationToken cancellationToken)
+    {
+        var organizationRequirementId = JsonInt(payload, "organizationRequirementId");
+        if (organizationRequirementId is null)
+            return [new List<Dictionary<string, object?>>()];
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            -- 347: LEFT JOIN so custom mappings (framework_statement_id NULL)
+            -- survive; label falls back to the custom statement via the overlay.
+            SELECT m.org_statement_id OrgStatementId,
+                   m.framework_statement_id FrameworkStatementId,
+                   COALESCE(fs.statement_reference, crs.statement_reference) StatementReference,
+                   COALESCE(fs.statement_title, crs.statement_title) StatementTitle
+            FROM grac_practice.organization_statement_practice_mapping m
+            LEFT JOIN grac_practice.organization_framework_statements ofs ON ofs.org_statement_id=m.org_statement_id
+            LEFT JOIN grac_new.framework_statement fs ON fs.framework_statement_id=m.framework_statement_id
+            LEFT JOIN grac_practice.custom_release_statement crs ON crs.custom_statement_id=ofs.custom_statement_id
+            WHERE m.org_practice_id=@organization_requirement_id
+              AND m.status=N'Active'
+            ORDER BY COALESCE(fs.statement_reference, crs.statement_reference);
+            """;
+        command.CommandType = CommandType.Text;
+        Add(command, "@organization_requirement_id", organizationRequirementId);
+        return await ReadTablesAsync(command, cancellationToken);
+    }
+
     private static async Task SaveCustomReleaseAsync(
         DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
     {
@@ -1148,11 +1428,30 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             DECLARE @end_dt DATE=TRY_CONVERT(DATE,JSON_VALUE(@payload,'$.endDate'));
             DECLARE @custom_release_notes NVARCHAR(MAX)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.releaseNotes'))),N'');
             DECLARE @subscription_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.subscriptionId'));
+            -- Owner, added to the Add/Edit Custom Release form itself so a
+            -- separate Owner-update page is not needed for Custom releases
+            -- (Subscribed releases keep their own dedicated Update Owner
+            -- flow -- UpdateSubscriptionOwnerAsync below -- unchanged).
+            -- Optional: an omitted or blank ownerId leaves the release
+            -- Unassigned, exactly like today's Add Release behaviour when
+            -- nobody has run Update Owner yet.
+            DECLARE @owner_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.ownerId'));
 
             IF @organization_id IS NULL
                 THROW 51060,'Organization is required.',1;
             IF @custom_release_name IS NULL
                 THROW 51061,'Release name is required.',1;
+            -- Same eligibility rule UpdateSubscriptionOwnerAsync enforces for
+            -- Subscribed releases (step 2 there): the picked owner must be an
+            -- Active employee of this same organization. Reusing the rule
+            -- here, rather than only the picker component, means a payload
+            -- built by hand (or a stale form) cannot assign an owner from a
+            -- different organization or a deactivated employee either.
+            IF @owner_id IS NOT NULL AND NOT EXISTS(
+                SELECT 1 FROM grac_practice.organization_employee
+                WHERE employee_id=@owner_id AND organization_id=@organization_id AND status='Active'
+            )
+                THROW 51065,'Selected employee is not an active employee of this organization.',1;
 
             -- Validate org access
             DECLARE @allowed NVARCHAR(MAX)=JSON_QUERY(@payload,'$.allowedOrganizationIds');
@@ -1184,6 +1483,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     effective_dt=@effective_dt,
                     end_dt=@end_dt,
                     custom_release_notes=@custom_release_notes,
+                    owner_id=@owner_id,
                     updated_by=@user_id,
                     updated_dt=SYSUTCDATETIME()
                 WHERE subscription_id=@subscription_id;
@@ -1204,14 +1504,14 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     organization_id,authority_id,artifact_id,release_id,
                     subscription_type,subscription_status,
                     effective_dt,end_dt,status,
-                    custom_release_name,custom_release_notes,
+                    custom_release_name,custom_release_notes,owner_id,
                     record_status_id,subscription_status_id,
                     entered_by,entered_dt)
                 VALUES(
                     @organization_id,NULL,NULL,NULL,
                     N'Custom',N'Active',
                     @effective_dt,@end_dt,N'Active',
-                    @custom_release_name,@custom_release_notes,
+                    @custom_release_name,@custom_release_notes,@owner_id,
                     COALESCE(@active_record_status_id,1),COALESCE(@active_subscription_status_id,1),
                     @user_id,SYSUTCDATETIME());
             END
@@ -1242,6 +1542,24 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             )
                 THROW 51042, 'The selected custom release is not found for this organization.', 1;
 
+            -- 347: ensure a source-agnostic overlay (org_statement_id) exists
+            -- for every active custom statement in this release, so the
+            -- Practice mapping picker can select and persist them exactly
+            -- like repository statements. Idempotent (NOT EXISTS guard).
+            INSERT grac_practice.organization_framework_statements(
+                organization_id, release_id, framework_statement_id,
+                source_type, subscription_id, custom_statement_id,
+                applicability_status_id, status, entered_by, entered_dt)
+            SELECT cs.organization_id, NULL, NULL,
+                   N'Custom', cs.subscription_id, cs.custom_statement_id,
+                   cs.applicability_status_id, N'Active', N'custom-map-ensure', SYSUTCDATETIME()
+            FROM   grac_practice.custom_release_statement cs
+            WHERE  cs.subscription_id=@subscription_id
+              AND  cs.organization_id=@organization_id
+              AND  cs.status=N'Active'
+              AND  NOT EXISTS(SELECT 1 FROM grac_practice.organization_framework_statements ofs
+                              WHERE ofs.source_type=N'Custom' AND ofs.custom_statement_id=cs.custom_statement_id);
+
             ;WITH hierarchy AS (
                 SELECT cs.custom_statement_id,
                        cs.parent_statement_id,
@@ -1267,6 +1585,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             )
             SELECT
                 cs.custom_statement_id CustomStatementId,
+                ofs.org_statement_id OrgStatementId,
                 cs.subscription_id SubscriptionId,
                 cs.organization_id OrganizationId,
                 cs.parent_statement_id ParentStatementId,
@@ -1286,6 +1605,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 ssn.node_title StructureNodeTitle
             FROM grac_practice.custom_release_statement cs
             JOIN hierarchy h ON h.custom_statement_id=cs.custom_statement_id
+            LEFT JOIN grac_practice.organization_framework_statements ofs ON ofs.source_type=N'Custom' AND ofs.custom_statement_id=cs.custom_statement_id
             LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=cs.applicability_status_id
             LEFT JOIN grac_practice.custom_release_source_structure ssn ON ssn.structure_node_id=cs.structure_node_id AND ssn.status=N'Active'
             WHERE cs.subscription_id=@subscription_id
@@ -1322,6 +1642,23 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             DECLARE @practice_mapping NVARCHAR(500)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.practiceMapping'))),N'');
             DECLARE @structure_node_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.structureNodeId'));
             DECLARE @action NVARCHAR(20)=COALESCE(NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.statementAction'))),N''),N'ADD');
+
+            -- Applicability Status (change request 2026-09-22, part 3): the
+            -- Add/Edit Control Statement form now sends a status name/code
+            -- (e.g. 'Applicable') the same way control-applicability and
+            -- practices already do -- resolve it the same way
+            -- SaveStatementApplicabilityAsync does (status_name OR
+            -- status_code match). Unresolved/blank is left NULL here and
+            -- handled per-branch below: INSERT falls back to 'Applicable'
+            -- (the UI's own default, enforced again here defensively);
+            -- UPDATE keeps whatever the row already had rather than wiping
+            -- it out.
+            DECLARE @applicability_status NVARCHAR(40)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.applicabilityStatus'))),N'');
+            DECLARE @applicability_status_id INT=(
+                SELECT TOP (1) applicability_status_id
+                FROM grac_practice.applicability_status_master
+                WHERE status_name=@applicability_status OR status_code=@applicability_status
+            );
 
             IF @organization_id IS NULL
                 THROW 51070,'Organization is required.',1;
@@ -1380,6 +1717,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     practice_mapping=@practice_mapping,
                     parent_statement_id=@parent_statement_id,
                     structure_node_id=@structure_node_id,
+                    applicability_status_id=COALESCE(@applicability_status_id,applicability_status_id),
                     updated_by=@user_id,
                     updated_dt=SYSUTCDATETIME()
                 WHERE custom_statement_id=@custom_statement_id
@@ -1402,19 +1740,29 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 IF @parent_statement_id IS NOT NULL
                     SET @level=(SELECT COALESCE(node_level,1)+1 FROM grac_practice.custom_release_statement WHERE custom_statement_id=@parent_statement_id);
 
+                -- Default to 'Applicable' when nothing resolved above -- the
+                -- Add Control Statement form always sends 'Applicable' from
+                -- its own default selection, so this only guards a caller
+                -- that skipped the field entirely.
+                DECLARE @default_applicable_status_id INT=(
+                    SELECT TOP (1) applicability_status_id
+                    FROM grac_practice.applicability_status_master
+                    WHERE status_code=N'Applicable' OR status_name=N'Applicable'
+                );
+
                 INSERT grac_practice.custom_release_statement(
                     subscription_id,organization_id,parent_statement_id,
                     node_level,display_order,
                     statement_reference,statement_title,statement_text,
                     keywords,classification,practice_mapping,
-                    structure_node_id,
+                    structure_node_id,applicability_status_id,
                     status,entered_by,entered_dt)
                 VALUES(
                     @subscription_id,@organization_id,@parent_statement_id,
                     @level,@next_order,
                     @statement_reference,@statement_title,@statement_text,
                     @keywords,@classification,@practice_mapping,
-                    @structure_node_id,
+                    @structure_node_id,COALESCE(@applicability_status_id,@default_applicable_status_id),
                     N'Active',@user_id,SYSUTCDATETIME());
             END
             """;
@@ -1662,10 +2010,377 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task SaveStatementApplicabilityAsync(
+    // Statement Classification for Custom Release authoring (change request
+    // 2026-09-22, part 2).
+    //
+    // The user clarified that Statement Classification is NOT the same
+    // thing as Source Structure -- it has its own data, tagged per RELEASE.
+    // The Release dropdown on the Add Control Statement form only ever
+    // offers Custom Releases (ReleaseId < 0 -- see fetchCustomReleaseOptionsForOrg
+    // in practice.js), so "against release" here means against the Custom
+    // Release (grac_practice.repository_subscription.subscription_id) --
+    // confirmed with the user 2026-09-22. Custom Releases have no real
+    // GRAC_New.release_id, so the shared Control Management master
+    // (GRAC_New.statement_classification, tagged per REAL framework
+    // release) does not apply here and is intentionally NOT read or
+    // merged in -- the user asked for organization custom classification
+    // only, scoped to the selected Custom Release.
+    //
+    // Every row this returns comes from grac_practice.custom_statement_classification
+    // (369_custom_statement_classification.sql), scoped by BOTH
+    // organization_id and subscription_id (the specific Custom Release),
+    // per the user's instruction: one organization's custom classification
+    // must not leak into another organization, nor into that same
+    // organization's other Custom Releases.
+    private static async Task<List<List<Dictionary<string, object?>>>> QueryCustomStatementClassificationAsync(
+        DbConnection connection, string payload, CancellationToken cancellationToken)
+    {
+        var organizationId = JsonInt(payload, "organizationId");
+        var subscriptionId = JsonInt(payload, "subscriptionId");
+        if (organizationId is null || subscriptionId is null)
+            return [new List<Dictionary<string, object?>>()];
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            IF NOT EXISTS(
+                SELECT 1 FROM grac_practice.repository_subscription
+                WHERE subscription_id=@subscription_id
+                  AND organization_id=@organization_id
+                  AND subscription_type=N'Custom'
+                  AND status=N'Active'
+            )
+                THROW 51090, 'The selected custom release is not found for this organization.', 1;
+
+            SELECT c.classification_id ClassificationId,
+                   c.organization_id OrganizationId,
+                   c.subscription_id SubscriptionId,
+                   c.classification_code ClassificationCode,
+                   c.classification_name ClassificationName,
+                   c.classification_scheme ClassificationScheme,
+                   c.description Description,
+                   c.display_order DisplayOrder,
+                   c.status Status
+            FROM grac_practice.custom_statement_classification c
+            WHERE c.subscription_id=@subscription_id
+              AND c.organization_id=@organization_id
+              AND c.status=N'Active'
+            ORDER BY c.display_order, c.classification_name;
+            """;
+        command.CommandType = CommandType.Text;
+        Add(command, "@organization_id", organizationId);
+        Add(command, "@subscription_id", subscriptionId);
+        return await ReadTablesAsync(command, cancellationToken);
+    }
+
+    private static async Task SaveCustomStatementClassificationAsync(
         DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DECLARE @organization_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.organizationId'));
+            DECLARE @subscription_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.subscriptionId'));
+            DECLARE @classification_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.classificationId'));
+            DECLARE @classification_code NVARCHAR(80)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.classificationCode'))),N'');
+            DECLARE @classification_name NVARCHAR(200)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.classificationName'))),N'');
+            DECLARE @classification_scheme NVARCHAR(200)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.classificationScheme'))),N'');
+            DECLARE @description NVARCHAR(MAX)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.description'))),N'');
+            DECLARE @action NVARCHAR(20)=COALESCE(NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.classificationAction'))),N''),N'ADD');
+
+            IF @organization_id IS NULL
+                THROW 51091,'Organization is required.',1;
+            IF @subscription_id IS NULL
+                THROW 51092,'Custom release is required.',1;
+            IF @classification_name IS NULL
+                THROW 51093,'Classification name is required.',1;
+
+            -- Validate org access
+            DECLARE @allowed NVARCHAR(MAX)=JSON_QUERY(@payload,'$.allowedOrganizationIds');
+            IF @allowed IS NOT NULL AND @allowed<>N'' AND @allowed<>N'[]'
+            BEGIN
+                IF NOT EXISTS(
+                    SELECT 1 FROM OPENJSON(@allowed) WHERE TRY_CONVERT(BIGINT,[value])=@organization_id
+                )
+                    THROW 51094,'You do not have access to this organization.',1;
+            END
+
+            -- Validate custom release belongs to org
+            IF NOT EXISTS(
+                SELECT 1 FROM grac_practice.repository_subscription
+                WHERE subscription_id=@subscription_id
+                  AND organization_id=@organization_id
+                  AND subscription_type=N'Custom'
+                  AND status=N'Active'
+            )
+                THROW 51095,'Custom release not found or access denied.',1;
+
+            IF @action=N'INACTIVATE' AND @classification_id IS NOT NULL
+            BEGIN
+                UPDATE grac_practice.custom_statement_classification
+                SET status=N'Inactive', updated_by=@user_id, updated_dt=SYSUTCDATETIME()
+                WHERE classification_id=@classification_id
+                  AND organization_id=@organization_id
+                  AND subscription_id=@subscription_id;
+            END
+            ELSE IF @classification_id IS NOT NULL AND @classification_id > 0
+            BEGIN
+                IF EXISTS(
+                    SELECT 1 FROM grac_practice.custom_statement_classification
+                    WHERE organization_id=@organization_id AND subscription_id=@subscription_id
+                      AND classification_name=@classification_name AND status=N'Active'
+                      AND classification_id<>@classification_id
+                )
+                    THROW 51096,'A classification with this name already exists for this release.',1;
+
+                UPDATE grac_practice.custom_statement_classification
+                SET classification_code=@classification_code,
+                    classification_name=@classification_name,
+                    classification_scheme=@classification_scheme,
+                    description=@description,
+                    updated_by=@user_id,
+                    updated_dt=SYSUTCDATETIME()
+                WHERE classification_id=@classification_id
+                  AND organization_id=@organization_id
+                  AND subscription_id=@subscription_id
+                  AND status=N'Active';
+            END
+            ELSE
+            BEGIN
+                IF EXISTS(
+                    SELECT 1 FROM grac_practice.custom_statement_classification
+                    WHERE organization_id=@organization_id AND subscription_id=@subscription_id
+                      AND classification_name=@classification_name AND status=N'Active'
+                )
+                    THROW 51097,'A classification with this name already exists for this release.',1;
+
+                DECLARE @next_order INT=(
+                    SELECT COALESCE(MAX(display_order),0)+1
+                    FROM grac_practice.custom_statement_classification
+                    WHERE organization_id=@organization_id AND subscription_id=@subscription_id AND status=N'Active'
+                );
+
+                INSERT grac_practice.custom_statement_classification(
+                    organization_id,subscription_id,
+                    classification_code,classification_name,classification_scheme,description,
+                    display_order,status,entered_by,entered_dt)
+                VALUES(
+                    @organization_id,@subscription_id,
+                    @classification_code,@classification_name,@classification_scheme,@description,
+                    @next_order,N'Active',@user_id,SYSUTCDATETIME());
+            END
+            """;
+        command.CommandType = CommandType.Text;
+        Add(command, "@payload", payload);
+        Add(command, "@user_id", enteredBy);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Bulk statement applicability. One shared Owner / Status / Reason applied
+    /// to every selected statement.
+    ///
+    /// SKIP AND REPORT, per statement -- the semantics sp_risk_bulk_review
+    /// established for bulk actions in this schema. A statement that fails a
+    /// rule (owner from another organization, release no longer subscribed,
+    /// statement not in the release) is recorded with its reason and the rest
+    /// proceed. One bad row must not cost the user the other forty-nine.
+    ///
+    /// EACH STATEMENT IS ITS OWN TRANSACTION. The single-record routine does
+    /// more than one write -- the MERGE, then the practice import, then the
+    /// statement-practice mapping -- and a failure between them would leave a
+    /// statement marked Applicable with no practices imported. One outer
+    /// transaction would be worse, not better: any failure would roll back the
+    /// statements already applied, which is the opposite of skip-and-report.
+    /// </summary>
+    private async Task<PracticeRepositoryResult> SaveStatementApplicabilityBulkAsync(
+        DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
+    {
+        var ids = JsonInt64Array(payload, "frameworkStatementIds");
+        if (ids.Count == 0)
+            return new(false, "Select at least one statement before marking applicability.");
+
+        var applied = new List<Dictionary<string, object?>>();
+        var appliedCount = 0;
+
+        foreach (var statementId in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            // The shared payload with this row's statement id written over it.
+            // Everything else -- organizationId, releaseId, status, owner,
+            // reason -- is what the modal captured once.
+            var rowPayload = WithJsonValue(payload, "frameworkStatementId", statementId);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await SaveStatementApplicabilityAsync(connection, rowPayload, enteredBy, cancellationToken, transaction);
+                await transaction.CommitAsync(cancellationToken);
+                appliedCount++;
+                applied.Add(BulkRow(statementId, "Applied", null));
+            }
+            catch (Exception ex)
+            {
+                try { await transaction.RollbackAsync(cancellationToken); } catch { /* already rolled back */ }
+                logger.LogWarning(ex, "Bulk statement applicability skipped statement {StatementId}.", statementId);
+                applied.Add(BulkRow(statementId, "Skipped", FriendlyBulkReason(ex)));
+            }
+        }
+
+        return BulkResult(appliedCount, ids.Count, applied, "statement", "statements");
+    }
+
+    /// <summary>
+    /// Bulk practice applicability, over grac_practice.organization_requirement.
+    ///
+    /// Composes dbo.pm_manage_practice_repository exactly as the single-record
+    /// save does -- same entity type, same EDIT action, same payload keys -- so
+    /// its validation fires per practice: 51032 (reason required), 51033 (owner
+    /// not valid for this organization), 51034 (owner required when Applicable).
+    /// The UPDATE branch COALESCEs every column it does not receive from the row
+    /// it is updating, which is what lets one shared payload carry only the
+    /// three applicability fields without disturbing anything else on the row.
+    ///
+    /// NO OUTER TRANSACTION HERE, deliberately. That procedure runs
+    /// SET XACT_ABORT ON; BEGIN TRAN; ... COMMIT with no CATCH, so it is already
+    /// atomic per call, and XACT_ABORT would doom an enclosing transaction on
+    /// the first failure -- rolling back the practices that had already
+    /// succeeded. Letting each EXEC be its own unit is what makes
+    /// skip-and-report possible at all.
+    /// </summary>
+    private async Task<PracticeRepositoryResult> SaveRequirementApplicabilityBulkAsync(
+        DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken)
+    {
+        var ids = JsonInt64Array(payload, "organizationRequirementIds");
+        if (ids.Count == 0)
+            return new(false, "Select at least one practice before marking applicability.");
+
+        var report = new List<Dictionary<string, object?>>();
+        var appliedCount = 0;
+
+        foreach (var requirementId in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "dbo.pm_manage_practice_repository";
+                command.CommandType = CommandType.StoredProcedure;
+                Add(command, "@p_entity_type", "organization-requirements");
+                Add(command, "@p_action", "EDIT");
+                Add(command, "@p_id", requirementId);
+                Add(command, "@p_search", "");
+                Add(command, "@p_status", "");
+                Add(command, "@p_payload", payload);
+                Add(command, "@p_usr_id", string.IsNullOrWhiteSpace(enteredBy) ? "system" : enteredBy);
+                // ExecuteNonQuery, not ExecuteReader: the procedure ends with a
+                // SELECT Success/Message/Id that nothing here needs. Draining it
+                // per row would only add work.
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                appliedCount++;
+                report.Add(BulkRow(requirementId, "Applied", null));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Bulk practice applicability skipped requirement {RequirementId}.", requirementId);
+                report.Add(BulkRow(requirementId, "Skipped", FriendlyBulkReason(ex)));
+            }
+        }
+
+        return BulkResult(appliedCount, ids.Count, report, "practice", "practices");
+    }
+
+    private static Dictionary<string, object?> BulkRow(long id, string outcome, string? reason) =>
+        new(StringComparer.OrdinalIgnoreCase) { ["Id"] = id, ["Outcome"] = outcome, ["Reason"] = reason };
+
+    /// <summary>
+    /// Success is "at least one row changed". A run where every row was skipped
+    /// is a failure the user has to see, not a green message over an unchanged
+    /// grid.
+    /// </summary>
+    private static PracticeRepositoryResult BulkResult(
+        int applied, int total, List<Dictionary<string, object?>> report, string singular, string plural)
+    {
+        var skipped = total - applied;
+        var noun = applied == 1 ? singular : plural;
+
+        // Nothing applied travels back as Success=false, and the Web tier's
+        // fetchJson turns that into a thrown error carrying only the message --
+        // the per-row report never reaches the alert. So when every row was
+        // skipped the reason goes IN the message. Whole-batch failures are
+        // usually one cause repeated (an owner from another organization, a
+        // release no longer subscribed), so the distinct reasons are short.
+        if (applied == 0)
+        {
+            var reasons = report
+                .Select(row => row.GetValueOrDefault("Reason") as string)
+                .Where(reason => !string.IsNullOrWhiteSpace(reason))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+            var detail = reasons.Count > 0 ? " " + string.Join(" ", reasons) : "";
+            return new(false, $"No {plural} were updated. {skipped} skipped.{detail}", report);
+        }
+
+        var message = skipped == 0
+            ? $"Applicability updated for {applied} {noun}."
+            : $"Applicability updated for {applied} {noun}. {skipped} skipped.";
+        return new(true, message, report);
+    }
+
+    /// <summary>
+    /// The message a skipped row carries. SQL Server THROWs raised by the
+    /// applicability rules (51032-51048) are written for the user and are
+    /// passed through as-is; anything else is a fault rather than a rule, so it
+    /// is logged in full and reported generically.
+    /// </summary>
+    private static string FriendlyBulkReason(Exception ex) =>
+        ex is Microsoft.Data.SqlClient.SqlException { Number: >= 51000 and < 52000 }
+            ? ex.Message
+            : "This record could not be updated.";
+
+    /// <summary>Reads a JSON array of ids, ignoring anything that is not a number.</summary>
+    private static List<long> JsonInt64Array(string payload, string property)
+    {
+        var ids = new List<long>();
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            if (!document.RootElement.TryGetProperty(property, out var array)
+                || array.ValueKind != JsonValueKind.Array) return ids;
+            foreach (var element in array.EnumerateArray())
+            {
+                long value = 0;
+                var ok = element.ValueKind switch
+                {
+                    JsonValueKind.Number => element.TryGetInt64(out value),
+                    JsonValueKind.String => long.TryParse(element.GetString(), out value),
+                    _ => false
+                };
+                // Distinct, because a grid that double-registers a checkbox
+                // would otherwise apply the same row twice and report it twice.
+                if (ok && value > 0 && !ids.Contains(value)) ids.Add(value);
+            }
+        }
+        catch (JsonException) { /* an unparseable payload yields no ids */ }
+        return ids;
+    }
+
+    /// <summary>Returns the payload with one numeric property set or replaced.</summary>
+    private static string WithJsonValue(string payload, string property, long value)
+    {
+        var values = string.IsNullOrWhiteSpace(payload)
+            ? []
+            : JsonSerializer.Deserialize<Dictionary<string, object?>>(payload) ?? [];
+        values[property] = value;
+        return JsonSerializer.Serialize(values);
+    }
+
+    private static async Task SaveStatementApplicabilityAsync(
+        DbConnection connection, string payload, string enteredBy, CancellationToken cancellationToken,
+        DbTransaction? transaction = null)
+    {
+        await using var command = connection.CreateCommand();
+        // Set by the bulk caller, which runs each statement in its own
+        // transaction. Null on the single-record path, which is unchanged.
+        if (transaction is not null) command.Transaction = transaction;
         command.CommandText = """
             DECLARE @organization_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.organizationId'));
             DECLARE @release_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.releaseId'));
@@ -1841,7 +2556,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                   ranked.DomainId,ranked.SubDomainId,ranked.IsManuallyAdded,ranked.SubscriptionId,ranked.ReleaseId,ranked.ArtifactId,
                   COALESCE(source_agg.SourceFrameworkRelease,ranked.SourceFrameworkRelease) SourceFrameworkRelease,
                   ranked.ApplicabilityStatus,ranked.PrimaryOwner,ranked.SecondaryOwner,ranked.BackupOwner,
-                  ranked.BusinessFunctionId,ranked.Criticality,ranked.Status
+                  ranked.BusinessFunctionId,ranked.Criticality,ranked.Status,COUNT(*) OVER () AS TotalRows
                 FROM ranked
                 JOIN group_flags ON group_flags.OrganizationId=ranked.OrganizationId AND group_flags.ControlGroupKey=ranked.ControlGroupKey
                 LEFT JOIN source_agg ON source_agg.OrganizationId=ranked.OrganizationId AND source_agg.ControlGroupKey=ranked.ControlGroupKey
@@ -1884,7 +2599,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
               oc.criticality Criticality,rs.status_name Status
               """;
         command.CommandText = $"""
-            SELECT {selectColumns}
+            SELECT {selectColumns},COUNT(*) OVER () AS TotalRows
             FROM grac_practice.organization_control oc
             JOIN grac_practice.record_status_master rs ON rs.record_status_id=oc.record_status_id
             JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=oc.applicability_status_id
@@ -2091,9 +2806,48 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 COALESCE(aps.status_name,q.applicability_status) ApplicabilityStatus,
                 COALESCE(aps.status_code,q.applicability_status) ApplicabilityStatusCode,
                 COALESCE(ims.status_name,q.implementation_status) ImplementationStatus,
+                -- Practice-level implementation roll-up, shown as the grid's
+                -- "Implementation Status" column.
+                --
+                -- DELIBERATELY NOT named ImplementationStatus. That column is
+                -- the value STORED on organization_requirement, and the
+                -- Practices edit form carries it as a hidden field that posts
+                -- back on save (practice.js: hidden("implementationStatus")).
+                -- Overwriting it with a derived value would write the roll-up
+                -- into q.implementation_status the first time anyone edited a
+                -- Practice. The Source Statement page has no such conflict --
+                -- a statement stores no implementation status at all -- which
+                -- is why it can call its derived column ImplementationStatus.
+                --
+                -- Same rule and same four values as the statement column in
+                -- QueryReleaseStatementsAsync, one level down: Implemented only
+                -- when the Practice has instances and EVERY one of them is
+                -- Implemented, so a single unfinished instance holds the whole
+                -- Practice back. A Practice with no instances has nothing
+                -- Implemented and falls through to Not Implemented.
+                CASE
+                    WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated')=N'Applicable'
+                         AND COALESCE(pic.PracticeInstanceCount,0)>0
+                         AND pic.PracticeInstanceCount=pic.ImplementedInstanceCount THEN N'Implemented'
+                    WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated')=N'Applicable'
+                         AND COALESCE(pic.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
+                    WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
+                    ELSE N'Not Implemented'
+                END PracticeImplementationStatus,
                 COALESCE(owner.employee_name,p.practice_owner,N'') PracticeOwner,
+                -- Added so Update Applicability opens pre-filled: the requirement's
+                -- own exclusion_justification is authoritative (pm_manage_practice_repository
+                -- writes it to both q and its linked practice p on every save), so
+                -- selecting it directly here removes the need for a second round trip.
+                -- PracticeId is exposed too -- practice.js's prefill fallback (openForm,
+                -- "Update Applicability prefill for Practices") reads it to fetch the
+                -- linked practice row, and previously always found it blank because this
+                -- query never selected it, so that fallback silently never ran.
+                p.practice_id PracticeId,
+                COALESCE(q.exclusion_justification,p.exclusion_justification) ExclusionJustification,
                 COALESCE(pic.PracticeInstanceCount,0) PracticeInstanceCount,
-                COALESCE(rs.status_name,q.status) Status
+                COALESCE(pic.ImplementedInstanceCount,0) ImplementedInstanceCount,
+                COALESCE(rs.status_name,q.status) Status,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.organization_requirement q
             LEFT JOIN grac_practice.organization_framework_statements ofs ON ofs.org_statement_id=q.org_statement_id
                 AND ofs.organization_id=q.organization_id
@@ -2128,7 +2882,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             LEFT JOIN grac_practice.implementation_status_master ims ON ims.implementation_status_id=q.implementation_status_id
             LEFT JOIN requirement_statement rsmap ON rsmap.OrganizationRequirementId=q.organization_requirement_id
             OUTER APPLY (
-                SELECT TOP (1) p.practice_owner_id,p.practice_owner
+                SELECT TOP (1) p.practice_id,p.practice_owner_id,p.practice_owner,p.exclusion_justification
                 FROM grac_practice.practice p
                 WHERE p.organization_requirement_id=q.organization_requirement_id
                   AND p.organization_id=q.organization_id
@@ -2138,21 +2892,49 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             OUTER APPLY (
                 -- practice_instance links to the requirement through practice;
                 -- it has no organization_requirement_id column of its own.
-                SELECT COUNT_BIG(1) PracticeInstanceCount
+                --
+                -- ImplementedInstanceCount rides along here rather than in a
+                -- second apply: the implementation roll-up walks exactly the
+                -- same two joins as the count, so asking twice would scan the
+                -- instances twice for one row of grid.
+                SELECT COUNT_BIG(1) PracticeInstanceCount,
+                       COUNT_BIG(CASE WHEN ism_pi.status_code=N'Implemented' THEN 1 END) ImplementedInstanceCount
                 FROM grac_practice.practice_instance pi
                 JOIN grac_practice.practice pp ON pp.practice_id=pi.practice_id
+                LEFT JOIN grac_practice.implementation_status_master ism_pi
+                    ON ism_pi.implementation_status_id=pi.implementation_status_id
                 WHERE pp.organization_requirement_id=q.organization_requirement_id
                   AND pi.organization_id=q.organization_id
                   AND pi.status='Active'
             ) pic
             LEFT JOIN grac_practice.organization_employee owner ON owner.employee_id=p.practice_owner_id
-            WHERE EXISTS(
-                  SELECT 1
-                  FROM grac_practice.repository_subscription s
-                  WHERE s.organization_id=q.organization_id
-                    AND s.release_id=COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id)
-                    AND s.status='Active'
-                    AND ISNULL(s.subscription_status,'Active')='Active'
+            -- Custom Practice creation (Add Custom Practice, entity_type
+            -- 'organization-requirements', origin_type 'Organization') was
+            -- silently missing from this grid. The row itself was always
+            -- correctly inserted -- code generated, ORG-PRACTICES container
+            -- control created/reused, applicability/owner all saved -- but
+            -- a custom practice has no repository framework release behind
+            -- it, so ofs.release_id, filter_oc.release_id and oc.release_id
+            -- (the ORG-PRACTICES container's release_id) are all NULL for
+            -- it. The subscription check below existed to hide a
+            -- repository-linked practice whose framework release is no
+            -- longer subscribed, but "s.release_id=NULL" can never be TRUE,
+            -- so it was also hiding every custom practice, unconditionally,
+            -- regardless of organization/status/search filters. Bypass the
+            -- subscription check for rows with no release association at
+            -- all (custom/organization-origin practices); repository-linked
+            -- practices (which always have a release here) still require an
+            -- active subscription exactly as before.
+            WHERE (
+                  COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id) IS NULL
+                  OR EXISTS(
+                      SELECT 1
+                      FROM grac_practice.repository_subscription s
+                      WHERE s.organization_id=q.organization_id
+                        AND s.release_id=COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id)
+                        AND s.status='Active'
+                        AND ISNULL(s.subscription_status,'Active')='Active'
+                  )
               )
               AND (@p_id=0 OR q.organization_requirement_id=@p_id)
               AND (@organization_id IS NULL OR q.organization_id=@organization_id)
@@ -2232,8 +3014,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 COALESCE(dept.department_name,pi.department) Department,
                 pi.execution_frequency_id ExecutionFrequencyId,
                 execf.frequency_name ExecutionFrequency,
-                pi.assurance_frequency_id AssuranceFrequencyId,
-                assurf.frequency_name AssuranceFrequency,
+                -- Migration 237: prefer the derived value across the
+                -- instance's Assurance obligations. If the view returns
+                -- NULL (no assurance obligation on this instance yet)
+                -- pi.assurance_frequency_id is the fallback -- Configure
+                -- still seeds it and older code paths still project it.
+                COALESCE(effassur.AssuranceFrequencyId,pi.assurance_frequency_id) AssuranceFrequencyId,
+                COALESCE(effassur.AssuranceFrequency,assurf.frequency_name) AssuranceFrequency,
                 COALESCE(pi.execution_frequency_id,pi.frequency_id) FrequencyId,
                 COALESCE(execf.frequency_code,f.frequency_code,pi.frequency_type) FrequencyType,
                 COALESCE(CASE WHEN f.is_custom=0 THEN f.frequency_value END,pi.frequency_value) FrequencyValue,
@@ -2241,12 +3028,20 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 pi.assurance_mode AssuranceMode,
                 pi.criticality Criticality,
                 pi.implementation_status ImplementationStatus,
-                COALESCE(rs.status_name,pi.status) Status
+                COALESCE(rs.status_name,pi.status) Status,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.practice_instance pi
             LEFT JOIN grac_practice.practice p ON p.practice_id=pi.practice_id
             LEFT JOIN grac_practice.frequency_master f ON f.frequency_id=pi.frequency_id
             LEFT JOIN grac_practice.frequency_master execf ON execf.frequency_id=pi.execution_frequency_id
             LEFT JOIN grac_practice.frequency_master assurf ON assurf.frequency_id=pi.assurance_frequency_id
+            -- Deploy 237 before this build reaches production -- SQL
+            -- Server binds the view at parse time, so an unknown-object
+            -- error here would refuse the whole query. The COALESCE
+            -- above still uses pi.assurance_frequency_id whenever the
+            -- view row is NULL, so an instance with no Assurance
+            -- obligations answers the same value it did before 237.
+            LEFT JOIN grac_practice.vw_pm_instance_effective_assurance_frequency effassur
+                ON effassur.PracticeInstanceId=pi.practice_instance_id
             LEFT JOIN grac_practice.record_status_master rs ON rs.record_status_id=pi.record_status_id
             LEFT JOIN grac_practice.organization_employee emp ON emp.employee_id=pi.primary_owner_id
             LEFT JOIN grac_practice.organization_department dept ON dept.department_id=pi.department_id
@@ -2323,7 +3118,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     ) THEN N'Configured'
                     ELSE N'Dependency Categories Pending'
                 END OperationalizationStatus,
-                ISNULL(prs.status_name,pi.status) Status
+                ISNULL(prs.status_name,pi.status) Status,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.practice_instance pi
             LEFT JOIN grac_practice.practice p ON p.practice_id=pi.practice_id
             LEFT JOIN grac_practice.organization_requirement req ON req.organization_requirement_id=p.organization_requirement_id
@@ -2500,6 +3295,39 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
 
         var pageSize = Math.Clamp(JsonInt(payload, "pageSize") ?? 200, 1, 500);
         var tableParts = sourceTable.Split('.', 2);
+
+        // Asset gets three extra columns so the Resolve workspace can
+        // filter a large asset register down by Category / Sub-category
+        // / Type before the user picks. Every other source stays a plain
+        // Value/Label pair, and the extra selects render as NULL for
+        // them, which the UI ignores. Coalesce with COL_LENGTH keeps the
+        // query safe on a database that has not run 239 yet -- those
+        // columns simply return NULL there.
+        var isAssetSource = sourceTable.Equals("grac_practice.organization_dependency_asset", StringComparison.OrdinalIgnoreCase);
+        var extraSelect = isAssetSource
+            ? ", asset_category_id AssetCategoryId, asset_subcategory_id AssetSubcategoryId, asset_type_id AssetTypeId"
+            : ", CAST(NULL AS INT) AssetCategoryId, CAST(NULL AS INT) AssetSubcategoryId, CAST(NULL AS INT) AssetTypeId";
+
+        // The Person category resolves to organization_employee, and its
+        // picker reads "Vinod - Risk Owner". The roles are a SEPARATE
+        // column, never folded into Label: the option label is what the
+        // dependency save persists as the object name (the UI sends it
+        // as data-object-name), so a role appended to Label would end up
+        // stored on the mapping row. The UI composes the display text.
+        //
+        // A scalar function rather than a correlated subquery because
+        // this query applies no table alias -- an inner reference to
+        // employee_id would bind to organization_employee_role's own
+        // column instead of the outer row. Bounded by the same page size
+        // as the list itself. Migration 291 defines it; COALESCE with
+        // OBJECT_ID keeps the query working on a database that has not
+        // run 291 yet, where the column simply comes back NULL.
+        var isEmployeeSource = sourceTable.Equals("grac_practice.organization_employee", StringComparison.OrdinalIgnoreCase);
+        var hasRoleFn = await ShimExistsAsync(connection, "grac_practice.fn_employee_role_names",
+                                              cancellationToken, "FN");
+        extraSelect += isEmployeeSource && hasRoleFn
+            ? $", grac_practice.fn_employee_role_names({QuoteName(idColumn)}) RoleNames"
+            : ", CAST(NULL AS NVARCHAR(400)) RoleNames";
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT
@@ -2508,7 +3336,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 @dependency_type_id DependencyTypeId,
                 @source_type SourceType,
                 @source_table SourceTableName,
-                @is_multi_select_allowed IsMultiSelectAllowed
+                @is_multi_select_allowed IsMultiSelectAllowed{extraSelect}
             FROM {QuoteName(tableParts[0])}.{QuoteName(tableParts[1])}
             WHERE {QuoteName(organizationColumn)}=@organization_id
               AND (
@@ -2672,7 +3500,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     WHEN COALESCE(ra.ResolvedDependenciesCount,0)>0 THEN N'Partially Operationalized'
                     ELSE N'Configured'
                 END OperationalizationStatus,
-                COALESCE(prs.status_name,pi.status) Status
+                COALESCE(prs.status_name,pi.status) Status,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.practice_instance pi
             LEFT JOIN grac_practice.record_status_master prs ON prs.record_status_id=pi.record_status_id
             LEFT JOIN grac_practice.organization_business_function bf ON bf.business_function_id=pi.business_function_id
@@ -2809,7 +3637,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 COALESCE(res_all.resolved_dependency_names,res.resolved_dependency_name) ResolvedDependencyName,
                 CASE WHEN res_all.resolved_dependency_names IS NULL THEN N'Pending' ELSE COALESCE(drs.status_name,N'Resolved') END ResolutionStatus,
                 ISNULL(emp.employee_name,N'') ResolutionOwner,
-                COALESCE(res_all.last_updated,res.updated_dt) LastUpdated
+                COALESCE(res_all.last_updated,res.updated_dt) LastUpdated,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.practice_instance_dependency d
             JOIN grac_practice.practice_instance pi
               ON pi.practice_instance_id=d.practice_instance_id
@@ -2955,7 +3783,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 CAST(NULL AS NVARCHAR(300)) ResolvedDependencyName,
                 N'Pending' ResolutionStatus,
                 CAST(NULL AS NVARCHAR(300)) ResolutionOwner,
-                d.updated_dt LastUpdated
+                d.updated_dt LastUpdated,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.practice_instance_dependency d
             JOIN grac_practice.practice_instance pi
               ON pi.practice_instance_id=d.practice_instance_id
@@ -3020,7 +3848,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 e.retention_period RetentionPeriod,
                 e.record_status_id StatusId,
                 COALESCE(rs.status_name,e.status) Status,
-                COALESCE(et.display_order,999) DisplayOrder
+                COALESCE(et.display_order,999) DisplayOrder,COUNT(*) OVER () AS TotalRows
             FROM grac_practice.practice_instance_evidence e
             LEFT JOIN GRAC_New.evidence_type_master et ON et.evidence_type_id=e.evidence_type_id
             LEFT JOIN grac_practice.collection_method_master cm ON cm.collection_method_id=e.collection_method_id
@@ -3121,7 +3949,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 f.frequency_id FrequencyId,
                 COALESCE(f.frequency_name,cm_freq.option_label) Frequency,
                 roe.retention_requirement RetentionRequirement,
-                roe.remarks Remarks
+                roe.remarks Remarks,COUNT(*) OVER () AS TotalRows
             FROM distinct_obligations dob
             JOIN GRAC_New.requirement_obligation o
               ON o.obligation_id=dob.obligation_id AND o.status='Active'
@@ -3362,6 +4190,30 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         Add(command, "@subject", subject);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is bool allowed ? allowed : Convert.ToInt32(result) == 1;
+    }
+
+    // Task Calendar -- Scheduler Edit Permission (change request 2026-09-23).
+    // Is employeeId the Practice Instance Owner of the instance behind this
+    // schedule rule? Same primary_owner_id column and @caller_employee_id
+    // comparison the rest of the app already uses for ownership (141/145/
+    // 222/236/287/290/315) -- this just runs that same test for one rule
+    // instead of filtering a list.
+    private static async Task<bool> HasScheduleOwnershipAsync(DbConnection connection, int scheduleRuleId, long employeeId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT CASE WHEN EXISTS(
+                SELECT 1
+                FROM grac_practice.assurance_schedule_rule r
+                JOIN grac_practice.practice_instance pi ON pi.practice_instance_id = r.practice_instance_id
+                WHERE r.schedule_rule_id = @schedule_rule_id
+                  AND pi.primary_owner_id = @employee_id
+            ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END;
+            """;
+        Add(command, "@schedule_rule_id", scheduleRuleId);
+        Add(command, "@employee_id", employeeId);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is bool allowed ? allowed : (result != null && Convert.ToInt32(result) == 1);
     }
 
     // Rule 5 — scope check for release-level actions. GLOBAL/ORGANIZATION
@@ -3695,13 +4547,17 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         await using var ruleCmd = connection.CreateCommand();
         ruleCmd.CommandText = """
             SELECT r.schedule_rule_id, r.organization_id, r.practice_instance_id,
+                   r.practice_instance_obligation_id, r.schedule_kind,
+                   pio.obligation_name, pio.responsibility,
                    pi.instance_code, pi.instance_name, pi.criticality, pi.assurance_mode,
-                   pi.primary_owner,
+                   pi.primary_owner, pi.practice_id, pi.primary_owner_id,
                    r.frequency_id, fm.frequency_name, fm.frequency_value, fm.frequency_unit,
                    r.anchor_date, r.end_date, r.schedule_owner, r.notes, r.is_active
             FROM grac_practice.assurance_schedule_rule r
             JOIN grac_practice.practice_instance pi ON pi.practice_instance_id = r.practice_instance_id
             JOIN grac_practice.frequency_master fm ON fm.frequency_id = r.frequency_id
+            LEFT JOIN grac_practice.practice_instance_obligation pio
+                   ON pio.practice_instance_obligation_id = r.practice_instance_obligation_id
             WHERE r.status = N'Active' AND r.is_active = 1
               AND (@organization_id IS NULL OR r.organization_id = @organization_id)
             ORDER BY pi.instance_name
@@ -3756,6 +4612,19 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         foreach (var rule in rules)
         {
             var ruleId = Convert.ToInt64(rule["schedule_rule_id"]);
+            // Task Calendar Edit Scheduler (change request 2026-09-23):
+            // carry the instance/practice identity onto every occurrence
+            // so the dialog can offer "View Practice" without a second
+            // round trip. Additive -- nothing downstream that ignores
+            // these two keys is affected.
+            var practiceInstanceId = rule.TryGetValue("practice_instance_id", out var piId) ? piId : null;
+            var practiceId = rule.TryGetValue("practice_id", out var pId) ? pId : null;
+            // Task Calendar -- Scheduler Edit Permission (2026-09-23): the
+            // Practice Instance Owner's employee id, carried the same
+            // additive way as PracticeInstanceId/PracticeId above, so the
+            // Calendar side panel can gate its own "Edit Schedule" button
+            // per occurrence without a second round trip.
+            var ownerEmployeeId = rule.TryGetValue("primary_owner_id", out var ownerId) ? ownerId : null;
             var anchorDate = Convert.ToDateTime(rule["anchor_date"]);
             var endDate = rule["end_date"] is DateTime ed ? ed : rangeTo;
             var freqValue = rule["frequency_value"] is not null and not DBNull ? Convert.ToInt32(rule["frequency_value"]) : 0;
@@ -3767,6 +4636,12 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             var assuranceMode = rule["assurance_mode"]?.ToString() ?? "Manual";
             var owner = rule["schedule_owner"]?.ToString() ?? rule["primary_owner"]?.ToString() ?? "";
             var frequencyName = rule["frequency_name"]?.ToString() ?? "";
+            // Migration 336-338: per-obligation stream identity + kind. Legacy
+            // instance-wide rows carry a NULL obligation id and were stamped
+            // schedule_kind = 'Assurance' by 336, so they still type cleanly.
+            var scheduleKind = rule["schedule_kind"]?.ToString() ?? "Assurance";
+            var obligationId = rule.TryGetValue("practice_instance_obligation_id", out var pobId) ? pobId : null;
+            var obligationName = rule["obligation_name"]?.ToString() ?? "";
 
             // Non-periodic frequencies (Event Driven, Continuous, Custom) — skip
             if (freqValue <= 0 || string.IsNullOrWhiteSpace(freqUnit)) continue;
@@ -3802,7 +4677,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                             ["RuleId"] = ruleId,
                             ["Date"] = current.Date,
                             ["PracticeInstance"] = practiceLabel,
+                            ["PracticeInstanceId"] = practiceInstanceId,
+                            ["PracticeId"] = practiceId,
+                            ["OwnerEmployeeId"] = ownerEmployeeId,
                             ["FrequencyName"] = frequencyName,
+                            ["ScheduleKind"] = scheduleKind,
+                            ["ObligationId"] = obligationId,
+                            ["ObligationName"] = obligationName,
                             ["Criticality"] = criticality,
                             ["AssuranceMode"] = assuranceMode,
                             ["Owner"] = owner,
@@ -3820,7 +4701,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                             ["RuleId"] = ruleId,
                             ["Date"] = newDate,
                             ["PracticeInstance"] = practiceLabel,
+                            ["PracticeInstanceId"] = practiceInstanceId,
+                            ["PracticeId"] = practiceId,
+                            ["OwnerEmployeeId"] = ownerEmployeeId,
                             ["FrequencyName"] = frequencyName,
+                            ["ScheduleKind"] = scheduleKind,
+                            ["ObligationId"] = obligationId,
+                            ["ObligationName"] = obligationName,
                             ["Criticality"] = criticality,
                             ["AssuranceMode"] = assuranceMode,
                             ["Owner"] = owner,
@@ -3837,7 +4724,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                             ["RuleId"] = ruleId,
                             ["Date"] = current.Date,
                             ["PracticeInstance"] = practiceLabel,
+                            ["PracticeInstanceId"] = practiceInstanceId,
+                            ["PracticeId"] = practiceId,
+                            ["OwnerEmployeeId"] = ownerEmployeeId,
                             ["FrequencyName"] = frequencyName,
+                            ["ScheduleKind"] = scheduleKind,
+                            ["ObligationId"] = obligationId,
+                            ["ObligationName"] = obligationName,
                             ["Criticality"] = criticality,
                             ["AssuranceMode"] = assuranceMode,
                             ["Owner"] = owner,
@@ -3876,7 +4769,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                             ["RuleId"] = ruleId,
                             ["Date"] = addedDate.Date,
                             ["PracticeInstance"] = practiceLabel,
+                            ["PracticeInstanceId"] = practiceInstanceId,
+                            ["PracticeId"] = practiceId,
+                            ["OwnerEmployeeId"] = ownerEmployeeId,
                             ["FrequencyName"] = frequencyName,
+                            ["ScheduleKind"] = scheduleKind,
+                            ["ObligationId"] = obligationId,
+                            ["ObligationName"] = obligationName,
                             ["Criticality"] = criticality,
                             ["AssuranceMode"] = assuranceMode,
                             ["Owner"] = owner,
@@ -3890,85 +4789,16 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             }
         }
 
-        // 4. Auto-generate events from practice instances that have an assurance frequency
-        //    but do NOT have an explicit assurance_schedule_rule yet.
-        await using var autoCmd = connection.CreateCommand();
-        autoCmd.CommandText = """
-            SELECT pi.practice_instance_id, pi.organization_id, pi.instance_code, pi.instance_name,
-                   pi.criticality, pi.assurance_mode, pi.primary_owner,
-                   pi.assurance_frequency_id, fm.frequency_name, fm.frequency_value, fm.frequency_unit
-            FROM grac_practice.practice_instance pi
-            JOIN grac_practice.frequency_master fm ON fm.frequency_id = pi.assurance_frequency_id
-            WHERE pi.assurance_frequency_id IS NOT NULL
-              AND pi.status IN (N'Active', N'Resolved', N'Operationalized')
-              AND NOT EXISTS (
-                  SELECT 1 FROM grac_practice.assurance_schedule_rule r
-                  WHERE r.practice_instance_id = pi.practice_instance_id
-                    AND r.status = N'Active' AND r.is_active = 1
-              )
-              AND (@organization_id IS NULL OR pi.organization_id = @organization_id)
-            ORDER BY pi.instance_name
-            """;
-        Add(autoCmd, "@organization_id", organizationId.HasValue ? organizationId.Value : DBNull.Value);
-        await using (var reader = await autoCmd.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var freqValue = reader.IsDBNull(reader.GetOrdinal("frequency_value")) ? 0 : reader.GetInt32(reader.GetOrdinal("frequency_value"));
-                var freqUnit = reader.IsDBNull(reader.GetOrdinal("frequency_unit")) ? "" : reader.GetString(reader.GetOrdinal("frequency_unit"));
-                if (freqValue <= 0 || string.IsNullOrWhiteSpace(freqUnit)) continue;
-
-                var instanceCode = reader.IsDBNull(reader.GetOrdinal("instance_code")) ? "" : reader.GetString(reader.GetOrdinal("instance_code"));
-                var instanceName = reader.IsDBNull(reader.GetOrdinal("instance_name")) ? "" : reader.GetString(reader.GetOrdinal("instance_name"));
-                var practiceLabel = $"{instanceCode} - {instanceName}";
-                var criticality = reader.IsDBNull(reader.GetOrdinal("criticality")) ? "Medium" : reader.GetString(reader.GetOrdinal("criticality"));
-                var assuranceMode = reader.IsDBNull(reader.GetOrdinal("assurance_mode")) ? "Manual" : reader.GetString(reader.GetOrdinal("assurance_mode"));
-                var owner = reader.IsDBNull(reader.GetOrdinal("primary_owner")) ? "" : reader.GetString(reader.GetOrdinal("primary_owner"));
-                var frequencyName = reader.IsDBNull(reader.GetOrdinal("frequency_name")) ? "" : reader.GetString(reader.GetOrdinal("frequency_name"));
-                var practiceInstanceId = reader.GetInt64(reader.GetOrdinal("practice_instance_id"));
-
-                // Use the first day of the current month as anchor for auto-generated events
-                var anchorDate = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
-                // Go back enough to cover rangeFrom
-                while (anchorDate > rangeFrom) anchorDate = freqUnit.Equals("Year", StringComparison.OrdinalIgnoreCase)
-                    ? anchorDate.AddYears(-freqValue) : freqUnit.Equals("Month", StringComparison.OrdinalIgnoreCase)
-                    ? anchorDate.AddMonths(-freqValue) : freqUnit.Equals("Week", StringComparison.OrdinalIgnoreCase)
-                    ? anchorDate.AddDays(-freqValue * 7) : anchorDate.AddDays(-freqValue);
-
-                var current = anchorDate;
-                while (current <= rangeTo)
-                {
-                    if (current >= rangeFrom.Date && current <= rangeTo.Date)
-                    {
-                        events.Add(new Dictionary<string, object?>
-                        {
-                            ["RuleId"] = (object?)null,
-                            ["PracticeInstanceId"] = practiceInstanceId,
-                            ["Date"] = current.Date,
-                            ["PracticeInstance"] = practiceLabel,
-                            ["FrequencyName"] = frequencyName,
-                            ["Criticality"] = criticality,
-                            ["AssuranceMode"] = assuranceMode,
-                            ["Owner"] = owner,
-                            ["Status"] = current.Date < DateTime.UtcNow.Date ? "Past" : "Upcoming",
-                            ["IsOverride"] = false,
-                            ["IsAutoGenerated"] = true,
-                            ["OriginalDate"] = (object?)null,
-                            ["OverrideType"] = (object?)null
-                        });
-                    }
-                    current = freqUnit.Equals("Day", StringComparison.OrdinalIgnoreCase)
-                        ? current.AddDays(freqValue)
-                        : freqUnit.Equals("Week", StringComparison.OrdinalIgnoreCase)
-                            ? current.AddDays(freqValue * 7)
-                            : freqUnit.Equals("Month", StringComparison.OrdinalIgnoreCase)
-                                ? current.AddMonths(freqValue)
-                                : freqUnit.Equals("Year", StringComparison.OrdinalIgnoreCase)
-                                    ? current.AddYears(freqValue)
-                                    : current.AddMonths(freqValue > 0 ? freqValue : 1);
-                }
-            }
-        }
+        // 4. (removed, migration 336-338) The instance-level auto-generate
+        //    block used to invent PracticeInstance-typed occurrences for
+        //    instances that had a frequency but no explicit schedule rule,
+        //    from the Assurance-only effective-frequency view (237). The
+        //    calendar is now purely rule-driven -- adoption auto-creates a
+        //    per-obligation assurance_schedule_rule
+        //    (SyncScheduleRulesForInstanceAsync), and existing instances are
+        //    brought in by the reconcile/backfill -- so every occurrence
+        //    carries its schedule_kind (Execution / Assurance) and there is
+        //    no untyped 'Practice Instance' stream any more.
 
         // ================================================================
         // 4b-4f. Assurance-module events (Plans / Plan Items / Executions /
@@ -4435,18 +5265,25 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             var e = events[idx];
             if (!e.ContainsKey("SourceModule"))
             {
-                // Legacy PI-derived events -- backfill the unified keys.
-                e["SourceModule"]     = "PracticeInstance";
-                e["SourceRefType"]    = e.ContainsKey("PracticeInstanceId") ? "PracticeInstance" : "AssuranceScheduleRule";
-                e["SourceRefId"]      = e.TryGetValue("PracticeInstanceId", out var pid) && pid is not null
-                                        ? pid : (e.TryGetValue("RuleId", out var rid) ? rid : null);
+                // Schedule-rule occurrences (migration 336-338). Every one
+                // carries its schedule_kind, so the module IS the kind --
+                // Execution or Assurance -- never "Practice Instance". The
+                // instance label becomes the subtitle/entity; the obligation
+                // name (when the row has one) is the title.
+                var kind = e.TryGetValue("ScheduleKind", out var sk) && sk is not null
+                           ? sk.ToString()! : "Assurance";
+                var instanceLabel = e.TryGetValue("PracticeInstance", out var pi) ? pi?.ToString() ?? "" : "";
+                var oblName = e.TryGetValue("ObligationName", out var on) ? on?.ToString() ?? "" : "";
+                e["SourceModule"]     = kind;
+                e["SourceRefType"]    = "AssuranceScheduleRule";
+                e["SourceRefId"]      = e.TryGetValue("RuleId", out var rid) ? rid : null;
                 e["StartDate"]        = e.TryGetValue("Date", out var dt) ? dt : null;
                 e["EndDate"]          = (object?)null;
                 e["IsRange"]          = false;
-                var titleVal = e.TryGetValue("PracticeInstance", out var pi) ? pi?.ToString() ?? "" : "";
-                e["Title"]            = titleVal;
-                e["Subtitle"]         = e.TryGetValue("FrequencyName", out var fn) ? $"Practice Instance · {fn}" : "Practice Instance";
-                e["EntityLabel"]      = (object?)null;
+                e["Title"]            = string.IsNullOrWhiteSpace(oblName) ? instanceLabel : oblName;
+                e["Subtitle"]         = e.TryGetValue("FrequencyName", out var fn)
+                                        ? $"{kind} · {fn}" : kind;
+                e["EntityLabel"]      = instanceLabel;
                 e["DefinitionCode"]   = (object?)null;
                 e["DefinitionId"]     = (object?)null;
                 e["OwnerRoleId"]      = (object?)null;
@@ -4457,8 +5294,6 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 e["StatusKind"]       = DeriveStatusKind(statusStr, null, false);
                 if (e.TryGetValue("RuleId", out var ruleId) && ruleId is not null)
                     e["DeepLink"] = $"/Practice/Calendar?ruleId={ruleId}";
-                else if (e.TryGetValue("PracticeInstanceId", out var piid) && piid is not null)
-                    e["DeepLink"] = $"/Practice/Manage/practice-instances?practiceInstanceId={piid}";
                 else
                     e["DeepLink"] = (object?)null;
             }
@@ -4503,6 +5338,104 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
 
                 return true;
             }).ToList();
+        }
+
+        // ================================================================
+        // Linked Task Centre tasks -- Gap and Observation events only.
+        //
+        // sp_task_open's source_type_code derivation (196) maps
+        // subject_entity_type 'CustomGap' -> source_type_code 'Gap', with
+        // source_record_id = the same custom_gap_id already carried above
+        // as this event's SourceRefId. An Observation only reaches Task
+        // Centre through the candidate stage (198/199): sp_org_assurance_
+        // observation_accept raises a candidate with source_type_code
+        // 'ContinuousAssurance' / source_record_id = observation_id, and
+        // sp_task_candidate_approve (198) passes those same two values
+        // straight through to sp_task_open once the candidate is approved.
+        // Both cases key on exactly the id already used as SourceRefId, so
+        // no new id and no schema change -- and this reads
+        // grac_practice.vw_pm_practice_task, the same view sp_task_list /
+        // sp_task_get / sp_task_source_tasks already use, instead of
+        // re-deriving its status/number joins here.
+        //
+        // Plan / Plan Item / Execution / Practice Instance have no source
+        // wired to Task Centre (docs/task-centre-v2.md, "Sources wired"),
+        // so they are left out entirely -- there is nothing to look up.
+        //
+        // parent_task_id IS NULL excludes child/sub-activity tasks, which
+        // inherit their parent's same source stamp (196) and would
+        // otherwise collide with it in the lookup below; Task Centre's own
+        // grid and counts apply the same top-level-only rule.
+        try
+        {
+            var gapIds = events
+                .Where(e => "AssuranceGap".Equals(e.GetValueOrDefault("SourceModule") as string, StringComparison.OrdinalIgnoreCase)
+                            && e.TryGetValue("SourceRefId", out var g) && g is not null)
+                .Select(e => Convert.ToInt64(e["SourceRefId"]))
+                .Distinct().ToList();
+            var obsIds = events
+                .Where(e => "AssuranceObservation".Equals(e.GetValueOrDefault("SourceModule") as string, StringComparison.OrdinalIgnoreCase)
+                            && e.TryGetValue("SourceRefId", out var o) && o is not null)
+                .Select(e => Convert.ToInt64(e["SourceRefId"]))
+                .Distinct().ToList();
+
+            if (gapIds.Count > 0 || obsIds.Count > 0)
+            {
+                var whereParts = new List<string>();
+                if (gapIds.Count > 0) whereParts.Add($"(v.source_type_code = N'Gap' AND v.source_record_id IN ({string.Join(",", gapIds)}))");
+                if (obsIds.Count > 0) whereParts.Add($"(v.source_type_code = N'ContinuousAssurance' AND v.source_record_id IN ({string.Join(",", obsIds)}))");
+
+                await using var taskCmd = connection.CreateCommand();
+                taskCmd.CommandText = $"""
+                    SELECT v.source_type_code, v.source_record_id, v.task_id, v.task_number,
+                           v.current_status_name, v.current_status_is_terminal
+                    FROM grac_practice.vw_pm_practice_task v
+                    WHERE v.parent_task_id IS NULL
+                      AND ({string.Join(" OR ", whereParts)})
+                    ORDER BY v.task_id DESC
+                    """;
+                // Most-recent-first (ORDER BY above) -- if a source somehow
+                // has more than one top-level task (BRD §15 allows it), the
+                // first row seen per key wins.
+                var linkedTasks = new Dictionary<(string SrcType, long SrcId), (long TaskId, string TaskNumber, string StatusName)>();
+                await using (var tr = await taskCmd.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await tr.ReadAsync(cancellationToken))
+                    {
+                        var key = (tr.GetString(tr.GetOrdinal("source_type_code")), tr.GetInt64(tr.GetOrdinal("source_record_id")));
+                        if (!linkedTasks.ContainsKey(key))
+                        {
+                            linkedTasks[key] = (
+                                tr.GetInt64(tr.GetOrdinal("task_id")),
+                                tr.GetString(tr.GetOrdinal("task_number")),
+                                tr.IsDBNull(tr.GetOrdinal("current_status_name")) ? "" : tr.GetString(tr.GetOrdinal("current_status_name"))
+                            );
+                        }
+                    }
+                }
+
+                foreach (var ev in events)
+                {
+                    var taskSourceType = (ev.GetValueOrDefault("SourceModule") as string) switch
+                    {
+                        "AssuranceGap"         => "Gap",
+                        "AssuranceObservation" => "ContinuousAssurance",
+                        _ => null
+                    };
+                    if (taskSourceType is null || !ev.TryGetValue("SourceRefId", out var refIdObj) || refIdObj is null) continue;
+                    if (linkedTasks.TryGetValue((taskSourceType, Convert.ToInt64(refIdObj)), out var linked))
+                    {
+                        ev["LinkedTaskId"]       = linked.TaskId;
+                        ev["LinkedTaskNumber"]   = linked.TaskNumber;
+                        ev["LinkedTaskStatus"]   = linked.StatusName;
+                        ev["LinkedTaskDeepLink"] = $"/Practice/Index/tasks#taskId={linked.TaskId}";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Calendar: Linked Task Centre lookup failed (org={OrgId}). Skipping -- events still render without it.", organizationId);
         }
 
         // 5. Fetch calendar config

@@ -41,7 +41,7 @@
 <section class="pm-panel" id="oaPlUnavailable" hidden>
     <div class="pm-empty">
         <i class="fa-solid fa-calendar-days pm-empty-icon" aria-hidden="true"></i>
-        <h2 id="oaPlUnavailableTitle">Assurance Plans are not available.</h2>
+        <h2 id="oaPlUnavailableTitle">Audit Plans are not available.</h2>
         <p id="oaPlUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
     </div>
 </section>
@@ -193,7 +193,7 @@
 
         <div style="display:grid; grid-template-columns:1fr 100px; gap:10px; align-items:start;">
             <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Assurance Definition <span style="color:#b91c1c;">*</span></span>
+                <span>Audit <span style="color:#b91c1c;">*</span></span>
                 <select id="oaPlItemDefinition" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
             </label>
             <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
@@ -304,7 +304,7 @@
         const enabled = await wf.checkFeature(FEATURE, state.orgId);
         if (!enabled) {
             wf.unavailable('oaPlUnavailable', 'oaPlUnavailableTitle', 'oaPlUnavailableBody',
-                'Assurance Plans are not available for this organization.',
+                'Audit Plans are not available for this organization.',
                 'Ask a GRAC Admin to enable ' + FEATURE + '.');
             return;
         }
@@ -421,7 +421,7 @@
         const body = document.getElementById('oaPlPlanBody');
         if (!state.orgId) {
             body.innerHTML = '<tr><td colspan="7" class="pm-empty">Select an organization to load plans.</td></tr>';
-            wf.updatePager('oa-plans', { pageNumber: 1, totalCount: 0 });
+            wf.updatePager('oa-plans', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
@@ -669,7 +669,8 @@
     }
 
     async function deletePlan(id) {
-        if (!confirm('Delete this plan (and its items)?')) return;
+        if (!await window.gracUi.confirm('Delete this plan (and its items)?',
+              { type: 'warning', title: 'Delete plan', confirmText: 'Delete' })) return;
         try {
             const url = U(API + '/plans/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
             const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
@@ -789,7 +790,7 @@
         const idStr = document.getElementById('oaPlItemEditId').value;
         const defSel = document.getElementById('oaPlItemDefinition');
         const defOpt = defSel.options[defSel.selectedIndex] || null;
-        if (!defSel.value) { showItemMessage('error', 'Pick an assurance definition.'); return; }
+        if (!defSel.value) { showItemMessage('error', 'Pick an audit.'); return; }
 
         // 121 hybrid Auditor -- read picker state; SP auto-resolves the missing side.
         const audState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
@@ -833,7 +834,8 @@
     }
 
     async function deleteItem(id) {
-        if (!confirm('Remove this item from the plan?')) return;
+        if (!await window.gracUi.confirm('Remove this item from the plan?',
+              { type: 'warning', title: 'Remove plan item', confirmText: 'Remove' })) return;
         try {
             const url = U(API + '/plans/' + state.selectedPlanId + '/items/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
             const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
@@ -975,6 +977,7 @@
     }
     function onlyDate(v) {
         if (!v) return '';
+        if (typeof window.gracFormatDisplayDate === "function") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         const s = String(v);
         return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
     }

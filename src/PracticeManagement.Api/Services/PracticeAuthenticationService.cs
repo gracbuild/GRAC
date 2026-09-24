@@ -13,7 +13,36 @@ public interface IPracticeAuthenticationService
 
     /// <summary>Replace an employee's password and clear force_password_change. False on any failure.</summary>
     Task<bool> SetPasswordAsync(long employeeId, string newPassword, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Find the active employee behind a login id (employee code or email)
+    /// WITHOUT verifying a password. Null when nothing matches.
+    /// <para>
+    /// This is NOT an authentication path and must never be used as one.
+    /// It exists for the bootstrap (ReviewLogin) sign-in, which is verified
+    /// against configuration rather than the database and therefore reaches
+    /// the session with no employee_id — leaving every procedure that
+    /// requires an actor (approve, reject, owner stamps) to fail with
+    /// "employee id is required". The caller passes a CONFIGURED identity it
+    /// has already authenticated, never a value typed by a visitor.
+    /// </para>
+    /// </summary>
+    Task<ResolvedIdentity?> ResolveIdentityAsync(string loginId, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// The identity fields a session needs when the password check happened
+/// somewhere other than the employee table. Deliberately smaller than
+/// <c>AuthenticatedUser</c>: no permissions, no data scope, no role — the
+/// bootstrap login already has those from configuration, and widening this
+/// would make a password-free lookup look like a sign-in.
+/// </summary>
+public sealed record ResolvedIdentity(
+    long   EmployeeId,
+    string EmployeeCode,
+    string EmployeeName,
+    string Email,
+    long   OrganizationId);
 
 // =====================================================================
 // PracticeAuthenticationService
@@ -146,6 +175,65 @@ public sealed class PracticeAuthenticationService(
             organizationId, organizationCode, organizationName,
             roleId, roleName, effectiveDataScope,
             permissions, allowedOrganizationIds, mustChangePassword);
+    }
+
+    /// <summary>
+    /// The same WHERE clause AuthenticateAsync uses -- active employee,
+    /// active record status, matched on employee_code OR email -- with the
+    /// password step removed. Reusing the predicate is the point: an
+    /// identity resolved here must be the same row a sign-in would have
+    /// found, or the bootstrap admin would be stamped against a different
+    /// employee than the one they appear to be.
+    /// </summary>
+    public async Task<ResolvedIdentity?> ResolveIdentityAsync(string loginId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(loginId)) return null;
+
+        var connectionString = SqlConnectionStringResolver.Resolve(configuration);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            logger.LogError("Identity resolve cannot proceed: no database connection is configured.");
+            return null;
+        }
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TOP (1)
+                   e.employee_id,
+                   e.employee_code,
+                   e.employee_name,
+                   e.email,
+                   e.organization_id
+            FROM grac_practice.organization_employee e
+            JOIN grac_practice.record_status_master rs ON rs.record_status_id = e.record_status_id
+            WHERE e.status = 'Active'
+              AND (rs.status_code = 'ACTIVE' OR rs.status_name = 'Active')
+              AND (LOWER(e.employee_code) = LOWER(@login_id) OR LOWER(e.email) = LOWER(@login_id))
+            ORDER BY e.employee_id;
+            """;
+        command.Parameters.Add(new SqlParameter("@login_id", SqlDbType.NVarChar, 250) { Value = loginId.Trim() });
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            // Not an error. A bootstrap admin with no employee row is a
+            // supported configuration; the session simply carries no
+            // employee id, exactly as it did before.
+            logger.LogInformation(
+                "Identity resolve for {LoginId}: no active employee matched. The session will carry no employee id.",
+                loginId);
+            return null;
+        }
+
+        return new ResolvedIdentity(
+            Convert.ToInt64(reader["employee_id"]),
+            Convert.ToString(reader["employee_code"]) ?? loginId,
+            Convert.ToString(reader["employee_name"]) ?? loginId,
+            Convert.ToString(reader["email"]) ?? "",
+            Convert.ToInt64(reader["organization_id"]));
     }
 
     /// <summary>

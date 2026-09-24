@@ -16,6 +16,7 @@
 // Registered via Infrastructure/CustomGapServiceRegistration.cs.
 // =====================================================================
 using System.Data;
+using System.Text.Json;
 using System.Data.Common;
 using Microsoft.Data.SqlClient;
 using PracticeManagement.Api.Models;
@@ -29,8 +30,17 @@ public interface ICustomGapService
     Task<CustomGapCommandResult> OpenAsync(CustomGapOpenRequest request, CancellationToken cancellationToken);
     Task<CustomGapCommandResult> CloseAsync(CustomGapCloseRequest request, CancellationToken cancellationToken);
 
+    // Migration 255 -- the unified Gap Centre list (both origins).
+    // Additive: ListAsync above keeps backing /api/practice/gaps/custom.
+    Task<GapCentreListResult> ListGapCentreAsync(
+        GapCentreListQuery query, CancellationToken cancellationToken);
+    Task<IReadOnlyList<GapCentreSourceCount>> ListGapCentreSourcesAsync(
+        long? organizationId, CancellationToken cancellationToken);
+
     // Unified
     Task<CustomGapDetail?>       GetAsync(long organizationId, long customGapId, CancellationToken cancellationToken);
+    // Migration 382: practices mapped to a Custom Gap (read-only display).
+    Task<IReadOnlyList<CustomGapPracticeRow>> GetPracticesAsync(long customGapId, CancellationToken cancellationToken);
     Task<CustomGapSaveResult>    SaveAsync(CustomGapSaveRequest request, CancellationToken cancellationToken);
     Task<CustomGapCommandResult> DeleteAsync(CustomGapCommandRequest request, CancellationToken cancellationToken);
     Task<CustomGapGenerateResult> GenerateFromAssuranceObservationAsync(
@@ -126,6 +136,10 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
     public async Task<CustomGapCommandResult> OpenAsync(CustomGapOpenRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        // Migration 382: at least one Practice must be mapped to a Custom Gap.
+        if (request.PracticeIds is null || request.PracticeIds.Count == 0)
+            return new CustomGapCommandResult(false, null,
+                "At least one Practice must be mapped to the Custom Gap.", "PRACTICE_REQUIRED");
         try
         {
             await using var connection = await OpenAsync(cancellationToken);
@@ -143,6 +157,18 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             AddParam(command, "@remarks",           DbType.String, (object?)request.Remarks     ?? DBNull.Value, 1000);
             AddParam(command, "@gap_type_code",     DbType.String, (object?)request.GapTypeCode ?? (object)"Custom", 60);
             AddParam(command, "@actor_employee_id", DbType.Int64,  (object?)request.ActorEmployeeId ?? DBNull.Value);
+            // Migration 250: captured at Add-Gap time. NULLs on a pre-250
+            // proc are silently dropped -- the parameter simply won't
+            // match anything, and the sproc keeps its old default
+            // behaviour (severity later derived, detection method left
+            // to the analysis form).
+            AddParam(command, "@severity_code",         DbType.String, (object?)request.SeverityCode        ?? DBNull.Value, 30);
+            AddParam(command, "@severity_name",         DbType.String, (object?)request.SeverityName        ?? DBNull.Value, 120);
+            AddParam(command, "@detection_method_code", DbType.String, (object?)request.DetectionMethodCode ?? DBNull.Value, 60);
+            AddParam(command, "@detection_method_name", DbType.String, (object?)request.DetectionMethodName ?? DBNull.Value, 200);
+            // Migration 382: JSON array of practice ids to map to this gap.
+            AddParam(command, "@practice_ids_json", DbType.String,
+                (object?)JsonSerializer.Serialize(request.PracticeIds) ?? DBNull.Value, -1);
 
             var idOut = command.CreateParameter();
             idOut.ParameterName = "@custom_gap_id";
@@ -166,6 +192,30 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             logger.LogWarning(ex, "CustomGapService.OpenAsync SQL error {Number}: {Message}", ex.Number, ex.Message);
             return new CustomGapCommandResult(false, null, ex.Message, reason);
         }
+    }
+
+    // Migration 382: read the practices mapped to a Custom Gap.
+    public async Task<IReadOnlyList<CustomGapPracticeRow>> GetPracticesAsync(long customGapId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_custom_gap_practice_map_list";
+        AddParam(command, "@custom_gap_id", DbType.Int64, customGapId);
+
+        var rows = new List<CustomGapPracticeRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new CustomGapPracticeRow(
+                Convert.ToInt64(reader["CustomGapPracticeMapId"]),
+                Convert.ToInt64(reader["CustomGapId"]),
+                Convert.ToInt64(reader["PracticeId"]),
+                reader["PracticeName"] as string,
+                reader["PracticeCode"] as string,
+                reader["MappedDt"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(reader["MappedDt"])));
+        }
+        return rows;
     }
 
     public async Task<CustomGapCommandResult> CloseAsync(CustomGapCloseRequest request, CancellationToken cancellationToken)
@@ -753,6 +803,129 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
     }
 
     // -------------------------------------------------------------
+    // Migration 255 -- the unified Gap Centre list
+    //
+    // ListAsync above is left exactly as it was. It still backs
+    // /api/practice/gaps/custom, which the assurance-observation screens
+    // and the by-observation route call with their own filters; this is a
+    // second, wider read, not a replacement for it.
+    // -------------------------------------------------------------
+    public async Task<GapCentreListResult> ListGapCentreAsync(
+        GapCentreListQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_gap_centre_list";
+
+            AddParam(command, "@organization_id",    DbType.Int64,  (object?)query.OrganizationId ?? DBNull.Value);
+            AddParam(command, "@source_module_code", DbType.String, (object?)query.SourceModuleCode ?? DBNull.Value, 30);
+            AddParam(command, "@status_code",        DbType.String, (object?)query.StatusCode ?? DBNull.Value, 30);
+            AddParam(command, "@search",             DbType.String, (object?)query.Search ?? DBNull.Value, 200);
+            AddParam(command, "@observation_id",     DbType.Int64,  (object?)query.ObservationId ?? DBNull.Value);
+            AddParam(command, "@page",               DbType.Int32,  Math.Max(1, query.Page));
+            AddParam(command, "@page_size",          DbType.Int32,  Math.Clamp(query.PageSize, 1, 200));
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            long total = 0;
+            int  page  = query.Page;
+            int  size  = query.PageSize;
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                total = Convert.ToInt64(reader["TotalCount"]);
+                page  = Convert.ToInt32(reader["PageNumber"]);
+                size  = Convert.ToInt32(reader["PageSize"]);
+            }
+
+            var rows = new List<GapCentreListRow>();
+            if (await reader.NextResultAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                    rows.Add(new GapCentreListRow(
+                        RowKey:             reader["RowKey"]?.ToString() ?? "",
+                        SourceModuleCode:   reader["SourceModuleCode"]?.ToString() ?? "",
+                        CustomGapId:        ReadLongOrNull(reader, "CustomGapId"),
+                        PracticeGapId:      ReadLongOrNull(reader, "PracticeGapId"),
+                        PracticeInstanceId: ReadLongOrNull(reader, "PracticeInstanceId"),
+                        IsMaterialized:     reader["IsMaterialized"] is bool m && m,
+                        Title:              ReadStringOrNull(reader, "Title"),
+                        Context:            ReadStringOrNull(reader, "Context"),
+                        StatusText:         ReadStringOrNull(reader, "StatusText"),
+                        SeverityText:       ReadStringOrNull(reader, "SeverityText"),
+                        OwnerText:          ReadStringOrNull(reader, "OwnerText"),
+                        DueDate:            ReadDateTimeOrNull(reader, "DueDate"),
+                        OpenedDt:           ReadDateTimeOrNull(reader, "OpenedDt"),
+                        LinkedCount:        ReadIntOrNull(reader, "LinkedCount") ?? 0,
+                        InstanceCode:       ReadStringOrNull(reader, "InstanceCode"),
+                        InstanceName:       ReadStringOrNull(reader, "InstanceName"),
+                        ExistingTaskCount:  ReadIntOrNull(reader, "ExistingTaskCount") ?? 0,
+                        // Migration 318. Absent on a pre-318 database --
+                        // HasColumn-guarded the same way the rest of this
+                        // reader tolerates schema this call predates.
+                        RawStatusCode:      HasColumn(reader, "RawStatusCode") ? ReadStringOrNull(reader, "RawStatusCode") : null,
+                        // Migration 324. Same HasColumn guard for a
+                        // pre-324 database.
+                        LifecycleStateCode: HasColumn(reader, "LifecycleStateCode") ? ReadStringOrNull(reader, "LifecycleStateCode") : null,
+                        // Migration 371. Practice Instance / Task / Risk /
+                        // Exception status columns -- HasColumn-guarded the
+                        // same way for a pre-371 database.
+                        PracticeInstanceStatusText: HasColumn(reader, "PracticeInstanceStatusText") ? ReadStringOrNull(reader, "PracticeInstanceStatusText") : null,
+                        TaskStatusText:             HasColumn(reader, "TaskStatusText") ? ReadStringOrNull(reader, "TaskStatusText") : null,
+                        RiskStatusText:             HasColumn(reader, "RiskStatusText") ? ReadStringOrNull(reader, "RiskStatusText") : null,
+                        ExceptionStatusText:        HasColumn(reader, "ExceptionStatusText") ? ReadStringOrNull(reader, "ExceptionStatusText") : null));
+            }
+            return new GapCentreListResult(total, page, size, rows);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "sp_gap_centre_list failed for organization {OrgId}.", query.OrganizationId);
+            // 2812 = "Could not find stored procedure". Named explicitly
+            // because an un-applied migration is by far the likeliest
+            // cause here, and "HTTP 500" on its own sends people looking
+            // at the wrong layer.
+            var message = ex.Number == 2812
+                ? "Gap Centre list procedure is missing. Run database migration "
+                  + "255_gap_centre_unified_list.sql."
+                : ex.Message;
+            return new GapCentreListResult(0, query.Page, query.PageSize, [], message);
+        }
+    }
+
+    public async Task<IReadOnlyList<GapCentreSourceCount>> ListGapCentreSourcesAsync(
+        long? organizationId, CancellationToken cancellationToken)
+    {
+        // Non-fatal by contract: the screen treats an empty list as "no
+        // filter options" and still renders the grid, so a missing
+        // migration degrades the dropdown rather than the page.
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_gap_centre_source_counts";
+            AddParam(command, "@organization_id", DbType.Int64, (object?)organizationId ?? DBNull.Value);
+
+            var rows = new List<GapCentreSourceCount>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add(new GapCentreSourceCount(
+                    reader["SourceModuleCode"]?.ToString() ?? "",
+                    Convert.ToInt32(reader["DisplayOrder"]),
+                    Convert.ToInt64(reader["GapCount"])));
+            return rows;
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "sp_gap_centre_source_counts failed for organization {OrgId}.", organizationId);
+            return [];
+        }
+    }
+
+    // -------------------------------------------------------------
     // Helpers + Mappers
     // -------------------------------------------------------------
     private async Task<DbConnection> OpenAsync(CancellationToken cancellationToken)
@@ -779,6 +952,20 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
     private static int?     ReadIntOrNull(DbDataReader r, string col)      => r[col] == DBNull.Value ? null : Convert.ToInt32(r[col]);
     private static DateTime? ReadDateTimeOrNull(DbDataReader r, string col)=> r[col] == DBNull.Value ? null : Convert.ToDateTime(r[col]);
     private static string?  ReadStringOrNull(DbDataReader r, string col)   => r[col] == DBNull.Value ? null : r[col].ToString();
+
+    // Migration 318: sp_gap_centre_list's RawStatusCode column is new, so
+    // a pre-318 database still returns the pre-318 shape. Same
+    // GetOrdinal-by-name tolerant-column check used elsewhere in the API
+    // (GapLifecycleService/ResolveWorkspaceService/etc.) -- an unguarded
+    // reader[col] on a missing column throws and takes the whole list
+    // down instead of degrading the one new field.
+    private static bool HasColumn(DbDataReader r, string name)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+            if (string.Equals(r.GetName(i), name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
 
     private static CustomGapListRow MapListRow(DbDataReader r) => new(
         Convert.ToInt64(r["custom_gap_id"]),

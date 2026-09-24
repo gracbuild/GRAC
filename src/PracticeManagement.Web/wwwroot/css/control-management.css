@@ -289,6 +289,14 @@ textarea {
   white-space: nowrap;
 }
 
+/* Grid font-weight standard (2026-09-24): all data cells render at the regular
+   weight. Column headers (thead th) stay bold via the `.table-wrap th` rule
+   above; in-body grouping / heading rows keep their own weight via their
+   higher-specificity rules. Row values must never be bold. */
+.table-wrap tbody td {
+  font-weight: 400;
+}
+
 .table-wrap tbody tr:nth-child(even) td {
   background: #fbfcff;
 }

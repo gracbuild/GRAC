@@ -1,0 +1,193 @@
+@*
+    Exception View  (dedicated full page)
+
+    Route: /Practice/Index/exception-view?exceptionId=NNN
+
+    PURPOSE
+    -------
+    exception-analysis.cshtml is the Pending-request ANALYSIS WORKFLOW
+    (justification, proposed dates, remediation tasks, Submit for
+    approval) -- it has no read-only "view mode", and Exception Centre's
+    own row menu already disables its own link to that page once a
+    request leaves Pending/SubmittedForApproval. There was, in effect,
+    no working "View" for a Closed/Approved/Rejected exception. This
+    page is that missing read-only full view, reachable in ANY status.
+
+    It does not replace exception-analysis.cshtml and does not touch it
+    -- Analysis stays exactly as it is, for exactly the Pending-request
+    workflow it was built for.
+
+    DATA SOURCES -- every one an existing API call, nothing new added:
+      * Request detail -> GET /practice/api/exception-centre/{id}
+                           (exception-analysis.js's own loadDetail())
+      * History         -> GET /practice/api/exception-centre/{id}/history
+                           (exception-analysis.js's own loadHistory())
+      * Attachments      -> GET /practice/api/exception-centre/{id}/attachments
+                           (already existed on the API; this is the
+                           first screen to actually list them)
+      * Related Tasks    -> GET /practice/api/exception-centre/{id}/tasks
+                           (exception-analysis.js's own loadTasks())
+      * Practice name    -> GET /practice/api/exception-centre/lookups/practices
+                           (exception-analysis.js's own loadPracticeName())
+
+    No duplicate business logic, no duplicate full-view page.
+
+    ACTIONS MENU (change request, 2026-09-22): the "Actions" button below
+    the heading offers the same items Exception Centre's row 3-dot menu
+    does for this request -- Analysis, Approve (or the task-side SLA
+    quick-approve), Open source gap -- built and gated by the exact same
+    shared code Exception Centre itself now calls:
+    window.gracExceptionActions.buildMenu() for the item list and every
+    applicability/disabled rule, and openApprove()/openReject()/
+    approveSlaQuick() for the decision itself. No action, navigation
+    target or permission/applicability rule is re-implemented here -- see
+    Shared/exception-actions.js's own header comment for the rules
+    themselves. "View" is deliberately not offered: this page already IS
+    the destination Exception Centre's "View" item opens, so buildMenu()
+    is called without an onView handler and it is simply left out (the
+    same reasoning Gap View and Task View apply to their own "View").
+
+    "Analysis" lives ONLY here now (second pass, same day): this page
+    used to also carry a standalone "Open Analysis" button beside
+    Actions, navigating to the same exception-analysis.cshtml URL the
+    menu's own Analysis item does -- but unconditionally, bypassing the
+    disabled/status gate buildMenu() applies to that same item (Analysis
+    only applies to a Pending or SubmittedForApproval request). That
+    button was removed; the Actions menu is the one path in now, gated
+    exactly like Exception Centre's own row menu gates it.
+
+    The Approve/Reject dialogs the menu's Approve item opens are the
+    SAME markup Exception Centre's row menu opens -- moved out of
+    exception-centre.cshtml into the shared partial
+    Partials/_exception-action-dialogs.cshtml so both screens include the
+    one copy rather than each carrying their own. See that partial's own
+    header comment.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="evHeading">Exception View</h1>
+        <p class="pm-hint">Everything recorded for this exception request, read-only.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <button type="button" class="pm-button" id="evActionsBtn" aria-haspopup="true" aria-expanded="false">
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
+        @* "Open Analysis" was a separate button here (change request,
+           2026-09-22, second pass): removed, since it duplicated the
+           "Analysis" item the Actions menu already offers -- and did so
+           WITHOUT that item's own status gate, so it stayed clickable
+           for an Approved/Rejected/Closed request when Exception Centre's
+           own row menu (and the menu above) both grey that same item out.
+           "Analysis" now has exactly one entry point, under Actions,
+           gated exactly the way Exception Centre's row menu gates it. *@
+        <a class="pm-button" href="~/Practice/Index/exception-centre">
+            <i class="fa-solid fa-arrow-left"></i> Back to Exception Centre
+        </a>
+    </div>
+</div>
+
+<partial name="Partials/_exception-action-dialogs" />
+
+<section class="pm-panel" id="evUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="evUnavailableTitle">Exception request not found.</h2>
+        <p id="evUnavailableBody">Open this page from Exception Centre's row menu.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="evRoot" hidden>
+
+    <div class="pm-toolbar" style="justify-content:space-between">
+        <div>
+            <span class="pm-badge" id="evStatusChip">-</span>
+        </div>
+        <button class="pm-button icon" id="evRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <h3 class="ev-section">Request Details</h3>
+    <dl class="ev-facts" id="evFacts"></dl>
+
+    <div id="evRelatedWrap" hidden>
+        <h3 class="ev-section">Related</h3>
+        <dl class="ev-facts" id="evRelatedFacts"></dl>
+    </div>
+
+    <div id="evReasonWrap" hidden>
+        <h3 class="ev-section">Reason / Justification</h3>
+        <dl class="ev-facts ev-facts-wide" id="evReasonFacts"></dl>
+    </div>
+
+    <div id="evValidityWrap" hidden>
+        <h3 class="ev-section">Validity</h3>
+        <dl class="ev-facts" id="evValidityFacts"></dl>
+    </div>
+
+    <div id="evApprovalWrap" hidden>
+        <h3 class="ev-section">Approval</h3>
+        <dl class="ev-facts ev-facts-wide" id="evApprovalFacts"></dl>
+    </div>
+
+    <div id="evEvidenceWrap">
+        <h3 class="ev-section">Evidence <span class="pm-badge" id="evEvidenceCount"></span></h3>
+        <p class="pm-hint" id="evEvidenceEmpty" hidden>No evidence recorded.</p>
+        <div class="pm-table-wrap" id="evEvidenceTable" hidden>
+            <table>
+                <thead><tr><th>File / Location</th><th>Type</th><th>Uploaded by</th><th>Uploaded</th><th>&nbsp;</th></tr></thead>
+                <tbody id="evEvidenceBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="evTasksWrap" hidden>
+        <h3 class="ev-section">Related Tasks</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Task #</th><th>Title</th><th>Status</th><th>Assigned To</th><th>Due</th></tr></thead>
+                <tbody id="evTasksBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <h3 class="ev-section">History</h3>
+    <p class="pm-hint">Every recorded action on this request, newest first.</p>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>When</th><th>Action</th><th>By</th><th>Detail</th></tr></thead>
+            <tbody id="evHistoryBody"><tr><td colspan="4" class="pm-empty">Loading...</td></tr></tbody>
+        </table>
+    </div>
+
+</section>
+
+<style>
+    #evRoot .ev-section {
+        margin: 18px 0 8px; font-size: 13px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .04em; color: #4a5568;
+    }
+    #evRoot .ev-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
+        gap: 8px 20px; margin: 0 0 4px;
+        padding: 12px 14px; background: #f7fafc; border-radius: 6px;
+    }
+    #evRoot .ev-facts-wide { grid-template-columns: 1fr; }
+    #evRoot .ev-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+    }
+    #evRoot .ev-facts dd {
+        margin: 0 0 6px; font-size: 13px; color: #2d3748; overflow-wrap: anywhere;
+        white-space: pre-wrap;
+    }
+    #evRoot .ev-facts dd.ev-empty { color: #a0aec0; font-style: italic; }
+    #evRoot .ev-facts dd.ev-block { white-space: pre-wrap; }
+    .ev-hint { font-size: 11px; color: #94a3b8; }
+</style>
+
+<script src="~/js/ExceptionCentre/exception-view.js" asp-append-version="true"></script>
+<script src="~/js/Shared/exception-actions.js" asp-append-version="true"></script>

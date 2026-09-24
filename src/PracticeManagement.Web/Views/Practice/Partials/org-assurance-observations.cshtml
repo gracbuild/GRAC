@@ -597,7 +597,7 @@
         const body = document.getElementById('oaObListBody');
         if (!state.orgId) {
             body.innerHTML = '<tr><td colspan="5" class="pm-empty">Pick an organization.</td></tr>';
-            wf.updatePager('oa-ob-list', { pageNumber: 1, totalCount: 0 });
+            wf.updatePager('oa-ob-list', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="5" class="pm-empty">Loading...</td></tr>';
@@ -661,7 +661,7 @@
                   + 'style="background:#fee2e2; color:#991b1b; text-decoration:none;">Gaps &raquo;</a>'
                 : '';
             return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '') + '>'
-                 + '<td><div style="font-weight:600;">' + wf.escape(title) + gapBadge + '</div>'
+                 + '<td><div>' + wf.escape(title) + gapBadge + '</div>'
                  + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div>'
                  + '<div style="font-size:11px; color:#64748b;">' + wf.escape(exec) + (ent ? ' &middot; ' + wf.escape(ent) : '') + '</div></td>'
                  + '<td><span class="pm-severity-dot" style="background:' + severityColor(sev) + ';"></span>' + wf.escape(sevN) + '</td>'
@@ -780,7 +780,8 @@
     }
 
     async function doTransition(id, action, prompt) {
-        const notes = window.prompt(prompt || 'Notes (optional):', '');
+        const notes = await window.gracUi.prompt(prompt || 'Notes (optional):',
+              { title: 'Notes', inputLabel: 'Notes', confirmText: 'Continue' });
         if (notes === null) return; // user cancelled
         try {
             const url  = U(API + '/observations/' + id + '/' + action);
@@ -835,7 +836,8 @@
     }
 
     async function doDelete(id) {
-        if (!window.confirm('Delete this observation? This cannot be undone.')) return;
+        if (!await window.gracUi.confirm('Delete this observation? This cannot be undone.',
+              { type: 'warning', title: 'Delete observation', confirmText: 'Delete' })) return;
         try {
             const qs = new URLSearchParams({ organizationId: String(state.orgId) });
             const url = U(API + '/observations/' + id + '?' + qs.toString());
@@ -1016,7 +1018,7 @@
             const when    = formatDateTime(e.collectedDt || e.CollectedDt);
             const by      = e.collectedByDisplayName || e.CollectedByDisplayName || '';
             return '<tr>'
-                 + '<td><div style="font-weight:600;">' + wf.escape(label || '(no label)') + '</div>'
+                 + '<td><div>' + wf.escape(label || '(no label)') + '</div>'
                  + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(type) + '</div></td>'
                  + '<td>' + (url ? '<a href="' + url + '" target="_blank" rel="noopener">' + wf.escape(file || url) + '</a>'
                                  : wf.escape(file || loc || '')) + '</td>'
@@ -1030,7 +1032,8 @@
     }
 
     async function deleteEvidence(evidenceId) {
-        if (!window.confirm('Delete this evidence?')) return;
+        if (!await window.gracUi.confirm('Delete this evidence?',
+              { type: 'warning', title: 'Delete evidence', confirmText: 'Delete' })) return;
         try {
             const qs = new URLSearchParams({ organizationId: String(state.orgId) });
             const url = U(API + '/observations/' + state.selectedObsId + '/evidence/' + evidenceId + '?' + qs.toString());
@@ -1373,12 +1376,14 @@
         el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
     }
     function formatDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         if (isNaN(d.getTime())) return String(v);
         return d.toISOString().slice(0, 10);
     }
     function formatDateTime(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         if (isNaN(d.getTime())) return String(v);

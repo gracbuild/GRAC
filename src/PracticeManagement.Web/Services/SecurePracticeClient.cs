@@ -25,6 +25,12 @@ public sealed class SecurePracticeClient(HttpClient httpClient, IConfiguration c
     public Task<string> SetPasswordAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
         SendAsync("secure/set-password", token, request, cancellationToken);
 
+    // Password-free identity lookup, same bootstrap-token transport as
+    // sign-in. Used only by the ReviewLogin path, to give a configuration-
+    // verified admin the employee id every actor stamp needs.
+    public Task<string> ResolveIdentityAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/resolve-identity", token, request, cancellationToken);
+
     private async Task<string> SendAsync(string path, string token, SecureRepositoryRequest request, CancellationToken cancellationToken)
     {
         request.TimestampUtc = DateTimeOffset.UtcNow;

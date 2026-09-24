@@ -1,0 +1,26 @@
+@*
+    Audit Definition (migration 276 / 279) -- Phase 3.
+
+    Screen key : `org-audit-definition`
+    Group      : Audit Management
+    Menu       : Audit Management -> Audit Definition
+
+    The audit is the primary entity. This screen is ONE audit list plus
+    one 3-tab page per audit:
+
+        Audit list
+          +-- New Definition ------> Definition Details / Scope / Question Set
+          +-- 3 dots -> View ------> the same three tabs, for that audit
+
+    All three tabs work against the same definition id, so scope and
+    question sets attach to the audit rather than becoming free-standing
+    records. The standalone Scope Builder and Question Sets list screens
+    are removed from the menu by migration 279; their routes stay alive
+    for existing deep links.
+
+    Everything lives in Partials/_audit-definition-workspace.cshtml, which
+    hosts the existing screens rather than reimplementing them.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_audit-definition-workspace" model="Model" />

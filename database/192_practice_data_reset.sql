@@ -42,9 +42,31 @@
 --   including GRAC_New.evidence_type_master. This script only ever writes to
 --   grac_practice.
 --
+-- TWO SCOPES (@Scope, added later for the catalogue re-import)
+--   'ALL'        the original behaviour described above -- clear the whole
+--                module, keep only masters and global config/security.
+--   'CATALOGUE'  clear ONLY the repository-subscription-and-below subtree:
+--                subscription, applicability, org statements/controls/
+--                requirements, practices, instances, and every table that
+--                hangs off them (tasks, gaps, assurance, evidence, events,
+--                risks, exceptions). Organisation, employees, roles,
+--                departments, workflow definitions and masters SURVIVE.
+--                Use this to reload the practice/obligation catalogue
+--                without rebuilding the tenant from scratch.
+--
+--                Membership is not a hand-written table list. Section 2
+--                seeds from @CatalogueRoots and then closes over foreign
+--                keys, so every child of a root is included automatically
+--                and a table added by a future migration needs no edit
+--                here. Everything else in the engine below -- the blocker
+--                pre-flight, FK levelling, cycle breaking, trigger
+--                handling, verification and identity reseed -- is shared
+--                by both scopes, unchanged.
+--
 -- SAFETY
 --   * @DryRun = 1 by default -- prints the full plan (order + row counts) and
 --     changes nothing. Set to 0 to execute.
+--   * @Scope is validated below; an unrecognised value aborts.
 --   * @ConfirmDatabase must be typed to match DB_NAME() before it will run
 --     for real. Prevents a stray F5 against the wrong database.
 --   * Pre-flight abort if any table OUTSIDE the delete set (a kept master, or
@@ -82,6 +104,40 @@ GO
 DECLARE @DryRun          BIT     = 1;      -- 1 = plan only, 0 = delete for real
 DECLARE @ConfirmDatabase SYSNAME = N'';    -- must equal DB_NAME() when @DryRun = 0
 DECLARE @ReseedIdentity  BIT     = 1;      -- 1 = restart IDENTITY counters at 1
+DECLARE @Scope           SYSNAME = N'ALL'; -- 'ALL' | 'CATALOGUE'  (see header)
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* CATALOGUE ROOTS -- only read when @Scope = 'CATALOGUE'.             */
+/*                                                                     */
+/* Name only the TOP of the subtree. Everything that references these  */
+/* -- children, grandchildren, link tables -- is added automatically   */
+/* by the foreign-key closure in section 2, so this list stays short   */
+/* and does not need editing when a new child table appears.           */
+/*                                                                     */
+/* The default is "repository subscription, applicability, and         */
+/* everything below": what an organisation SUBSCRIBED to and everything*/
+/* derived from it. Organisation, employees, roles, departments,       */
+/* workflow definitions and masters are parents of these, not          */
+/* children, so they survive.                                          */
+/*                                                                     */
+/* Run with @DryRun = 1 first and read the printed table list. If a    */
+/* table you expected is missing, add its root here; if one you wanted */
+/* kept appears, remove the root that pulled it in.                    */
+/* ------------------------------------------------------------------ */
+DECLARE @CatalogueRoots TABLE (table_name SYSNAME NOT NULL PRIMARY KEY);
+INSERT INTO @CatalogueRoots (table_name) VALUES
+    (N'repository_subscription'),                -- the subscription itself
+    (N'subscription_recommendation_history'),
+    (N'organization_framework_statements'),      -- statements pulled from the release
+    (N'organization_statement_applicability'),   -- applicability decisions
+    (N'organization_control'),                   -- control context per org
+    (N'organization_control_requirement'),
+    (N'organization_requirement'),               -- requirements derived from statements
+    (N'organization_statement_practice_mapping'),
+    (N'custom_release_source_structure'),        -- org-authored releases
+    (N'custom_release_statement'),
+    (N'practice');                               -- practice + instance + everything below
 /* ------------------------------------------------------------------ */
 
 DECLARE @sql        NVARCHAR(MAX),
@@ -111,6 +167,9 @@ IF OBJECT_ID('tempdb..#kept_counts') IS NOT NULL DROP TABLE #kept_counts;
 IF SCHEMA_ID('grac_practice') IS NULL
     THROW 51000, 'Schema grac_practice is missing. Run 001_practice_management_schema.sql first.', 1;
 
+IF @Scope IS NULL OR @Scope NOT IN (N'ALL', N'CATALOGUE')
+    THROW 51005, 'Set @Scope to N''ALL'' or N''CATALOGUE''.', 1;
+
 IF @DryRun = 0 AND (@ConfirmDatabase IS NULL OR @ConfirmDatabase <> DB_NAME())
 BEGIN
     PRINT '>>> BLOCKED. Set @ConfirmDatabase = N''' + DB_NAME() + ''' to run this for real.';
@@ -120,6 +179,10 @@ END
 PRINT '=====================================================================';
 PRINT '192 Practice Management data reset';
 PRINT '  Database : ' + DB_NAME();
+PRINT '  Scope    : ' + @Scope
+    + CASE WHEN @Scope = N'CATALOGUE'
+           THEN ' (repository subscription and everything below it)'
+           ELSE ' (whole module except masters and global config)' END;
 PRINT '  Mode     : ' + CASE WHEN @DryRun = 1 THEN 'DRY RUN (nothing will be deleted)' ELSE 'EXECUTE' END;
 PRINT '  Started  : ' + CONVERT(NVARCHAR(30), SYSUTCDATETIME(), 126) + 'Z';
 PRINT '=====================================================================';
@@ -129,28 +192,33 @@ PRINT '=====================================================================';
 /* ------------------------------------------------------------------ */
 CREATE TABLE #keep (table_name SYSNAME NOT NULL PRIMARY KEY, keep_reason NVARCHAR(60) NOT NULL);
 
-INSERT INTO #keep (table_name, keep_reason)
-SELECT t.name, N'master table'
-FROM sys.tables t
-JOIN sys.schemas s ON s.schema_id = t.schema_id
-WHERE s.name = 'grac_practice'
-  AND t.name LIKE '%[_]master';
+IF @Scope = N'ALL'
+BEGIN
+    INSERT INTO #keep (table_name, keep_reason)
+    SELECT t.name, N'master table'
+    FROM sys.tables t
+    JOIN sys.schemas s ON s.schema_id = t.schema_id
+    WHERE s.name = 'grac_practice'
+      AND t.name LIKE '%[_]master';
 
-INSERT INTO #keep (table_name, keep_reason)
-SELECT v.table_name, N'global config/security'
-FROM (VALUES
-        (N'reference_option'),
-        (N'security_role'),
-        (N'security_permission'),
-        (N'security_role_permission'),
-        (N'rbac_rule'),
-        (N'entity_state_transition_rule'),
-        (N'feature_flag')
-     ) AS v(table_name)
-WHERE EXISTS (SELECT 1 FROM sys.tables t
-              JOIN sys.schemas s ON s.schema_id = t.schema_id
-              WHERE s.name = 'grac_practice' AND t.name = v.table_name)
-  AND NOT EXISTS (SELECT 1 FROM #keep k WHERE k.table_name = v.table_name);
+    INSERT INTO #keep (table_name, keep_reason)
+    SELECT v.table_name, N'global config/security'
+    FROM (VALUES
+            (N'reference_option'),
+            (N'security_role'),
+            (N'security_permission'),
+            (N'security_role_permission'),
+            (N'rbac_rule'),
+            (N'entity_state_transition_rule'),
+            (N'feature_flag')
+         ) AS v(table_name)
+    WHERE EXISTS (SELECT 1 FROM sys.tables t
+                  JOIN sys.schemas s ON s.schema_id = t.schema_id
+                  WHERE s.name = 'grac_practice' AND t.name = v.table_name)
+      AND NOT EXISTS (SELECT 1 FROM #keep k WHERE k.table_name = v.table_name);
+END
+/* In CATALOGUE scope the keep list is whatever the delete set does not
+   claim, so it is filled in AFTER section 2. */
 
 /* ------------------------------------------------------------------ */
 /* 2. Delete set                                                       */
@@ -164,19 +232,109 @@ CREATE TABLE #target
     has_ident  BIT      NOT NULL DEFAULT 0
 );
 
-INSERT INTO #target (object_id, table_name, row_est, has_ident)
-SELECT t.object_id,
-       t.name,
-       ISNULL((SELECT SUM(ps.row_count)
-               FROM sys.dm_db_partition_stats ps
-               WHERE ps.object_id = t.object_id AND ps.index_id IN (0, 1)), 0),
-       CASE WHEN EXISTS (SELECT 1 FROM sys.identity_columns ic
-                         WHERE ic.object_id = t.object_id) THEN 1 ELSE 0 END
-FROM sys.tables t
-JOIN sys.schemas s ON s.schema_id = t.schema_id
-WHERE s.name = 'grac_practice'
-  AND t.is_ms_shipped = 0
-  AND NOT EXISTS (SELECT 1 FROM #keep k WHERE k.table_name = t.name);
+IF @Scope = N'ALL'
+BEGIN
+    INSERT INTO #target (object_id, table_name, row_est, has_ident)
+    SELECT t.object_id,
+           t.name,
+           ISNULL((SELECT SUM(ps.row_count)
+                   FROM sys.dm_db_partition_stats ps
+                   WHERE ps.object_id = t.object_id AND ps.index_id IN (0, 1)), 0),
+           CASE WHEN EXISTS (SELECT 1 FROM sys.identity_columns ic
+                             WHERE ic.object_id = t.object_id) THEN 1 ELSE 0 END
+    FROM sys.tables t
+    JOIN sys.schemas s ON s.schema_id = t.schema_id
+    WHERE s.name = 'grac_practice'
+      AND t.is_ms_shipped = 0
+      AND NOT EXISTS (SELECT 1 FROM #keep k WHERE k.table_name = t.name);
+END
+ELSE
+BEGIN
+    /* ---------------------------------------------------------------- */
+    /* CATALOGUE scope: the subscription-and-below subtree only.        */
+    /*                                                                  */
+    /* Seeded with the roots listed in @CatalogueRoots, then CLOSED     */
+    /* over foreign keys: any table that references something already   */
+    /* in the set joins the set, repeatedly, until nothing new is       */
+    /* found. That is what makes this safe to state as a short root     */
+    /* list -- every child, grandchild and cross-link of a root is      */
+    /* pulled in automatically, so a table added by a future migration  */
+    /* is included the day it is created without editing this script.   */
+    /*                                                                  */
+    /* Everything the roots hang FROM stays: organization and its       */
+    /* structure, employees, roles, departments, workflow definitions,  */
+    /* masters. They are parents, never children, so the closure never  */
+    /* reaches them.                                                    */
+    /* ---------------------------------------------------------------- */
+    INSERT INTO #target (object_id, table_name, row_est, has_ident)
+    SELECT t.object_id, t.name, 0, 0
+    FROM sys.tables t
+    JOIN sys.schemas s ON s.schema_id = t.schema_id
+    JOIN @CatalogueRoots r ON r.table_name = t.name
+    WHERE s.name = 'grac_practice'
+      AND t.is_ms_shipped = 0;
+
+    IF NOT EXISTS (SELECT 1 FROM #target)
+        THROW 51003, 'CATALOGUE scope: none of the root tables exist in this database. Check @CatalogueRoots.', 1;
+
+    /* Report roots that were named but do not exist -- a typo in the
+       root list would otherwise silently shrink the delete set. */
+    IF EXISTS (SELECT 1 FROM @CatalogueRoots r
+                WHERE NOT EXISTS (SELECT 1 FROM #target g WHERE g.table_name = r.table_name))
+    BEGIN
+        PRINT '>>> These named roots do not exist in grac_practice and were ignored:';
+        SELECT r.table_name AS missing_root
+        FROM @CatalogueRoots r
+        WHERE NOT EXISTS (SELECT 1 FROM #target g WHERE g.table_name = r.table_name);
+    END
+
+    SET @changed = 1;
+    SET @pass    = 0;
+    WHILE @changed > 0 AND @pass < 100
+    BEGIN
+        INSERT INTO #target (object_id, table_name, row_est, has_ident)
+        SELECT DISTINCT ct.object_id, ct.name, 0, 0
+        FROM sys.foreign_keys fk
+        JOIN sys.tables  ct ON ct.object_id = fk.parent_object_id
+        JOIN sys.schemas cs ON cs.schema_id = ct.schema_id
+        WHERE cs.name = 'grac_practice'
+          AND ct.is_ms_shipped = 0
+          AND fk.referenced_object_id IN (SELECT object_id FROM #target)
+          AND fk.parent_object_id NOT IN (SELECT object_id FROM #target);
+
+        SET @changed = @@ROWCOUNT;
+        SET @pass += 1;
+    END
+
+    /* Row estimates and identity flags, once the membership is settled. */
+    UPDATE g
+       SET g.row_est   = ISNULL((SELECT SUM(ps.row_count)
+                                 FROM sys.dm_db_partition_stats ps
+                                 WHERE ps.object_id = g.object_id AND ps.index_id IN (0, 1)), 0),
+           g.has_ident = CASE WHEN EXISTS (SELECT 1 FROM sys.identity_columns ic
+                                           WHERE ic.object_id = g.object_id) THEN 1 ELSE 0 END
+    FROM #target g;
+
+    /* A master table reached by the closure is a modelling surprise, not
+       a routine event: masters are supposed to be parents. Say so rather
+       than quietly wiping a seeded catalog. */
+    IF EXISTS (SELECT 1 FROM #target WHERE table_name LIKE '%[_]master')
+    BEGIN
+        PRINT '>>> BLOCKED. The closure reached one or more _master tables:';
+        SELECT table_name FROM #target WHERE table_name LIKE '%[_]master' ORDER BY table_name;
+        PRINT '    A master should never be a child of the catalogue subtree. Either the';
+        PRINT '    root list is too wide, or that master carries an unexpected FK.';
+        THROW 51004, 'CATALOGUE scope reached a master table. Nothing was deleted.', 1;
+    END
+
+    INSERT INTO #keep (table_name, keep_reason)
+    SELECT t.name, N'outside catalogue scope'
+    FROM sys.tables t
+    JOIN sys.schemas s ON s.schema_id = t.schema_id
+    WHERE s.name = 'grac_practice'
+      AND t.is_ms_shipped = 0
+      AND NOT EXISTS (SELECT 1 FROM #target g WHERE g.object_id = t.object_id);
+END
 
 SELECT @totalRows = SUM(row_est) FROM #target;
 SELECT @keepCount = COUNT(*) FROM #keep;
@@ -629,4 +787,76 @@ DROP TABLE #trig;
 DROP TABLE #ignore_fk;
 DROP TABLE #target;
 DROP TABLE #keep;
+GO
+
+-- =====================================================================
+-- POST-RESET: re-seed the four lifecycle event definitions   (335)
+--
+-- WHY THIS IS HERE
+-- ----------------
+-- The header above explains why event_definition is deliberately NOT on
+-- the keep list: it is organization-scoped and FKs to workflow /
+-- workflow_stage, both of which this script clears, so keeping it would
+-- leave orphans and fail the workflow DELETE.
+--
+-- That reasoning is sound. What was missing is the other half: nothing
+-- put the rows back. PEOPLE_ONBOARDING, PEOPLE_OFFBOARDING,
+-- ASSET_COMMISSIONING and ASSET_DECOMMISSIONING are not organizational
+-- configuration -- they are the codes sp_event_raise_people_lifecycle
+-- and sp_event_raise_asset_lifecycle HARD-CODE (migration 126 calls them
+-- "a CONTRACT with 124"). Clearing them leaves Raise Event throwing
+--
+--     sp_event_instance_raise_scoped: event definition not found for
+--     organization.                                        (67223)
+--
+-- for every surviving organization, with nothing on screen explaining
+-- why. Under @Scope = 'CATALOGUE' that is exactly the state the module
+-- is left in: the organizations survive, their events do not.
+--
+-- WHAT IT DOES
+-- ------------
+-- Calls migration 335's sp_event_definition_ensure_baseline for every
+-- surviving active organization. That procedure is INSERT-ONLY, so on a
+-- 'ALL' reset -- where organization itself is cleared -- there is nothing
+-- to iterate and this does nothing at all.
+--
+-- GUARDED, so this script still runs unchanged against a database that
+-- has not had 335 applied. There it prints what to do instead, rather
+-- than failing the reset over a re-seed.
+--
+-- Rows land with entered_by = 'reset-192', so a post-reset seed is
+-- distinguishable from 126's and from 335's own gap fill.
+-- =====================================================================
+IF OBJECT_ID('grac_practice.sp_event_definition_ensure_baseline','P') IS NULL
+BEGIN
+    PRINT '';
+    PRINT '>>> NOTE: sp_event_definition_ensure_baseline is not present (migration 335 not applied).';
+    PRINT '>>> The four lifecycle event definitions were cleared and have NOT been restored.';
+    PRINT '>>> Raise Event will fail with 67223 until you run 335_event_definition_ensure_baseline.sql';
+    PRINT '>>> (or re-run 126_event_scope_baseline_seed.sql).';
+END
+ELSE
+BEGIN
+    DECLARE @reseed_org BIGINT, @reseed_count INT = 0;
+
+    DECLARE reseed_cur CURSOR LOCAL FAST_FORWARD FOR
+        SELECT organization_id FROM grac_practice.organization
+        WHERE status = N'Active' ORDER BY organization_id;
+
+    OPEN reseed_cur;
+    FETCH NEXT FROM reseed_cur INTO @reseed_org;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC grac_practice.sp_event_definition_ensure_baseline
+             @organization_id = @reseed_org, @actor = N'reset-192';
+        SET @reseed_count = @reseed_count + 1;
+        FETCH NEXT FROM reseed_cur INTO @reseed_org;
+    END
+    CLOSE reseed_cur;
+    DEALLOCATE reseed_cur;
+
+    PRINT '';
+    PRINT '192: lifecycle event definitions re-seeded for '
+        + CAST(@reseed_count AS VARCHAR(20)) + ' surviving active organization(s).';
+END
 GO

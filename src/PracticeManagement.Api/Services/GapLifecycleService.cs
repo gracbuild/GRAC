@@ -127,7 +127,22 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             HasColumn(r, "SlaMasterName")     && r["SlaMasterName"]     != DBNull.Value ? r["SlaMasterName"]?.ToString()      : null,
             HasColumn(r, "SlaDaysEffective")  && r["SlaDaysEffective"]  != DBNull.Value ? Convert.ToInt32(r["SlaDaysEffective"]) : (int?)null,
             HasColumn(r, "SlaSourceCode")     && r["SlaSourceCode"]     != DBNull.Value ? r["SlaSourceCode"]?.ToString()      : null,
-            HasColumn(r, "SlaOverridePending")&& r["SlaOverridePending"]!= DBNull.Value ? Convert.ToBoolean(r["SlaOverridePending"]) : false);
+            HasColumn(r, "SlaOverridePending")&& r["SlaOverridePending"]!= DBNull.Value ? Convert.ToBoolean(r["SlaOverridePending"]) : false,
+            // Migration 250: detection method captured at Add Gap.
+            // Guarded so a pre-250 header proc still binds.
+            HasColumn(r, "DetectionMethodCode") ? r["DetectionMethodCode"] as string : null,
+            HasColumn(r, "DetectionMethodName") ? r["DetectionMethodName"] as string : null,
+            // Migration 321: linked Practice Instance. Guarded so a
+            // pre-321 header proc still binds.
+            HasColumn(r, "PracticeInstanceId")   && r["PracticeInstanceId"]   != DBNull.Value ? Convert.ToInt64(r["PracticeInstanceId"]) : (long?)null,
+            HasColumn(r, "PracticeInstanceCode") ? r["PracticeInstanceCode"] as string : null,
+            HasColumn(r, "PracticeInstanceName") ? r["PracticeInstanceName"] as string : null,
+            // Migration 325: Identified Date. Guarded so a pre-325 header
+            // proc still binds.
+            HasColumn(r, "IdentifiedDate") && r["IdentifiedDate"] != DBNull.Value ? Convert.ToDateTime(r["IdentifiedDate"]) : (DateTime?)null,
+            // Migration 367: Practice Instance Operationalized flag.
+            // Guarded so a pre-367 header proc still binds.
+            HasColumn(r, "IsPracticeOperationalized") && r["IsPracticeOperationalized"] != DBNull.Value ? Convert.ToBoolean(r["IsPracticeOperationalized"]) : (bool?)null);
     }
 
     // Tolerant column-presence check for forward/back compatibility with
@@ -242,11 +257,25 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             r["RcaMethodCode"] as string,
             r["RcaSummary"] as string,
             r["RecommendedActionSummary"] as string,
+            // Migration 249: optional read -- returns null on a database
+            // without the column so the model still binds against older
+            // procs while a rollout is in flight.
+            HasColumn(r, "PreventiveAction") ? r["PreventiveAction"] as string : null,
+            // Migration 323: these three are the independent decisions
+            // the Analysis tab's checkboxes read and write directly.
             Convert.ToBoolean(r["RecommendTask"]),
             Convert.ToBoolean(r["RecommendException"]),
             Convert.ToBoolean(r["RecommendRisk"]),
-            r["RemediationPossible"] as string,
-            r["BusinessRiskPresent"] as string,
+            // Migration 252: same optional read as PreventiveAction above.
+            // 249/250 briefly re-emitted this proc from 157's body and
+            // dropped both 168 columns from the projection; guarding here
+            // means an un-migrated database degrades to null instead of
+            // throwing IndexOutOfRange. Migration 323 retired these from
+            // the Analysis tab (kept here only for a historical row's
+            // stored value; sp_custom_gap_analysis_get itself is
+            // unchanged by 323 and still always projects them).
+            HasColumn(r, "RemediationPossible") ? r["RemediationPossible"] as string : null,
+            HasColumn(r, "BusinessRiskPresent") ? r["BusinessRiskPresent"] as string : null,
             r["AnalysedByEmployeeId"] as long?,
             r["AnalysedOn"] as DateTime?,
             r["EnteredBy"] as string,
@@ -275,12 +304,21 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             AddParam(cmd, "@rca_method_code",           DbType.String, (object?)request.RcaMethodCode ?? DBNull.Value, 60);
             AddParam(cmd, "@rca_summary",               DbType.String, (object?)request.RcaSummary ?? DBNull.Value, -1);
             AddParam(cmd, "@recommended_action_summary",DbType.String, (object?)request.RecommendedActionSummary ?? DBNull.Value, -1);
+            // Migration 249: Preventive Action is a separate free-text
+            // column. NULL means "no opinion" and the proc COALESCE-
+            // preserves the stored value; the UI sends NULL when the
+            // textarea is empty or absent.
+            AddParam(cmd, "@preventive_action",         DbType.String, (object?)request.PreventiveAction ?? DBNull.Value, -1);
+            // Migration 323: three independent decisions -- any
+            // combination, each driving its own auto-trigger. See
+            // GapAnalysisSaveRequest's doc comment.
             AddParam(cmd, "@recommend_task",            DbType.Boolean, request.RecommendTask);
             AddParam(cmd, "@recommend_exception",       DbType.Boolean, request.RecommendException);
             AddParam(cmd, "@recommend_risk",            DbType.Boolean, request.RecommendRisk);
-            // Sir's decision model (migration 168). Proc gives these
-            // priority over the legacy flags above and derives the
-            // legacy flags from them for backward compat.
+            // Migration 168, retired by 323: request.RemediationPossible/
+            // BusinessRiskPresent are always null from this UI now. Still
+            // sent through (as DBNull) so an un-migrated proc on an older
+            // database does not see a missing-argument error.
             AddParam(cmd, "@remediation_possible",      DbType.StringFixedLength,
                      string.IsNullOrWhiteSpace(request.RemediationPossible) ? (object)DBNull.Value : request.RemediationPossible!, 1);
             AddParam(cmd, "@business_risk_present",     DbType.StringFixedLength,
@@ -289,7 +327,35 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             AddParam(cmd, "@caller_display_name",       DbType.String, request.CallerDisplayName ?? "system", 100);
 
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct)) { /* consume */ }
+            if (await r.ReadAsync(ct)) { /* consume CustomGapId result set */ }
+
+            // Migration 323: second result set -- per-artefact outcome of
+            // the three auto-triggers (TaskCreated/TaskError/...). Guarded
+            // with NextResultAsync's own return value so a database still
+            // on the pre-323 proc (single result set) degrades to the
+            // all-false/null defaults on GapAnalysisSaveResult instead of
+            // throwing.
+            bool taskCreated = false, exceptionCreated = false, riskCreated = false;
+            string? taskError = null, exceptionError = null, riskError = null;
+            // Migration 324: the same second result set gains the auto-
+            // Delegate ("Analysed") transition's own outcome. HasColumn-
+            // guarded like every field above so a database still on the
+            // pre-324 proc degrades to false/null instead of throwing.
+            bool lifecycleTransitioned = false;
+            string? lifecycleError = null, lifecycleStateCode = null, lifecycleStateName = null;
+            if (await r.NextResultAsync(ct) && await r.ReadAsync(ct))
+            {
+                if (HasColumn(r, "TaskCreated"))      taskCreated      = Convert.ToBoolean(r["TaskCreated"]);
+                if (HasColumn(r, "TaskError"))        taskError        = r["TaskError"] as string;
+                if (HasColumn(r, "ExceptionCreated")) exceptionCreated = Convert.ToBoolean(r["ExceptionCreated"]);
+                if (HasColumn(r, "ExceptionError"))   exceptionError   = r["ExceptionError"] as string;
+                if (HasColumn(r, "RiskCreated"))      riskCreated      = Convert.ToBoolean(r["RiskCreated"]);
+                if (HasColumn(r, "RiskError"))        riskError        = r["RiskError"] as string;
+                if (HasColumn(r, "LifecycleTransitioned")) lifecycleTransitioned = Convert.ToBoolean(r["LifecycleTransitioned"]);
+                if (HasColumn(r, "LifecycleError"))        lifecycleError        = r["LifecycleError"] as string;
+                if (HasColumn(r, "LifecycleStateCode"))    lifecycleStateCode    = r["LifecycleStateCode"] as string;
+                if (HasColumn(r, "LifecycleStateName"))    lifecycleStateName    = r["LifecycleStateName"] as string;
+            }
 
             // Migration 184: severity is captured during analysis. Retrigger
             // auto SLA-match so an updated severity_code lands the right
@@ -298,7 +364,28 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             // approved override survives re-analyses.
             await ApplyAutoSlaAsync(customGapId, request.CallerDisplayName, ct);
 
-            return new GapAnalysisSaveResult(true, customGapId, null);
+            // A best-effort trigger that was requested (checkbox ticked)
+            // but failed is still a successful analysis SAVE -- surfaced
+            // via the per-artefact fields below, not as request.Error,
+            // matching how this proc has always treated these triggers
+            // (best-effort, never rolling back the save itself).
+            if (request.RecommendTask && !taskCreated && taskError != null)
+                logger.LogWarning("GapLifecycleService.SaveAnalysis: Task auto-create failed for {GapId}: {Msg}", customGapId, taskError);
+            if (request.RecommendException && !exceptionCreated && exceptionError != null)
+                logger.LogWarning("GapLifecycleService.SaveAnalysis: Exception auto-create failed for {GapId}: {Msg}", customGapId, exceptionError);
+            if (request.RecommendRisk && !riskCreated && riskError != null)
+                logger.LogWarning("GapLifecycleService.SaveAnalysis: Risk auto-create failed for {GapId}: {Msg}", customGapId, riskError);
+            // Migration 324: a failed auto-Delegate is the direct cause of
+            // "status did not become Analysed" -- log it exactly like a
+            // failed Task/Exception/Risk auto-create above, instead of it
+            // being visible only via a server-side PRINT (or, before 324,
+            // not at all for a gap with no lifecycle_state_id yet).
+            if (!lifecycleTransitioned && lifecycleError != null)
+                logger.LogWarning("GapLifecycleService.SaveAnalysis: auto-delegate (Analysed) transition failed for {GapId}: {Msg}", customGapId, lifecycleError);
+
+            return new GapAnalysisSaveResult(true, customGapId, null,
+                taskCreated, taskError, exceptionCreated, exceptionError, riskCreated, riskError,
+                lifecycleTransitioned, lifecycleError, lifecycleStateCode, lifecycleStateName);
         }
         catch (SqlException ex)
         {
@@ -363,28 +450,54 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
         GapLinkedArtefactRow? task = null;
         GapLinkedArtefactRow? exception = null;
         GapLinkedArtefactRow? risk = null;
+        var failedObligations = new List<GapFailedObligationRow>();
 
-        // The proc returns three separate result sets (Task, Exception,
-        // Risk); each has zero or one row. Iterate through with NextResult.
+        // The proc returns four result sets: Task, Exception, Risk (each
+        // zero or one row, unchanged since 174) and, since migration 317,
+        // FailedObligations (zero or more rows -- an instance can have
+        // several Obligations in gap territory at once). Iterate with
+        // NextResult; the fourth set reads every row instead of just the
+        // first. A pre-317 database's proc still ends after Risk, so
+        // NextResultAsync returns false before the fourth branch is ever
+        // reached and failedObligations simply stays empty -- no guard
+        // needed beyond that.
         await using var r = await cmd.ExecuteReaderAsync(ct);
         int idx = 0;
         do
         {
-            if (await r.ReadAsync(ct))
+            if (idx < 3)
             {
-                var row = new GapLinkedArtefactRow(
-                    r["ArtefactType"]?.ToString() ?? "",
-                    Convert.ToInt64(r["ArtefactId"]),
-                    r["Title"] as string,
-                    r["StatusCode"] as string);
-                if (idx == 0) task = row;
-                else if (idx == 1) exception = row;
-                else if (idx == 2) risk = row;
+                if (await r.ReadAsync(ct))
+                {
+                    var row = new GapLinkedArtefactRow(
+                        r["ArtefactType"]?.ToString() ?? "",
+                        Convert.ToInt64(r["ArtefactId"]),
+                        r["Title"] as string,
+                        r["StatusCode"] as string);
+                    if (idx == 0) task = row;
+                    else if (idx == 1) exception = row;
+                    else if (idx == 2) risk = row;
+                }
+            }
+            else
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    failedObligations.Add(new GapFailedObligationRow(
+                        Convert.ToInt64(r["ObligationId"]),
+                        r["ObligationName"] as string,
+                        r["ObligationTypeCode"] as string,
+                        r["LoggedStatusCode"]?.ToString() ?? "",
+                        r["AddedDt"] as DateTime?,
+                        // Migration 372: live status, additive column. Guarded so a
+                        // pre-372 sp_custom_gap_linked_artefacts still binds.
+                        HasColumn(r, "CurrentStatusCode") ? r["CurrentStatusCode"]?.ToString() : null));
+                }
             }
             idx++;
         } while (await r.NextResultAsync(ct));
 
-        return new GapLinkedArtefactsResult(task, exception, risk);
+        return new GapLinkedArtefactsResult(task, exception, risk, failedObligations);
     }
 
     public async Task<long> AddDownstreamAsync(long customGapId, GapDownstreamLinkAddRequest request, CancellationToken ct)

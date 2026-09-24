@@ -581,7 +581,7 @@ public sealed class PracticeManagementGatewayController(
         "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets",
         "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability",
         "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", "dependencies", "evidence-configurations",
-        "subscribed-frameworks", "release-statements", "statement-applicability", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "dashboard-summary",
+        "subscribed-frameworks", "release-statements", "statement-applicability", "statement-applicability-bulk", "requirement-applicability-bulk", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "dashboard-summary",
         "assurance-schedule-rules", "assurance-schedule-overrides", "assurance-calendar-config", "assurance-calendar-events"
     };
 
@@ -595,7 +595,13 @@ public sealed class PracticeManagementGatewayController(
     private bool CanSaveEntity(string entityType, string action)
     {
         var area = PermissionArea(entityType);
+        // Both bulk entities sit here with their single-record counterpart:
+        // marking applicability is an EDIT of an existing row that may not have
+        // an applicability row yet, so ADD or EDIT permits it. Bulk must not be
+        // easier to reach than marking one record, nor harder.
         if (entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase)
+            || entityType.Equals("statement-applicability-bulk", StringComparison.OrdinalIgnoreCase)
+            || entityType.Equals("requirement-applicability-bulk", StringComparison.OrdinalIgnoreCase)
             || entityType.Equals("custom-release", StringComparison.OrdinalIgnoreCase)
             || entityType.Equals("custom-release-source-structure", StringComparison.OrdinalIgnoreCase)
             || entityType.Equals("custom-statement", StringComparison.OrdinalIgnoreCase)
@@ -656,9 +662,35 @@ public sealed class PracticeManagementGatewayController(
     {
         if (string.IsNullOrWhiteSpace(code)) return null;
         var context = navigationContextProtector.Unprotect(token, code);
-        if (!context.TargetArea.Equals(targetArea, StringComparison.OrdinalIgnoreCase))
+        if (!NavigationAreaMatches(context.TargetArea, targetArea))
             throw new CryptographicException("Navigation context target does not match the requested area.");
         return context;
+    }
+
+    // A navigation code is minted with the DESTINATION SCREEN as its
+    // TargetArea (navigateWithContext -> Practice/Index/{targetArea}). The
+    // bulk applicability actions, however, post their own *-bulk entity type
+    // (statement-applicability-bulk / requirement-applicability-bulk) while
+    // reusing that same screen code, so a strict equality check rejected them
+    // with "navigation context target does not match" -- the error seen when
+    // saving Bulk Mark Applicability on a screen reached via a drill-in.
+    // Single-record marking was unaffected because its entity type equals the
+    // screen key. Accept the bulk entities against the screen(s) they are
+    // marked from; organization scoping and the screen's own permission still
+    // apply, so this does not widen access.
+    private static bool NavigationAreaMatches(string contextTargetArea, string requestedArea)
+    {
+        if (contextTargetArea.Equals(requestedArea, StringComparison.OrdinalIgnoreCase)) return true;
+        return requestedArea.ToLowerInvariant() switch
+        {
+            "requirement-applicability-bulk" =>
+                contextTargetArea.Equals("organization-requirements", StringComparison.OrdinalIgnoreCase)
+                || contextTargetArea.Equals("practices", StringComparison.OrdinalIgnoreCase),
+            "statement-applicability-bulk" =>
+                contextTargetArea.Equals("source-statements", StringComparison.OrdinalIgnoreCase)
+                || contextTargetArea.Equals("organization-controls", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
     }
 
     private void ApplyNavigationContext(string token, string entityType, string code, ref int? organizationId, ref int? practiceId, ref int? practiceInstanceId, ref int? organizationControlId, ref int? organizationRequirementId)

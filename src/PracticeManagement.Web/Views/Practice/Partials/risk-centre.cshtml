@@ -18,8 +18,33 @@
     §4B is explicit that a custom risk has no candidate stage.
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
+@using PracticeManagement.Web.Security
+@* ISession.GetString is an extension in this namespace, and neither
+   Razor's implicit usings nor _ViewImports include it -- _Layout carries
+   the same two lines for the same reason. Without it the @@{ } block
+   below fails to compile with CS1061. *@
+@using Microsoft.AspNetCore.Http
+@{
+    // The signed-in user's employee id, rendered for the bulk accept
+    // form to PRE-SELECT an accepter (295).
+    //
+    // Read from session in the view, the way _Layout already reads the
+    // display name and organisation, rather than through a new
+    // "who am I" endpoint -- the value is known at render time and a
+    // round trip to learn it would be one we do not need.
+    //
+    // It is a DEFAULT ONLY, never an authority. The server stamps
+    // actorEmployeeId from the session regardless of what the browser
+    // sends, and sp_risk_acceptance_save still refuses an accepter from
+    // another organisation (56608). Empty when the account is not mapped
+    // to an employee, in which case the picker simply opens unset.
+    var sessionEmployeeId = Context.Session.GetString(PracticeSessionIdentity.EmployeeIdKey);
+}
 
-<div class="pm-page-heading compact">
+@* Hidden while the Risk Analysis full page is open — that page carries
+   its own heading naming the risk being analysed, and two page headings
+   stacked on one screen reads as a rendering fault. *@
+<div class="pm-page-heading compact" id="riskCentreHeading">
     <div>
         <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
         <h1>@Model.Title</h1>
@@ -36,6 +61,33 @@
     </button>
     @* BRD §23 — separate visibility for Candidates and Register, plus the
        §19 approval queue and the §21 notification outbox. *@
+    @* Review Risk and Risk Calendar are two views of ONE column,
+       next_review_date (migration 261):
+
+         Review Risk    next_review_date <= today  -- the work queue
+         Risk Calendar  next_review_date in a range -- the outlook
+
+       They are separate tabs rather than one filtered grid because they
+       answer different questions. "What must I look at now?" is a list
+       you work through; "what is coming?" is a shape you scan. A single
+       screen doing both does neither well. *@
+    @* Accept Risk sits before Review Risk because that is the order the
+       work happens in: a risk is accepted once, then comes back for
+       review on a cadence. Its list is workflow_stage_code =
+       'AcceptanceDue', which the view in 264 already computes -- so
+       "ready to accept" means one thing here, on the register grid and
+       in the dashboard, and no screen re-implements the test. *@
+    <button type="button" class="risk-tab" data-risk-tab="accept" role="tab" aria-selected="false">
+        <i class="fa-solid fa-circle-check"></i> Accept Risk
+        <span class="pm-badge risk-tab-badge" id="acceptDueBadge" hidden>0</span>
+    </button>
+    <button type="button" class="risk-tab" data-risk-tab="review" role="tab" aria-selected="false">
+        <i class="fa-solid fa-rotate-left"></i> Review Risk
+        <span class="pm-badge risk-tab-badge" id="reviewDueBadge" hidden>0</span>
+    </button>
+    <button type="button" class="risk-tab" data-risk-tab="calendar" role="tab" aria-selected="false">
+        <i class="fa-solid fa-calendar-days"></i> Risk Calendar
+    </button>
     <button type="button" class="risk-tab" data-risk-tab="dashboard" role="tab" aria-selected="false">
         <i class="fa-solid fa-chart-pie"></i> Dashboard
     </button>
@@ -45,10 +97,27 @@
     </button>
 </div>
 
+@* The organisation picker appears in EVERY tab's filter row, not in a
+   bar of its own and not in only one tab.
+
+   Originally it lived in the Candidates toolbar alone, inside
+   #riskListView — which showTab() hides on Register and Dashboard. On
+   those tabs the control was not on the page at all, so whatever
+   organisation init() auto-selected was the only one reachable, and a
+   register holding rows for another organisation read as "no risks match
+   these filters" with no way to correct it.
+
+   Lifting it out to its own bar fixed the reachability but took it out of
+   the filter row, where it belongs and where operators look for it. So
+   each toolbar carries its own control instead, all marked
+   .risk-org-filter. They are three views of ONE value: changing any of
+   them sets state.organizationId and syncs the others. Distinct ids
+   because duplicate ids are invalid; the class is what the JS binds to. *@
+
 @* ================= Tab 1 — Risk Candidates (BRD §6, §16) ============ *@
 <section class="pm-panel" id="riskListView" hidden>
     <div class="pm-toolbar">
-        <select id="riskFilterOrganization"><option value="">Select organization</option></select>
+        <select id="riskFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
         <select id="riskFilterStatus">
             <option value="">All statuses</option>
             @* 'Pending' is the stored code for BRD §16 "New" — see migration 205. *@
@@ -70,38 +139,54 @@
 
     <div class="pm-table-wrap">
         <table id="riskTable">
+            @* Analyst and Att columns dropped from the Risk Candidates grid
+               (change request 2026-09-22) -- display only. assignedAnalystName
+               and attachmentCount are still on the row data and still used
+               elsewhere (e.g. the candidate detail modal / analysis form);
+               they are just no longer columns here. See risk-centre.js's
+               refresh() for the matching row markup and displayCandidateTitle()
+               for the "Risk: " prefix strip (display only -- the stored
+               candidate_title is untouched). *@
             <thead>
                 <tr>
                     <th>Candidate</th>
                     <th>Source</th>
                     <th>Rating</th>
-                    <th>Analyst</th>
                     <th>Identified</th>
                     <th>Status</th>
                     <th>Registered risk</th>
-                    <th>Att</th>
                     <th aria-label="Actions"></th>
                 </tr>
             </thead>
             <tbody id="riskTableBody">
-                <tr><td colspan="9" class="pm-empty-row">Select an organization to load candidates.</td></tr>
+                <tr><td colspan="7" class="pm-empty-row">Select an organization to load candidates.</td></tr>
             </tbody>
         </table>
     </div>
+
+    @* Standard grid pager (pm-grid.js). Server-side: the page
+       controls refetch, they never slice a local array. *@
+    <div id="candPager"></div>
 </section>
 
 @* ================= Tab 2 — Risk Register (BRD §9, §17, §23) ========= *@
 <section class="pm-panel" id="riskRegisterView" hidden>
     <div class="pm-toolbar">
-        <select id="regFilterStatus">
-            <option value="">All statuses</option>
-            <option value="Active" selected>Active</option>
-            <option value="UnderTreatment">Under treatment</option>
-            <option value="Accepted">Accepted</option>
-            <option value="Monitoring">Monitoring</option>
-            <option value="Closed">Closed</option>
-            <option value="Retired">Retired</option>
-        </select>
+        <select id="regFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
+        @* The Record status filter was removed: the Stage filter below
+           is the lifecycle control now, and two dropdowns asking almost
+           the same question is what this review set out to end.
+
+           NOTE THE SIDE EFFECT, IT IS THE POINT. That dropdown defaulted
+           to `Active`, so the register was silently showing ONLY risks
+           with status_code = 'Active' — a risk moved to UnderTreatment,
+           Accepted or Monitoring vanished from the default view. With no
+           status filter, sp_risk_register_list receives @status_code =
+           NULL and lists every risk, which is what a register should do.
+           Closed and Retired now list too; Stage = Closed isolates them.
+
+           @status_code is untouched on the procedure and the API — only
+           this control is gone. *@
         <select id="regFilterSource"><option value="">All sources</option></select>
         <select id="regFilterCategory"><option value="">All categories</option></select>
         <select id="regFilterRating">
@@ -118,6 +203,28 @@
             <option value="1">Analysis pending</option>
             <option value="0">Analysis done</option>
         </select>
+        @* The derived stage (migration 264). Filtering on it is how the
+           register answers "what is waiting on me?" without the user
+           having to know which combination of status, pending flags and
+           task counts adds up to each answer. *@
+        <select id="regFilterStage" title="Workflow stage">
+            <option value="">All stages</option>
+            <option value="AnalysisDue">Analysis due</option>
+            <option value="TreatmentDue">Treatment option due</option>
+            <option value="InTreatment">In treatment</option>
+            <option value="ResidualDue">Residual analysis due</option>
+            <option value="AcceptanceDue">Acceptance due</option>
+            <option value="Accepted">Accepted</option>
+            <option value="ReviewDue">Review due</option>
+            <option value="Closed">Closed</option>
+        </select>
+        <select id="regFilterTreatment" title="Treatment option">
+            <option value="">All treatment options</option>
+            <option value="Terminate">Terminate / Avoid</option>
+            <option value="Treat">Treat / Reduce</option>
+            <option value="Transfer">Transfer / Share</option>
+            <option value="Tolerate">Tolerate / Accept</option>
+        </select>
         <input type="search" id="regFilterSearch" placeholder="Search title / statement / RSK-..." />
         <button class="pm-button icon" id="regRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
             <i class="fa-solid fa-arrows-rotate"></i>
@@ -132,27 +239,282 @@
         <table id="regTable">
             <thead>
                 <tr>
+                    @* COLUMN ORDER AND SET (change request, 2026-09-23):
+                       Risk ID, Risk, Owner, Stage, Inherent Risk Score,
+                       Residual Risk Score, Next Review Date -- exactly
+                       these seven, in this order. Category and Source
+                       (previously columns 3-4) are REMOVED from this
+                       grid on the same request -- both are still on the
+                       risk detail view and still drive their own
+                       filters (regFilterCategory / regFilterSource,
+                       untouched) and the dashboard drill-down, only the
+                       grid columns are gone. Owner moved up from the end
+                       (was after Next review); Stage moved up ahead of
+                       the two score columns (was after them). *@
                     <th>Risk ID</th>
                     <th>Risk</th>
-                    <th>Category</th>
-                    <th>Source</th>
-                    <th>Rating</th>
                     <th>Owner</th>
-                    <th>Status</th>
-                    <th>Registered</th>
+                    @* THE STAGE COLUMN (migration 264).
+                       Derived, never stored — vw_pm_risk_workflow_stage
+                       computes it from analysis_pending, the treatment
+                       option, the open task count, residual_pending,
+                       accepted_dt and next_review_date. It cannot
+                       disagree with the columns beside it because there
+                       is nothing to keep in sync.
+
+                       Stage is now the ONLY progress column. Treatment,
+                       Scope, Status and Registered were removed on
+                       request; Stage subsumes most of what Treatment and
+                       Status showed, because it is derived from the
+                       treatment option and the open task count in the
+                       first place. Every removed value is still on the
+                       risk detail view — none of them were dropped from
+                       the payload, only from this grid. *@
+                    <th>Stage</th>
+                    @* TWO RATINGS, DELIBERATELY (migration 258).
+                       Inherent is the score BEFORE treatment; Residual is
+                       what is left AFTER it. Both are resolved from the
+                       same matrix by the same procedure, so the columns
+                       are comparable — which is the only reason showing
+                       them side by side is honest. *@
+                    <th>Inherent Risk Score</th>
+                    <th>Residual Risk Score</th>
+                    <th>Next Review Date</th>
                     <th aria-label="Actions"></th>
                 </tr>
             </thead>
             <tbody id="regTableBody">
-                <tr><td colspan="9" class="pm-empty-row">Select an organization to load the register.</td></tr>
+                <tr><td colspan="8" class="pm-empty-row">Select an organization to load the register.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* Standard grid pager (pm-grid.js). Server-side: the page
+       controls refetch, they never slice a local array. *@
+    <div id="regPager"></div>
+</section>
+
+@* ============ Tab 3 — Accept Risk (migration 295) ==================
+    Everything waiting to be accepted, in one place, accepted singly or
+    in bulk.
+
+    THE LIST IS NOT A NEW QUERY. It is the register filtered to
+    workflowStageCode=AcceptanceDue -- the stage vw_pm_risk_workflow_stage
+    (264) already computes as "Tolerate chosen, or the residual
+    assessment is done, and not yet accepted". Writing a second
+    definition of "ready to accept" here would give the tab, the register
+    grid and the dashboard three chances to disagree about the same
+    question.
+
+    The toggle switches that one filter to Accepted, so the person who
+    just accepted twelve risks can see them without leaving the tab.
+    Same grid, same endpoint, one query-string value different.
+
+    SINGLE ACCEPT IS THE EXISTING PAGE. The Accept button on each row
+    opens the very same #riskAcceptancePageView the register and
+    residual pages open, with its own guidance banner and its own rules.
+    The tab adds a way to REACH acceptance, not a second way to DO it.
+=================================================================== *@
+<section class="pm-panel" id="riskAcceptView" hidden>
+    <div class="pm-toolbar">
+        <select id="accFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
+        <select id="accFilterOwner"><option value="">All owners</option></select>
+        <select id="accFilterRating">
+            <option value="">All ratings</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+        </select>
+        <label class="risk-inline-label">
+            Show
+            <select id="accFilterStage">
+                <option value="AcceptanceDue" selected>Pending acceptance</option>
+                <option value="Accepted">Already accepted</option>
+            </select>
+        </label>
+        <input type="search" id="accFilterSearch" placeholder="Search title / statement / RSK-..." />
+        <button class="pm-button icon" id="accRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        @* Same pattern as the review tab's bar: hidden until something
+           is selected, because a permanent "0 selected" toolbar is
+           furniture. *@
+        <div class="risk-bulkbar" id="accBulkBar" hidden>
+            <span id="accBulkCount">0 selected</span>
+            <button type="button" class="pm-button primary" id="accBulkAcceptBtn">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Accept selected
+            </button>
+            <button type="button" class="pm-button" id="accBulkClearBtn">Clear selection</button>
+        </div>
+
+        <table id="accTable">
+            <thead>
+                <tr>
+                    <th style="width:28px;">
+                        <input type="checkbox" id="accSelectAll"
+                               title="Select all rows shown"
+                               aria-label="Select all rows shown" />
+                    </th>
+                    <th>Risk ID</th>
+                    <th>Risk</th>
+                    <th>Owner</th>
+                    <th>Inherent</th>
+                    <th>Residual</th>
+                    <th>Treatment</th>
+                    <th>Accepted</th>
+                    <th>Next review</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="accTableBody">
+                <tr><td colspan="10" class="pm-empty-row">Select an organization to load risks awaiting acceptance.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="accPager"></div>
+</section>
+
+@* ================= Tab 4 — Review Risk (migration 264) =============
+    Risks whose review date has arrived.
+
+    THE RULE IS ONE LINE AND THE SCREEN DOES NOT RESTATE IT:
+        next_review_date <= today, and the risk is not Closed/Retired.
+
+    Future dates do not appear here at all. The "Show upcoming" control
+    widens the horizon by passing includeFutureDays, which the SAME
+    procedure honours — so the due list and the upcoming list can never
+    disagree about what counts as due, because there is only one query.
+================================================================== *@
+<section class="pm-panel" id="riskReviewView" hidden>
+    <div class="pm-toolbar">
+        <select id="revFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
+        <select id="revFilterOwner"><option value="">All owners</option></select>
+        <select id="revFilterRating">
+            <option value="">All ratings</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+        </select>
+        <label class="risk-inline-label">
+            Horizon
+            <select id="revFilterHorizon">
+                <option value="" selected>Due and overdue only</option>
+                <option value="7">+ next 7 days</option>
+                <option value="30">+ next 30 days</option>
+                <option value="90">+ next 90 days</option>
+            </select>
+        </label>
+        <input type="search" id="revFilterSearch" placeholder="Search title / statement / RSK-..." />
+        <button class="pm-button icon" id="revRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        @* Bulk review bar. Hidden until something is selected -- a
+           permanently visible "0 selected" toolbar is furniture. *@
+        <div class="risk-bulkbar" id="revBulkBar" hidden>
+            <span id="revBulkCount">0 selected</span>
+            <button type="button" class="pm-button primary" id="revBulkReviewBtn">
+                <i class="fa-solid fa-list-check" aria-hidden="true"></i> Bulk review
+            </button>
+            <button type="button" class="pm-button" id="revBulkClearBtn">Clear selection</button>
+        </div>
+
+        <table id="revTable">
+            <thead>
+                <tr>
+                    <th style="width:28px;">
+                        <input type="checkbox" id="revSelectAll"
+                               title="Select all rows shown"
+                               aria-label="Select all rows shown" />
+                    </th>
+                    <th>Risk ID</th>
+                    <th>Risk</th>
+                    <th>Owner</th>
+                    <th>Inherent</th>
+                    <th>Residual</th>
+                    <th>Treatment</th>
+                    <th>Accepted</th>
+                    <th>Review date</th>
+                    <th>Overdue</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="revTableBody">
+                <tr><td colspan="11" class="pm-empty-row">Select an organization to load risks due for review.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* Standard grid pager (pm-grid.js). Server-side: the page
+       controls refetch, they never slice a local array. *@
+    <div id="revPager"></div>
+</section>
+
+@* ================= Tab 5 — Risk Calendar (migration 264) ===========
+    The same next_review_date column, laid out as a month.
+
+    A SEPARATE, SMALL CALENDAR AND NOT Practice/Calendar:
+    the assurance calendar is a 1,100-line month/week/day view wired to
+    assurance_calendar_events, a materialised schedule with rules and
+    overrides. A risk review date is one mutable column with no schedule
+    behind it. Generalising that calendar to carry both would mean
+    maintaining schedule machinery for something that has none, and
+    would put the assurance module at risk for a Risk Centre feature.
+
+    So this is a month grid, it borrows practice-calendar.css's visual
+    language, and it does one thing.
+================================================================== *@
+<section class="pm-panel" id="riskCalendarView" hidden>
+    <div class="pm-toolbar">
+        <select id="calFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
+        <select id="calFilterOwner"><option value="">All owners</option></select>
+        <button class="pm-button icon" id="calPrevBtn" type="button" title="Previous month" aria-label="Previous month">
+            <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <span class="risk-cal-title" id="calTitle">&nbsp;</span>
+        <button class="pm-button icon" id="calNextBtn" type="button" title="Next month" aria-label="Next month">
+            <i class="fa-solid fa-chevron-right"></i>
+        </button>
+        <button class="pm-button" id="calTodayBtn" type="button">Today</button>
+        <span class="pm-hint" id="calSummary"></span>
+    </div>
+
+    <div class="risk-cal">
+        <div class="risk-cal-head">
+            <div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div>
+            <div>Fri</div><div>Sat</div><div>Sun</div>
+        </div>
+        <div class="risk-cal-grid" id="calGrid"></div>
+    </div>
+
+    <h3 class="risk-subhead">Reviews in this month</h3>
+    <div class="pm-table-wrap">
+        <table id="calListTable">
+            <thead>
+                <tr>
+                    <th>Review date</th><th>Risk ID</th><th>Risk</th>
+                    <th>Rating</th><th>Owner</th><th>Treatment</th><th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="calListBody">
+                <tr><td colspan="7" class="pm-empty-row">Select an organization to load the calendar.</td></tr>
             </tbody>
         </table>
     </div>
 </section>
 
-@* ================= Tab 3 — Dashboard (BRD §19, §21, §23) =========== *@
+@* ================= Tab 6 — Dashboard (BRD §19, §21, §23) =========== *@
 <section class="pm-panel" id="riskDashboardView" hidden>
     <div class="pm-toolbar">
+        <select id="dashFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
         <label class="risk-inline-label">
             Trend window
             <select id="dashTrendMonths">
@@ -186,6 +548,10 @@
             </tbody>
         </table>
     </div>
+
+    @* Standard grid pager (pm-grid.js). Server-side: the page
+       controls refetch, they never slice a local array. *@
+    <div id="apprPager"></div>
 
     @* --- Candidate ageing (§23) --- *@
     <h3 class="risk-subhead">Candidate ageing <span class="pm-hint">(open candidates only)</span></h3>
@@ -488,24 +854,44 @@
                     <textarea id="anStatement" rows="2" maxlength="1000" required
                               placeholder="There is a risk that ... leading to ..."></textarea>
                 </label>
-                <label>
-                    <span>Threat<span class="pm-required">*</span></span>
-                    <select id="anThreat" required><option value="">-- select --</option></select>
+                @* MULTI-SELECT (285/286). A risk can face several
+                   threats, and a threat that is not on the list is added
+                   from inside the control -- it becomes a real row in
+                   this organisation's master list, so the next analyst
+                   picks it instead of typing it again.
+
+                   The "Others" textareas below are KEPT IN THE DOM,
+                   hidden, and are neither cleared nor defaulted: the
+                   save payload still reads them with val(), so a risk
+                   created before 285 keeps its wording until somebody
+                   converts it. They are no longer reachable for NEW
+                   entry -- that is the workaround being removed. *@
+                <div class="form-field pm-form-grid-full">
+                    <span>Threats<span class="pm-required">*</span></span>
+                    <div id="anThreatPicker"></div>
+                </div>
+                <div class="form-field pm-form-grid-full">
+                    <span>Vulnerabilities<span class="pm-required">*</span></span>
+                    <div id="anVulnPicker"></div>
+                </div>
+                @* Legacy, hidden. anThreat / anVulnerability stay so the
+                   lead-id payload field and 216's procedures keep
+                   working unchanged; the picker sets them. *@
+                <label hidden>
+                    <span>Threat</span>
+                    <select id="anThreat"><option value="">-- select --</option></select>
                 </label>
-                <label>
-                    <span>Vulnerability<span class="pm-required">*</span></span>
-                    <select id="anVulnerability" required><option value="">-- select --</option></select>
+                <label hidden>
+                    <span>Vulnerability</span>
+                    <select id="anVulnerability"><option value="">-- select --</option></select>
                 </label>
-                @* Shown only when "Others" is chosen. The procedure
-                   enforces the same rule (56403 / 56405), so a stale
-                   client cannot save an unnamed "Others". *@
                 <label class="pm-form-grid-full" id="anThreatOtherWrap" hidden>
-                    <span>Describe the threat<span class="pm-required">*</span></span>
+                    <span>Describe the threat</span>
                     <textarea id="anThreatDescription" rows="2" maxlength="4000"
                               placeholder="What is the threat?"></textarea>
                 </label>
                 <label class="pm-form-grid-full" id="anVulnOtherWrap" hidden>
-                    <span>Describe the vulnerability<span class="pm-required">*</span></span>
+                    <span>Describe the vulnerability</span>
                     <textarea id="anVulnerabilityDescription" rows="2" maxlength="4000"
                               placeholder="What is the weakness the threat exploits?"></textarea>
                 </label>
@@ -516,6 +902,17 @@
                 <label>
                     <span>Business function<span class="pm-required">*</span></span>
                     <select id="anBusinessFunction" required><option value="">-- select --</option></select>
+                </label>
+                @* Asked here, before Save, not as a follow-up popup after
+                   the assessment is already saved -- the note only ever
+                   applies to Save & register, so it lives in the form
+                   Save & register submits, same as every other field
+                   that button reads. Left blank, nothing is recorded. *@
+                <label class="pm-form-grid-full">
+                    <span>Registration note
+                        <span class="pm-hint">(optional — recorded on the risk and on this assessment if you Save &amp; register)</span></span>
+                    <textarea id="anRegistrationNote" rows="2" maxlength="1000"
+                              placeholder="Optional note for the register and this assessment"></textarea>
                 </label>
             </div>
             <p class="pm-form-message" id="anMessage" role="status" aria-live="polite"></p>
@@ -598,20 +995,32 @@
                     <textarea id="cxStatement" rows="2" maxlength="1000" required
                               placeholder="There is a risk that ... leading to ..."></textarea>
                 </label>
-                <label>
-                    <span>Threat<span class="pm-required">*</span></span>
-                    <select id="cxThreat" required><option value="">-- select --</option></select>
+                @* Same multi-select as the Analysis form (285/286) --
+                   one control, mounted twice, so the two screens cannot
+                   drift. See the comment there for why the legacy
+                   controls below stay hidden rather than deleted. *@
+                <div class="form-field pm-form-grid-full">
+                    <span>Threats<span class="pm-required">*</span></span>
+                    <div id="cxThreatPicker"></div>
+                </div>
+                <div class="form-field pm-form-grid-full">
+                    <span>Vulnerabilities<span class="pm-required">*</span></span>
+                    <div id="cxVulnPicker"></div>
+                </div>
+                <label hidden>
+                    <span>Threat</span>
+                    <select id="cxThreat"><option value="">-- select --</option></select>
                 </label>
-                <label>
-                    <span>Vulnerability<span class="pm-required">*</span></span>
-                    <select id="cxVulnerability" required><option value="">-- select --</option></select>
+                <label hidden>
+                    <span>Vulnerability</span>
+                    <select id="cxVulnerability"><option value="">-- select --</option></select>
                 </label>
                 <label class="pm-form-grid-full" id="cxThreatOtherWrap" hidden>
-                    <span>Describe the threat<span class="pm-required">*</span></span>
+                    <span>Describe the threat</span>
                     <textarea id="cxThreatDescription" rows="2" maxlength="4000"></textarea>
                 </label>
                 <label class="pm-form-grid-full" id="cxVulnOtherWrap" hidden>
-                    <span>Describe the vulnerability<span class="pm-required">*</span></span>
+                    <span>Describe the vulnerability</span>
                     <textarea id="cxVulnerabilityDescription" rows="2" maxlength="4000"></textarea>
                 </label>
                 <label>
@@ -652,30 +1061,103 @@
     </div>
 </div>
 
-@* ================= Register ANALYSIS modal — stage 2 (BRD §7.1) =====
-    The scoring work, on a risk that is already in the register. This is
-    where category, likelihood and impact are asked, and where the §19
-    approval gate applies — because this is the stage that produces a
-    rating for a rating threshold to judge.
+@* ================= Risk Analysis — FULL PAGE (stage 2, BRD §7.1) ====
+    The scoring work, on a risk that is already in the register: category,
+    likelihood and impact, plus the §19 approval gate — because this is
+    the stage that produces a rating for a rating threshold to judge.
+
+    WHY THIS IS A PAGE AND NOT A MODAL
+    ----------------------------------
+    It was a modal until 261-264 gave it three more things to carry: the
+    practice/asset scope panel, the treatment-option picker, and the
+    analysis-detail fields the procedure has always accepted. Inside an
+    820px `pm-modal-wide` that is a scrolling box inside a scrolling
+    page, with two-column content squeezed into whatever width was left.
+
+    practice-view.cshtml (migration 139) made exactly this move for
+    exactly this reason and its header says so in the same words. This
+    page follows it: `pm-panel` per section, `pm-section-heading` on each,
+    `pm-form-grid` for the fields, and the full `container-fluid` width
+    the master layout already provides.
+
+    IT IS NOT A NEW SCREEN KEY. It is a sibling of the tab panels above,
+    shown by showAnalysisPage() and hidden by backFromAnalysisPage(), so
+    it inherits the organisation, the scoring options and the employee
+    list this partial has already loaded, and needs no menu row, no
+    permission seed and no navigation round trip.
 =================================================================== *@
-<div class="pm-modal" id="riskRegAnalysisModal" hidden>
-    <div class="pm-modal-panel pm-modal-wide">
-        <header>
-            <h2>Risk analysis</h2>
-            <button class="pm-modal-close" type="button" data-close-reg-analysis aria-label="Close">&times;</button>
-        </header>
-        <form id="riskRegAnalysisForm">
-            <input type="hidden" id="raRiskId" />
-            <dl class="risk-meta" id="raMeta"></dl>
-            <div class="pm-form-grid">
-                <label>
+<section id="riskAnalysisPageView" class="risk-page" hidden>
+    @* The page's own heading bar, matching the partial's top-level one.
+       The risk being analysed is the h1 — on a full page the record is
+       the subject, not a line of metadata inside a form. *@
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Risk Register</p>
+            <h1 id="raPageTitle">Risk analysis</h1>
+            <p id="raPageSubtitle">Score the risk, set its scope, and choose how it will be treated.</p>
+        </div>
+        <div class="ra-head-actions">
+            <span id="raHeadStatus"></span>
+            <button type="button" class="pm-button ghost" id="raBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to register
+            </button>
+        </div>
+    </div>
+
+    <form id="riskRegAnalysisForm" class="ra-form">
+        <input type="hidden" id="raRiskId" />
+
+        @* ---- Row 1: what the risk IS --------------------------------
+           STACKED, not beside the scoring card. These two were side by
+           side so the analyst could read one while choosing the other,
+           but context carries eleven read-only fields and scoring only
+           three controls: in a 1.35fr column the context list fell to
+           two narrow tracks and its values wrapped. Full width gives it
+           three clean columns, and scoring is one short scroll below
+           rather than off-screen. *@
+        @* No .ra-row wrapper: a row holding one panel is an empty level.
+           Panels sit directly in the form, exactly as Analysis detail
+           below does, and .ra-form > * + * gives them the same 14px
+           rhythm as every other row on the page. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Risk context</h2>
+                <p>Recorded at assessment. Read-only here — change it from the register.</p>
+            </div>
+            <dl class="pm-detail-grid" id="raMeta"></dl>
+        </section>
+
+        @* ---- Row 2: how it scores ----------------------------------- *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Inherent scoring</h2>
+                <p>Likelihood &times; impact, against this organisation's own matrix.</p>
+            </div>
+            @* ra-grid-score, not ra-grid-1: .ra-grid-1 is still two
+               columns for the residual panels that remain in a split
+               row, and widening it would stretch those. *@
+            <div class="pm-form-grid ra-grid-score">
+                @* Category loses .full here. At two columns it had to
+                   span to avoid a half-empty row; at three it sits
+                   beside Likelihood and Impact, which is the row the
+                   analyst actually fills in left to right. *@
+                <div class="form-field">
                     <span>Risk category<span class="pm-required">*</span></span>
-                    <select id="raCategory" required><option value="">-- select --</option></select>
-                </label>
-                <label>
-                    <span>Process</span>
-                    <input type="text" id="raProcess" maxlength="200" />
-                </label>
+                    @* 375, 376: multi-select. pm-checkcombo, not the
+                       risk-treat-options card grid Risk Type uses below --
+                       risk_category_master is organisation-defined and
+                       open-ended, so the searchable combo is the widget
+                       that scales, and it keeps Category's seat in this
+                       four-column score row instead of dropping to a
+                       full-width band. Built by renderCategoryOptions()
+                       in risk-centre.js (same render-fresh-with-checked-
+                       baked-in convention every other pm-checkcombo
+                       instance on this page already uses); its clicks
+                       are wired through comboInHost(), widened to
+                       recognise .risk-category-host alongside the
+                       existing .risk-map-host. *@
+                    <div class="pm-checkcombo risk-category-host" id="raCategoryCombo" data-checkcombo></div>
+                </div>
                 <label>
                     <span>Likelihood<span class="pm-required">*</span></span>
                     <select id="raLikelihood" required><option value="">-- select --</option></select>
@@ -684,38 +1166,1613 @@
                     <span>Impact<span class="pm-required">*</span></span>
                     <select id="raImpact" required><option value="">-- select --</option></select>
                 </label>
-                <div class="pm-form-grid-full">
+                @* Fourth cell of the SAME row, not a full-width band
+                   under it. The rating is the result of the three inputs
+                   beside it, so reading left to right now gives
+                   category -> likelihood -> impact -> rating in one
+                   line, and the row of empty space this used to leave is
+                   gone. It keeps .form-field (which carries the label
+                   styling) but drops .full (which made it span). *@
+                <div class="form-field">
                     @* Resolved from the organisation's own matrix, never
                        typed in. The server recomputes it on save. *@
-                    <span class="pm-hint">Inherent risk rating</span>
+                    <span>Inherent risk rating</span>
                     <div id="raRating" class="risk-rating-preview">Select likelihood and impact</div>
                 </div>
-                <label class="pm-form-grid-full">
-                    <span>Risk cause</span>
-                    <textarea id="raCause" rows="2" maxlength="4000"></textarea>
+            </div>
+        </section>
+
+        @* ---- Analysis detail ----------------------------------------
+           Every one of these fields is already a parameter of
+           sp_risk_register_assess and has been since 216. The modal asked
+           for exactly one of them (consequence) because there was no room
+           for the rest, so the other five were silently saved as NULL on
+           every re-assessment. The page has the room, so it asks. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Analysis detail</h2>
+                <p>The justification behind the score. All of it is retained per version (BRD §20).</p>
+            </div>
+            @* Only Impact Analysis and Risk Type are asked for now. The
+               other five controls are KEPT IN THE DOM, hidden, and are
+               neither cleared nor defaulted:
+
+                 * loadDetail() still fills them from the saved record;
+                 * the assess payload still reads them with val(...);
+
+               so a re-assessment round-trips whatever was stored instead
+               of silently overwriting it with NULL. Deleting the markup
+               would have made val() return "" and blanked five columns
+               of sp_risk_register_assess on every save -- exactly the
+               bug the comment above says 216 fixed.
+
+               Give any of them back by removing the `hidden` attribute;
+               nothing else has to change. *@
+            <div class="pm-form-grid ra-grid-single">
+                <label class="full">
+                    <span>Impact Analysis</span>
+                    <textarea id="raConsequence" rows="5" maxlength="4000"
+                              placeholder="What happens if it materialises."></textarea>
                 </label>
-                <label class="pm-form-grid-full">
-                    <span>Potential consequence / impact</span>
-                    <textarea id="raConsequence" rows="2" maxlength="4000"></textarea>
-                </label>
-                <label class="pm-form-grid-full">
-                    <span>Existing controls</span>
-                    <textarea id="raControls" rows="2" maxlength="4000"></textarea>
-                </label>
-                <label class="pm-form-grid-full">
+
+                @* Risk Type (313, 314) -- Confidentiality / Integrity /
+                   Availability, MULTI-SELECT: a risk that leaks data and
+                   corrupts it is Confidentiality AND Integrity, so a
+                   single-choice control would force a false record. See
+                   313's header.
+
+                   Options come from the master table (loadRiskTypeOptions
+                   in risk-centre.js), not hardcoded here -- the same
+                   reason the Threats/Vulnerabilities pickers above read
+                   their lists from the server. Same card-toggle markup and
+                   CSS as Treatment option below (.risk-treat-opt), just
+                   checkboxes instead of radios so more than one can be
+                   on at once. *@
+                <div class="form-field full">
+                    <span>Risk Type<span class="pm-required">*</span></span>
+                    <div class="risk-treat-options" id="raRiskTypeOptions"></div>
+                </div>
+
+                <label class="full" hidden>
                     <span>Risk description</span>
-                    <textarea id="raDescription" rows="2" maxlength="4000"></textarea>
+                    <textarea id="raDescription" rows="3" maxlength="4000"></textarea>
                 </label>
-                <label class="pm-form-grid-full">
+                <label hidden>
+                    <span>Risk cause</span>
+                    <textarea id="raCause" rows="4" maxlength="4000"></textarea>
+                </label>
+                <label hidden>
+                    <span>Existing controls</span>
+                    <textarea id="raControls" rows="4" maxlength="4000"></textarea>
+                </label>
+                <label hidden>
+                    <span>Process / activity</span>
+                    <input type="text" id="raProcess" maxlength="200" />
+                </label>
+                <label hidden>
                     <span>Analyst remarks</span>
-                    <textarea id="raRemarks" rows="2" maxlength="4000"></textarea>
+                    <input type="text" id="raRemarks" maxlength="4000" />
                 </label>
             </div>
+        </section>
+
+        @* ---- Impact Details -----------------------------------------
+           ABOVE Existing Controls, immediately below Analysis Details:
+           what the risk impacts is read with the analysis that scored
+           it, not with the practices that control it.
+
+           Filled by the SAME riskMapping.mount() as the scope panel
+           below, via impactHostId -- one /mapping call, one refresh, one
+           save path. This host holds only the by-category table; the
+           panel supplies the heading. *@
+        <section class="pm-panel" id="raImpactPanel">
+            <div class="pm-section-heading">
+                <h2>Impact Details</h2>
+                <p>
+                    What this risk impacts &mdash; assets, vendors, people, teams and committees,
+                    by Operationalize category.
+                </p>
+            </div>
+            <div id="raImpactScope" class="risk-map-host"></div>
+        </section>
+
+        @* ---- Scope ---------------------------------------------------
+           riskMapping.mount() fills this host. The panel supplies the
+           heading, so the component is mounted with showHeading:false —
+           otherwise the page would carry two headings for one section. *@
+        <section class="pm-panel" id="raScopePanel">
+            <div class="pm-section-heading">
+                <h2>Existing Controls</h2>
+                @* Five lines of prose above a section that is itself two
+                   sections made the panel top-heavy before a single
+                   practice was visible. One line; the rules it dropped
+                   (every category, mapped once) are inherent behaviour,
+                   not something the reader has to be told up front. *@
+                <p>
+                    Practices that control this risk, the dependencies each one brings in,
+                    and what the risk impacts.
+                </p>
+            </div>
+            <div id="raMapping" class="risk-map-host"></div>
+        </section>
+
+        @* ---- Treatment ----------------------------------------------- *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Treatment option</h2>
+                <p>
+                    Terminate, Treat or Transfer raises a Risk Treatment Task in Task Center owned
+                    by the risk owner. Tolerate raises nothing and continues to Risk Acceptance.
+                    Re-saving does not create a second task.
+                </p>
+            </div>
+            <div class="risk-treat-options" id="raTreatmentOptions">
+                <label class="risk-treat-opt">
+                    <input type="radio" name="raTreatment" value="Terminate" />
+                    <span class="t">Terminate / Avoid</span>
+                    <span class="d">Stop the activity that creates the risk.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="raTreatment" value="Treat" />
+                    <span class="t">Treat / Reduce</span>
+                    <span class="d">Apply controls to reduce likelihood or impact.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="raTreatment" value="Transfer" />
+                    <span class="t">Transfer / Share</span>
+                    <span class="d">Insure, outsource or contractually share the exposure.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="raTreatment" value="Tolerate" />
+                    <span class="t">Tolerate / Accept</span>
+                    <span class="d">Accept the risk as it stands, with a review date.</span>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Action bar ----------------------------------------------
+           Sticky to the bottom of the viewport. On a form this tall the
+           alternative is scrolling to the end to save, then scrolling
+           back to see the validation message that stopped it. *@
+        <div class="ra-actionbar">
             <p class="pm-form-message" id="raMessage" role="status" aria-live="polite"></p>
-            <footer class="pm-modal-footer">
-                <button type="button" class="pm-button" data-close-reg-analysis>Cancel</button>
+            <div class="ra-actionbar-buttons">
+                <button type="button" class="pm-button" id="raCancelBtn">Cancel</button>
                 <button type="submit" class="pm-button primary">
                     <i class="fa-solid fa-floppy-disk"></i> Save analysis
+                </button>
+            </div>
+        </div>
+    </form>
+</section>
+
+@* ============ Residual Risk Analysis — FULL PAGE (258, 263) ========
+    The SECOND score. Stage 2 above produces the inherent rating — the
+    risk before anything was done about it. This produces the residual
+    rating — what is left once the treatment has landed.
+
+    Same three controls, deliberately: likelihood, impact, and a derived
+    rating nobody types. Two scores that came out of two different
+    methods would not be comparable, and the whole point of putting them
+    in adjacent columns on the register is that they are.
+
+    Only reachable on a risk that is Under treatment, Monitoring or
+    Accepted, and only once an inherent rating exists — see errors
+    56454-56457 in migration 258. The row menu disables the action for
+    the same reasons, which is an affordance; SQL is the rule.
+
+    WHY THIS IS A PAGE AND NOT A MODAL
+    ----------------------------------
+    It was an 820px `pm-modal-wide` and it carried everything the
+    inherent analysis page carries: the scope panel, the treatment-option
+    picker, three long-form fields and the §20 history table. Inside a
+    fixed-width panel capped at `calc(100vh - 80px)` that is a scrolling
+    box inside a scrolling page — the content compressed into a narrow
+    column while the master layout's width sat unused on both sides.
+
+    So it now uses the SAME `risk-page` shell as Risk Analysis and Risk
+    Treatment: `pm-panel` per section, `pm-section-heading` on each,
+    `pm-form-grid` for the fields, `ra-actionbar` at the foot, and the
+    full `container-fluid` width the master layout already provides. Not
+    one new class — the shell is shared precisely so a third page cannot
+    drift from the two that came before it.
+
+    IT IS NOT A NEW SCREEN KEY. It is a sibling of the tab panels, shown
+    by showResidualPage() and left by backFromFullPage(), so it inherits
+    the organisation and scoring options this partial has already loaded.
+=================================================================== *@
+<section id="riskResidualPageView" class="risk-page" hidden>
+    @* The risk is the page's subject, so it is the h1 — on a full page
+       the record is the heading, not a line of metadata inside a form. *@
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Risk Register</p>
+            <h1 id="rrPageTitle">Residual risk analysis</h1>
+            @* No longer "confirm how the risk is carried from here" --
+               that described the treatment-option radios this page used
+               to end with. Scoring the residual risk IS the decision now;
+               acceptance follows from it. *@
+            <p id="rrPageSubtitle">Score what is left after the treatment. The risk then goes to Risk Acceptance.</p>
+        </div>
+        <div class="ra-head-actions">
+            <span id="rrHeadStatus"></span>
+            <button type="button" class="pm-button ghost" id="rrBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to register
+            </button>
+        </div>
+    </div>
+
+    @* ---- The flow, stated before anything is asked for ---------------
+       Inherent -> Treatment -> Residual -> Acceptance. The page is the
+       third step of that story and it used to open in the middle of it:
+       a score box with no answer to "a reduction from what, by what
+       work?".
+
+       The rail is not decoration. Each step carries the actual value —
+       the inherent chip, the treatment option with its task counts, the
+       residual chip as it is being chosen — so the arithmetic of the
+       whole exercise is legible before the analyst scrolls. Rendered by
+       renderResidualFlow(), and step 3 updates live as the selects
+       change.
+
+       Step 4 replaced the treatment-option radios this page used to end
+       with. The analyst is told where the risk goes rather than asked:
+       saving the residual score sets residual_pending = 0, which makes
+       the stage AcceptanceDue by itself. *@
+    <ol class="risk-flow risk-flow-4" id="rrFlow" aria-label="Inherent risk to residual risk to acceptance"></ol>
+
+    <form id="riskResidualForm" class="ra-form">
+        <input type="hidden" id="rrRiskId" />
+
+        @* ================= STEP 1 — the risk, as it was ===============
+           Read-only. Everything here was decided at analysis time and is
+           changed from the register, not from this page. *@
+        <div class="ra-row ra-row-split ra-step" data-step="1">
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2><span class="ra-step-badge">1</span> Risk summary</h2>
+                    <p>What the risk is. Recorded at assessment — change it from the register.</p>
+                </div>
+                <dl class="pm-detail-grid" id="rrMeta"></dl>
+            </section>
+
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2>Inherent risk <span class="pm-hint">before treatment</span></h2>
+                    @* No numeric score row any more: the rating chip names the level and
+                       Likelihood x Impact is what produced it, so the number was the same
+                       fact a third time. Cause and Controls at analysis went with it --
+                       the Analysis page stopped asking for them, so they render empty on
+                       every risk analysed since. What the analyst actually wrote is the
+                       Impact analysis field. *@
+                    <p>The rating this residual assessment is measured against, on the same
+                       matrix, and the impact analysis it was scored from.</p>
+                </div>
+                <dl class="pm-detail-grid" id="rrInherent"></dl>
+            </section>
+        </div>
+
+        @* ---- Impact Details -----------------------------------------
+           ABOVE step 2, and READ-ONLY.
+
+           Position: what the risk impacts belongs with the assessment
+           that scored it (step 1), not after the treatment that was
+           done about it. So it sits between step 1 and step 2 rather
+           than further down beside Existing Controls.
+
+           Read-only: this page re-scores what treatment has left. What
+           the risk impacts was established at Risk Analysis, and Review
+           is where it is revised -- editing it mid-residual would change
+           the thing being measured while measuring it. Mounted with
+           impactReadOnly, so the scope panel below stays editable (a
+           residual assessment may legitimately re-map practices) while
+           this table renders as chips with no picker at all.
+
+           Same host pairing as every other page -- one riskMapping
+           mount, one /mapping call. *@
+        <section class="pm-panel" id="rrImpactPanel">
+            <div class="pm-section-heading">
+                <h2>Impact Details <span class="pm-hint">read-only</span></h2>
+                <p>
+                    What this risk impacts &mdash; assets, vendors, people, teams and
+                    committees, as established at Risk Analysis. Revised on the Review page.
+                </p>
+            </div>
+            <div id="rrImpactScope" class="risk-map-host"></div>
+        </section>
+
+        @* ================= STEP 2 — what was done about it ============
+           READ-ONLY, AND READ FROM TREATMENT'S OWN SOURCE.
+           Every value in this section comes from sp_risk_treatment_state
+           and the register row — the same two reads the Risk Treatment
+           page makes, rendered by the same functions
+           (refreshTreatmentState / taskRow, called with readOnly:true).
+           There is no second copy of task state here and no editing:
+           the button in the heading navigates to the Treatment page,
+           which is where treatment work is actually done.
+
+           The gate banner is the point of the section. A residual score
+           entered while treatment tasks are still open is a score for
+           work that has not happened, and the page must not let that be
+           assumed — so the banner names the state in words, the tiles
+           count it, and step 3 repeats the warning where the score is
+           actually typed. *@
+        <section class="pm-panel ra-step" data-step="2" id="rrTreatmentPanel">
+            <div class="pm-section-heading ra-heading-row">
+                <div>
+                    <h2><span class="ra-step-badge">2</span> Risk treatment <span class="pm-hint">read-only</span></h2>
+                    <p>The treatment already recorded for this risk, exactly as the Risk Treatment page holds it.</p>
+                </div>
+                <button type="button" class="pm-button ghost" id="rrOpenTreatmentBtn">
+                    <i class="fa-solid fa-diagram-project"></i> Open risk treatment
+                </button>
+            </div>
+
+            @* sp_risk_treatment_state returns both the answer and the
+               reason, so this banner explains itself rather than being a
+               colour. *@
+            <div class="risk-gate" id="rrGate"></div>
+            <dl class="pm-detail-grid" id="rrTreatmentMeta"></dl>
+            <div class="risk-tiles" id="rrTiles"></div>
+
+            <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Center</span></h3>
+            <div class="pm-table-wrap">
+                @* Seven columns, not eight: the Actions column of the
+                   Treatment page is absent because this view is read-only.
+                   taskRow() omits it when called with readOnly:true rather
+                   than rendering a disabled menu nobody can use. *@
+                <table id="rrTaskTable">
+                    <thead>
+                        <tr>
+                            <th>Task</th><th>Title</th><th>Owner</th><th>Priority</th>
+                            <th>Target date</th><th>Status</th><th>Sub tasks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rrTaskBody">
+                        <tr><td colspan="7" class="pm-empty-row">Loading treatment work...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @* ================= STEP 3 — what is left ======================
+           The only editable step on the page. *@
+        @* No .ra-row-split wrapper any more. That row was a two-column
+           grid (1.35fr / 1fr) holding Residual risk beside Justification;
+           with Justification gone it kept reserving the second column and
+           left a third of the page blank.
+
+           The panel now sits directly in the form, which is what this
+           page already does for every single-panel step -- "a row holding
+           one panel is an empty level", as the Risk context step above
+           puts it. .ra-form > * + * supplies the same 14px rhythm, and
+           .ra-step / data-step move onto the panel itself so the rail's
+           scroll target is unchanged. *@
+        <section class="pm-panel ra-step" data-step="3">
+            <div class="pm-section-heading">
+                <h2><span class="ra-step-badge">3</span> Residual risk</h2>
+                <p>
+                    Score the risk <strong>as it stands now</strong>, after the treatment above. The
+                    rating and risk level are derived from the same matrix as the inherent rating,
+                    so the two are comparable.
+                </p>
+            </div>
+            @* Repeated here, where the score is actually typed: the
+               banner in step 2 is three panels up by the time the
+               analyst is choosing a likelihood. Hidden when treatment
+               is complete -- a warning that is always on screen stops
+               being read. *@
+            <div class="risk-gate is-blocked" id="rrIncompleteWarning" hidden></div>
+
+            @* ra-grid-residual, not ra-grid-1. .ra-grid-1 exists for
+               panels still inside a split row and is deliberately left
+               alone -- the Review page's two panels still use it. This
+               panel is full width now, so it gets its own four-column
+               track set and the fields stop being stretched two-up
+               across the whole page. *@
+            <div class="pm-form-grid ra-grid-residual">
+                <label>
+                    <span>Residual likelihood<span class="pm-required">*</span></span>
+                    <select id="rrLikelihood" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Residual impact<span class="pm-required">*</span></span>
+                    <select id="rrImpact" required><option value="">-- select --</option></select>
+                </label>
+                @* Rating and delta sit BESIDE the two selects rather than
+                   spanning rows under them. They are the output of those
+                   selects, so the whole calculation reads left to right
+                   on one line: likelihood x impact -> rating -> movement.
+                   As full-width rows they each wasted a line. *@
+                <div class="form-field">
+                    @* Resolved from the organisation's own matrix, never
+                       typed in. The server recomputes it on save. *@
+                    <span>Residual risk rating &amp; level</span>
+                    <div id="rrRating" class="risk-rating-preview">Select likelihood and impact</div>
+                </div>
+                <div class="form-field">
+                    <span>Change against inherent</span>
+                    <div id="rrDelta" class="risk-delta">--</div>
+                </div>
+                @* THE JUSTIFICATION CARD IS GONE, and only this field
+                   came across from it.
+
+                   It used to ask for "Treatment carried out" and
+                   "Controls now in place" as free text -- both of
+                   which this page ALREADY SHOWS: the treated task
+                   details are in step 2 above, read-only and straight
+                   from the task records, and the controls are in the
+                   Existing Controls panel below. Asking the analyst
+                   to retype them produced a second, hand-written copy
+                   that could disagree with the first, and the version
+                   history then retained the disagreement.
+
+                   The remark is different in kind -- it is the one
+                   thing on that card that exists nowhere else -- so it
+                   sits with the score it explains, spanning the row
+                   beneath it. *@
+                <label class="full">
+                    <span>Analyst remark</span>
+                    <textarea id="rrRemarks" rows="2" maxlength="4000"
+                              placeholder="Anything the next reviewer should know about this score."></textarea>
+                    <span class="pm-hint">
+                        Optional. The treatment work and the controls are shown above and below &mdash;
+                        no need to repeat them here.
+                    </span>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Scope ---------------------------------------------------
+           The residual analysis is a FULL analysis, so it carries the
+           same scope panel as the inherent one: a risk's practice/asset
+           scope may have changed while the treatment was being done.
+
+           riskMapping.mount() fills this host with showHeading:false —
+           the panel supplies the heading, and two headings for one
+           section is what a copied component looks like. *@
+        <section class="pm-panel" id="rrScopePanel">
+            <div class="pm-section-heading">
+                <h2>Existing Controls</h2>
+                <p>
+                    Adjust the scope if the treatment changed which practices this risk reaches.
+                </p>
+            </div>
+            <div id="rrMapping" class="risk-map-host"></div>
+        </section>
+
+        @* ---- Treatment option: REMOVED -------------------------------
+           This page used to end with a "Treatment option after treatment"
+           radio set, so the analyst had to make a treatment decision
+           again after scoring the residual risk.
+
+           It no longer does, and nothing replaces it. Once the residual
+           risk is assessed, the risk goes to Risk Acceptance -- that is
+           the only sensible next step at this point in the flow, so
+           asking for it was asking the analyst to confirm the obvious,
+           with four ways to get it wrong.
+
+           HOW THE ROUTING HAPPENS NOW, with no code deciding it here:
+           sp_risk_residual_analysis_save sets residual_pending = 0, and
+           vw_pm_risk_workflow_stage then reads the risk as AcceptanceDue
+           -- treatment tasks are closed (56574 refuses the save
+           otherwise), the residual is assessed, and it has not been
+           accepted yet. It appears on the Accept Risk tab by itself.
+
+           The procedure still ACCEPTS @treatment_option_code, and the
+           API still carries it, so an integration that genuinely needs to
+           change the option can. This page simply stops asking.
+
+           A risk that really does need another round of treatment is a
+           different decision, and it belongs where treatment decisions
+           are made -- the Risk Treatment page -- not tacked onto the end
+           of a scoring form. *@
+
+        @* ---- Acceptance / decision -----------------------------------
+           READ-ONLY, like step 2, and for the same reason: acceptance is
+           written by sp_risk_acceptance_save through its own modal, and a
+           second set of acceptance inputs here would be a second way to
+           write one decision. What this shows is the decision as it
+           stands -- who accepted, when, and when the risk comes back --
+           because "is this residual level already accepted, and until
+           when?" is part of the picture the analyst is completing.
+
+           The action is the one that already exists: "Save & accept
+           risk" in the bar below, which saves this analysis and then
+           opens that same modal. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Acceptance &amp; next review</h2>
+                <p>The acceptance decision as it stands. Recorded through Risk Acceptance — shown here for context.</p>
+            </div>
+            <dl class="pm-detail-grid" id="rrAcceptance"></dl>
+        </section>
+
+        @* ---- History -------------------------------------------------
+           BRD §20 — every retained residual version, same table shape as
+           the candidate's analysis history. On a page it gets the full
+           width, so the eight columns stop wrapping. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Residual history</h2>
+                <p>Every retained version, newest first, each carrying the inherent rating as it stood at the time.</p>
+            </div>
+            <div class="pm-table-wrap" id="rrHistory"></div>
+        </section>
+
+        @* ---- Action bar ----------------------------------------------
+           Sticky, like the analysis page's: on a form this tall the
+           alternative is scrolling to the end to save, then back to read
+           the validation message that stopped it.
+
+           "Save & accept risk" SAVES FIRST, then opens the acceptance
+           modal -- accepting a risk while an unsaved residual score sits
+           on screen would record an acceptance of a number that was
+           never persisted. *@
+        <div class="ra-actionbar">
+            <p class="pm-form-message" id="rrMessage" role="status" aria-live="polite"></p>
+            <div class="ra-actionbar-buttons">
+                <button type="button" class="pm-button" id="rrCancelBtn">Cancel</button>
+                <button type="button" class="pm-button" id="rrAcceptBtn">
+                    <i class="fa-solid fa-circle-check"></i> Save &amp; accept risk
+                </button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-floppy-disk"></i> Save residual analysis
+                </button>
+            </div>
+        </div>
+    </form>
+</section>
+
+@* ================= Review Risk — FULL PAGE (264) ====================
+    Reassessing a risk whose review date has arrived.
+
+    THE SAME FORM AS RISK ANALYSIS, ON PURPOSE.
+    Original requirement: "Open a page similar to the existing Risk
+    Analysis page ... reassess the risk using the same analysis
+    process." Not similar -- the same. The server delegates to
+    sp_risk_register_assess, the exact procedure the analysis screen
+    calls, so a future change to how risks are analysed changes reviews
+    too and the two cannot drift. The two extra fields are the review's
+    own: what changed, and when to look again.
+
+    Was a pm-modal-wide. It carried the same load as the residual page —
+    a full reassessment, the scope panel, the treatment options and a
+    next-review date — and inside a modal the scope panel's checkcombo
+    menus were clipped and the form scrolled inside a box that was
+    itself scrolling.
+
+    Same shell as Residual analysis, deliberately: pm-page-heading with
+    the risk as the h1, a risk-flow rail, pm-panel per section,
+    ra-actionbar at the foot. A reviewer moving between the two screens
+    should not have to relearn where anything is.
+
+    THREE flow steps, not four. .risk-flow is a five-track grid, so
+    3 steps + 2 arrows fills it exactly; a fourth step pushes the rail
+    to seven items and it overflows.
+
+    NO history section here, unlike the residual page. There is no
+    review-history read in the API — sp_risk_review_perform writes, and
+    sp_risk_review_due_list lists what is due. Inventing a panel with
+    nothing behind it would be worse than not having one.
+*@
+<section id="riskReviewPageView" class="risk-page" hidden>
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Review</p>
+            <h1 id="rvPageTitle">Review risk</h1>
+            <p id="rvPageSubtitle">Reassess the risk as it stands today, and say where it goes from here.</p>
+        </div>
+        <div class="ra-head-actions">
+            <span id="rvHeadStatus"></span>
+            <button type="button" class="pm-button ghost" id="rvBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to register
+            </button>
+        </div>
+    </div>
+
+    @* Where this review stands: what was decided last time, what is
+       being entered now, and where saving will land. Step 3 updates as
+       the treatment option changes, so the routing is stated before the
+       reviewer commits to it rather than surprising them afterwards. *@
+    <ol class="risk-flow" id="rvFlow" aria-label="Last assessment to next step"></ol>
+
+    <form id="riskReviewForm" class="ra-form">
+        <input type="hidden" id="rvRiskId" />
+
+        @* ---- STEP 1 — the risk as it stands (read-only) -------------- *@
+        <div class="ra-row ra-row-split ra-step" data-step="1">
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2><span class="ra-step-badge">1</span> Risk summary</h2>
+                    <p>What the risk is, as the register holds it today.</p>
+                </div>
+                <dl class="pm-detail-grid" id="rvMeta"></dl>
+            </section>
+
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2>Where it stands <span class="pm-hint">before this review</span></h2>
+                    <p>The scores and the decision this review is revisiting.</p>
+                </div>
+                <dl class="pm-detail-grid" id="rvStanding"></dl>
+            </section>
+        </div>
+
+        @* ---- STEP 2 — the reassessment (the editable step) -----------
+           No .ra-row-split wrapper. That row was a two-column grid
+           holding Reassessment beside Justification; with Justification
+           gone it would keep reserving the second column and leave a
+           third of the page blank. The panel sits directly in the form,
+           the way every single-panel step on these pages does. *@
+        <section class="pm-panel ra-step" data-step="2">
+            <div class="pm-section-heading">
+                <h2><span class="ra-step-badge">2</span> Reassessment</h2>
+                <p>
+                    Score the risk <strong>as it stands now</strong>. Pre-filled with the current
+                    assessment, so only what has actually moved needs changing. The rating is
+                    resolved from the organisation's matrix, never typed.
+                </p>
+            </div>
+            @* ra-grid-score, the same class the Inherent scoring panel
+               uses: category, likelihood, impact and the resolved rating
+               are exactly the same four fields in the same order, so they
+               get the same four-column row rather than a second class
+               that would have to be kept in step with it. *@
+            <div class="pm-form-grid ra-grid-score">
+                <label>
+                    <span>Risk category<span class="pm-required">*</span></span>
+                    <select id="rvCategory" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Likelihood<span class="pm-required">*</span></span>
+                    <select id="rvLikelihood" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Impact<span class="pm-required">*</span></span>
+                    <select id="rvImpact" required><option value="">-- select --</option></select>
+                </label>
+                <div class="form-field">
+                    <span>Reassessed inherent rating &amp; level</span>
+                    <div id="rvRating" class="risk-rating-preview">Select likelihood and impact</div>
+                </div>
+                @* THE JUSTIFICATION CARD IS GONE, and only this field came
+                   across from it.
+
+                   It also asked for "Potential consequence / impact" and
+                   "Controls now in place" as free text. The controls are
+                   already on this page, in the Existing Controls panel
+                   below, and the treated task details are shown above --
+                   retyping them produced a second copy that could
+                   contradict the first.
+
+                   IMPORTANT, and the reason this is not simply a
+                   deletion: sp_risk_analysis_save INSERTS A NEW ANALYSIS
+                   VERSION from whatever it is handed, and that row becomes
+                   is_current. Dropping the two fields from the request
+                   would therefore blank potential_consequence and
+                   existing_controls on the live assessment. The client
+                   still sends both -- carried forward unchanged from the
+                   risk as loaded -- so the record keeps them and nobody
+                   has to retype them. See onReviewSubmit. *@
+                <label class="full">
+                    <span>Analyst remark</span>
+                    <textarea id="rvRemarks" rows="2" maxlength="4000"
+                              placeholder="What has changed since the last assessment?"></textarea>
+                    <span class="pm-hint">
+                        Optional. The treated tasks and the existing controls are already shown
+                        on this page &mdash; no need to repeat them here.
+                    </span>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Impact Details -----------------------------------------
+           Above Existing Controls, same position and same host pairing
+           as the other pages. Editable: a review is where a change in
+           what the risk reaches is most likely to be noticed. *@
+        <section class="pm-panel" id="rvImpactPanel">
+            <div class="pm-section-heading">
+                <h2>Impact Details</h2>
+                <p>
+                    What this risk impacts &mdash; assets, vendors, people, teams and committees,
+                    by Operationalize category. Adjust it if the review found otherwise.
+                </p>
+            </div>
+            <div id="rvImpactScope" class="risk-map-host"></div>
+        </section>
+
+        @* ---- Scope --------------------------------------------------
+           Same panel, same heading and same host shape as the residual
+           page's. A review is where a scope change is most likely to be
+           noticed, so it is editable here exactly as it was in the
+           modal this replaces. *@
+        <section class="pm-panel" id="rvScopePanel">
+            <div class="pm-section-heading">
+                <h2>Existing Controls</h2>
+                <p>Adjust the scope if this risk now reaches different practices or assets.</p>
+            </div>
+            <div id="rvMapping" class="risk-map-host"></div>
+        </section>
+
+        @* ---- Treatment option ---------------------------------------
+           The option decides where saving lands, so each choice says so.
+           Descriptions are filled in rather than left as spacers, to
+           match the residual page's option list. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Treatment option</h2>
+                <p>
+                    Optional. Leave on <em>No change</em> to keep the decision already recorded.
+                    Tolerate takes this risk on to acceptance; the other three send it back to
+                    treatment, and its residual score is assessed once that work is done.
+                </p>
+            </div>
+            <div class="risk-treat-options" id="rvTreatmentOptions">
+                <label class="risk-treat-opt">
+                    <input type="radio" name="rvTreatment" value="" checked />
+                    <span class="t">No change</span>
+                    <span class="d">Keep the treatment decision already recorded.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="rvTreatment" value="Terminate" />
+                    <span class="t">Terminate / Avoid</span>
+                    <span class="d">Stop the activity that creates the risk.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="rvTreatment" value="Treat" />
+                    <span class="t">Treat / Reduce</span>
+                    <span class="d">Another round of controls is required.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="rvTreatment" value="Transfer" />
+                    <span class="t">Transfer / Share</span>
+                    <span class="d">Insure, outsource or contractually share the exposure.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="rvTreatment" value="Tolerate" />
+                    <span class="t">Tolerate / Accept</span>
+                    <span class="d">The risk is acceptable as it stands — goes on to acceptance.</span>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Next review date ---------------------------------------- *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Next review</h2>
+                <p>What you suggest for the next cycle. The person who accepts this risk sees it and can change it.</p>
+            </div>
+            @* 299. Both fields are PROPOSALS now, not controls. A review
+               always sends the risk to Accept Risk (it moves to
+               Monitoring), and these two travel with it so the accepter
+               starts from the reviewer's suggestion instead of a blank
+               form. Before 299 a date here silently kept the risk off
+               the Accept tab, and choosing a frequency filled that date
+               in -- so the helpful action was the one that broke it. *@
+            <div class="pm-form-grid">
+                <label>
+                    <span>Review frequency</span>
+                    <select id="rvReviewFrequency"><option value="">-- select --</option></select>
+                    <span class="pm-hint">Fills the date beside it. Both are suggestions.</span>
+                </label>
+                <label>
+                    <span>Next review date</span>
+                    <input type="date" id="rvNextReview" />
+                    <span class="pm-hint">
+                        Optional. Whatever you put here is carried to the acceptance screen
+                        as the proposed date &mdash; it does not decide where this risk goes next.
+                    </span>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Action bar ----------------------------------------------
+           One primary action. Where it lands is decided by the treatment
+           option and stated in step 3 of the rail above, so there is no
+           second "save and go to..." button to choose between — and no
+           step the reviewer has to take by hand afterwards. *@
+        <div class="ra-actionbar">
+            <p class="pm-form-message" id="rvMessage" role="status" aria-live="polite"></p>
+            <div class="ra-actionbar-buttons">
+                <button type="button" class="pm-button" id="rvCancelBtn">Cancel</button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-floppy-disk"></i> Save review
+                </button>
+            </div>
+        </div>
+    </form>
+</section>
+
+@* ================= Risk Treatment — FULL PAGE (261, 263) ============
+    The treatment task and its sub tasks.
+
+    EVERYTHING HERE IS TASK CENTRE'S, SHOWN IN PLACE.
+    The task, its status, its owner, its SLA and its children all belong
+    to Task Centre and are read and written through Task Centre's own
+    endpoints (practice/api/tasks/{id}/children). This page is a lens on
+    that data from the risk's side -- it does not keep its own copy and
+    it does not implement a second task mechanism.
+
+    Sub tasks use sp_task_child_create, which is what makes the parent
+    refuse to close while a mandatory child is open (BRD §12). That gate
+    is the reason residual analysis can trust "all treatment tasks
+    closed" to mean the work is genuinely done.
+
+    A PAGE, NOT A MODAL, for the same reason Risk Analysis is: it
+    carries a task grid that grows with the work, a sub-task form, and a
+    gate notice, and inside an 820px pm-modal-wide the grid loses its
+    Due and Sub-task columns to wrapping while the page around it
+    scrolls. Same shell as the analysis page -- pm-panel per section,
+    pm-section-heading on each, the master layout's container-fluid
+    width.
+=================================================================== *@
+
+@* ================= Risk Details — READ-ONLY FULL PAGE ==============
+    Opened by "View risk" on the register's 3-dot menu. The whole life of
+    one risk on one page: context, inherent score, treatment, scope,
+    residual score, acceptance.
+
+    READ-ONLY MEANS READ-ONLY. There is not one input, select, textarea
+    or save button below, and the loader issues GETs only -- in
+    particular it calls refreshTreatmentState with sync:false, because
+    the Treatment and Residual pages deliberately POST treatment-sync
+    before reading and a page whose whole job is to look at a risk must
+    not move it to Monitoring as a side effect of being opened.
+
+    IT REUSES, IT DOES NOT COPY. Every block here is a component the
+    Residual page already read-only-renders:
+      pm-panel / pm-section-heading      section shell
+      risk-flow                          the stage rail
+      pm-detail-grid + dd()              label/value lists
+      risk-gate, risk-tiles, taskRow()   treatment state, readOnly:true
+      riskMapping.mount(..., readOnly)   practices + dependencies
+    Nothing on this page has its own renderer where one already exists,
+    so a change to any of those shows up here too.
+
+    SECTIONS ARE GATED BY WHAT THE RISK HAS REACHED, not hidden. A risk
+    still awaiting analysis has no treatment, residual or acceptance to
+    show -- those panels stay in place and say what has to happen first,
+    because a section that vanishes reads as a missing feature while a
+    section that explains itself reads as a workflow.
+
+    IT IS NOT A NEW SCREEN KEY. Like the other three full pages it is a
+    sibling of the tab panels, shown by showFullPage() and left by
+    backFromFullPage(), so it needs no menu row, no permission seed and
+    no navigation round trip.
+=================================================================== *@
+<section id="riskDetailPageView" class="risk-page" hidden>
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Risk Register</p>
+            <h1 id="rdPageTitle">Risk details</h1>
+            <p id="rdPageSubtitle">Everything recorded for this risk, read-only.</p>
+        </div>
+        <div class="ra-head-actions">
+            @* One lifecycle badge, from the derived stage. The second
+               span that used to sit here carried the stored record
+               status and read as a competing "status". *@
+            <span id="rdHeadStage"></span>
+            @* Actions (change request, 2026-09-22): the same items the
+               Register row menu offers for this risk, gated by the same
+               permission and status/applicability rules -- both build
+               from buildRegisterMenu() in risk-centre.js, so there is
+               exactly one implementation of those rules. "View risk" is
+               not offered here: this page already IS that view. *@
+            @* class="pm-button" ONLY -- not pm-action-trigger too. That
+               class exists for the small square 3-dot triggers on grid
+               rows (data-reg-menu etc.) and, defined later in
+               practice-management.css with equal specificity, its
+               background/border/padding/display:inline-grid win over
+               pm-button's for every property they share -- on a button
+               this size that reads as the icon, "Actions" and the
+               chevron stacking on three lines inside a tiny square
+               instead of one bordered button. data-rd-menu alone is
+               enough for wireDelegation()'s selector below (no other
+               element on this page carries it), so the CSS collision is
+               avoided by simply not opting into that class. *@
+            <button type="button" class="pm-button" id="rdActionsBtn"
+                    data-rd-menu="1" aria-haspopup="true" aria-expanded="false">
+                <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+                <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+            </button>
+            @* Print, not "Export": the browser's own dialog offers PDF,
+               so this needs no server route and no new dependency. *@
+            <button type="button" class="pm-button ghost" id="rdPrintBtn">
+                <i class="fa-solid fa-print"></i> Print
+            </button>
+            <button type="button" class="pm-button ghost" id="rdBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to register
+            </button>
+        </div>
+    </div>
+
+    @* Where the risk has got to, before any detail. Same .risk-flow the
+       Residual page uses for its three-step rail. *@
+    <ol class="risk-flow risk-flow-4" id="rdFlow" aria-label="Risk progress"></ol>
+
+    <div class="rd-body">
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Risk context</h2>
+                <p>What the risk is, and where it came from.</p>
+            </div>
+            <dl class="pm-detail-grid" id="rdContext"></dl>
+            <h3 class="risk-subhead">Traceability</h3>
+            <div id="rdTrace" class="risk-trace"></div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Inherent risk level <span class="pm-hint">before treatment</span></h2>
+                <p>Likelihood &times; impact on this organisation's matrix, as scored at analysis.</p>
+            </div>
+            <div id="rdInherent"></div>
+        </section>
+
+        @* ---- Impact Details -----------------------------------------
+           ABOVE Treatment details on this page, not just above Existing
+           Controls: the read-only page states the risk in the order it
+           was assessed -- context, inherent level, what it impacts, then
+           what was done about it. Read-only, like everything else here.
+           *@
+        <section class="pm-panel" id="rdImpactPanel">
+            <div class="pm-section-heading">
+                <h2>Impact Details</h2>
+                <p>
+                    What this risk impacts &mdash; assets, vendors, people, teams and committees,
+                    by Operationalize category.
+                </p>
+            </div>
+            <div id="rdImpactScope" class="risk-map-host"></div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Treatment details</h2>
+                <p>The decision taken about this risk, and the work raised to carry it out.</p>
+            </div>
+            <div id="rdTreatment"></div>
+            @* Kept OUT of #rdTreatment: refreshTreatmentState() writes
+               into these three by id, so they must exist in the DOM
+               before it runs and must not be replaced by the gating
+               renderer. rd-when-treated is toggled hidden instead. *@
+            <div id="rdTreatmentWork" class="rd-when-treated" hidden>
+                <div class="risk-gate" id="rdGate"></div>
+                <div class="risk-tiles" id="rdTiles"></div>
+                <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Centre</span></h3>
+                <div class="pm-table-wrap">
+                    @* Seven columns: taskRow(readOnly:true) omits the
+                       Actions column rather than rendering a disabled
+                       menu nobody can use. *@
+                    <table id="rdTaskTable">
+                        <thead>
+                            <tr>
+                                <th>Task</th><th>Title</th><th>Owner</th><th>Priority</th>
+                                <th>Target date</th><th>Status</th><th>Sub tasks</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rdTaskBody">
+                            <tr><td colspan="7" class="pm-empty-row">Loading treatment work...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Existing controls</h2>
+                <p>
+                    Practices that control this risk and the dependencies each one brings in.
+                </p>
+            </div>
+            @* TWO hosts, ONE mount: this one takes "Mapped practices"
+               (each card listing its own dependencies read-only) and
+               #rdImpactScope above takes the Impact Details table.
+               Mounted read-only, so it draws no Map button, no unmap
+               control, no tick boxes and no save bar, and it skips the
+               mapping/options fetch entirely. *@
+            <div id="rdMapping" class="risk-map-host"></div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Residual risk level <span class="pm-hint">after treatment</span></h2>
+                <p>What is left once the treatment has been carried out, scored on the same matrix.</p>
+            </div>
+            <div id="rdResidual"></div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Risk acceptance</h2>
+                <p>Who carried this risk forward, on what terms, and when it comes back for review.</p>
+            </div>
+            <div id="rdAcceptance"></div>
+        </section>
+    </div>
+</section>
+
+<section id="riskTreatmentPageView" class="risk-page" hidden>
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Risk Register</p>
+            <h1 id="twPageTitle">Risk treatment</h1>
+            <p id="twPageSubtitle">Track the treatment work for this risk and break it into sub tasks.</p>
+        </div>
+        <div class="ra-head-actions">
+            <span id="twHeadStatus"></span>
+            <button type="button" class="pm-button ghost" id="twBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to register
+            </button>
+        </div>
+    </div>
+
+    <div class="ra-form">
+        <input type="hidden" id="twRiskId" />
+
+        @* ---- Row 1: the risk, beside where the treatment stands ----- *@
+        <div class="ra-row ra-row-split">
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2>Risk</h2>
+                    <p>The risk this treatment work belongs to.</p>
+                </div>
+                <dl class="pm-detail-grid" id="twMeta"></dl>
+            </section>
+
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2>Treatment progress</h2>
+                    <p>Residual analysis unlocks once every treatment task is closed.</p>
+                </div>
+                @* The gate, stated plainly. sp_risk_treatment_state returns
+                   both the answer and the reason, so a disabled button can
+                   explain itself instead of just being grey. *@
+                <div class="risk-gate" id="twGate"></div>
+                <div class="risk-tiles" id="twTiles"></div>
+            </section>
+        </div>
+
+        @* ---- Treatment tasks ---------------------------------------- *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Treatment tasks <span class="pm-hint">from Task Center</span></h2>
+                <p>
+                    Parent tasks own the commitment; sub tasks distribute the work. A parent
+                    cannot be completed while a mandatory sub task is still open.
+                </p>
+            </div>
+            <div class="pm-table-wrap">
+                <table id="twTable">
+                    <thead>
+                        <tr>
+                            <th>Task</th><th>Title</th><th>Owner</th><th>Priority</th>
+                            <th>Due</th><th>Status</th><th>Sub tasks</th><th aria-label="Actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="twTableBody">
+                        <tr><td colspan="8" class="pm-empty-row">No treatment work raised.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @* Sub tasks are created through THE common Task / Sub Task form
+           (Shared/task-form.js), opened with this risk's treatment task
+           fixed as the parent. This page used to carry its own six-field
+           panel with its own validation -- a third implementation of one
+           concept, alongside the Task Center dialog and its prompt()
+           chain. The button below is all that is left of it. *@
+
+        <div class="ra-actionbar">
+            <p class="pm-form-message" id="twMessage" role="status" aria-live="polite"></p>
+            <div class="ra-actionbar-buttons">
+                <button type="button" class="pm-button" id="twCloseBtn">Close</button>
+                <button type="button" class="pm-button" id="twAddChildBtn">
+                    <i class="fa-solid fa-plus"></i> Add sub task
+                </button>
+                <button type="button" class="pm-button primary" id="twResidualBtn" disabled>
+                    <i class="fa-solid fa-scale-balanced"></i> Residual risk analysis
+                </button>
+            </div>
+        </div>
+    </div>
+</section>
+
+@* ================= Accept Risk — FULL PAGE ==========================
+    Recording the acceptance decision for one risk.
+
+    IT WAS A MODAL, AND THE MODAL WAS THE PROBLEM.
+    Acceptance is the last step of a four-step story, and it is the one
+    step that is a JUDGEMENT rather than a measurement: somebody signs
+    that this level of residual risk is acceptable to the organisation.
+    Signing that needs the whole record in front of you — what the risk
+    is, what it scored, what it impacts, what was done about it, what is
+    left — and an 820px popup could show none of it. What it showed
+    instead was five summary lines plus a collapsed block that had to be
+    opened, so the decision was made against a summary of a summary.
+
+    THE SAME SHELL AS RESIDUAL ANALYSIS, deliberately: pm-page-heading
+    with the risk as the h1, the four-step risk-flow-4 rail, a pm-panel
+    per step, a sticky ra-actionbar at the foot. An analyst moving from
+    Residual to Accept should not have to learn a second layout for the
+    next step of the same story.
+
+    EVERYTHING ABOVE THE LAST SECTION IS READ-ONLY.
+    Not disabled — absent. There is no control to press, because
+    acceptance records a decision ABOUT what analysis and residual
+    assessment found; it does not re-open the finding. The two scope
+    hosts are mounted read-only (chips, no pickers), the treatment
+    section is rendered by the Treatment page's own renderer with
+    readOnly:true and sync:false, and every other value is a dl.
+
+    THE FORM IDS ARE UNCHANGED FROM THE MODAL. acRiskId, acGuidance,
+    acMessage, acAcceptedBy, acAcceptedDate, acReviewFrequency,
+    acNextReview, acNote and #riskAcceptanceForm are the same elements
+    under the same ids, so onAcceptanceSubmit, the frequency-to-date
+    rule and every validation message came across untouched. This is a
+    re-housing of the decision, not a rewrite of it.
+
+    BULK ACCEPT IS STILL A MODAL, and should be: it asks for the four
+    values that are common to twelve risks and shows none of the
+    per-risk record, so there is nothing for a page to carry.
+=================================================================== *@
+<section id="riskAcceptancePageView" class="risk-page" hidden>
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Risk Register</p>
+            <h1 id="acPageTitle">Accept risk</h1>
+            <p id="acPageSubtitle">Confirm that this level of residual risk is acceptable, and set when it comes back for review.</p>
+        </div>
+        <div class="ra-head-actions">
+            <span id="acHeadStatus"></span>
+            <button type="button" class="pm-button ghost" id="acBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to register
+            </button>
+        </div>
+    </div>
+
+    @* Step 4 is the current one here, which is the whole point of the
+       rail on this page: the three steps behind it carry their real
+       values, so "accepting WHAT?" is answered before anything is
+       asked. Rendered by renderAcceptanceFlow(). *@
+    <ol class="risk-flow risk-flow-4" id="acFlow" aria-label="Inherent risk to treatment to residual risk to acceptance"></ol>
+
+    <form id="riskAcceptanceForm" class="ra-form">
+        <input type="hidden" id="acRiskId" />
+
+        @* ---- The risk, as it was ------------------------------------
+           Same split as the residual page's step 1: "what the risk is"
+           and "what it scored" are two questions. *@
+        <div class="ra-row ra-row-split ra-step" data-step="1">
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2><span class="ra-step-badge">1</span> Risk summary</h2>
+                    <p>What the risk is. Recorded at assessment &mdash; change it from the register.</p>
+                </div>
+                <dl class="pm-detail-grid" id="acSummary"></dl>
+            </section>
+
+            <section class="pm-panel">
+                <div class="pm-section-heading">
+                    <h2>Inherent risk <span class="pm-hint">before treatment</span></h2>
+                    <p>The rating this acceptance is measured from, and the impact analysis behind it.</p>
+                </div>
+                <dl class="pm-detail-grid" id="acInherent"></dl>
+            </section>
+        </div>
+
+        @* ---- Impact Details, read-only ------------------------------
+           Above the treatment section, as on Residual and View Risk:
+           what the risk impacts is the thing an acceptance is a
+           decision about. *@
+        <section class="pm-panel" id="acImpactPanel">
+            <div class="pm-section-heading">
+                <h2>Impact Details <span class="pm-hint">read-only</span></h2>
+                <p>
+                    What this risk impacts &mdash; assets, vendors, people, teams and
+                    committees, as established at Risk Analysis.
+                </p>
+            </div>
+            <div id="acImpactScope" class="risk-map-host"></div>
+        </section>
+
+        @* ---- What was done about it ---------------------------------
+           The Treatment page's own renderer with readOnly:true and
+           sync:false. Read-only, and it must not move the risk's status
+           as a side effect of being looked at. *@
+        <section class="pm-panel ra-step" data-step="2" id="acTreatmentPanel">
+            <div class="pm-section-heading ra-heading-row">
+                <div>
+                    <h2><span class="ra-step-badge">2</span> Risk treatment <span class="pm-hint">read-only</span></h2>
+                    <p>The treatment recorded for this risk, exactly as the Risk Treatment page holds it.</p>
+                </div>
+                <button type="button" class="pm-button ghost" id="acOpenTreatmentBtn">
+                    <i class="fa-solid fa-diagram-project"></i> Open risk treatment
+                </button>
+            </div>
+
+            <div class="risk-gate" id="acTreatmentGate"></div>
+            <dl class="pm-detail-grid" id="acTreatmentMeta"></dl>
+            <div class="risk-tiles" id="acTiles"></div>
+
+            <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Center</span></h3>
+            <div class="pm-table-wrap">
+                @* Seven columns: taskRow() omits the Actions column when
+                   called with readOnly:true rather than rendering a
+                   disabled menu nobody can use. *@
+                <table id="acTaskTable">
+                    <thead>
+                        <tr>
+                            <th>Task</th><th>Title</th><th>Owner</th><th>Priority</th>
+                            <th>Target date</th><th>Status</th><th>Sub tasks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="acTaskBody">
+                        <tr><td colspan="7" class="pm-empty-row">Loading treatment work...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @* ---- What is left -------------------------------------------
+           The number the acceptance is actually about. Read-only: it is
+           scored on the Residual page, and a risk with no residual
+           score cannot be accepted at all — which is what the gate in
+           step 4 says in words. *@
+        <section class="pm-panel ra-step" data-step="3">
+            <div class="pm-section-heading ra-heading-row">
+                <div>
+                    <h2><span class="ra-step-badge">3</span> Residual risk <span class="pm-hint">read-only</span></h2>
+                    <p>What the treatment left. This is the level being accepted.</p>
+                </div>
+                <button type="button" class="pm-button ghost" id="acOpenResidualBtn">
+                    <i class="fa-solid fa-scale-balanced"></i> Open residual analysis
+                </button>
+            </div>
+            <dl class="pm-detail-grid" id="acResidual"></dl>
+        </section>
+
+        @* ---- Existing controls --------------------------------------
+           Mounted read-only into #acMapping, paired with the impact
+           host above by ONE riskMapping.mount — one /mapping call for
+           both sections. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Existing controls</h2>
+                <p>Practices that control this risk and the dependencies each one brings in.</p>
+            </div>
+            <div id="acMapping" class="risk-map-host"></div>
+        </section>
+
+        @* ================= STEP 4 — the decision ======================
+           The only editable section on the page, and the only one that
+           asks for anything.
+
+           NEXT REVIEW DATE IS REQUIRED AND MUST BE IN THE FUTURE. The
+           procedure refuses without it (56601/56602) and the input is
+           marked required, but the rule is SQL's — a client-side
+           required attribute is an affordance, not a guarantee. The
+           reason it is required at all: this column is the only thing
+           that ever brings an accepted risk back. Accepted with a NULL
+           review date, a risk is invisible to Review Risk and to the
+           calendar forever — quietly retired without anybody deciding
+           to retire it.
+
+           .ac-grid, the same two-column grid the bulk form uses:
+
+               WHO / WHEN            |   WHY
+               Accepted by           |   Acceptance rationale
+               Accepted date         |   (spans all four rows, so the
+               Review frequency      |    textarea is tall without
+               Next review date      |    making the form tall)
+
+           Short answers stacked beside one long one. Review frequency
+           (293) sits directly above the date it drives. *@
+        <section class="pm-panel ra-step" data-step="4" id="acDecisionPanel">
+            <div class="pm-section-heading">
+                <h2><span class="ra-step-badge">4</span> Acceptance decision</h2>
+                <p>Who accepts this risk, on what date, and when it returns for review.</p>
+            </div>
+
+            @* sp_risk_acceptance_get returns both the answer and the
+               reason, so this banner explains itself rather than being a
+               colour. It is the gate on whether this page can save at
+               all. *@
+            <div class="risk-gate" id="acGuidance"></div>
+
+            <div class="pm-form-grid ac-grid">
+                <label>
+                    <span>Accepted by<span class="pm-required">*</span></span>
+                    <select id="acAcceptedBy" required><option value="">-- select --</option></select>
+                </label>
+                <label>
+                    <span>Accepted date</span>
+                    <input type="date" id="acAcceptedDate" />
+                </label>
+                @* Migration 293. Directly above the date it drives, so
+                   the cause sits above its effect and the pair reads as
+                   one decision. Optional: a risk may be given a date with
+                   no cadence behind it, which is what every acceptance
+                   recorded before 293 has. *@
+                <label>
+                    <span>Review frequency</span>
+                    <select id="acReviewFrequency"><option value="">-- select --</option></select>
+                    <span class="pm-hint">Sets the date below. Leave blank, or pick Custom, to choose the date yourself.</span>
+                </label>
+                <label>
+                    <span>Next review date<span class="pm-required">*</span></span>
+                    <input type="date" id="acNextReview" required />
+                    <span class="pm-hint">Must be in the future &mdash; it is what brings this risk back for review.</span>
+                </label>
+                @* Explicitly placed in column 2, spanning the four rows
+                   the left column occupies. The four fields above are
+                   auto-placed and flow down column 1 around it. *@
+                <label class="ac-note">
+                    <span>Acceptance rationale</span>
+                    <textarea id="acNote" rows="3" maxlength="4000"
+                              placeholder="Why is this level of risk acceptable to the organisation?"></textarea>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Action bar ----------------------------------------------
+           Sticky, like the residual page's: on a page this tall the
+           alternative is scrolling to the end to save, then back up to
+           read the validation message that stopped it. *@
+        <div class="ra-actionbar">
+            <p class="pm-form-message" id="acMessage" role="status" aria-live="polite"></p>
+            <div class="ra-actionbar-buttons">
+                <button type="button" class="pm-button" id="acCancelBtn">Cancel</button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-circle-check"></i> Accept risk
+                </button>
+            </div>
+        </div>
+    </form>
+</section>
+@* ================= Bulk accept (migration 295) =====================
+    THE SAME FIELDS AS THE SINGLE ACCEPT FORM, MINUS THE PER-RISK ONES.
+
+    Accepted by, accepted date, review frequency, next review date and
+    the rationale are all shared judgements -- "the committee accepted
+    these twelve on Tuesday, next review in a year" is one decision about
+    twelve risks, not twelve decisions.
+
+    What is NOT here is the per-risk context the single form shows: the
+    ratings, the treatment option, the acceptGuidance banner. Those
+    differ per risk and cannot be summarised into one panel honestly, so
+    the tab shows them as columns in the grid instead and this form asks
+    only for what is genuinely common.
+
+    NOT bulk review with Status = Accepted. That stamps a review
+    (last_reviewed_dt, review_count) which a first acceptance has not
+    earned. Both call sp_risk_acceptance_save, so the rules are shared
+    and only the review stamp differs -- see 295's header.
+=================================================================== *@
+<div class="pm-modal" id="riskBulkAcceptModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide risk-accept-panel">
+        <header>
+            <h2>Accept selected risks</h2>
+            <button class="pm-modal-close" type="button" data-close-bulk-accept aria-label="Close">&times;</button>
+        </header>
+        <form id="riskBulkAcceptForm" data-session-employee-id="@sessionEmployeeId">
+            <p class="pm-hint" id="baSubject" style="margin:0 0 10px;"></p>
+
+            <div class="pm-form-grid ac-grid">
+                <label>
+                    <span>Accepted by<span class="pm-required">*</span></span>
+                    <select id="baAcceptedBy" required><option value="">-- select --</option></select>
+                    <span class="pm-hint">Recorded on every selected risk. Anyone from another organisation is refused.</span>
+                </label>
+                <label>
+                    <span>Accepted date</span>
+                    <input type="date" id="baAcceptedDate" />
+                </label>
+                <label>
+                    <span>Review frequency</span>
+                    <select id="baReviewFrequency"><option value="">-- select --</option></select>
+                    <span class="pm-hint">Sets the date below. Leave blank, or pick Custom, to choose it yourself.</span>
+                </label>
+                <label>
+                    <span>Next review date<span class="pm-required">*</span></span>
+                    <input type="date" id="baNextReview" required />
+                    <span class="pm-hint">Must be in the future &mdash; it is what brings these risks back for review.</span>
+                </label>
+                <label class="ac-note">
+                    <span>Acceptance rationale</span>
+                    <textarea id="baNote" rows="3" maxlength="4000"
+                              placeholder="Why is this level of risk acceptable to the organisation?"></textarea>
+                </label>
+            </div>
+
+            @* Filled after a save: one line per risk, so a partial result
+               is visible rather than averaged into "saved". *@
+            <div id="baOutcome" style="margin-top:10px;"></div>
+
+            <p class="pm-form-message" id="baMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-bulk-accept>Cancel</button>
+                <button type="submit" class="pm-button primary" id="baSubmit">
+                    <i class="fa-solid fa-circle-check"></i> Accept risks
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ============ Bulk review (migrations 270, 294) ====================
+    SHARED DISPOSITIONS ONLY. Everything else about a risk is a per-risk
+    judgement: likelihood, impact, owner, treatment option. One value
+    applied to thirty risks would be a fabricated assessment, which is
+    why this is NOT the single-risk Review over a list -- that one
+    re-scores through sp_risk_register_assess and requires likelihood and
+    impact per risk.
+
+    294 added Review frequency, and it belongs to this set for the same
+    reason the date does: a cadence is a SCHEDULING decision that is
+    genuinely the same for every risk in a quarterly sweep, not an
+    assessment of any one of them. The test for admitting a field here is
+    unchanged -- would one value across thirty risks be a fact or a
+    fabrication?
+
+    299 REMOVED the Status picker, which fails that test from the other
+    direction. A bulk review already says what it is: the procedure moves
+    every reviewed risk to Monitoring, and that is what sends it to the
+    Accept tab. A status box on top of that let one action contradict
+    itself -- and did, silently.
+
+    So this form is now three fields, and all three are the same kind of
+    thing: what happened (description), and what the reviewer SUGGESTS
+    for next time (frequency, date). Neither suggestion decides anything;
+    both travel to the Accept screen for whoever accepts to confirm or
+    change.
+
+    This records a review DISPOSITION: it was looked at, here is the
+    note, here is where it stands, here is when to look again.
+
+    Description writes the REVIEW's remark and the audit trail -- not
+    each risk's risk_description, which is what the risk IS and differs
+    per risk. Applying one description to five risks would erase five
+    different descriptions.
+
+    Status is not written directly. sp_risk_bulk_review routes it through
+    sp_risk_acceptance_save or sp_risk_register_status_set, so a risk
+    without a treatment option or a completed analysis is SKIPPED and
+    reported rather than forced into a state the rest of the product
+    believes cannot exist.
+=================================================================== *@
+<div class="pm-modal" id="riskBulkReviewModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Bulk review</h2>
+            <button class="pm-modal-close" type="button" data-close-bulk-review aria-label="Close">&times;</button>
+        </header>
+        <form id="riskBulkReviewForm">
+            <p class="pm-hint" id="brSubject" style="margin:0 0 10px;"></p>
+
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Description</span>
+                    <textarea id="brRemarks" rows="3" maxlength="4000"
+                              placeholder="e.g. Reviewed as part of quarterly risk review"></textarea>
+                    <span class="pm-hint">
+                        Recorded as the review note on every selected risk and on its audit trail.
+                        It does not overwrite each risk's own description.
+                    </span>
+                </label>
+
+                @* THE STATUS PICKER IS GONE (299).
+                   A bulk review means one thing -- "these were looked at"
+                   -- and the procedure now says it in the status by
+                   moving them to Monitoring, which is what puts them on
+                   the Accept tab. Offering a status box on top of that
+                   was a second way to say the same thing, and it went
+                   wrong in both directions: picking Accepted on an
+                   already-accepted risk silently did nothing, and picking
+                   anything at all stopped the review reaching acceptance.
+
+                   Accepting in bulk has its own place now -- the Accept
+                   Risk tab's "Accept selected" (295) -- so nothing was
+                   lost by removing it. Forcing some other status is a
+                   per-risk decision and belongs on the risk itself. *@
+
+                @* Migration 294. Same control, same placement and the
+                   same derivation rule as the single Accept form, so a
+                   reviewer meets one behaviour rather than two. With
+                   Status = Accepted it reaches sp_risk_acceptance_save
+                   and is recorded on every accepted risk; otherwise it
+                   is stamped alongside the review date. *@
+                <label>
+                    <span>Review frequency</span>
+                    <select id="brReviewFrequency"><option value="">-- leave unchanged --</option></select>
+                    <span class="pm-hint">
+                        Suggested cadence. Fills the date below and travels with it to
+                        Accept Risk. Leave blank, or pick Custom, to choose the date yourself.
+                    </span>
+                </label>
+
+                @* 299 replaced 297's rule. This date no longer decides
+                   anything: a bulk review always sends its risks to
+                   Accept Risk (they move to Monitoring), and the date is
+                   carried there as the reviewer's suggestion. Which is
+                   what makes the frequency select above safe -- under
+                   297 it filled this box and thereby stopped the risk
+                   ever reaching acceptance. *@
+                <label>
+                    <span>Next review date</span>
+                    <input type="date" id="brNextReview" />
+                    <span class="pm-hint">
+                        Suggested date, carried to <strong>Accept Risk</strong> for whoever accepts
+                        these &mdash; they can change it. Must be in the future.
+                    </span>
+                </label>
+            </div>
+
+            @* Filled after a save: one line per risk, so a partial result
+               is visible rather than averaged into "saved". *@
+            <div id="brOutcome" style="margin-top:10px;"></div>
+
+            <p class="pm-form-message" id="brMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-bulk-review>Cancel</button>
+                <button type="submit" class="pm-button primary" id="brSubmit">
+                    <i class="fa-solid fa-check"></i> Apply to selected
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ================= Reassign treatment task =========================
+    POSTs to the EXISTING /practice/api/tasks/{id}/assign — the same
+    endpoint and the same sp_task_assign Task Center has always used. No
+    API and no schema change: reassignment already existed, it just had
+    no way in from this page.
+
+    WHY A PICKER AND NOT A prompt()
+    -------------------------------
+    Task Center's own Reassign is `prompt()` asking the operator to read
+    an employee id out of a printed list and type it back. That is the
+    same interaction the common Task/Sub Task form just replaced for Add
+    Child Task, and copying it here would spread it rather than retire
+    it. state.employees is already loaded on this page for the acceptance
+    and owner selects, so the list costs nothing.
+
+    The reason is optional but goes to sp_task_assign's @reason_text, so
+    the audit_trail row it writes says WHY the owner changed, not just
+    that it did.
+=================================================================== *@
+<div class="pm-modal" id="riskTaskAssignModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Reassign treatment task</h2>
+            <button class="pm-modal-close" type="button" data-close-task-assign aria-label="Close">&times;</button>
+        </header>
+        <form id="riskTaskAssignForm">
+            <input type="hidden" id="taTaskId" />
+            <dl class="risk-meta" id="taMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Reassign to<span class="pm-required">*</span></span>
+                    <select id="taAssignee" required><option value="">-- select --</option></select>
+                    <span class="pm-hint">
+                        The task keeps its priority, SLA and sub tasks — only the owner changes.
+                    </span>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Reason</span>
+                    <textarea id="taReason" rows="2" maxlength="500"
+                              placeholder="Recorded on the task's audit trail."></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="taMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-task-assign>Cancel</button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-user-pen"></i> Reassign
                 </button>
             </footer>
         </form>
@@ -953,6 +3010,96 @@
                     text-transform: uppercase; font-size: 11px; align-self: center; }
     .risk-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
 
+    /* .risk-meta is a TRACK grid (label column | value column) and so it
+       needs dt and dd to be separate grid items — the exact opposite of
+       .pm-detail-grid, which needs the PAIR to be one item. Both are fed
+       by the same dd() helper, so the wrapper it emits is made to
+       generate no box here: its dt/dd then land in the tracks directly
+       and all 13 .risk-meta lists render exactly as they did before.
+       Safe on a plain <div> — it carries no ARIA role to lose, which is
+       the one real hazard of display:contents. */
+    .risk-meta .pm-detail-item { display: contents; }
+
+    /* ==================================================================
+       Bulk accept: one screen, no scrollbar.
+
+       Scoped to .risk-accept-panel on purpose. Every value below is a
+       tightening of a shared rule (.pm-modal-panel's padding, the
+       header's and footer's rules, .pm-form-grid's gap), and tightening
+       those globally would reflow every modal in the product to fix one.
+
+       SINGLE accept is a full page now (#riskAcceptancePageView) and
+       needs none of this -- .risk-page supplies its spacing. What is
+       left here dresses #riskBulkAcceptModal, which is still a modal
+       and still has to fit on one screen.
+       ================================================================== */
+    .risk-accept-panel { padding: 16px 18px; }
+    .risk-accept-panel > header { margin-bottom: 12px; padding-bottom: 10px; }
+    .risk-accept-panel .risk-meta { margin-bottom: 10px; padding: 10px 12px; row-gap: 5px; }
+    .risk-accept-panel .risk-gate { margin: 0 0 10px; padding: 8px 10px; }
+    .risk-accept-panel .pm-form-message { margin: 10px 0 0; }
+    .risk-accept-panel .pm-modal-footer { margin-top: 12px; padding-top: 10px; }
+
+    /* WHO/WHEN on the left, WHY on the right. The four left fields are
+       auto-placed and flow down column 1; the rationale is placed into
+       column 2 across all four of their rows, so the textarea gets its
+       height from the column beside it instead of adding a row.
+
+       Four since 293 added Review frequency above the date it drives.
+       The span below tracks that count -- left at three, the fourth field
+       would have sat beside empty space with the textarea ending short
+       of it.
+
+       Ratio, not fixed widths: 1 : 1.15 gives a date input about 350px
+       and the textarea about 400px at 820px, both comfortably readable.
+       Nothing here shrinks the type or the controls -- the height comes
+       out of empty space, not out of legibility. */
+    /* .pm-form-grid.ac-grid, not .ac-grid alone: both are single-class
+       selectors, so on equal specificity this would be winning on source
+       order alone -- true today, and quietly false the day this block
+       moves into a stylesheet that loads first. */
+    .pm-form-grid.ac-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+        gap: 10px 18px;
+        align-items: start;
+    }
+    .ac-grid .ac-note {
+        grid-column: 2;
+        grid-row: 1 / span 4;
+        display: flex;
+        flex-direction: column;
+        /* The container is align-items:start so the four left fields sit
+           at the top of their rows. This one must opt back into
+           stretching, or it would size to its own content and the
+           four-row span would buy nothing. */
+        align-self: stretch;
+    }
+    /* Fills its column rather than sitting at rows="3" with a gap under
+       it. The rows attribute stays as the pre-CSS floor. */
+    .ac-grid .ac-note textarea {
+        flex: 1 1 auto;
+        min-height: 116px;
+        resize: vertical;
+    }
+    .ac-grid .pm-hint { display: block; margin-top: 4px; }
+
+    /* The ratio above was tuned for an 820px modal. On the full-width
+       acceptance page the same two columns would stretch a date input
+       to 700px and the rationale textarea to 800 -- a form does not get
+       more usable by getting wider, and four short answers spread across
+       a whole screen stop reading as one decision. Capped at roughly the
+       width they were designed for, left-aligned within the panel.
+       Scoped to .risk-page, so the bulk modal is untouched. */
+    .risk-page .pm-form-grid.ac-grid { max-width: 860px; }
+
+    /* Below two usable columns the span placement would strand the
+       textarea, so it goes back to being the last row of one column. */
+    @@media (max-width: 720px) {
+        .pm-form-grid.ac-grid { grid-template-columns: minmax(0, 1fr); }
+        .ac-grid .ac-note { grid-column: 1; grid-row: auto; }
+        .ac-grid .ac-note textarea { min-height: 84px; }
+    }
+
     .risk-subhead { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
                     color: #718096; margin: 16px 0 8px; }
     .risk-history table { width: 100%; font-size: 12px; border-collapse: collapse; }
@@ -1012,29 +3159,867 @@
 
     /* Modal overlay (defensive CSS same as exception + gap-detail so
        pm-modal renders as a proper popup regardless of global stylesheet). */
-    .pm-modal {
-        position: fixed; inset: 0; z-index: 1100;
-        display: flex; align-items: flex-start; justify-content: center;
-        background: rgba(15, 23, 42, 0.55); padding: 40px 20px; overflow-y: auto;
-    }
-    .pm-modal[hidden] { display: none !important; }
-    .pm-modal-panel {
-        background: #fff; border-radius: 8px;
-        box-shadow: 0 12px 32px rgba(0,0,0,0.25);
-        padding: 20px; width: 100%; max-width: 560px;
-        max-height: calc(100vh - 80px); overflow-y: auto;
-    }
+
+
+
     .pm-modal-panel.pm-modal-wide { max-width: 820px; }
-    .pm-modal-panel > header {
-        display: flex; justify-content: space-between; align-items: center;
-        border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;
-    }
-    .pm-modal-panel > header h2 { margin: 0; font-size: 18px; color: #2d3748; }
-    .pm-modal-close { background: transparent; border: 0; padding: 0;
+
+
+    /* .pm-modal / .pm-modal-panel / .pm-modal-footer moved to
+           practice-management.css -- they were identical in three
+           views and absent from any fourth that used the classes.
+           The .pm-modal-close override below is kept deliberately:
+           the global rule is a bordered button, this is a glyph. */
+        .pm-modal-close { background: transparent; border: 0; padding: 0;
         font-size: 26px; line-height: 1; cursor: pointer; color: #718096; }
     .pm-modal-close:hover { color: #e53e3e; }
-    .pm-modal-footer { display: flex; justify-content: flex-end; gap: 8px;
-        margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+
+    /* ==================================================================
+       `pm-form-grid-full` — an alias, and why it is needed.
+
+       This partial uses .pm-form-grid-full 40+ times to mean "this field
+       spans both columns", and so do exception-centre, exception-analysis,
+       gap-detail and document-uploads. It is not defined in
+       practice-management.css or anywhere else: the real class is `.full`
+       (`.pm-form-grid label.full { grid-column: 1 / -1; }`).
+
+       So every field marked full-width in this screen has in fact been
+       rendering at HALF width inside a two-column grid — which is a large
+       part of why these forms felt cramped. Long textareas (risk
+       statement, consequence, controls, remarks) were the worst affected.
+
+       Aliased rather than renamed in the markup: one rule fixes all 40
+       occurrences here with no churn, and the new page below uses the
+       correct `.full` so nothing new depends on the alias.
+
+       SCOPED TO THIS PARTIAL ON PURPOSE. The other four screens have the
+       same latent bug, but fixing them is a change to screens this task
+       did not ask about, and their layouts should be looked at rather
+       than silently reflowed.
+       ================================================================== */
+    .pm-form-grid > .pm-form-grid-full { grid-column: 1 / -1; }
+
+    /* ==================================================================
+       Full-page views — Risk Analysis and Risk Treatment.
+
+       SCOPED TO .risk-page, NOT TO A PAGE ID.
+       These rules were originally written as `#riskAnalysisPageView ...`.
+       When Risk Treatment reused the same class names under a different
+       id, not one of them matched it: the split row never became a grid,
+       the detail list never got its columns, the action bar never became
+       sticky. The page rendered as a single stacked column down the left
+       of a very wide panel -- which looked like a layout that had not
+       been written rather than one that had not been applied.
+
+       A shared class is what makes "the full-page shell" a thing both
+       pages have, and what stops the next page silently missing it.
+
+       The layout rules the page needs, and nothing the site stylesheet
+       already provides: pm-panel, pm-page-heading, pm-section-heading,
+       pm-form-grid, pm-detail-grid and pm-button all come from
+       practice-management.css and are deliberately not restated.
+       ================================================================== */
+    .risk-page { display: block; }
+
+    /* Vertical rhythm between sections. One rule, so "proper spacing
+       between sections" is a property of the page rather than something
+       each section has to remember. */
+    .risk-page .ra-form > * + * { margin-top: 14px; }
+    .risk-page .ra-head { margin-bottom: 14px; }
+    .risk-page .ra-head-actions { display: flex; align-items: center; gap: 10px; }
+
+    /* Split rows (residual analysis, treatment work). Risk context and
+       Inherent scoring no longer use this — they are full-width rows of
+       their own. minmax(0,...) on both tracks stops a long unbroken
+       value from widening its column and squeezing the controls beside
+       it — the classic CSS-grid overflow. */
+    .risk-page .ra-row-split {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+    }
+
+    /* Panels still inside a split row keep two columns. The Review page
+       still has two of them, so this rule stays as it is. */
+    .risk-page .ra-grid-1 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    /* Residual scoring, once the Justification card beside it was
+       removed and the panel went full width.
+
+       Four columns, same shape and cap as .ra-grid-score above, so the
+       two scoring panels on this product look like siblings: the whole
+       calculation reads left to right on one line --
+       likelihood x impact -> rating -> movement -- instead of the two
+       read-outs each taking a full-width row of their own.
+
+       Capped for the same reason .ra-grid-score is: four fields stretched
+       across a 1600px monitor look like a mistake. The remark below spans
+       the row (.pm-form-grid label.full), which keeps the textarea a
+       comfortable reading width rather than one line 1600px wide. */
+    .risk-page .ra-grid-residual {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        max-width: 1280px;
+    }
+
+    /* Inherent scoring: category, likelihood, impact AND the resolved
+       rating all on one row. The rating used to span a second full-width
+       row on its own, which left most of that row empty; as a fourth
+       cell the panel is one line and reads in the order it is worked
+       out. Capped, because four fields stretched across a 1600px monitor
+       look like a mistake — the panel is left-aligned to the page grid
+       and simply stops. */
+    .risk-page .ra-grid-score {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        max-width: 1280px;
+    }
+    /* Match the select box exactly (34px tall, same 6px gap under the
+       label), or the rating chip sits a few pixels proud of the three
+       controls beside it — the kind of misalignment that is only
+       visible once they share a row. */
+    /* Residual scoring shares the row shape, so it shares the alignment
+       fix. Without this the residual chip sits proud of the two selects
+       beside it, exactly as the inherent one did. */
+    .risk-page .ra-grid-score .risk-rating-preview,
+    .risk-page .ra-grid-residual .risk-rating-preview {
+        align-items: center; display: flex; height: 34px;
+        line-height: 1.2; padding: 7px 12px;
+    }
+    /* Same treatment for the delta line, which is the fourth cell on
+       that row and would otherwise be the only one not 34px tall. */
+    .risk-page .ra-grid-residual .risk-delta {
+        align-items: center; display: flex; flex-wrap: wrap;
+        gap: 6px; min-height: 34px; line-height: 1.2;
+    }
+
+    /* Risk Category (375, 376) reuses pm-checkcombo -- see raCategory's
+       markup comment above -- but it still has to sit in this same
+       34px-tall row beside raLikelihood/raImpact/raRating.
+       .pm-checkcombo-trigger's own min-height is 40px (correct for the
+       multi-row Impacted Assets/dependency pickers it was built for),
+       so it is trimmed here to match, exactly the way the rating chip
+       above it was. margin-top:6px matches every other control's gap
+       under its label in this grid -- .form-field (display:block, no
+       gap) does not give it that for free the way .pm-field's grid
+       layout would. */
+    .risk-page .ra-grid-score .pm-checkcombo-trigger {
+        min-height: 34px; margin-top: 6px; padding: 6px 9px;
+    }
+
+    /* Analysis detail asks for Impact Analysis and Risk Type (313) --
+       both full-width, so this stays a single column at every width. A
+       dedicated class rather than reusing .ra-grid-1, which the scoring
+       panel already owns at two columns. */
+    .risk-page .ra-grid-single { grid-template-columns: minmax(0, 1fr); }
+
+    /* Analysis detail: three columns on a wide screen. These are the
+       long-form fields, and three of them side by side is what actually
+       uses the width the master layout gives us. */
+    .risk-page .ra-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .risk-page .ra-span-2 { grid-column: span 2; }
+
+    /* Responsive: collapse in two steps rather than one, so a 1200px
+       laptop gets a sensible middle layout instead of jumping straight
+       to a single column. */
+    @@media (max-width: 1400px) {
+        .risk-page .ra-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .risk-page .ra-span-2 { grid-column: span 2; }
+    }
+    @@media (max-width: 1100px) {
+        .risk-page .ra-row-split { grid-template-columns: minmax(0, 1fr); }
+    }
+    @@media (max-width: 1200px) {
+        /* Four fields need ~230px each before "Inherent risk rating"
+           and the rating text start wrapping. Below that, two rows of
+           two — which still pairs likelihood with impact, and pairs the
+           rating with the delta it is being compared against. */
+        .risk-page .ra-grid-score,
+        .risk-page .ra-grid-residual { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 760px) {
+        .risk-page .ra-grid-3,
+        .risk-page .ra-grid-score,
+        .risk-page .ra-grid-residual,
+        .risk-page .ra-grid-1 { grid-template-columns: minmax(0, 1fr); }
+        .risk-page .ra-span-2 { grid-column: span 1; }
+        .risk-page .ra-actionbar { flex-direction: column; align-items: stretch; }
+    }
+
+    /* The context list.
+
+       THE GRID ITEM IS .pm-detail-item, NOT dt/dd. A <dl> laid out as a
+       grid treats every <dt> and every <dd> as its own item, so across
+       three columns they interleave — label, value, label / value,
+       label, value — and each label ends up above somebody else's
+       value. dd() in risk-centre.js wraps each pair in a .pm-detail-item
+       so the PAIR occupies one cell, which is what a multi-column
+       label/value layout requires. Never style dt/dd as items here.
+
+       240px, auto-fit: three columns at the width this full-width card
+       now has, two on a laptop, one on a phone, without a media query
+       per breakpoint. */
+    .risk-page .pm-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px 28px;
+        margin: 0;
+        align-items: start;
+    }
+    /* min-width:0 so a long unbroken statement wraps inside its cell
+       instead of widening the track and pushing the columns out. */
+    .risk-page .pm-detail-item { min-width: 0; }
+    /* For the one value that is a sentence, not a field. */
+    .risk-page .pm-detail-grid .pm-detail-span { grid-column: 1 / -1; }
+    .risk-page .pm-detail-grid dt {
+        font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--grac-muted, #758095); margin: 0 0 3px;
+    }
+    /* margin:0 — the grid gap owns the spacing now. A bottom margin here
+       would add to the gap and only under the last row of each column,
+       which is what made the old list look ragged. */
+    .risk-page .pm-detail-grid dd {
+        margin: 0; font-size: 13px; color: var(--grac-ink, #172033);
+        overflow-wrap: anywhere; line-height: 1.45;
+    }
+
+    /* The rating preview is a block in a grid cell here, not an inline
+       chip in a modal, so it fills its cell. */
+    .risk-page .risk-rating-preview { display: block; width: 100%; min-width: 0; }
+    .risk-page .form-field > span {
+        color: #536077; display: block; font-size: 13px; font-weight: 650; margin-bottom: 6px;
+    }
+
+    @* The 220px cap this rule used to lift is gone: the mapped practices
+       are a parent/child table now and it never had an inner scroller.
+       The principle still holds -- a scrollbar inside a section inside a
+       scrolling page hides rows the page has room to show -- so nothing
+       replaces it, and .risk-map-cols has been deleted as dead. *@
+
+    /* Four treatment cards across the full width on a wide screen. */
+    .risk-page .risk-treat-options {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+
+    /* Sticky action bar. On a form this tall, a footer that scrolls away
+       means scrolling to the end to save and back to read the validation
+       message that stopped it. */
+    .risk-page .ra-actionbar {
+        position: sticky; bottom: 0; z-index: 5;
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 14px; flex-wrap: wrap;
+        background: #fff;
+        border: 1px solid var(--grac-line, #e2e7f0);
+        border-radius: 8px;
+        box-shadow: 0 -2px 10px rgba(37, 52, 90, 0.06);
+        padding: 12px 14px;
+    }
+    .risk-page .ra-actionbar-buttons { display: flex; gap: 10px; margin-left: auto; }
+    .risk-page .ra-actionbar .pm-form-message { margin: 0; }
+
+    /* ==================================================================
+       The Inherent -> Treatment -> Residual rail, and the step markers
+       that carry it down the page (Residual Risk Analysis).
+
+       WHY A RAIL AND NOT THREE MORE PANELS.
+       The residual page asks one question -- what is left? -- that is
+       only answerable in terms of two things that happened before it.
+       Stacked panels of equal weight read as a form with a long preamble;
+       a numbered rail reads as a sequence, which is what it is. The rail
+       carries the actual values (the inherent chip, the option and its
+       task counts, the residual chip as it is chosen), so the three
+       steps are the summary as well as the navigation.
+
+       Built from the same palette and the same chips as everything else
+       on this screen -- risk-severity-chip inside the boxes, the gate's
+       amber/green for state. Nothing here is a new visual language.
+       ================================================================== */
+    .risk-page .risk-flow {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: stretch;
+        gap: 0;
+        list-style: none;
+        margin: 0 0 14px;
+        padding: 0;
+    }
+    .risk-flow-step {
+        background: #fff;
+        border: 1px solid var(--grac-line, #e2e7f0);
+        border-radius: 8px;
+        padding: 10px 12px;
+        min-width: 0;
+    }
+    /* The step the page is FOR. Nothing else on the rail competes with it. */
+    .risk-flow-step.is-current { border-color: #90cdf4; box-shadow: 0 0 0 2px #ebf8ff inset; }
+    /* Treatment that is not finished. Same amber the gate uses, so the
+       two say the same thing in the same colour. */
+    .risk-flow-step.is-warn    { border-color: #fbd38d; background: #fffaf0; }
+    .risk-flow-step .n {
+        align-items: center; background: #edf2f7; border-radius: 999px;
+        color: #4a5568; display: inline-flex; font-size: 10px; font-weight: 750;
+        height: 16px; justify-content: center; margin-right: 6px; width: 16px;
+    }
+    .risk-flow-step .k {
+        color: #718096; font-size: 11px; font-weight: 700;
+        letter-spacing: .04em; text-transform: uppercase;
+    }
+    .risk-flow-step .v { font-size: 13px; margin-top: 6px; }
+    .risk-flow-step .s { color: var(--grac-muted, #758095); font-size: 11px; margin-top: 4px; }
+    .risk-flow-arrow {
+        align-items: center; color: #a0aec0; display: flex;
+        font-size: 14px; padding: 0 10px;
+    }
+
+    /* ---- Read-only Risk Details page ---------------------------------
+       Reuses .risk-flow for its rail; these are the only two states it
+       adds. A stage the risk has reached is solid; one it has not is
+       faded, so "how far has this got" is answered before reading a
+       word. Deliberately NOT a colour difference: the chips inside the
+       steps already carry severity colour and a second colour system on
+       top of them would fight it. */
+    .rd-step.is-pending { background: #fbfcfe; border-style: dashed; }
+    .rd-step.is-pending .v, .rd-step.is-pending .s { opacity: .7; }
+    .rd-step.is-done .n { background: #c6f6d5; color: #22543d; }
+
+    .rd-body { display: flex; flex-direction: column; gap: 14px; }
+
+    /* A section with nothing to show yet. It says what has to happen
+       first — an empty panel reads as a broken feature. */
+    .rd-na {
+        align-items: center; background: #f9fafb; border: 1px dashed var(--grac-line, #e2e7f0);
+        border-radius: 8px; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 16px;
+    }
+    .rd-na-tag {
+        background: #edf2f7; border-radius: 999px; color: #718096; font-size: 10px;
+        font-weight: 700; letter-spacing: .05em; padding: 3px 9px; text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .rd-na p { color: #718096; font-size: 12px; margin: 0; }
+    .rd-na strong { color: #4a5568; }
+
+    /* Where a required field has no value. Muted, so a page of real
+       values is not shouted at by its gaps. */
+    .rd-none { color: #a0aec0; font-style: italic; }
+
+    /* ---- Print --------------------------------------------------------
+       The page is a record of one risk, so printing it should produce
+       that record and nothing else: no sidebar, no top bar, no tab
+       chrome, no buttons. Panels get a real border and are kept off page
+       breaks, since a section split across two sheets is the thing that
+       makes printed reports unreadable. */
+    @@media print {
+        .main-sidebar, .main-header, .main-footer, .pm-breadcrumb,
+        .risk-tabs, .ra-head-actions, .pm-action-trigger { display: none !important; }
+        .content-wrapper, body { background: #fff !important; margin: 0 !important; }
+        #riskDetailPageView .pm-panel {
+            border: 1px solid #cbd5e0 !important; box-shadow: none !important;
+            break-inside: avoid; page-break-inside: avoid;
+        }
+        #riskDetailPageView .rmp-card,
+        #riskDetailPageView .risk-flow-step { break-inside: avoid; page-break-inside: avoid; }
+        #riskDetailPageView .pm-table-wrap { overflow: visible !important; }
+    }
+    /* Stacked, the arrows would point sideways between rows. */
+    @@media (max-width: 900px) {
+        .risk-page .risk-flow { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+        .risk-flow-arrow { display: none; }
+    }
+
+    /* ---- FOUR-STEP RAIL: four equal columns, chevrons in the gaps -----
+       `.risk-flow-4`, a modifier on .risk-flow. Carried by BOTH four-step
+       rails — Risk Details (#rdFlow) and Residual Analysis (#rrFlow).
+
+       .risk-page .risk-flow above is a fixed FIVE-track grid,
+       1fr auto 1fr auto 1fr, sized for THREE steps and the two <li>
+       arrows between them — which is still exactly what the Review rail
+       is. A four-step rail is seven items in five tracks, and the
+       overflow is what pushed Risk acceptance onto a second row with an
+       orphaned arrow beside it. Both four-step rails now use four tracks
+       and emit no arrow items at all.
+
+       These rules sit AFTER the shared ones, and after the 900px block,
+       deliberately: `.risk-page .risk-flow-4` and `.risk-page .risk-flow`
+       have identical specificity, so source order is what decides, and
+       the single-column rule above would otherwise win on every screen
+       narrower than 900px. */
+    .risk-page .risk-flow-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        align-items: stretch;
+    }
+    /* Equal height comes from align-items:stretch. This lines up the
+       INSIDE of the cards too — heading at the top, supporting line on
+       the bottom edge — so four cards carrying different amounts of text
+       still read as one row rather than four ragged blocks.
+       .risk-flow-step, not .rd-step: the Residual rail's steps carry
+       only the shared class. */
+    .risk-page .risk-flow-4 .risk-flow-step { display: flex; flex-direction: column; position: relative; }
+    .risk-page .risk-flow-4 .risk-flow-step .s { margin-top: auto; padding-top: 4px; }
+
+    /* The connector, drawn in the gap rather than added as a grid item —
+       an extra item is exactly what broke the row. Borders, not an icon
+       font, so it cannot depend on which Font Awesome build is loaded. */
+    .risk-page .risk-flow-4 .risk-flow-step:not(:last-child)::after {
+        border-right: 1.5px solid #cbd5e0;
+        border-top: 1.5px solid #cbd5e0;
+        content: "";
+        height: 6px; width: 6px;
+        margin-top: -4px;
+        position: absolute; right: -8px; top: 50%;
+        transform: rotate(45deg);
+    }
+
+    @@media (max-width: 1200px) {
+        .risk-page .risk-flow-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        /* At two columns the second card's chevron would point at a card
+           on the row below. */
+        .risk-page .risk-flow-4 .risk-flow-step:nth-child(2n)::after { content: none; }
+    }
+    @@media (max-width: 700px) {
+        .risk-page .risk-flow-4 { grid-template-columns: minmax(0, 1fr); }
+        .risk-page .risk-flow-4 .risk-flow-step::after { content: none; }
+    }
+
+    /* ---- Risk Details label/value grids -------------------------------
+       A fixed FOUR columns rather than pm-detail-grid's auto-fit, so
+       every section on the page sits on the same rhythm instead of
+       resolving to a different column count per panel depending on how
+       many fields it happens to have. Fields keep label above value and
+       wrap inside their own column: .pm-detail-item already carries
+       min-width:0 and dd carries overflow-wrap:anywhere, which is what
+       stops a long statement widening its track.
+
+       Id selector, so it beats .risk-page .pm-detail-grid wherever this
+       block ends up in the file. Traceability is outside the <dl>, so it
+       stays a full-width row below the grid. */
+    #riskDetailPageView .pm-detail-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    @@media (max-width: 1400px) {
+        #riskDetailPageView .pm-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 1000px) {
+        #riskDetailPageView .pm-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 640px) {
+        #riskDetailPageView .pm-detail-grid { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    /* The step number on each section heading, tying the panels below to
+       the rail above. */
+    /* The three primary sections carry .ra-step so the rail's steps and
+       the panels below it are one sequence rather than two lists that
+       happen to be numbered the same. The rule is a scroll anchor, not
+       decoration: the sticky action bar would otherwise cover a heading
+       jumped to from the rail. */
+    .risk-page .ra-step { scroll-margin-top: 12px; }
+
+    .ra-step-badge {
+        align-items: center; background: #2b6cb0; border-radius: 999px;
+        color: #fff; display: inline-flex; font-size: 11px; font-weight: 750;
+        height: 18px; justify-content: center; margin-right: 7px; width: 18px;
+    }
+    /* A heading with an action on its right (step 2's link to the
+       Treatment page). */
+    .risk-page .ra-heading-row {
+        align-items: flex-start; display: flex; gap: 12px; justify-content: space-between;
+    }
+    .risk-page .ra-heading-row > div { min-width: 0; }
+
+    /* Inherent -> residual, in words, under the rating preview. */
+    .risk-delta { font-size: 13px; font-weight: 650; color: #2d3748; padding: 4px 0; }
+    .risk-delta .arrow { color: #a0aec0; margin: 0 6px; }
+
+    /* Step 2 is a read-only lens on Task Center's data. Its table is the
+       Treatment page's, minus the actions column. */
+    .risk-page #rrTaskTable td,
+    .risk-page #rrTaskTable th { padding-top: 5px; padding-bottom: 5px; }
+
+    /* ==================================================================
+       Migrations 261-264: stage, treatment, scope, acceptance, calendar.
+
+       Every colour below is already in this file's palette. The point of
+       the new screens is that they look like the Risk Centre, not like
+       a bolt-on -- so the stage chip borrows the status chip's shape,
+       the source badges borrow the severity chip's, and the calendar
+       borrows practice-calendar.css's grid proportions.
+       ================================================================== */
+
+    .risk-tab-badge { margin-left: 6px; }
+
+    /* ---- Stage chip -------------------------------------------------
+       Three visual weights, because the stages fall into three kinds:
+       something is DUE (amber, act), something is IN FLIGHT (blue,
+       wait), something is SETTLED (green/grey, nothing to do). Colour
+       carries the same meaning as the wording so the column can be
+       scanned rather than read. */
+    .risk-stage-chip { display: inline-block; padding: 2px 8px; border-radius: 10px;
+                       font-size: 11px; font-weight: 600; white-space: nowrap;
+                       background: #edf2f7; color: #4a5568; }
+    .risk-stage-chip[data-stage="AnalysisDue"],
+    .risk-stage-chip[data-stage="TreatmentDue"],
+    .risk-stage-chip[data-stage="ResidualDue"],
+    .risk-stage-chip[data-stage="AcceptanceDue"] { background: #fefcbf; color: #744210; }
+    .risk-stage-chip[data-stage="ReviewDue"]     { background: #fed7d7; color: #742a2a; }
+    .risk-stage-chip[data-stage="InTreatment"]   { background: #bee3f8; color: #2a4365; }
+    .risk-stage-chip[data-stage="Accepted"]      { background: #c6f6d5; color: #22543d; }
+    .risk-stage-chip[data-stage="Closed"]        { background: #e2e8f0; color: #718096; }
+
+    /* ---- Treatment option picker ------------------------------------
+       Radio cards rather than a <select>. Four options whose
+       CONSEQUENCES differ (three raise work, one does not) need their
+       consequences visible at the moment of choosing -- a dropdown shows
+       four words and hides the thing that matters. */
+    .risk-treat-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+                          gap: 8px; margin: 8px 0 4px; }
+    .risk-treat-opt { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px;
+                      align-items: start; padding: 10px 12px; cursor: pointer;
+                      border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+    .risk-treat-opt:hover { border-color: #2b6cb0; background: #ebf8ff; }
+    .risk-treat-opt input { margin-top: 2px; }
+    .risk-treat-opt .t { font-weight: 600; font-size: 13px; color: #2d3748; }
+    .risk-treat-opt .d { grid-column: 2; font-size: 11px; color: #718096; line-height: 1.35; }
+    .risk-treat-opt:has(input:checked) { border-color: #2b6cb0; background: #ebf8ff;
+                                         box-shadow: inset 0 0 0 1px #2b6cb0; }
+
+    /* ---- Scope panel (practices + assets) ---------------------------
+       Two columns on desktop because practices and assets are read
+       together -- "which practice put that asset here?" is the question
+       the panel exists to answer, and answering it should not require
+       scrolling between two stacked lists. */
+    .risk-map-host { margin-top: 8px; }
+
+    /* Practices first, dependency categories underneath — two stacked
+       full-width rows, NOT two columns.
+
+       The old two-column split gave practices a 260px lane. That was
+       survivable while a practice was just a name; once each one had to
+       show framework > structure root > statement plus its tasks, every
+       line wrapped and the column read as a ransom note. Both halves now
+       get the whole panel width and the page is scanned downward. */
+    .risk-scope { display: flex; flex-direction: column; gap: 26px; }
+    .risk-scope-block { min-width: 0; }
+    /* A rule rather than a nested card: this already sits inside a
+       pm-panel, and a white card on a white card only adds edges. The
+       gap above it is generous on purpose — the practice blocks are
+       themselves bordered, so a thin divider alone would have read as
+       one more block rather than as a change of subject.
+       ONLY when it follows another block. Impact Details now has a panel
+       of its own above Existing Controls, and a top border on the first
+       thing in a panel is a stray rule under the heading, not a
+       divider between two subjects. */
+    .risk-scope-block + .risk-scope-deps { border-top: 1px solid #e2e8f0; padding-top: 22px; }
+    .risk-scope h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase;
+                     letter-spacing: .04em; color: #718096; }
+    /* Section title and its one action share a line, so the action does
+       not cost a row of vertical space of its own. */
+    .risk-scope-head { display: flex; align-items: center; justify-content: space-between;
+                       gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .risk-scope-head h4 { margin: 0; display: flex; align-items: center; gap: 8px;
+                          flex-wrap: wrap; }
+    .risk-scope-head h4 .pm-hint { margin: 0; text-transform: none; letter-spacing: 0; }
+
+    /* One row per Operationalize category, carrying the shared
+       pm-checkcombo multi-select — the same widget and the same table
+       shape the Operationalize dependency section uses.
+
+       No .pm-checkcombo rules here on purpose: practice-management.css
+       already styles the widget and practice.js already drives it. The
+       only thing this screen adds is the row it sits in. */
+    .risk-dep-table td { vertical-align: middle; }
+    .risk-dep-table td:first-child { white-space: nowrap; }
+
+    /* Locked options are inherited from a mapped practice — visibly
+       present and visibly not yours to untick. */
+    .risk-dep-table [data-checkcombo-option].is-locked { opacity: .72; cursor: not-allowed; }
+    .risk-dep-table [data-checkcombo-option].is-locked span { font-style: italic; }
+
+    .risk-dep-savebar { display: flex; align-items: center; justify-content: space-between;
+                        gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    .risk-dep-savebar .pm-hint { margin: 0; }
+
+    /* The Asset row: three cascade filters and the picker share ONE flex
+       line, the same proportions the Operationalize Asset row uses
+       (filters 1fr each, picker 2fr). Stacking them would make the Asset
+       row twice the height of every other one and put the filters a
+       glance away from the list they narrow.
+
+       min-width:0 on every cell is what stops a long asset or category
+       name widening its flex item and pushing the row past the table —
+       the usual flexbox overflow trap. */
+    .risk-asset-row { display: flex; gap: 8px; align-items: flex-end; width: 100%; }
+    .risk-asset-filter { flex: 1 1 0; min-width: 0; }
+    .risk-asset-picker { flex: 2 1 0; min-width: 0; }
+    .risk-asset-row .pm-hint { display: block; margin: 0 0 2px; }
+    .risk-asset-row .pm-checkcombo { width: 100%; }
+
+    @@media (max-width: 1100px) {
+        /* Two lines rather than four: filters wrap among themselves and
+           the picker takes a full line under them. */
+        .risk-asset-row { flex-wrap: wrap; }
+        .risk-asset-filter { flex: 1 1 30%; }
+        .risk-asset-picker { flex: 1 1 100%; }
+    }
+
+    @* .risk-map-cols / .risk-map-col removed: no markup in this partial,
+       any other view, or any script used them. Dead since the scope panel
+       stopped being two columns. *@
+    /* ---- Mapped practice blocks ---------------------------------------
+       ONE BORDERED BLOCK PER PRACTICE. The flat table this replaces gave
+       the practice name, its provenance, its dependency count and its
+       tasks rows of equal visual weight, so nothing said which belonged
+       to what. Each block now has three tiers that are read in order:
+       title + badge, labelled facts, then the tasks inset and shaded so
+       they are plainly subordinate to both.
+
+       Colours, radius and type are the page's existing ones — this is a
+       regrouping of the same values, not a new palette. */
+    .rmp-list { display: flex; flex-direction: column; gap: 12px; }
+
+    .rmp-card {
+        border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;
+        padding: 14px 16px; transition: border-color .12s ease;
+    }
+    .rmp-card:hover { border-color: #cbd5e0; }
+
+    .rmp-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .rmp-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    .rmp-title h5 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.35;
+                    color: var(--grac-ink, #172033); overflow-wrap: anywhere; }
+
+    /* Lighter than the old row button: an unmap is destructive and rare,
+       so it should be findable, not prominent. Colour arrives on hover. */
+    .rmp-remove { background: transparent; border: 0; cursor: pointer; color: #cbd5e0;
+                  font-size: 13px; line-height: 1; padding: 5px 7px; border-radius: 6px;
+                  flex: 0 0 auto; }
+    .rmp-remove:hover { color: #e53e3e; background: #fff5f5; }
+    .rmp-remove[disabled] { color: #edf2f7; cursor: not-allowed; }
+    .rmp-remove[disabled]:hover { color: #edf2f7; background: transparent; }
+
+    /* Named facts instead of an undecoded breadcrumb. auto-fit so they
+       use the block's width and wrap as a set rather than one per line. */
+    .rmp-facts {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px 20px; margin: 12px 0 0; padding: 12px 0 0;
+        border-top: 1px dashed #edf1f6;
+    }
+    .rmp-fact { min-width: 0; }
+    .rmp-facts dt { margin: 0 0 2px; font-size: 10px; font-weight: 600;
+                    text-transform: uppercase; letter-spacing: .05em; color: #a0aec0; }
+    .rmp-facts dd { margin: 0; font-size: 12px; line-height: 1.45;
+                    color: #2d3748; overflow-wrap: anywhere; }
+
+    /* Tasks: inset, shaded, one step smaller. */
+    .rmp-tasks { margin-top: 12px; padding: 9px 11px; border-radius: 6px;
+                 background: #f8fafc; border: 1px solid #eef2f7; }
+    .rmp-tasks-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+                       font-size: 10px; font-weight: 600; text-transform: uppercase;
+                       letter-spacing: .05em; color: #a0aec0; }
+    .rmp-task-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .rmp-task-table th { padding: 0 8px 5px; text-align: left; font-size: 10px;
+                         font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+                         color: #a0aec0; }
+    .rmp-task-table td { padding: 6px 8px; color: #2d3748; vertical-align: middle;
+                         border-top: 1px solid #e8eef5; overflow-wrap: anywhere; }
+    .rmp-task-table th:first-child, .rmp-task-table td:first-child { padding-left: 0; }
+    .rmp-task-table th:last-child,  .rmp-task-table td:last-child  { padding-right: 0; }
+    .rmp-dash { color: #cbd5e0; }
+    .rmp-no-tasks { margin: 0; font-size: 11px; font-style: italic; color: #a0aec0; }
+
+    /* ---- The practice's own dependencies, read-only ------------------
+       Same inset treatment as .rmp-tasks, so both read as subordinate to
+       the practice they sit under. Chips, not a table: these are names
+       with no other attribute worth a column, and there is nothing to do
+       to them here -- the practice owns them and unmapping the practice
+       is what removes them. No pointer cursor, no hover state, nothing
+       that would suggest otherwise. */
+    .rmp-deps { margin-top: 12px; padding: 9px 11px; border-radius: 6px;
+                background: #f8fafc; border: 1px solid #eef2f7; }
+    .rmp-deps-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+                      font-size: 10px; font-weight: 600; text-transform: uppercase;
+                      letter-spacing: .05em; color: #a0aec0; }
+    .rmp-dep-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+                      gap: 8px 18px; margin: 0; }
+    .rmp-dep-group { min-width: 0; }
+    .rmp-dep-groups dt { margin: 0 0 3px; font-size: 10px; font-weight: 600;
+                         text-transform: uppercase; letter-spacing: .04em; color: #a0aec0; }
+    .rmp-dep-groups dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+    .rmp-dep-chip { display: inline-block; padding: 2px 8px; border-radius: 10px;
+                    background: #edf2f7; border: 1px solid #e2e8f0; color: #2d3748;
+                    font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+    .rmp-no-deps { margin: 0; font-size: 11px; font-style: italic; color: #a0aec0; }
+
+    /* The read-only Impact Details cell: chips, wrapping, in the box the
+       picker would have occupied. Same chip as the practice cards, so
+       "a mapped record" looks the same wherever it is read. */
+    .risk-dep-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0; }
+
+    /* Count pill beside a section or group title. */
+    .rmp-count { display: inline-block; min-width: 20px; padding: 1px 7px; border-radius: 9px;
+                 background: #edf2f7; color: #4a5568; font-size: 11px; font-weight: 650;
+                 text-align: center; letter-spacing: 0; }
+    .rmp-count.sm { min-width: 16px; padding: 0 5px; font-size: 10px; }
+
+    /* ---- Source badges ----------------------------------------------
+       The requirement asks the UI to distinguish assets inherited from
+       the primary practice, assets inherited through an additional
+       practice, and assets mapped directly. Four badges, because an
+       asset can legitimately be BOTH direct and inherited -- and that
+       combination is exactly the one that survives unmapping a
+       practice, so it must be visible rather than collapsed into one of
+       the other two. */
+    .risk-src-badge { display: inline-block; padding: 1px 6px; border-radius: 8px;
+                      font-size: 10px; font-weight: 600; letter-spacing: .02em;
+                      text-transform: uppercase; }
+    .risk-src-badge[data-src="Primary"]            { background: #bee3f8; color: #2a4365; }
+    .risk-src-badge[data-src="Additional"]         { background: #e9d8fd; color: #44337a; }
+    .risk-src-badge[data-src="Direct"]             { background: #c6f6d5; color: #22543d; }
+    .risk-src-badge[data-src="DirectAndInherited"] { background: #feebc8; color: #7b341e; }
+
+    /* ---- Gate notice -------------------------------------------------
+       A disabled button that cannot say why is a dead end. Every gate in
+       this flow returns its own reason text, and this is where it goes. */
+    .risk-gate { padding: 10px 12px; border-radius: 6px; font-size: 12px;
+                 background: #ebf8ff; border: 1px solid #bee3f8; color: #2a4365;
+                 margin-bottom: 10px; }
+    .risk-gate.is-blocked { background: #fffaf0; border-color: #fbd38d; color: #7b341e; }
+    .risk-gate.is-ready   { background: #f0fff4; border-color: #9ae6b4; color: #22543d; }
+
+    /* ---- Risk calendar ----------------------------------------------
+       A month grid, borrowing practice-calendar.css's proportions so the
+       two calendars in the product feel like one idea. Deliberately not
+       a week or day view: a review date has no time component, so hours
+       would be a grid of empty cells. */
+    .risk-cal-title { font-weight: 600; color: #2d3748; min-width: 160px; text-align: center; }
+    .risk-cal { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
+    .risk-cal-head, .risk-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+    .risk-cal-head > div { padding: 6px 8px; font-size: 11px; font-weight: 600;
+                           text-transform: uppercase; letter-spacing: .04em;
+                           color: #718096; background: #f7fafc; border-bottom: 1px solid #e2e8f0; }
+    .risk-cal-cell { min-height: 92px; padding: 4px 6px; border-right: 1px solid #edf2f7;
+                     border-bottom: 1px solid #edf2f7; background: #fff; }
+    .risk-cal-cell:nth-child(7n) { border-right: 0; }
+    .risk-cal-cell.is-outside { background: #fafafa; }
+    .risk-cal-cell.is-outside .d { color: #cbd5e0; }
+    .risk-cal-cell.is-today { background: #ebf8ff; }
+    .risk-cal-cell .d { font-size: 11px; font-weight: 600; color: #4a5568; }
+    .risk-cal-cell.is-today .d { color: #2b6cb0; }
+    .risk-cal-ev { display: block; width: 100%; text-align: left; margin-top: 3px;
+                   padding: 2px 5px; border: 0; border-radius: 4px; cursor: pointer;
+                   font-size: 10px; line-height: 1.3; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap;
+                   background: #edf2f7; color: #2d3748; }
+    .risk-cal-ev:hover { filter: brightness(0.95); }
+    .risk-cal-ev[data-rating="Critical"] { background: #742a2a; color: #fff; }
+    .risk-cal-ev[data-rating="High"]     { background: #fed7d7; color: #742a2a; }
+    .risk-cal-ev[data-rating="Medium"]   { background: #fefcbf; color: #744210; }
+    .risk-cal-ev[data-rating="Low"]      { background: #c6f6d5; color: #22543d; }
+    .risk-cal-ev.is-overdue { box-shadow: inset 2px 0 0 #c53030; font-weight: 700; }
+    .risk-cal-more { font-size: 10px; color: #718096; margin-top: 2px; }
+
+    .risk-overdue { color: #c53030; font-weight: 600; }
+    .risk-duetoday { color: #b7791f; font-weight: 600; }
+
+    /* ---- Treatment task hierarchy -----------------------------------
+       Parent tasks own the commitment; sub tasks distribute the work.
+       Rendered flat, the two read as unrelated rows and the relationship
+       -- which is the whole point of BRD §11/§12 -- has to be inferred
+       from a parent id nobody can see.
+
+       So the parent is the row, and its sub tasks are disclosed beneath
+       it. Collapsed on load: a risk with four treatment tasks and a
+       dozen sub tasks otherwise opens as a wall, and the reader wanted
+       the four.
+
+       The indent is drawn with a left border on the first cell rather
+       than padding alone, so the child rows read as one group hanging
+       off the parent instead of four separately-shifted rows. */
+    .tw-toggle {
+        background: none; border: 0; cursor: pointer; padding: 0 6px 0 0;
+        color: #4a5568; font-size: 11px; line-height: 1;
+    }
+    .tw-toggle:hover { color: #2b6cb0; }
+    .tw-toggle i { transition: transform .12s ease; display: inline-block; }
+    .tw-toggle[aria-expanded="true"] i { transform: rotate(90deg); }
+
+    /* Keeps the task number of a childless parent aligned with one that
+       has a toggle -- otherwise the column looks ragged. */
+    .tw-toggle-spacer { display: inline-block; width: 17px; }
+
+    .risk-page tr.tw-parent.is-open > td { background: #f7fafc; }
+
+    .risk-page tr.tw-sub > td { background: #fbfdff; }
+    .risk-page tr.tw-sub > td:first-child {
+        padding-left: 26px;
+        box-shadow: inset 3px 0 0 #bee3f8;
+    }
+    .risk-page tr.tw-sub .tw-sub-mark { color: #90cdf4; margin-right: 4px; }
+
+    /* Compact: the hierarchy adds rows, so each row gives some back.
+       Only the treatment table -- the register grids are untouched. */
+    .risk-page #twTable td,
+    .risk-page #twTable th { padding-top: 5px; padding-bottom: 5px; }
+
+    /* A child whose parent is not in this list (raised against a legacy
+       candidate, say) has no toggle to reveal it, so it is never hidden
+       and says why it is standing on its own. */
+    .risk-page tr.tw-orphan > td:first-child { box-shadow: inset 3px 0 0 #fbd38d; }
+
 </style>
 
+@* ================= Map a practice (Practice Picker) ==================
+   The four cascading dropdowns need real width. Inline in the scope
+   panel they were squeezed into the narrow "mapped practices" column and
+   the labels wrapped. A dialog gives them a full row each and keeps the
+   scope panel to a single Map button, so no other column has to move.
+   The picker itself is unchanged -- it is mounted into #riskMapPickerHost
+   instead of into the panel. *@
+<div class="pm-modal" id="riskMapPracticeModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Map a practice</h2>
+            <button class="pm-modal-close" type="button" data-close-map-practice aria-label="Close">&times;</button>
+        </header>
+        <p class="pm-hint">
+            Choose the framework, then narrow down to the practice. Each list loads only
+            what sits under the selection above it, so a large practice set is never
+            fetched in one go. Practices already mapped to this risk are not offered.
+        </p>
+        <div id="riskMapPickerHost"></div>
+        <p class="pm-form-message" id="riskMapPickerMessage" role="status" aria-live="polite"></p>
+        <footer class="pm-modal-footer">
+            <button type="button" class="pm-button" data-close-map-practice>Cancel</button>
+            <button type="button" class="pm-button primary" id="riskMapPickerConfirm">
+                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice
+            </button>
+        </footer>
+    </div>
+</div>
+
+@* Reusable cascading Practice Picker (migration 282). Loaded BEFORE
+   risk-centre.js because the scope panel mounts it during its first
+   render. It is a self-contained component with no page-specific code,
+   so any future practice-mapping screen loads this same file. *@
+@* The standard grid pager. Before risk-centre.js, which mounts four of
+   them as soon as the page initialises. *@
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/practice-picker.js" asp-append-version="true"></script>
+@* Before risk-centre.js for the same reason practice-picker.js is:
+   loadAssessOptions() mounts the threat/vulnerability pickers as soon as
+   an organisation is selected, and window.__tagPicker has to exist by
+   then. (285/286) *@
+<script src="~/js/tag-picker.js" asp-append-version="true"></script>
+
+@* Shared helpers — exposes window.__wfCommon, of which this screen uses
+   personWithRole ("Vinod - Risk Owner") so the dependency Person picker
+   formats people exactly as Operationalize does. Pure script, no markup,
+   self-guarding on re-render, and every fetch inside it is behind a
+   function, so rendering it here adds no requests. Must precede
+   risk-centre.js. (291) *@
+<partial name="Partials/_workflow-common" />
+
 <script src="~/js/RiskCentre/risk-centre.js" asp-append-version="true"></script>
+
+@* THE common Task / Sub Task creation form, shared with Task Center.
+   Risk Treatment opens it in sub task mode with the treatment task fixed
+   as the parent. *@
+<partial name="Partials/_task-form-dialog" />
+<script src="~/js/Shared/task-form.js" asp-append-version="true"></script>

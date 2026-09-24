@@ -48,6 +48,12 @@ public sealed class ObligationTypedRow
     public string FrameworkRelease { get; set; } = "";
     public long ObligationId { get; set; }
     public string ObligationName { get; set; } = "";
+
+    // Migration 301. The authored obligation text, full and untruncated.
+    // ObligationName above already falls back to LEFT(obligation_text, 300)
+    // for an obligation published without a name, so for those two the words
+    // are the same -- a caller showing both should suppress the duplicate.
+    public string ObligationText { get; set; } = "";
     public long? ObligationTypeId { get; set; }
     public string TypeCode { get; set; } = "";
     public string TypeName { get; set; } = "";

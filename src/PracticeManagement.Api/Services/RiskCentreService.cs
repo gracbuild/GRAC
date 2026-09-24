@@ -44,7 +44,7 @@ public interface IRiskCentreService
     Task<RiskRegisterActionResult>           RegisterAsync(long candidateId, RiskRegisterRequest req, CancellationToken ct);
     Task<RiskRegisterActionResult>           CreateCustomRiskAsync(RiskCustomCreateRequest req, CancellationToken ct);
     Task<IReadOnlyList<RiskDuplicateMatch>>  CheckDuplicatesAsync(RiskDuplicateCheckRequest req, CancellationToken ct);
-    Task<RiskRegisterListResult>             ListRegisterAsync(long organizationId, string? statusCode, string? sourceTypeCode, string? categoryCode, string? ratingCode, long? ownerEmployeeId, string? search, int page, int pageSize, CancellationToken ct);
+    Task<RiskRegisterListResult>             ListRegisterAsync(long organizationId, string? statusCode, string? sourceTypeCode, string? categoryCode, string? ratingCode, long? ownerEmployeeId, string? search, int page, int pageSize, bool? analysisPending, string? residualRatingCode, bool? residualPending, string? treatmentOptionCode, string? workflowStageCode, bool? reviewDue, CancellationToken ct);
     Task<RiskRegisterDetail?>                GetRegisterAsync(long riskRegisterId, CancellationToken ct);
     Task<RiskRegisterActionResult>           SetRegisterStatusAsync(long riskRegisterId, RiskRegisterStatusRequest req, CancellationToken ct);
     Task<RiskRegisterActionResult>           SetRegisterOwnerAsync(long riskRegisterId, RiskRegisterOwnerRequest req, CancellationToken ct);
@@ -66,8 +66,76 @@ public interface IRiskCentreService
 
     // ---- Two-stage assessment (migration 216) -----------------------
     Task<RiskAssessmentOptions>               GetAssessmentOptionsAsync(long organizationId, CancellationToken ct);
+
+    // ---- Organisation-owned threats / vulnerabilities (285, 286) ----
+    Task<IReadOnlyList<RiskThreatItem>>        ListThreatsAsync(long organizationId, CancellationToken ct);
+    Task<IReadOnlyList<RiskVulnerabilityItem>> ListVulnerabilitiesAsync(long organizationId, CancellationToken ct);
+    Task<RiskThreatCreateResult>               CreateThreatAsync(long organizationId, string name, string? caller, CancellationToken ct);
+    Task<RiskVulnerabilityCreateResult>        CreateVulnerabilityAsync(long organizationId, string name, string? caller, CancellationToken ct);
+    Task<RiskThreatSelection>                  GetThreatSelectionAsync(long riskRegisterId, CancellationToken ct);
+    Task<int>                                  SetThreatSelectionAsync(long organizationId, long? riskAnalysisId, long? riskRegisterId, IReadOnlyList<int>? threatIds, IReadOnlyList<int>? vulnerabilityIds, string? caller, CancellationToken ct);
+
+    // ---- Risk Type: Confidentiality / Integrity / Availability (313, 314) --
+    Task<IReadOnlyList<RiskTypeItem>>          ListRiskTypesAsync(long organizationId, CancellationToken ct);
+    Task<RiskTypeSelection>                    GetRiskTypeSelectionAsync(long riskRegisterId, CancellationToken ct);
+    Task<RiskTypeSelectionResult>              SetRiskTypeSelectionAsync(long organizationId, long? riskAnalysisId, long? riskRegisterId, IReadOnlyList<int>? riskTypeIds, string? caller, CancellationToken ct);
+
+    // ---- Risk Category, multi-select (375, 376) ----------------------
+    // No ListAsync here -- see the model file's header comment: the
+    // options come from GetScoringOptionsAsync's Categories, which
+    // already carries RiskCategoryId.
+    Task<RiskCategorySelection>                GetRiskCategorySelectionAsync(long riskRegisterId, CancellationToken ct);
+    Task<RiskCategorySelectionResult>          SetRiskCategorySelectionAsync(long organizationId, long? riskAnalysisId, long? riskRegisterId, IReadOnlyList<long>? riskCategoryIds, string? caller, CancellationToken ct);
+
     Task<RiskRegisterAssessResult>            AssessRegisteredRiskAsync(long riskRegisterId, RiskRegisterAssessRequest req, CancellationToken ct);
     Task<RiskApprovalActionResult>            DecideRegisterAnalysisAsync(long riskRegisterId, RiskApprovalDecisionRequest req, CancellationToken ct);
+
+    // ---- Residual Risk Analysis (migration 258) ---------------------
+    Task<RiskResidualSaveResult>              SaveResidualAnalysisAsync(long riskRegisterId, RiskResidualSaveRequest req, CancellationToken ct);
+    Task<RiskResidualDetail?>                 GetResidualAnalysisAsync(long riskRegisterId, CancellationToken ct);
+    Task<IReadOnlyList<RiskResidualVersionRow>> GetResidualHistoryAsync(long riskRegisterId, CancellationToken ct);
+
+    // ---- Practice / Asset mapping (migrations 261, 262) -------------
+    Task<RiskMappingDetail>                   GetMappingAsync(long riskRegisterId, CancellationToken ct);
+    Task<RiskMappingOptions>                  GetMappingOptionsAsync(long riskRegisterId, string? search, int top, CancellationToken ct);
+    Task<RiskPracticeMapResult>               MapPracticeAsync(long riskRegisterId, RiskPracticeMapRequest req, CancellationToken ct);
+    Task<RiskPracticeUnmapResult>             UnmapPracticeAsync(long riskRegisterId, long practiceId, long? actorEmployeeId, string? caller, CancellationToken ct);
+    // Migration 284 -- "Existing Controls" on the risk analysis page.
+    Task<RiskScopePracticeContextResult>      GetScopePracticeContextAsync(long organizationId, long riskRegisterId, CancellationToken ct);
+    Task<RiskDependencyMapResult>             MapDependencyAsync(long riskRegisterId, RiskDependencyMapRequest req, CancellationToken ct);
+    Task<RiskDependencyUnmapResult>           UnmapDependencyAsync(long riskRegisterId, int dependencyTypeId, long dependencyObjectId, long? actorEmployeeId, string? caller, CancellationToken ct);
+
+    // ---- Treatment Option (migrations 261, 263) ---------------------
+    Task<RiskTreatmentOptionResult>           SetTreatmentOptionAsync(long riskRegisterId, RiskTreatmentOptionRequest req, CancellationToken ct);
+    Task<RiskTreatmentState?>                 GetTreatmentStateAsync(long riskRegisterId, CancellationToken ct);
+    Task<int>                                 SyncTreatmentAsync(long? riskRegisterId, long? organizationId, string? caller, CancellationToken ct);
+
+    // ---- Acceptance, Review, Calendar (migration 264) ---------------
+    Task<RiskAcceptanceDetail?>               GetAcceptanceAsync(long riskRegisterId, CancellationToken ct);
+    Task<RiskAcceptanceResult>                SaveAcceptanceAsync(long riskRegisterId, RiskAcceptanceSaveRequest req, CancellationToken ct);
+    Task<RiskReviewDueListResult>             ListReviewDueAsync(long organizationId, long? ownerEmployeeId, string? ratingCode, string? search, int? includeFutureDays, int page, int pageSize, CancellationToken ct);
+    Task<IReadOnlyList<RiskCalendarEventRow>> GetReviewCalendarAsync(long organizationId, DateTime? fromDate, DateTime? toDate, long? ownerEmployeeId, CancellationToken ct);
+    Task<RiskReviewPerformResult>             PerformReviewAsync(long riskRegisterId, RiskReviewPerformRequest req, CancellationToken ct);
+
+    // Review frequency lookup (293). Global, not org-scoped:
+    // frequency_master is a master table, the same list the practice
+    // instance and the organisation committee already choose from.
+    Task<IReadOnlyList<RiskReviewFrequencyRow>> ListReviewFrequenciesAsync(CancellationToken ct);
+
+    // Bulk review (270). Deliberately NOT PerformReviewAsync over a list:
+    // that one is a re-assessment and needs per-risk scores. See
+    // RiskBulkReviewRequest.
+    Task<RiskBulkReviewResult>                BulkReviewAsync(RiskBulkReviewRequest req, CancellationToken ct);
+
+    // Bulk accept (295). Deliberately NOT BulkReviewAsync with StatusCode
+    // "Accepted": that stamps a review. See RiskBulkAcceptRequest.
+    Task<RiskBulkAcceptResult>                BulkAcceptAsync(RiskBulkAcceptRequest req, CancellationToken ct);
+
+    // Risk acceptance approval authority (271). Org-scoped configuration,
+    // reached from Organization -> Risk Acceptance Approval Authority.
+    Task<RiskAcceptanceAuthorityResult>       GetAcceptanceAuthorityAsync(long organizationId, CancellationToken ct);
+    Task<RiskAcceptanceAuthorityResult>       SaveAcceptanceAuthorityAsync(RiskAcceptanceAuthoritySaveRequest req, CancellationToken ct);
+    Task<RiskAcceptanceAuthorityResolved?>    ResolveAcceptanceAuthorityAsync(long riskRegisterId, string? scopeCode, CancellationToken ct);
 }
 
 public sealed class RiskCentreService(IConfiguration configuration, ILogger<RiskCentreService> logger) : IRiskCentreService
@@ -350,7 +418,7 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             while (await r.ReadAsync(ct))
                 categories.Add(new RiskCategoryOption(
                     r["CategoryCode"]?.ToString() ?? "", r["CategoryName"]?.ToString() ?? "",
-                    r["Description"] as string));
+                    r["Description"] as string, Convert.ToInt64(r["RiskCategoryId"])));
 
         if (await r.NextResultAsync(ct))
             while (await r.ReadAsync(ct))
@@ -601,6 +669,21 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             AddParam(cmd, "@linked_control_id",      DbType.Int64,  (object?)req.LinkedControlId ?? DBNull.Value);
             AddParam(cmd, "@created_by_employee_id", DbType.Int64,  (object?)req.CreatedByEmployeeId ?? DBNull.Value);
             AddParam(cmd, "@caller_display_name",    DbType.String, req.CallerDisplayName ?? "system", 100);
+            // ---- stage 1 (migration 216) --------------------------------
+            // 216 added these five parameters to sp_risk_custom_create and
+            // made threat / vulnerability / owner mandatory in
+            // sp_risk_register_insert, but this call site was never
+            // extended. Every parameter carries a NULL default, so the
+            // call still succeeded -- it just wrote risk_analysis with
+            // threat_id = NULL, and the register insert then threw
+            // 56410 "assessment is incomplete - a threat is required."
+            // The screen and RiskCustomCreateRequest have been sending
+            // these values the whole time; only the bridge was missing.
+            AddParam(cmd, "@threat_id",                 DbType.Int32,  (object?)req.ThreatId ?? DBNull.Value);
+            AddParam(cmd, "@threat_description",        DbType.String, (object?)req.ThreatDescription ?? DBNull.Value, -1);
+            AddParam(cmd, "@vulnerability_id",          DbType.Int32,  (object?)req.VulnerabilityId ?? DBNull.Value);
+            AddParam(cmd, "@vulnerability_description", DbType.String, (object?)req.VulnerabilityDescription ?? DBNull.Value, -1);
+            AddParam(cmd, "@business_function_id",      DbType.Int64,  (object?)req.BusinessFunctionId ?? DBNull.Value);
         }, ct);
     }
 
@@ -641,7 +724,10 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
 
     public async Task<RiskRegisterListResult> ListRegisterAsync(
         long organizationId, string? statusCode, string? sourceTypeCode, string? categoryCode,
-        string? ratingCode, long? ownerEmployeeId, string? search, int page, int pageSize, CancellationToken ct)
+        string? ratingCode, long? ownerEmployeeId, string? search, int page, int pageSize,
+        bool? analysisPending, string? residualRatingCode, bool? residualPending,
+        string? treatmentOptionCode, string? workflowStageCode, bool? reviewDue,
+        CancellationToken ct)
     {
         await using var conn = await OpenAsync(ct);
         await using var cmd  = Proc(conn, "grac_practice.sp_risk_register_list");
@@ -654,6 +740,60 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         AddParam(cmd, "@search",            DbType.String, (object?)search ?? DBNull.Value, 200);
         AddParam(cmd, "@page_number",       DbType.Int32,  Math.Max(1, page));
         AddParam(cmd, "@page_size",         DbType.Int32,  Math.Clamp(pageSize <= 0 ? 25 : pageSize, 1, 200));
+        // The screen has offered an "Analysis pending" filter since 216
+        // and sends analysisPending on every register fetch, but nothing
+        // between the query string and here ever carried it -- so the
+        // control silently did nothing. Sent only when the proc declares
+        // it, so a database still on 206 is not handed a parameter it
+        // does not have (which is the "too many arguments" failure mode).
+        if (analysisPending.HasValue
+            && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                   conn, "sp_risk_register_list", "@analysis_pending", ct))
+        {
+            AddParam(cmd, "@analysis_pending", DbType.Boolean, analysisPending.Value);
+        }
+
+        // Same probe, same reason (migration 258). A database still on
+        // 216 has no @residual_rating_code / @residual_pending, and
+        // sending one it does not declare is the "too many arguments"
+        // failure the analysisPending guard above already exists to
+        // avoid. Probed independently of each other so a partially
+        // applied 258 degrades one filter, not both.
+        if (!string.IsNullOrWhiteSpace(residualRatingCode)
+            && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                   conn, "sp_risk_register_list", "@residual_rating_code", ct))
+        {
+            AddParam(cmd, "@residual_rating_code", DbType.String, residualRatingCode, 30);
+        }
+        if (residualPending.HasValue
+            && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                   conn, "sp_risk_register_list", "@residual_pending", ct))
+        {
+            AddParam(cmd, "@residual_pending", DbType.Boolean, residualPending.Value);
+        }
+
+        // Same probe again, same reason (migration 264). A database on
+        // 258 has none of these three, and each is probed independently
+        // so a partially applied 264 degrades one filter rather than
+        // failing the whole list with "too many arguments".
+        if (!string.IsNullOrWhiteSpace(treatmentOptionCode)
+            && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                   conn, "sp_risk_register_list", "@treatment_option_code", ct))
+        {
+            AddParam(cmd, "@treatment_option_code", DbType.String, treatmentOptionCode, 30);
+        }
+        if (!string.IsNullOrWhiteSpace(workflowStageCode)
+            && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                   conn, "sp_risk_register_list", "@workflow_stage_code", ct))
+        {
+            AddParam(cmd, "@workflow_stage_code", DbType.String, workflowStageCode, 30);
+        }
+        if (reviewDue.HasValue
+            && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                   conn, "sp_risk_register_list", "@review_due", ct))
+        {
+            AddParam(cmd, "@review_due", DbType.Boolean, reviewDue.Value);
+        }
 
         var rows = new List<RiskRegisterRow>();
         long total = 0;
@@ -673,7 +813,11 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
                 r["SourceReference"] as string,
                 r["SourceCentreCode"] as string,
                 r["RiskCandidateId"] as long?,
-                Convert.ToInt64(r["RiskAnalysisId"]),
+                // NOT NULL by schema (BRD 24.1), but a DBNull here would
+                // throw InvalidCast and take the whole list down rather
+                // than one row -- and the failure would arrive on screen
+                // as "no risks match these filters".
+                r["RiskAnalysisId"] == DBNull.Value ? 0L : Convert.ToInt64(r["RiskAnalysisId"]),
                 r["RiskOwnerEmployeeId"] as long?,
                 r["RiskOwnerName"] as string,
                 r["BusinessUnit"] as string,
@@ -685,10 +829,54 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
                 r["StatusCode"]?.ToString() ?? "",
                 Convert.ToDateTime(r["RegisteredOn"]),
                 r["RegisteredByName"] as string,
-                Convert.ToBoolean(r["AnalysisPending"]),
-                r["ThreatName"] as string,
-                r["VulnerabilityName"] as string,
-                r["BusinessFunctionName"] as string));
+                // The four 216 columns, read defensively. On a database
+                // still running 206's sp_risk_register_list these are not
+                // in the result set at all, and an unguarded read throws
+                // IndexOutOfRange -- which apiGet then swallowed into
+                // "No risks in the register match these filters", i.e. an
+                // empty register rather than a broken one.
+                HasColumn(r, "AnalysisPending")
+                    && r["AnalysisPending"] != DBNull.Value
+                    && Convert.ToBoolean(r["AnalysisPending"]),
+                HasColumn(r, "ThreatName")           ? r["ThreatName"]           as string : null,
+                HasColumn(r, "VulnerabilityName")    ? r["VulnerabilityName"]    as string : null,
+                HasColumn(r, "BusinessFunctionName") ? r["BusinessFunctionName"] as string : null,
+                // The 258 columns, read the same defensive way. On a
+                // database still on 216 they are absent; ResidualPending
+                // then falls back to TRUE, which is exactly right -- no
+                // residual assessment exists there either.
+                HasColumn(r, "ResidualLikelihoodName") ? r["ResidualLikelihoodName"] as string : null,
+                HasColumn(r, "ResidualImpactName")     ? r["ResidualImpactName"]     as string : null,
+                HasColumn(r, "ResidualRatingCode")     ? r["ResidualRatingCode"]     as string : null,
+                HasColumn(r, "ResidualRatingName")     ? r["ResidualRatingName"]     as string : null,
+                HasColumn(r, "ResidualRatingScore")    ? r["ResidualRatingScore"]    as int?   : null,
+                HasColumn(r, "ResidualAssessedOn")     ? r["ResidualAssessedOn"]     as DateTime? : null,
+                !HasColumn(r, "ResidualPending")
+                    || r["ResidualPending"] == DBNull.Value
+                    || Convert.ToBoolean(r["ResidualPending"]),
+                // The 261-264 columns, read the same defensive way. On a
+                // database still on 258 they are absent, and every one of
+                // them then falls back to the value that means "this risk
+                // has not reached that stage" -- which is true there.
+                HasColumn(r, "TreatmentOptionCode") ? r["TreatmentOptionCode"] as string : null,
+                HasColumn(r, "TreatmentOptionName") ? r["TreatmentOptionName"] as string : null,
+                HasColumn(r, "TreatmentTaskId")     ? r["TreatmentTaskId"]     as long?  : null,
+                HasColumn(r, "AcceptedOn")          ? r["AcceptedOn"]          as DateTime? : null,
+                HasColumn(r, "AcceptedByName")      ? r["AcceptedByName"]      as string : null,
+                HasColumn(r, "NextReviewDate")      ? r["NextReviewDate"]      as DateTime? : null,
+                HasColumn(r, "LastReviewedOn")      ? r["LastReviewedOn"]      as DateTime? : null,
+                NullableInt(HasColumn(r, "ReviewCount") ? r["ReviewCount"] : null),
+                HasColumn(r, "WorkflowStageCode")   ? r["WorkflowStageCode"]   as string : null,
+                NullableInt(HasColumn(r, "OpenTreatmentTaskCount") ? r["OpenTreatmentTaskCount"] : null),
+                NullableInt(HasColumn(r, "TreatmentTaskCount")     ? r["TreatmentTaskCount"]     : null),
+                HasColumn(r, "IsReviewDue")
+                    && r["IsReviewDue"] != DBNull.Value
+                    && Convert.ToBoolean(r["IsReviewDue"]),
+                NullableInt(HasColumn(r, "MappedPracticeCount") ? r["MappedPracticeCount"] : null),
+                NullableInt(HasColumn(r, "MappedDependencyCount") ? r["MappedDependencyCount"] : null),
+                // 376. Absent on a database not yet migrated -- the grid
+                // falls back to the legacy scalar RiskCategoryName itself.
+                HasColumn(r, "RiskCategoryNames") ? r["RiskCategoryNames"] as string : null));
             total = Convert.ToInt64(r["TotalRows"]);
         }
         return new RiskRegisterListResult(total, page, pageSize, rows);
@@ -761,7 +949,207 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             r["VulnerabilityDescription"] as string,
             r["BusinessFunctionId"] as long?,
             r["BusinessFunctionName"] as string,
-            r["AnalysisApprovalStatusCode"] as string);
+            r["AnalysisApprovalStatusCode"] as string,
+            // ---- migration 258 ------------------------------------------
+            // Guarded per column: this proc is rewritten by 258, so a
+            // database still on 216 returns none of these and an
+            // unguarded read would throw IndexOutOfRange and turn the
+            // whole detail modal into "Risk not found."
+            HasColumn(r, "ResidualAnalysisId")       ? r["ResidualAnalysisId"]       as long? : null,
+            HasColumn(r, "ResidualVersion")          ? r["ResidualVersion"]          as int?  : null,
+            HasColumn(r, "ResidualLikelihoodCode")   ? r["ResidualLikelihoodCode"]   as string : null,
+            HasColumn(r, "ResidualLikelihoodName")   ? r["ResidualLikelihoodName"]   as string : null,
+            HasColumn(r, "ResidualLikelihoodValue")  ? r["ResidualLikelihoodValue"]  as int?  : null,
+            HasColumn(r, "ResidualImpactCode")       ? r["ResidualImpactCode"]       as string : null,
+            HasColumn(r, "ResidualImpactName")       ? r["ResidualImpactName"]       as string : null,
+            HasColumn(r, "ResidualImpactValue")      ? r["ResidualImpactValue"]      as int?  : null,
+            HasColumn(r, "ResidualRatingCode")       ? r["ResidualRatingCode"]       as string : null,
+            HasColumn(r, "ResidualRatingName")       ? r["ResidualRatingName"]       as string : null,
+            HasColumn(r, "ResidualRatingScore")      ? r["ResidualRatingScore"]      as int?  : null,
+            HasColumn(r, "ResidualAssessedOn")       ? r["ResidualAssessedOn"]       as DateTime? : null,
+            !HasColumn(r, "ResidualPending")
+                || r["ResidualPending"] == DBNull.Value
+                || Convert.ToBoolean(r["ResidualPending"]),
+            HasColumn(r, "ResidualTreatmentSummary") ? r["ResidualTreatmentSummary"] as string : null,
+            HasColumn(r, "ResidualControls")         ? r["ResidualControls"]         as string : null,
+            HasColumn(r, "ResidualRemarks")          ? r["ResidualRemarks"]          as string : null,
+            HasColumn(r, "ResidualAssessedByName")   ? r["ResidualAssessedByName"]   as string : null,
+            // ---- migrations 261-264 --------------------------------------
+            // Guarded per column for the same reason: this proc is
+            // rewritten again by 264, and a database still on 258 returns
+            // none of these.
+            HasColumn(r, "LinkedPracticeName")       ? r["LinkedPracticeName"]       as string : null,
+            HasColumn(r, "TreatmentOptionCode")      ? r["TreatmentOptionCode"]      as string : null,
+            HasColumn(r, "TreatmentOptionName")      ? r["TreatmentOptionName"]      as string : null,
+            HasColumn(r, "TreatmentDecidedOn")       ? r["TreatmentDecidedOn"]       as DateTime? : null,
+            HasColumn(r, "TreatmentDecidedByName")   ? r["TreatmentDecidedByName"]   as string : null,
+            HasColumn(r, "TreatmentTaskId")          ? r["TreatmentTaskId"]          as long? : null,
+            HasColumn(r, "AcceptedByEmployeeId")     ? r["AcceptedByEmployeeId"]     as long? : null,
+            HasColumn(r, "AcceptedByName")           ? r["AcceptedByName"]           as string : null,
+            // 292. Guarded like every column around it, so an API ahead
+            // of its migration shows the bare name rather than throwing.
+            HasColumn(r, "AcceptedByRoleNames")      ? r["AcceptedByRoleNames"]      as string : null,
+            HasColumn(r, "AcceptedOn")               ? r["AcceptedOn"]               as DateTime? : null,
+            HasColumn(r, "AcceptanceNote")           ? r["AcceptanceNote"]           as string : null,
+            HasColumn(r, "NextReviewDate")           ? r["NextReviewDate"]           as DateTime? : null,
+            HasColumn(r, "LastReviewedOn")           ? r["LastReviewedOn"]           as DateTime? : null,
+            NullableInt(HasColumn(r, "ReviewCount") ? r["ReviewCount"] : null),
+            HasColumn(r, "WorkflowStageCode")        ? r["WorkflowStageCode"]        as string : null,
+            NullableInt(HasColumn(r, "OpenTreatmentTaskCount") ? r["OpenTreatmentTaskCount"] : null),
+            NullableInt(HasColumn(r, "TreatmentTaskCount")     ? r["TreatmentTaskCount"]     : null),
+            HasColumn(r, "IsReviewDue")
+                && r["IsReviewDue"] != DBNull.Value
+                && Convert.ToBoolean(r["IsReviewDue"]),
+            NullableInt(HasColumn(r, "MappedPracticeCount") ? r["MappedPracticeCount"] : null),
+            NullableInt(HasColumn(r, "MappedDependencyCount") ? r["MappedDependencyCount"] : null),
+            // 310. Falls back to 1, not 0, when the column is absent --
+            // this database may not have 310 yet, and every risk is at
+            // least version 1 by definition. HasColumn is the same guard
+            // every other v2 column here uses, for the same reason.
+            HasColumn(r, "RiskVersion") && r["RiskVersion"] != DBNull.Value
+                ? Convert.ToInt32(r["RiskVersion"])
+                : 1,
+            // 311. Falls back to MappedPracticeCount when the column is
+            // absent (a database still on 310), which is the answer that
+            // procedure gave before 311 -- degraded, never wrong in a
+            // new way.
+            HasColumn(r, "LinkedPracticeCount") && r["LinkedPracticeCount"] != DBNull.Value
+                ? Convert.ToInt32(r["LinkedPracticeCount"])
+                : NullableInt(HasColumn(r, "MappedPracticeCount") ? r["MappedPracticeCount"] : null),
+            // 376. Same additive column as the list row above, for the
+            // Risk View detail page.
+            HasColumn(r, "RiskCategoryNames") ? r["RiskCategoryNames"] as string : null);
+    }
+
+    // =================================================================
+    // Residual Risk Analysis (migration 258)
+    //
+    // The rating is never sent. sp_risk_residual_analysis_save resolves
+    // it from the organisation's matrix through the same
+    // sp_risk_rating_resolve the inherent rating uses, so the two scores
+    // on the register grid are produced by one method and are
+    // comparable.
+    // =================================================================
+
+    public async Task<RiskResidualSaveResult> SaveResidualAnalysisAsync(
+        long riskRegisterId, RiskResidualSaveRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        if (string.IsNullOrWhiteSpace(req.ResidualLikelihoodCode))
+            return new RiskResidualSaveResult(false, riskRegisterId, null, null, null, null, null, null, null, "residualLikelihoodCode is required.");
+        if (string.IsNullOrWhiteSpace(req.ResidualImpactCode))
+            return new RiskResidualSaveResult(false, riskRegisterId, null, null, null, null, null, null, null, "residualImpactCode is required.");
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_residual_analysis_save");
+            AddParam(cmd, "@risk_register_id",         DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@residual_likelihood_code", DbType.String, req.ResidualLikelihoodCode, 60);
+            AddParam(cmd, "@residual_impact_code",     DbType.String, req.ResidualImpactCode, 60);
+            AddParam(cmd, "@treatment_summary",        DbType.String, (object?)req.TreatmentSummary ?? DBNull.Value, -1);
+            AddParam(cmd, "@residual_controls",        DbType.String, (object?)req.ResidualControls ?? DBNull.Value, -1);
+            AddParam(cmd, "@analyst_remarks",          DbType.String, (object?)req.AnalystRemarks ?? DBNull.Value, -1);
+            AddParam(cmd, "@assessed_by_employee_id",  DbType.Int64,  (object?)req.AssessedByEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",      DbType.String, req.CallerDisplayName ?? "system", 100);
+
+            // Migration 263 added @treatment_option_code. Probed, not
+            // assumed, for exactly the reason ListRegisterAsync probes
+            // its own additions: a database still on 258 does not declare
+            // it, and sending an undeclared parameter fails the whole
+            // save with "too many arguments" rather than degrading.
+            if (!string.IsNullOrWhiteSpace(req.TreatmentOptionCode)
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       conn, "sp_risk_residual_analysis_save", "@treatment_option_code", ct))
+            {
+                AddParam(cmd, "@treatment_option_code", DbType.String, req.TreatmentOptionCode, 30);
+            }
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskResidualSaveResult(true, riskRegisterId,
+                    r["RiskResidualAnalysisId"] as long?,
+                    r["ResidualVersion"] as int?,
+                    r["ResidualRatingCode"] as string,
+                    r["ResidualRatingName"] as string,
+                    r["ResidualRatingScore"] as int?,
+                    r["InherentRatingCode"] as string,
+                    r["InherentRatingScore"] as int?,
+                    null,
+                    HasColumn(r, "TreatmentOptionCode") ? r["TreatmentOptionCode"] as string : null,
+                    HasColumn(r, "TreatmentOptionName") ? r["TreatmentOptionName"] as string : null);
+            return new RiskResidualSaveResult(true, riskRegisterId, null, null, null, null, null, null, null, null);
+        }
+        catch (SqlException ex)
+        {
+            // 56450-56462 are this migration's own refusals and name the
+            // rule that refused (no inherent rating yet, risk still
+            // Active, risk closed). Surfaced verbatim, like every other
+            // 560xx in this service.
+            logger.LogWarning(ex, "RiskCentreService.SaveResidualAnalysis failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskResidualSaveResult(false, riskRegisterId, null, null, null, null, null, null, null, ex.Message);
+        }
+    }
+
+    public async Task<RiskResidualDetail?> GetResidualAnalysisAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_residual_analysis_get");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        // No row simply means no residual assessment yet. That is the
+        // normal state of a newly registered risk, not an error, so the
+        // controller answers 204 rather than 404.
+        if (!await r.ReadAsync(ct)) return null;
+        return new RiskResidualDetail(
+            Convert.ToInt64(r["RiskResidualAnalysisId"]),
+            Convert.ToInt64(r["OrganizationId"]),
+            Convert.ToInt64(r["RiskRegisterId"]),
+            r["InherentAnalysisId"] as long?,
+            Convert.ToInt32(r["ResidualVersion"]),
+            Convert.ToBoolean(r["IsCurrent"]),
+            r["ResidualLikelihoodCode"] as string,
+            r["ResidualLikelihoodName"] as string,
+            r["ResidualLikelihoodValue"] as int?,
+            r["ResidualImpactCode"] as string,
+            r["ResidualImpactName"] as string,
+            r["ResidualImpactValue"] as int?,
+            r["ResidualRatingCode"] as string,
+            r["ResidualRatingName"] as string,
+            r["ResidualRatingScore"] as int?,
+            r["InherentRatingCode"] as string,
+            r["InherentRatingName"] as string,
+            r["InherentRatingScore"] as int?,
+            r["TreatmentSummary"] as string,
+            r["ResidualControls"] as string,
+            r["AnalystRemarks"] as string,
+            Convert.ToDateTime(r["AssessedOn"]),
+            r["AssessedByEmployeeId"] as long?,
+            r["AssessedByName"] as string);
+    }
+
+    public async Task<IReadOnlyList<RiskResidualVersionRow>> GetResidualHistoryAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_residual_analysis_history");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+        var rows = new List<RiskResidualVersionRow>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskResidualVersionRow(
+                Convert.ToInt64(r["RiskResidualAnalysisId"]),
+                Convert.ToInt32(r["ResidualVersion"]),
+                Convert.ToBoolean(r["IsCurrent"]),
+                r["ResidualLikelihoodName"] as string,
+                r["ResidualImpactName"] as string,
+                r["ResidualRatingCode"] as string,
+                r["ResidualRatingScore"] as int?,
+                r["InherentRatingCode"] as string,
+                r["InherentRatingScore"] as int?,
+                r["TreatmentSummary"] as string,
+                r["AnalystRemarks"] as string,
+                Convert.ToDateTime(r["AssessedOn"]),
+                r["AssessedByName"] as string));
+        return rows;
     }
 
     public async Task<RiskRegisterActionResult> SetRegisterStatusAsync(long riskRegisterId, RiskRegisterStatusRequest req, CancellationToken ct)
@@ -1295,6 +1683,295 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         return new RiskAssessmentOptions(threats, vulns, funcs);
     }
 
+    // =================================================================
+    // Organisation-owned threats and vulnerabilities (285, 286)
+    //
+    // Separate from GetAssessmentOptionsAsync above, which is left
+    // exactly as it was: sp_risk_threat_options_get still backs the old
+    // single-select picklists, and nothing that reads it changes.
+    // =================================================================
+
+    public async Task<IReadOnlyList<RiskThreatItem>> ListThreatsAsync(long organizationId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_threat_list");
+        AddParam(cmd, "@organization_id", DbType.Int64, organizationId);
+
+        var rows = new List<RiskThreatItem>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskThreatItem(
+                Convert.ToInt32(r["ThreatId"]),
+                r["ThreatName"]?.ToString() ?? "",
+                NullableLong(r["OrganizationId"]),
+                Convert.ToBoolean(r["IsShared"])));
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<RiskVulnerabilityItem>> ListVulnerabilitiesAsync(long organizationId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_vulnerability_list");
+        AddParam(cmd, "@organization_id", DbType.Int64, organizationId);
+
+        var rows = new List<RiskVulnerabilityItem>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskVulnerabilityItem(
+                Convert.ToInt32(r["VulnerabilityId"]),
+                r["VulnerabilityName"]?.ToString() ?? "",
+                NullableLong(r["OrganizationId"]),
+                Convert.ToBoolean(r["IsShared"])));
+        return rows;
+    }
+
+    public async Task<RiskThreatCreateResult> CreateThreatAsync(
+        long organizationId, string name, string? caller, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_threat_create");
+        AddParam(cmd, "@organization_id",     DbType.Int64,  organizationId);
+        AddParam(cmd, "@threat",              DbType.String, name, 400);
+        AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct))
+            throw new InvalidOperationException("sp_risk_threat_create returned no row.");
+
+        return new RiskThreatCreateResult(
+            Convert.ToInt32(r["ThreatId"]),
+            r["ThreatName"]?.ToString() ?? "",
+            NullableLong(r["OrganizationId"]),
+            Convert.ToBoolean(r["IsShared"]),
+            Convert.ToBoolean(r["WasCreated"]));
+    }
+
+    public async Task<RiskVulnerabilityCreateResult> CreateVulnerabilityAsync(
+        long organizationId, string name, string? caller, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_vulnerability_create");
+        AddParam(cmd, "@organization_id",     DbType.Int64,  organizationId);
+        AddParam(cmd, "@vulnerability",       DbType.String, name, 400);
+        AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct))
+            throw new InvalidOperationException("sp_risk_vulnerability_create returned no row.");
+
+        return new RiskVulnerabilityCreateResult(
+            Convert.ToInt32(r["VulnerabilityId"]),
+            r["VulnerabilityName"]?.ToString() ?? "",
+            NullableLong(r["OrganizationId"]),
+            Convert.ToBoolean(r["IsShared"]),
+            Convert.ToBoolean(r["WasCreated"]));
+    }
+
+    // Three result sets, fixed order -- threats, vulnerabilities, then
+    // the legacy "Others" text, which is absent entirely for a risk that
+    // never used it. See sp_risk_threat_selection_get's header.
+    public async Task<RiskThreatSelection> GetThreatSelectionAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_threat_selection_get");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        var threats = new List<RiskThreatItem>();
+        var vulns   = new List<RiskVulnerabilityItem>();
+        string? legacyThreat = null, legacyVuln = null;
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            threats.Add(new RiskThreatItem(
+                Convert.ToInt32(r["ThreatId"]),
+                r["ThreatName"]?.ToString() ?? "",
+                null,
+                Convert.ToBoolean(r["IsShared"])));
+
+        if (await r.NextResultAsync(ct))
+            while (await r.ReadAsync(ct))
+                vulns.Add(new RiskVulnerabilityItem(
+                    Convert.ToInt32(r["VulnerabilityId"]),
+                    r["VulnerabilityName"]?.ToString() ?? "",
+                    null,
+                    Convert.ToBoolean(r["IsShared"])));
+
+        if (await r.NextResultAsync(ct))
+            while (await r.ReadAsync(ct))
+            {
+                legacyThreat = r["LegacyThreatText"] as string;
+                legacyVuln   = r["LegacyVulnerabilityText"] as string;
+            }
+
+        return new RiskThreatSelection(threats, vulns, legacyThreat, legacyVuln);
+    }
+
+    // Ids go down as a comma-separated string because that is what
+    // STRING_SPLIT takes, and STRING_SPLIT is already how this codebase
+    // passes id lists to SQL (20 existing uses). The procedure validates
+    // every id against what the tenant may see, so a crafted list cannot
+    // attach another tenant's private row.
+    public async Task<int> SetThreatSelectionAsync(
+        long organizationId, long? riskAnalysisId, long? riskRegisterId,
+        IReadOnlyList<int>? threatIds, IReadOnlyList<int>? vulnerabilityIds,
+        string? caller, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_threat_selection_set");
+        AddParam(cmd, "@organization_id",     DbType.Int64,  organizationId);
+        AddParam(cmd, "@risk_analysis_id",    DbType.Int64,  riskAnalysisId);
+        AddParam(cmd, "@risk_register_id",    DbType.Int64,  riskRegisterId);
+        AddParam(cmd, "@threat_ids",          DbType.String, Csv(threatIds));
+        AddParam(cmd, "@vulnerability_ids",   DbType.String, Csv(vulnerabilityIds));
+        AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        return await r.ReadAsync(ct) ? Convert.ToInt32(r["ThreatCount"]) : 0;
+
+        // null and empty both mean "clear the set", which the procedure
+        // reads the same way -- so this returns null rather than "" and
+        // lets ISNULL(@threat_ids, N'') in SQL do the rest.
+        static string? Csv(IReadOnlyList<int>? ids) =>
+            ids is null || ids.Count == 0 ? null : string.Join(",", ids);
+    }
+
+    // ---- Risk Type: Confidentiality / Integrity / Availability (313, 314) --
+    //
+    // Same shape as the threat/vulnerability trio above, minus create --
+    // 313 deliberately has no free-text escape hatch, so there is nothing
+    // for a "create" endpoint to do.
+    public async Task<IReadOnlyList<RiskTypeItem>> ListRiskTypesAsync(long organizationId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_type_list");
+        AddParam(cmd, "@organization_id", DbType.Int64, organizationId);
+
+        var rows = new List<RiskTypeItem>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskTypeItem(
+                Convert.ToInt32(r["RiskTypeId"]),
+                r["RiskTypeCode"]?.ToString() ?? "",
+                r["RiskTypeName"]?.ToString() ?? "",
+                Convert.ToInt32(r["DisplayOrder"]),
+                Convert.ToBoolean(r["IsShared"])));
+        return rows;
+    }
+
+    public async Task<RiskTypeSelection> GetRiskTypeSelectionAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_type_selection_get");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        var rows = new List<RiskTypeSelectionEntry>();
+        var fromFallback = false;
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            rows.Add(new RiskTypeSelectionEntry(
+                Convert.ToInt32(r["RiskTypeId"]),
+                r["RiskTypeCode"]?.ToString() ?? "",
+                r["RiskTypeName"]?.ToString() ?? "",
+                Convert.ToInt32(r["DisplayOrder"])));
+            fromFallback = Convert.ToBoolean(r["FromAnalysisFallback"]);
+        }
+        return new RiskTypeSelection(rows, fromFallback);
+    }
+
+    // Same CSV-down-STRING_SPLIT convention as SetThreatSelectionAsync, and
+    // the same reason: 56731 (at least one risk type required) is thrown by
+    // the procedure, not guessed at here, so it is caught and returned as
+    // the result's Error rather than left to bubble as an unhandled 500.
+    public async Task<RiskTypeSelectionResult> SetRiskTypeSelectionAsync(
+        long organizationId, long? riskAnalysisId, long? riskRegisterId,
+        IReadOnlyList<int>? riskTypeIds, string? caller, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_type_selection_set");
+            AddParam(cmd, "@organization_id",     DbType.Int64,  organizationId);
+            AddParam(cmd, "@risk_analysis_id",    DbType.Int64,  riskAnalysisId);
+            AddParam(cmd, "@risk_register_id",    DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@risk_type_ids",       DbType.String, Csv(riskTypeIds));
+            AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var count = await r.ReadAsync(ct) ? Convert.ToInt32(r["RiskTypeCount"]) : 0;
+            return new RiskTypeSelectionResult(true, riskRegisterId ?? 0, count, null);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.SetRiskTypeSelection failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskTypeSelectionResult(false, riskRegisterId ?? 0, 0, ex.Message);
+        }
+
+        static string? Csv(IReadOnlyList<int>? ids) =>
+            ids is null || ids.Count == 0 ? null : string.Join(",", ids);
+    }
+
+    // ---- Risk Category, multi-select (375, 376) -----------------------
+    //
+    // Same shape as GetRiskTypeSelectionAsync/SetRiskTypeSelectionAsync
+    // above, called as a SECOND, independent request right after the
+    // Analysis page's existing /assess POST succeeds -- sp_risk_register_
+    // assess is not touched, matching the "no wrapper" precedent 314's
+    // header lays out for Risk Type.
+    public async Task<RiskCategorySelection> GetRiskCategorySelectionAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_category_selection_get");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        var rows = new List<RiskCategorySelectionEntry>();
+        var fromFallback = false;
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            rows.Add(new RiskCategorySelectionEntry(
+                Convert.ToInt64(r["RiskCategoryId"]),
+                r["CategoryCode"]?.ToString() ?? "",
+                r["CategoryName"]?.ToString() ?? "",
+                Convert.ToInt32(r["DisplayOrder"])));
+            fromFallback = Convert.ToBoolean(r["FromAnalysisFallback"]);
+        }
+        return new RiskCategorySelection(rows, fromFallback);
+    }
+
+    // Same CSV-down-STRING_SPLIT convention as SetRiskTypeSelectionAsync,
+    // and the same reason: 56757 (at least one risk category required) is
+    // thrown by the procedure, not guessed at here, so it is caught and
+    // returned as the result's Error rather than left to bubble as an
+    // unhandled 500.
+    public async Task<RiskCategorySelectionResult> SetRiskCategorySelectionAsync(
+        long organizationId, long? riskAnalysisId, long? riskRegisterId,
+        IReadOnlyList<long>? riskCategoryIds, string? caller, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_category_selection_set");
+            AddParam(cmd, "@organization_id",     DbType.Int64,  organizationId);
+            AddParam(cmd, "@risk_analysis_id",    DbType.Int64,  riskAnalysisId);
+            AddParam(cmd, "@risk_register_id",    DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@risk_category_ids",   DbType.String, Csv(riskCategoryIds));
+            AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var count = await r.ReadAsync(ct) ? Convert.ToInt32(r["RiskCategoryCount"]) : 0;
+            return new RiskCategorySelectionResult(true, riskRegisterId ?? 0, count, null);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.SetRiskCategorySelection failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskCategorySelectionResult(false, riskRegisterId ?? 0, 0, ex.Message);
+        }
+
+        static string? Csv(IReadOnlyList<long>? ids) =>
+            ids is null || ids.Count == 0 ? null : string.Join(",", ids);
+    }
+
     public async Task<RiskRegisterAssessResult> AssessRegisteredRiskAsync(
         long riskRegisterId, RiskRegisterAssessRequest req, CancellationToken ct)
     {
@@ -1378,6 +2055,13 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
     private static double? NullableDouble(object? value)
         => value is null || value == DBNull.Value ? null : Convert.ToDouble(value);
 
+    // NULLABLE, unlike NullableInt above, which coalesces to 0 because
+    // its callers are count tiles. Here NULL is meaningful: a threat with
+    // organization_id NULL is a SHARED row, and flattening that to 0
+    // would claim it belongs to organisation zero. (285, 286)
+    private static long? NullableLong(object? value)
+        => value is null || value == DBNull.Value ? null : Convert.ToInt64(value);
+
     // Shared executor for the candidate/register write procs. They all
     // return the same optional columns, so one reader covers them and no
     // action method repeats the open/execute/catch dance.
@@ -1407,6 +2091,996 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         }
     }
 
+    // =================================================================
+    // Practice / Asset mapping — migrations 261, 262
+    //
+    // Every method here is a straight pass-through to one procedure. The
+    // rules that make mapping correct — one asset row per (risk, asset),
+    // contributions as the reason each row exists, removal that will not
+    // steal an asset another practice still needs — all live in SQL, in
+    // 262, behind constraints. Re-stating any of them in C# would create
+    // a second place for them to be wrong.
+    // =================================================================
+    public async Task<RiskMappingDetail> GetMappingAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+
+        // THE AUTO-MAPPING REQUIREMENT LIVES HERE.
+        //
+        // "A risk will already be associated with a Practice when it
+        // reaches Risk Analysis, and the assets that are dependencies of
+        // that Practice should already be mapped." Nobody clicks anything
+        // to make that true, so it has to happen on the read that first
+        // shows the scope.
+        //
+        // sp_risk_mapping_sync_primary is idempotent by construction: it
+        // returns immediately when the risk has no linked practice, and
+        // again when the Primary row is already correct. So calling it on
+        // every mapping read costs one indexed lookup in the steady state
+        // and is the only thing that makes the requirement hold for risks
+        // registered before these migrations existed.
+        //
+        // Run as a SEPARATE command, and its result set discarded: it
+        // delegates to sp_risk_practice_map, which emits one, and folding
+        // that into the read below would make "which result set is the
+        // practice list?" depend on whether a sync happened to fire.
+        //
+        // A failure here must not fail the read. The scope is still
+        // displayable without the primary practice, and reporting "scope
+        // could not be loaded" because a derivation failed would hide the
+        // data that IS there.
+        try
+        {
+            await using var sync = Proc(conn, "grac_practice.sp_risk_mapping_sync_primary");
+            AddParam(sync, "@risk_register_id",    DbType.Int64,  riskRegisterId);
+            AddParam(sync, "@caller_display_name", DbType.String, "system", 100);
+            await sync.ExecuteNonQueryAsync(ct);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.GetMapping: primary-practice sync failed for {Id}: {Msg}",
+                riskRegisterId, ex.Message);
+        }
+
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_mapping_get");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        var practices  = new List<RiskMappedPracticeRow>();
+        var categories = new List<RiskDependencyCategoryRow>();
+        var deps       = new List<RiskMappedDependencyRow>();
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+
+        // Result set 1: practices.
+        while (await r.ReadAsync(ct))
+            practices.Add(new RiskMappedPracticeRow(
+                Convert.ToInt64(r["RiskPracticeMapId"]),
+                Convert.ToInt64(r["PracticeId"]),
+                r["PracticeName"] as string,
+                r["PracticeCode"] as string,
+                r["MapSourceCode"]?.ToString() ?? "Additional",
+                r["IsPrimary"] != DBNull.Value && Convert.ToBoolean(r["IsPrimary"]),
+                Convert.ToDateTime(r["MappedDt"]),
+                r["MappedByEmployeeId"] as long?,
+                r["MappedByName"] as string,
+                r["Remarks"] as string,
+                NullableInt(r["DependencyCount"])));
+
+        // Result set 2: the categories, straight from dependency_type_master.
+        // Every ACTIVE one, including the empty ones — that is how a user
+        // discovers a category is available to map into.
+        if (await r.NextResultAsync(ct))
+            while (await r.ReadAsync(ct))
+                categories.Add(new RiskDependencyCategoryRow(
+                    Convert.ToInt32(r["DependencyTypeId"]),
+                    r["DependencyTypeCode"] as string,
+                    r["DependencyTypeName"]?.ToString() ?? "",
+                    NullableInt(r["DisplayOrder"]),
+                    r["IsSelectable"] != DBNull.Value && Convert.ToBoolean(r["IsSelectable"]),
+                    NullableInt(r["MappedCount"])));
+
+        // Result set 3: the mapped dependencies, with provenance resolved.
+        if (await r.NextResultAsync(ct))
+            while (await r.ReadAsync(ct))
+                deps.Add(new RiskMappedDependencyRow(
+                    Convert.ToInt64(r["RiskDependencyMapId"]),
+                    Convert.ToInt32(r["DependencyTypeId"]),
+                    r["DependencyTypeName"] as string,
+                    Convert.ToInt64(r["DependencyObjectId"]),
+                    r["DependencyObjectName"] as string,
+                    Convert.ToDateTime(r["FirstMappedDt"]),
+                    r["Remarks"] as string,
+                    r["IsDirect"] != DBNull.Value && Convert.ToBoolean(r["IsDirect"]),
+                    r["IsInherited"] != DBNull.Value && Convert.ToBoolean(r["IsInherited"]),
+                    r["FromPrimaryPractice"] != DBNull.Value && Convert.ToBoolean(r["FromPrimaryPractice"]),
+                    r["SourceLabel"]?.ToString() ?? "Additional",
+                    NullableInt(r["SourceCount"]),
+                    r["SourcePractices"] as string));
+
+        return new RiskMappingDetail(riskRegisterId, practices, categories, deps);
+    }
+
+    public async Task<RiskMappingOptions> GetMappingOptionsAsync(
+        long riskRegisterId, string? search, int top, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_mapping_options");
+        AddParam(cmd, "@risk_register_id", DbType.Int64,  riskRegisterId);
+        AddParam(cmd, "@search",           DbType.String, (object?)search ?? DBNull.Value, 200);
+        AddParam(cmd, "@top",              DbType.Int32,  Math.Clamp(top <= 0 ? 200 : top, 1, 1000));
+
+        // Practices only. The OBJECTS for each category are fetched by the
+        // client from the repository gateway's `dependency-options/query`
+        // — the same endpoint the Operationalize picker uses. See
+        // RiskMappingOptions for why there is no second implementation.
+        var practices = new List<RiskPracticeOption>();
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            practices.Add(new RiskPracticeOption(
+                Convert.ToInt64(r["PracticeId"]),
+                r["PracticeName"]?.ToString() ?? "",
+                r["PracticeCode"] as string,
+                NullableInt(r["DependenciesFromPractice"])));
+
+        return new RiskMappingOptions(practices);
+    }
+
+    public async Task<RiskPracticeMapResult> MapPracticeAsync(
+        long riskRegisterId, RiskPracticeMapRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        if (req.PracticeId <= 0)
+            return new RiskPracticeMapResult(false, riskRegisterId, req.PracticeId, null, false, 0, 0, "practiceId is required.");
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_practice_map");
+            AddParam(cmd, "@risk_register_id",    DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@practice_id",         DbType.Int64,  req.PracticeId);
+            // map_source_code is deliberately NOT taken from the client.
+            // Only sp_risk_mapping_sync_primary may create a Primary row;
+            // anything a user maps is Additional by definition.
+            AddParam(cmd, "@map_source_code",     DbType.String, "Additional", 20);
+            AddParam(cmd, "@remarks",             DbType.String, (object?)req.Remarks ?? DBNull.Value, 1000);
+            AddParam(cmd, "@actor_employee_id",   DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name", DbType.String, req.CallerDisplayName ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskPracticeMapResult(true, riskRegisterId,
+                    Convert.ToInt64(r["PracticeId"]),
+                    r["PracticeName"] as string,
+                    r["Created"] != DBNull.Value && Convert.ToBoolean(r["Created"]),
+                    NullableInt(r["DependenciesAdded"]),
+                    NullableInt(r["ContributionsAdded"]),
+                    null);
+            return new RiskPracticeMapResult(true, riskRegisterId, req.PracticeId, null, false, 0, 0, null);
+        }
+        catch (SqlException ex)
+        {
+            // 56522-56527 are 262's own refusals and name the rule that
+            // refused (risk closed, practice from another organisation).
+            // Surfaced verbatim, like every other 565xx in this service.
+            logger.LogWarning(ex, "RiskCentreService.MapPractice failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskPracticeMapResult(false, riskRegisterId, req.PracticeId, null, false, 0, 0, ex.Message);
+        }
+    }
+
+    public async Task<RiskPracticeUnmapResult> UnmapPracticeAsync(
+        long riskRegisterId, long practiceId, long? actorEmployeeId, string? caller, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_practice_unmap");
+            AddParam(cmd, "@risk_register_id",    DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@practice_id",         DbType.Int64,  practiceId);
+            AddParam(cmd, "@actor_employee_id",   DbType.Int64,  (object?)actorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskPracticeUnmapResult(true, riskRegisterId, practiceId,
+                    r["Removed"] != DBNull.Value && Convert.ToBoolean(r["Removed"]),
+                    NullableInt(r["DependenciesRemoved"]),
+                    NullableInt(r["DependenciesKept"]),
+                    null);
+            return new RiskPracticeUnmapResult(true, riskRegisterId, practiceId, false, 0, 0, null);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.UnmapPractice failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskPracticeUnmapResult(false, riskRegisterId, practiceId, false, 0, 0, ex.Message);
+        }
+    }
+
+    public async Task<RiskDependencyMapResult> MapDependencyAsync(
+        long riskRegisterId, RiskDependencyMapRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        if (req.DependencyTypeId <= 0)
+            return new RiskDependencyMapResult(false, riskRegisterId, null, req.DependencyTypeId, null,
+                req.DependencyObjectId, null, false, "dependencyTypeId is required.");
+        if (req.DependencyObjectId <= 0)
+            return new RiskDependencyMapResult(false, riskRegisterId, null, req.DependencyTypeId, null,
+                req.DependencyObjectId, null, false, "dependencyObjectId is required.");
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_dependency_map_direct");
+            AddParam(cmd, "@risk_register_id",       DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@dependency_type_id",     DbType.Int32,  req.DependencyTypeId);
+            AddParam(cmd, "@dependency_object_id",   DbType.Int64,  req.DependencyObjectId);
+            AddParam(cmd, "@dependency_object_name", DbType.String, (object?)req.DependencyObjectName ?? DBNull.Value, 300);
+            AddParam(cmd, "@remarks",                DbType.String, (object?)req.Remarks ?? DBNull.Value, 1000);
+            AddParam(cmd, "@actor_employee_id",      DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",    DbType.String, req.CallerDisplayName ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskDependencyMapResult(true, riskRegisterId,
+                    r["RiskDependencyMapId"] as long?,
+                    Convert.ToInt32(r["DependencyTypeId"]),
+                    r["DependencyTypeName"] as string,
+                    Convert.ToInt64(r["DependencyObjectId"]),
+                    r["DependencyObjectName"] as string,
+                    r["Created"] != DBNull.Value && Convert.ToBoolean(r["Created"]),
+                    null);
+            return new RiskDependencyMapResult(true, riskRegisterId, null, req.DependencyTypeId, null,
+                req.DependencyObjectId, req.DependencyObjectName, false, null);
+        }
+        catch (SqlException ex)
+        {
+            // 56673-56678 are 266's refusals and name the rule that
+            // refused (risk closed, unknown or inactive category).
+            logger.LogWarning(ex, "RiskCentreService.MapDependency failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskDependencyMapResult(false, riskRegisterId, null, req.DependencyTypeId, null,
+                req.DependencyObjectId, req.DependencyObjectName, false, ex.Message);
+        }
+    }
+
+    public async Task<RiskDependencyUnmapResult> UnmapDependencyAsync(
+        long riskRegisterId, int dependencyTypeId, long dependencyObjectId,
+        long? actorEmployeeId, string? caller, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_dependency_unmap");
+            AddParam(cmd, "@risk_register_id",     DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@dependency_type_id",   DbType.Int32,  dependencyTypeId);
+            AddParam(cmd, "@dependency_object_id", DbType.Int64,  dependencyObjectId);
+            AddParam(cmd, "@actor_employee_id",    DbType.Int64,  (object?)actorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",  DbType.String, caller ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskDependencyUnmapResult(true, riskRegisterId, dependencyTypeId, dependencyObjectId,
+                    r["DependencyRemoved"] != DBNull.Value && Convert.ToBoolean(r["DependencyRemoved"]),
+                    NullableInt(r["RemainingSources"]),
+                    null);
+            return new RiskDependencyUnmapResult(true, riskRegisterId, dependencyTypeId, dependencyObjectId, false, 0, null);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.UnmapDependency failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskDependencyUnmapResult(false, riskRegisterId, dependencyTypeId, dependencyObjectId, false, 0, ex.Message);
+        }
+    }
+
+    // =================================================================
+    // Treatment Option — migrations 261, 263
+    // =================================================================
+    public async Task<RiskTreatmentOptionResult> SetTreatmentOptionAsync(
+        long riskRegisterId, RiskTreatmentOptionRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        if (string.IsNullOrWhiteSpace(req.TreatmentOptionCode))
+            return new RiskTreatmentOptionResult(false, riskRegisterId, null, null, null, false, null, null,
+                "treatmentOptionCode is required.");
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_treatment_option_set");
+            AddParam(cmd, "@risk_register_id",      DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@treatment_option_code", DbType.String, req.TreatmentOptionCode, 30);
+            AddParam(cmd, "@task_title",            DbType.String, (object?)req.TaskTitle ?? DBNull.Value, 250);
+            AddParam(cmd, "@task_description",      DbType.String, (object?)req.TaskDescription ?? DBNull.Value, -1);
+            AddParam(cmd, "@target_date",           DbType.DateTime2, (object?)req.TargetDate ?? DBNull.Value);
+            AddParam(cmd, "@remark",                DbType.String, (object?)req.Remark ?? DBNull.Value, -1);
+            AddParam(cmd, "@actor_employee_id",     DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",   DbType.String, req.CallerDisplayName ?? "system", 100);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskTreatmentOptionResult(true, riskRegisterId,
+                    r["TreatmentOptionCode"] as string,
+                    r["TreatmentOptionName"] as string,
+                    r["TreatmentTaskId"] as long?,
+                    r["TaskCreated"] != DBNull.Value && Convert.ToBoolean(r["TaskCreated"]),
+                    r["StatusCode"] as string,
+                    r["NextStep"] as string,
+                    null);
+            return new RiskTreatmentOptionResult(true, riskRegisterId, req.TreatmentOptionCode, null, null, false, null, null, null);
+        }
+        catch (SqlException ex)
+        {
+            // 56560-56569 are 263's refusals: analysis not complete, risk
+            // closed, unknown option. Each names what to do next, so the
+            // message goes to the screen unaltered.
+            logger.LogWarning(ex, "RiskCentreService.SetTreatmentOption failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskTreatmentOptionResult(false, riskRegisterId, req.TreatmentOptionCode, null, null, false, null, null, ex.Message);
+        }
+    }
+
+    public async Task<RiskTreatmentState?> GetTreatmentStateAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_treatment_state");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct)) return null;
+
+        var optionCode   = r["TreatmentOptionCode"] as string;
+        var statusCode   = r["StatusCode"] as string;
+        var taskCount    = NullableInt(r["TreatmentTaskCount"]);
+        var openCount    = NullableInt(r["OpenTreatmentTaskCount"]);
+        var closedCount  = NullableInt(r["ClosedTreatmentTaskCount"]);
+        var openSubCount = NullableInt(r["OpenSubTaskCount"]);
+        var available    = r["ResidualAvailable"] != DBNull.Value && Convert.ToBoolean(r["ResidualAvailable"]);
+        var pending      = r["ResidualPending"] == DBNull.Value || Convert.ToBoolean(r["ResidualPending"]);
+        var reason       = r["Reason"] as string;
+
+        var tasks = new List<RiskTreatmentTaskRow>();
+        if (await r.NextResultAsync(ct))
+            while (await r.ReadAsync(ct))
+                tasks.Add(new RiskTreatmentTaskRow(
+                    Convert.ToInt64(r["TaskId"]),
+                    r["TaskNumber"] as string,
+                    r["Title"] as string,
+                    r["StatusCode"] as string,
+                    r["StatusName"] as string,
+                    r["IsTerminal"] != DBNull.Value && Convert.ToBoolean(r["IsTerminal"]),
+                    r["OwnerEmployeeId"] as long?,
+                    r["OwnerName"] as string,
+                    r["Priority"] as string,
+                    r["DueAt"] as DateTime?,
+                    r["ClosedAt"] as DateTime?,
+                    r["IsChild"] != DBNull.Value && Convert.ToBoolean(r["IsChild"]),
+                    r["ParentTaskId"] as long?,
+                    NullableInt(r["ChildCount"]),
+                    NullableInt(r["MandatoryChildOpenCount"]),
+                    r["RaisedDt"] as DateTime?));
+
+        return new RiskTreatmentState(riskRegisterId, optionCode, statusCode,
+            taskCount, openCount, closedCount, openSubCount,
+            available, pending, reason, tasks);
+    }
+
+    public async Task<int> SyncTreatmentAsync(
+        long? riskRegisterId, long? organizationId, string? caller, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_treatment_sync");
+        AddParam(cmd, "@risk_register_id",    DbType.Int64,  (object?)riskRegisterId ?? DBNull.Value);
+        AddParam(cmd, "@organization_id",     DbType.Int64,  (object?)organizationId ?? DBNull.Value);
+        AddParam(cmd, "@caller_display_name", DbType.String, caller ?? "system", 100);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (await r.ReadAsync(ct)) return NullableInt(r["RisksMovedToMonitoring"]);
+        return 0;
+    }
+
+    // =================================================================
+    // Acceptance, Review and the Risk Calendar — migration 264
+    // =================================================================
+    public async Task<RiskAcceptanceDetail?> GetAcceptanceAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_acceptance_get");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct)) return null;
+
+        return new RiskAcceptanceDetail(
+            Convert.ToInt64(r["RiskRegisterId"]),
+            r["RiskNumber"] as string,
+            r["RiskTitle"] as string,
+            r["StatusCode"] as string,
+            r["RiskOwnerEmployeeId"] as long?,
+            r["RiskOwnerName"] as string,
+            r["TreatmentOptionCode"] as string,
+            r["TreatmentOptionName"] as string,
+            r["InherentRatingCode"] as string,
+            r["ResidualRatingCode"] as string,
+            r["ResidualPending"] == DBNull.Value || Convert.ToBoolean(r["ResidualPending"]),
+            r["AnalysisPending"] == DBNull.Value || Convert.ToBoolean(r["AnalysisPending"]),
+            r["AcceptedByEmployeeId"] as long?,
+            r["AcceptedByName"] as string,
+            // 291. HasColumn-guarded: an API deployed ahead of its
+            // migration would otherwise throw on every acceptance read
+            // over a column that only enriches a label. Absent, the UI
+            // shows the bare name, exactly as it did before.
+            HasColumn(r, "AcceptedByRoleNames") ? r["AcceptedByRoleNames"] as string : null,
+            r["AcceptedOn"] as DateTime?,
+            r["AcceptanceNote"] as string,
+            // 293, guarded the same way and for the same reason as 291's
+            // column above: an API deployed ahead of its migration must
+            // still read an acceptance. Absent, the modal simply opens
+            // with no frequency preselected and the date stays manual --
+            // exactly how it behaved before 293.
+            HasColumn(r, "ReviewFrequencyId")   ? r["ReviewFrequencyId"] as int?     : null,
+            HasColumn(r, "ReviewFrequencyName") ? r["ReviewFrequencyName"] as string : null,
+            r["NextReviewDate"] as DateTime?,
+            r["LastReviewedOn"] as DateTime?,
+            NullableInt(r["ReviewCount"]),
+            r["WorkflowStageCode"] as string,
+            NullableInt(r["OpenTreatmentTaskCount"]),
+            r["CanAccept"] != DBNull.Value && Convert.ToBoolean(r["CanAccept"]),
+            r["AcceptGuidance"] as string);
+    }
+
+    public async Task<RiskAcceptanceResult> SaveAcceptanceAsync(
+        long riskRegisterId, RiskAcceptanceSaveRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        // Checked here as well as in SQL, purely so the common mistake
+        // gets a fast, plain answer instead of a SqlException. The
+        // procedure's THROW is still the rule — this is the courtesy.
+        if (req.NextReviewDate == default)
+            return new RiskAcceptanceResult(false, riskRegisterId, null, null, null, null, null, null,
+                "nextReviewDate is required — without one this risk would never return for review.");
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_acceptance_save");
+            AddParam(cmd, "@risk_register_id",        DbType.Int64, riskRegisterId);
+            AddParam(cmd, "@next_review_date",        DbType.Date,  req.NextReviewDate.Date);
+            AddParam(cmd, "@accepted_by_employee_id", DbType.Int64, (object?)req.AcceptedByEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@accepted_date",           DbType.Date,  (object?)req.AcceptedDate?.Date ?? DBNull.Value);
+            AddParam(cmd, "@acceptance_note",         DbType.String, (object?)req.AcceptanceNote ?? DBNull.Value, -1);
+            AddParam(cmd, "@actor_employee_id",       DbType.Int64, (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",     DbType.String, req.CallerDisplayName ?? "system", 100);
+            // 293. Null is a legitimate value, not an omission: a Custom
+            // or Event-driven acceptance has a date the user typed and no
+            // cadence behind it. The procedure defaults the parameter to
+            // NULL, so sending it explicitly changes nothing for a caller
+            // that leaves the select empty.
+            AddParam(cmd, "@review_frequency_id",     DbType.Int32, (object?)req.ReviewFrequencyId ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+                return new RiskAcceptanceResult(true, riskRegisterId,
+                    r["RiskNumber"] as string,
+                    r["AcceptedByEmployeeId"] as long?,
+                    r["AcceptedByName"] as string,
+                    r["AcceptedOn"] as DateTime?,
+                    r["NextReviewDate"] as DateTime?,
+                    r["StatusCode"] as string,
+                    null);
+            return new RiskAcceptanceResult(true, riskRegisterId, null, null, null, null, req.NextReviewDate, "Accepted", null);
+        }
+        catch (SqlException ex)
+        {
+            // 56600-56608 are 264's refusals: missing or past review
+            // date, analysis incomplete, no treatment option. Each says
+            // what to fix.
+            logger.LogWarning(ex, "RiskCentreService.SaveAcceptance failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskAcceptanceResult(false, riskRegisterId, null, null, null, null, null, null, ex.Message);
+        }
+    }
+
+    // =================================================================
+    // Review frequency lookup — migration 293
+    //
+    // No organizationId: frequency_master is a master table, and the
+    // cadences an organisation may choose from are not per-tenant. The
+    // procedure filters is_active and orders by display_order, so the
+    // client neither filters nor sorts.
+    //
+    // FrequencyValue / FrequencyUnit are carried through untouched
+    // because they are the whole point: the Acceptance screen derives
+    // "Quarterly = today + 3 months" from them. Collapsing them into a
+    // label here would push that arithmetic back into a hard-coded
+    // switch in JavaScript, which is what 293's header refuses.
+    // =================================================================
+    public async Task<IReadOnlyList<RiskReviewFrequencyRow>> ListReviewFrequenciesAsync(CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_review_frequency_list");
+
+        var rows = new List<RiskReviewFrequencyRow>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskReviewFrequencyRow(
+                Convert.ToInt32(r["FrequencyId"]),
+                r["FrequencyCode"] as string,
+                r["FrequencyName"]?.ToString() ?? "",
+                // Nullable, and meaningfully so: Event Driven, Continuous
+                // and Custom carry no value or unit, which is how the
+                // client knows there is no date to derive.
+                r["FrequencyValue"] as int?,
+                r["FrequencyUnit"] as string,
+                r["IsCustom"] != DBNull.Value && Convert.ToBoolean(r["IsCustom"])));
+        return rows;
+    }
+
+    public async Task<RiskReviewDueListResult> ListReviewDueAsync(
+        long organizationId, long? ownerEmployeeId, string? ratingCode, string? search,
+        int? includeFutureDays, int page, int pageSize, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_review_due_list");
+        AddParam(cmd, "@organization_id",     DbType.Int64,  organizationId);
+        AddParam(cmd, "@owner_employee_id",   DbType.Int64,  (object?)ownerEmployeeId ?? DBNull.Value);
+        AddParam(cmd, "@rating_code",         DbType.String, (object?)ratingCode ?? DBNull.Value, 30);
+        AddParam(cmd, "@search",              DbType.String, (object?)search ?? DBNull.Value, 200);
+        AddParam(cmd, "@include_future_days", DbType.Int32,  (object?)includeFutureDays ?? DBNull.Value);
+        AddParam(cmd, "@page_number",         DbType.Int32,  Math.Max(1, page));
+        AddParam(cmd, "@page_size",           DbType.Int32,  Math.Clamp(pageSize <= 0 ? 25 : pageSize, 1, 200));
+
+        var rows = new List<RiskReviewDueRow>();
+        long total = 0;
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            rows.Add(new RiskReviewDueRow(
+                Convert.ToInt64(r["RiskRegisterId"]),
+                r["RiskNumber"]?.ToString() ?? "",
+                r["RiskTitle"]?.ToString() ?? "",
+                r["RiskStatement"] as string,
+                r["RiskCategoryName"] as string,
+                r["StatusCode"]?.ToString() ?? "",
+                r["RiskOwnerEmployeeId"] as long?,
+                r["RiskOwnerName"] as string,
+                r["BusinessUnit"] as string,
+                r["InherentRatingCode"] as string,
+                r["InherentRatingName"] as string,
+                r["ResidualRatingCode"] as string,
+                r["ResidualRatingName"] as string,
+                r["TreatmentOptionCode"] as string,
+                r["TreatmentOptionName"] as string,
+                r["AcceptedOn"] as DateTime?,
+                r["AcceptedByName"] as string,
+                r["NextReviewDate"] as DateTime?,
+                r["LastReviewedOn"] as DateTime?,
+                NullableInt(r["ReviewCount"]),
+                NullableInt(r["DaysOverdue"]),
+                r["IsDue"] != DBNull.Value && Convert.ToBoolean(r["IsDue"]),
+                r["WorkflowStageCode"] as string));
+            total = Convert.ToInt64(r["TotalRows"]);
+        }
+        return new RiskReviewDueListResult(total, page, pageSize, rows);
+    }
+
+    public async Task<IReadOnlyList<RiskCalendarEventRow>> GetReviewCalendarAsync(
+        long organizationId, DateTime? fromDate, DateTime? toDate, long? ownerEmployeeId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_review_calendar");
+        AddParam(cmd, "@organization_id",   DbType.Int64, organizationId);
+        AddParam(cmd, "@from_date",         DbType.Date,  (object?)fromDate?.Date ?? DBNull.Value);
+        AddParam(cmd, "@to_date",           DbType.Date,  (object?)toDate?.Date ?? DBNull.Value);
+        AddParam(cmd, "@owner_employee_id", DbType.Int64, (object?)ownerEmployeeId ?? DBNull.Value);
+
+        var rows = new List<RiskCalendarEventRow>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskCalendarEventRow(
+                Convert.ToInt64(r["RiskRegisterId"]),
+                r["RiskNumber"]?.ToString() ?? "",
+                r["RiskTitle"]?.ToString() ?? "",
+                Convert.ToDateTime(r["EventDate"]),
+                r["StatusCode"]?.ToString() ?? "",
+                r["RiskCategoryName"] as string,
+                r["RiskOwnerEmployeeId"] as long?,
+                r["RiskOwnerName"] as string,
+                r["BusinessUnit"] as string,
+                r["InherentRatingCode"] as string,
+                r["ResidualRatingCode"] as string,
+                r["EffectiveRatingCode"] as string,
+                r["TreatmentOptionCode"] as string,
+                r["TreatmentOptionName"] as string,
+                r["AcceptedOn"] as DateTime?,
+                r["AcceptedByName"] as string,
+                NullableInt(r["ReviewCount"]),
+                r["IsOverdue"] != DBNull.Value && Convert.ToBoolean(r["IsOverdue"]),
+                r["IsToday"] != DBNull.Value && Convert.ToBoolean(r["IsToday"]),
+                r["WorkflowStageCode"] as string));
+        return rows;
+    }
+
+    public async Task<RiskReviewPerformResult> PerformReviewAsync(
+        long riskRegisterId, RiskReviewPerformRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        if (string.IsNullOrWhiteSpace(req.RiskCategoryCode))
+            return new RiskReviewPerformResult(false, riskRegisterId, null, null, null, null, "riskCategoryCode is required.");
+        if (string.IsNullOrWhiteSpace(req.LikelihoodCode))
+            return new RiskReviewPerformResult(false, riskRegisterId, null, null, null, null, "likelihoodCode is required.");
+        if (string.IsNullOrWhiteSpace(req.ImpactCode))
+            return new RiskReviewPerformResult(false, riskRegisterId, null, null, null, null, "impactCode is required.");
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_review_perform");
+            AddParam(cmd, "@risk_register_id",        DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@risk_category_code",      DbType.String, req.RiskCategoryCode, 60);
+            AddParam(cmd, "@likelihood_code",         DbType.String, req.LikelihoodCode, 60);
+            AddParam(cmd, "@impact_code",             DbType.String, req.ImpactCode, 60);
+            AddParam(cmd, "@risk_cause",              DbType.String, (object?)req.RiskCause ?? DBNull.Value, -1);
+            AddParam(cmd, "@potential_consequence",   DbType.String, (object?)req.PotentialConsequence ?? DBNull.Value, -1);
+            AddParam(cmd, "@existing_controls",       DbType.String, (object?)req.ExistingControls ?? DBNull.Value, -1);
+            AddParam(cmd, "@risk_description",        DbType.String, (object?)req.RiskDescription ?? DBNull.Value, -1);
+            AddParam(cmd, "@process_name",            DbType.String, (object?)req.ProcessName ?? DBNull.Value, 200);
+            AddParam(cmd, "@review_remarks",          DbType.String, (object?)req.ReviewRemarks ?? DBNull.Value, -1);
+            AddParam(cmd, "@treatment_option_code",   DbType.String, (object?)req.TreatmentOptionCode ?? DBNull.Value, 30);
+            AddParam(cmd, "@next_review_date",        DbType.Date,   (object?)req.NextReviewDate?.Date ?? DBNull.Value);
+            AddParam(cmd, "@reviewed_by_employee_id", DbType.Int64,  (object?)req.ReviewedByEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",     DbType.String, req.CallerDisplayName ?? "system", 100);
+            // 299. The proposed cadence, stored on the risk so the Accept
+            // screen opens with it preselected.
+            AddParam(cmd, "@review_frequency_id",     DbType.Int32,  (object?)req.ReviewFrequencyId ?? DBNull.Value);
+
+            // The procedure emits sp_risk_register_assess's result set
+            // FIRST (it EXECs it without suppressing output), then its
+            // own. Skipping to the last result set is what gets the
+            // review's answer rather than the analysis's.
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            RiskReviewPerformResult? result = null;
+            do
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    if (!HasColumn(r, "RiskNumber")) continue;   // the assess result set
+                    result = new RiskReviewPerformResult(true, riskRegisterId,
+                        r["RiskNumber"] as string,
+                        r["StatusCode"] as string,
+                        r["NextReviewDate"] as DateTime?,
+                        r["TreatmentOptionCode"] as string,
+                        null);
+                }
+            } while (await r.NextResultAsync(ct));
+
+            return result ?? new RiskReviewPerformResult(true, riskRegisterId, null, null, req.NextReviewDate, req.TreatmentOptionCode, null);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.PerformReview failed {Id}: {Msg}", riskRegisterId, ex.Message);
+            return new RiskReviewPerformResult(false, riskRegisterId, null, null, null, null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Bulk review (270). Returns one row per selected risk saying what
+    /// happened to it.
+    ///
+    /// <para>A SqlException here means the BATCH was rejected — an empty
+    /// selection, a past review date, an attempt to close in bulk. A risk
+    /// that individually failed a rule is not an exception: it comes back
+    /// as a <c>Skipped</c> row with its reason, because that is
+    /// information the user needs, not a fault.</para>
+    /// </summary>
+    public async Task<RiskBulkReviewResult> BulkReviewAsync(RiskBulkReviewRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (req.RiskRegisterIds is null || req.RiskRegisterIds.Count == 0)
+            return new RiskBulkReviewResult(false, Array.Empty<RiskBulkReviewRow>(),
+                                            "Select at least one risk.");
+
+        // Rejected here as well as in SQL (56724) so the user is told
+        // before a round trip, not after.
+        if (string.Equals(req.StatusCode, "Closed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(req.StatusCode, "Retired", StringComparison.OrdinalIgnoreCase))
+            return new RiskBulkReviewResult(false, Array.Empty<RiskBulkReviewRow>(),
+                "Closing or retiring is not a bulk action — each needs its own reason (BRD §20).");
+
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_bulk_review");
+
+            // Comma-separated, matching the procedure's STRING_SPLIT. The
+            // ids are longs already parsed by the model binder, so this
+            // cannot carry anything but digits and commas.
+            AddParam(cmd, "@risk_register_ids", DbType.String,
+                     string.Join(",", req.RiskRegisterIds), -1);
+            AddParam(cmd, "@review_remarks",    DbType.String, (object?)req.ReviewRemarks ?? DBNull.Value, -1);
+            AddParam(cmd, "@status_code",       DbType.String, (object?)req.StatusCode ?? DBNull.Value, 30);
+            AddParam(cmd, "@next_review_date",  DbType.Date,   (object?)req.NextReviewDate?.Date ?? DBNull.Value);
+            AddParam(cmd, "@reviewed_by_employee_id", DbType.Int64, (object?)req.ReviewedByEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",     DbType.String, req.CallerDisplayName ?? "system", 100);
+            // 294. Reaches sp_risk_acceptance_save when the status is
+            // Accepted, so a bulk acceptance records the same cadence a
+            // single one does. 56726 refuses an unknown or inactive id
+            // once for the batch rather than per risk.
+            AddParam(cmd, "@review_frequency_id",     DbType.Int32, (object?)req.ReviewFrequencyId ?? DBNull.Value);
+
+            var rows = new List<RiskBulkReviewRow>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+
+            // 294 makes the procedure return exactly one result set. This
+            // guard is for the database that has NOT had 294 applied yet:
+            // 270 EXEC'd sp_risk_acceptance_save / _status_set bare inside
+            // its loop, and both end with a SELECT, so one result set per
+            // status change arrived AHEAD of the report. Reading the first
+            // reader then threw IndexOutOfRange on "Outcome" — which is
+            // not a SqlException, so it escaped the catch below as a 500.
+            //
+            // Skipping to the set that actually carries Outcome costs one
+            // check against a fixed database and rescues an unfixed one.
+            while (!HasColumn(r, "Outcome") && await r.NextResultAsync(ct)) { }
+
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new RiskBulkReviewRow(
+                    Convert.ToInt64(r["RiskRegisterId"]),
+                    r["RiskNumber"]     as string,
+                    r["RiskTitle"]      as string,
+                    r["Outcome"]?.ToString() ?? "Skipped",
+                    r["Reason"]         as string,
+                    r["FromStatus"]     as string,
+                    r["ToStatus"]       as string,
+                    r["FromReviewDate"] as DateTime?,
+                    r["ToReviewDate"]   as DateTime?));
+            }
+
+            return new RiskBulkReviewResult(true, rows);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.BulkReview failed for {Count} risk(s): {Msg}",
+                              req.RiskRegisterIds.Count, ex.Message);
+            return new RiskBulkReviewResult(false, Array.Empty<RiskBulkReviewRow>(), ex.Message);
+        }
+    }
+
+    // =================================================================
+    // Bulk accept — migration 295
+    //
+    // Not a loop over SaveAcceptanceAsync: that would be N round trips
+    // and N transactions from the client, with no way to report a
+    // partial outcome as one answer. sp_risk_bulk_accept does the loop
+    // where the data is and returns one row per risk.
+    // =================================================================
+    public async Task<RiskBulkAcceptResult> BulkAcceptAsync(
+        RiskBulkAcceptRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (req.RiskRegisterIds is null || req.RiskRegisterIds.Count == 0)
+            return new RiskBulkAcceptResult(false, Array.Empty<RiskBulkAcceptRow>(),
+                                            "Select at least one risk.");
+
+        // Checked here as well as in SQL (56751/56752) so the common
+        // mistake gets a plain answer instead of a SqlException.
+        if (req.NextReviewDate == default)
+            return new RiskBulkAcceptResult(false, Array.Empty<RiskBulkAcceptRow>(),
+                "nextReviewDate is required — without one these risks would never return for review.");
+
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_bulk_accept");
+
+            // Comma separated, matching the procedure's STRING_SPLIT. The
+            // ids are longs already parsed by the model binder, so this
+            // cannot carry anything but digits and commas.
+            AddParam(cmd, "@risk_register_ids", DbType.String,
+                     string.Join(",", req.RiskRegisterIds), -1);
+            AddParam(cmd, "@next_review_date",        DbType.Date,   req.NextReviewDate.Date);
+            AddParam(cmd, "@accepted_by_employee_id", DbType.Int64,  (object?)req.AcceptedByEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@accepted_date",           DbType.Date,   (object?)req.AcceptedDate?.Date ?? DBNull.Value);
+            AddParam(cmd, "@acceptance_note",         DbType.String, (object?)req.AcceptanceNote ?? DBNull.Value, -1);
+            AddParam(cmd, "@review_frequency_id",     DbType.Int32,  (object?)req.ReviewFrequencyId ?? DBNull.Value);
+            AddParam(cmd, "@actor_employee_id",       DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name",     DbType.String, req.CallerDisplayName ?? "system", 100);
+
+            var rows = new List<RiskBulkAcceptRow>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+
+            // 295 returns exactly one result set by construction (its only
+            // EXEC is an INSERT ... EXEC). Guarded anyway, for the same
+            // reason BulkReviewAsync is: it costs one check and it means a
+            // future change that reintroduces a streamed inner result set
+            // degrades instead of throwing IndexOutOfRange out of a
+            // catch that only handles SqlException.
+            while (!HasColumn(r, "Outcome") && await r.NextResultAsync(ct)) { }
+
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new RiskBulkAcceptRow(
+                    Convert.ToInt64(r["RiskRegisterId"]),
+                    r["RiskNumber"]     as string,
+                    r["RiskTitle"]      as string,
+                    r["Outcome"]?.ToString() ?? "Skipped",
+                    r["Reason"]         as string,
+                    r["FromStatus"]     as string,
+                    r["ToStatus"]       as string,
+                    r["AcceptedOn"]     as DateTime?,
+                    r["NextReviewDate"] as DateTime?));
+            }
+
+            return new RiskBulkAcceptResult(true, rows);
+        }
+        catch (SqlException ex)
+        {
+            // 56750-56754 are 295's batch refusals; 56601-56608 cannot
+            // reach here, because per-risk failures are reported as rows.
+            logger.LogWarning(ex, "RiskCentreService.BulkAccept failed for {Count} risk(s): {Msg}",
+                              req.RiskRegisterIds.Count, ex.Message);
+            return new RiskBulkAcceptResult(false, Array.Empty<RiskBulkAcceptRow>(), ex.Message);
+        }
+    }
+
+    // =================================================================
+    // Risk acceptance approval authority — migration 271
+    //
+    // The read and the save return the SAME shape, because
+    // sp_org_risk_acceptance_authority_save ends by calling the get:
+    // the page re-renders from what the database now holds rather than
+    // from what it hoped it sent. One reader serves both.
+    // =================================================================
+
+    /// <summary>
+    /// Three result sets: the levels (derived from the organisation's own
+    /// risk matrix, not a fixed list), the roles it has, and the
+    /// migration-212 settings an unconfigured level falls back to.
+    /// </summary>
+    private async Task<RiskAcceptanceAuthorityResult> ReadAuthorityAsync(DbCommand cmd, CancellationToken ct)
+    {
+        var levels = new List<RiskAcceptanceAuthorityRow>();
+        var roles  = new List<RiskAuthorityRoleOption>();
+        RiskAuthorityFallback? fallback = null;
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+
+        while (await r.ReadAsync(ct))
+        {
+            levels.Add(new RiskAcceptanceAuthorityRow(
+                r["RatingCode"]?.ToString() ?? "",
+                r["RatingName"] as string,
+                r["Severity"] as int?,
+                r["InherentRoleId"]   as long?,
+                r["InherentRoleName"] as string,
+                r["ResidualRoleId"]   as long?,
+                r["ResidualRoleName"] as string,
+                Convert.ToBoolean(r["ResidualSameAsInherent"]),
+                r["EffectiveInherentRoleId"]   as long?,
+                r["EffectiveInherentRoleName"] as string,
+                r["EffectiveResidualRoleId"]   as long?,
+                r["EffectiveResidualRoleName"] as string,
+                Convert.ToBoolean(r["InherentUsesFallback"]),
+                Convert.ToBoolean(r["ResidualUsesFallback"])));
+        }
+
+        if (await r.NextResultAsync(ct))
+            while (await r.ReadAsync(ct))
+                roles.Add(new RiskAuthorityRoleOption(
+                    Convert.ToInt64(r["RoleId"]), r["RoleName"]?.ToString() ?? ""));
+
+        if (await r.NextResultAsync(ct) && await r.ReadAsync(ct))
+            fallback = new RiskAuthorityFallback(
+                r["ApprovalRequired"] is bool b && b,
+                r["ApprovalMinRatingCode"] as string,
+                r["FallbackRoleId"]        as long?,
+                r["FallbackRoleName"]      as string);
+
+        return new RiskAcceptanceAuthorityResult(levels, roles, fallback);
+    }
+
+    public async Task<RiskAcceptanceAuthorityResult> GetAcceptanceAuthorityAsync(
+        long organizationId, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_org_risk_acceptance_authority_get");
+            AddParam(cmd, "@organization_id", DbType.Int64, organizationId);
+            return await ReadAuthorityAsync(cmd, ct);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.GetAcceptanceAuthority failed for org {Org}", organizationId);
+            return new RiskAcceptanceAuthorityResult(
+                Array.Empty<RiskAcceptanceAuthorityRow>(),
+                Array.Empty<RiskAuthorityRoleOption>(),
+                null, false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Saves the whole grid. The procedure validates every rating against
+    /// the organisation's matrix (56745), every role against the
+    /// organisation (56746), and refuses "same as inherent" where no
+    /// inherent approver exists (56747) — all BEFORE writing anything, so
+    /// a rejected save leaves the configuration exactly as it was.
+    /// </summary>
+    public async Task<RiskAcceptanceAuthorityResult> SaveAcceptanceAuthorityAsync(
+        RiskAcceptanceAuthoritySaveRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        if (req.Rows is null || req.Rows.Count == 0)
+            return new RiskAcceptanceAuthorityResult(
+                Array.Empty<RiskAcceptanceAuthorityRow>(),
+                Array.Empty<RiskAuthorityRoleOption>(),
+                null, false, "No rows were supplied.");
+
+        // camelCase to match the OPENJSON ... WITH paths in the procedure.
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            req.Rows.Select(x => new
+            {
+                ratingCode             = x.RatingCode,
+                inherentRoleId         = x.InherentRoleId,
+                residualRoleId         = x.ResidualRoleId,
+                residualSameAsInherent = x.ResidualSameAsInherent
+            }));
+
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_org_risk_acceptance_authority_save");
+            AddParam(cmd, "@organization_id",     DbType.Int64,  req.OrganizationId);
+            AddParam(cmd, "@rows_json",           DbType.String, json, -1);
+            AddParam(cmd, "@actor_employee_id",   DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name", DbType.String, req.CallerDisplayName ?? "system", 100);
+
+            // The save ends by re-running the get, so this is the state as
+            // stored — not an echo of the request.
+            return await ReadAuthorityAsync(cmd, ct);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.SaveAcceptanceAuthority failed for org {Org}: {Msg}",
+                              req.OrganizationId, ex.Message);
+            return new RiskAcceptanceAuthorityResult(
+                Array.Empty<RiskAcceptanceAuthorityRow>(),
+                Array.Empty<RiskAuthorityRoleOption>(),
+                null, false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Who may approve accepting this risk. The single answer, so the
+    /// acceptance screen and any future queue or notification cannot
+    /// disagree. <c>scopeCode</c> NULL lets the procedure decide from the
+    /// risk (Residual once residually assessed, otherwise Inherent).
+    /// </summary>
+    public async Task<RiskAcceptanceAuthorityResolved?> ResolveAcceptanceAuthorityAsync(
+        long riskRegisterId, string? scopeCode, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, "grac_practice.sp_risk_acceptance_authority_resolve");
+            AddParam(cmd, "@risk_register_id", DbType.Int64,  riskRegisterId);
+            AddParam(cmd, "@scope_code",       DbType.String, (object?)scopeCode ?? DBNull.Value, 20);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct)) return null;
+
+            return new RiskAcceptanceAuthorityResolved(
+                Convert.ToInt64(r["RiskRegisterId"]),
+                r["RiskNumber"] as string,
+                Convert.ToInt64(r["OrganizationId"]),
+                r["ScopeCode"]?.ToString() ?? "Inherent",
+                r["RatingCode"] as string,
+                r["ApproverRoleId"]   as long?,
+                r["ApproverRoleName"] as string,
+                r["ResolvedFrom"]?.ToString() ?? "NotConfigured");
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.ResolveAcceptanceAuthority failed for risk {Id}", riskRegisterId);
+            return null;
+        }
+    }
+
     private static bool HasColumn(DbDataReader reader, string name)
     {
         for (var i = 0; i < reader.FieldCount; i++)
@@ -1415,6 +3089,58 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
     }
 
     // ---- helpers (same pattern as ExceptionCentreService) ----
+    // =================================================================
+    // Risk scope: practice context + tasks (migration 284)
+    //
+    // Two result sets from sp_risk_scope_practice_context. Read-only.
+    // The caller groups tasks under their practice by PracticeId; the
+    // procedure already orders them that way.
+    // =================================================================
+    public async Task<RiskScopePracticeContextResult> GetScopePracticeContextAsync(
+        long organizationId, long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_scope_practice_context");
+        AddParam(cmd, "@organization_id",  DbType.Int64, organizationId);
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+
+        var practices = new List<RiskScopePracticeContext>();
+        var tasks     = new List<RiskScopePracticeTask>();
+
+        // Columns are read inline with Convert / `as`, matching the rest
+        // of this service rather than introducing a second reader style.
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            practices.Add(new RiskScopePracticeContext(
+                Convert.ToInt64(reader["PracticeId"]),
+                reader["PracticeCode"]       as string,
+                reader["PracticeName"]       as string,
+                reader["FrameworkName"]      as string,
+                reader["StructureRootName"]  as string,
+                reader["StatementReference"] as string,
+                reader["StatementTitle"]     as string,
+                NullableInt(reader["TaskCount"])));
+        }
+
+        if (await reader.NextResultAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                tasks.Add(new RiskScopePracticeTask(
+                    Convert.ToInt64(reader["TaskId"]),
+                    reader["PracticeId"] == DBNull.Value ? null : Convert.ToInt64(reader["PracticeId"]),
+                    reader["Title"]      as string,
+                    reader["StatusName"] as string,
+                    reader["Priority"]   as string,
+                    reader["DueAt"] == DBNull.Value ? null : Convert.ToDateTime(reader["DueAt"]),
+                    reader["AssignedTo"] as string));
+            }
+        }
+
+        return new RiskScopePracticeContextResult(practices, tasks);
+    }
+
     private async Task<DbConnection> OpenAsync(CancellationToken ct)
     {
         var cs = Infrastructure.SqlConnectionStringResolver.Resolve(configuration);

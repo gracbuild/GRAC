@@ -45,7 +45,7 @@
     <div class="pm-empty">
         <i class="fa-solid fa-diagram-project pm-empty-icon" aria-hidden="true"></i>
         <h2 id="oaScopeUnavailableTitle">Scope Builder is not available.</h2>
-        <p id="oaScopeUnavailableBody">Open an Assurance Definition and click the Scope button.</p>
+        <p id="oaScopeUnavailableBody">Open an Audit and click the Scope button.</p>
     </div>
 </section>
 
@@ -63,7 +63,7 @@
             </select>
         </label>
         <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
-            <span>Assurance Definition</span>
+            <span>Audit</span>
             <select id="oaScopePickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
                 <option value="">Select an organization first</option>
             </select>
@@ -120,7 +120,7 @@
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:13px; color:#1e40af;">
             <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
             <strong>How to use this page:</strong>
-            Pick values under any of the filters below. The assurance will apply to items that match
+            Pick values under any of the filters below. The audit will apply to items that match
             <em>every filter you fill in</em>. Leave a filter empty to skip it.
         </div>
         <div id="oaScopeSimpleFilters" style="display:grid; grid-template-columns:1fr; gap:10px;"></div>
@@ -561,7 +561,7 @@
             document.getElementById('oaScopeDefVersion').textContent = '';
             document.getElementById('oaScopeHeading').textContent    = 'Scope Builder';
             document.getElementById('oaScopeSubtitle').textContent   =
-                'Pick an organization and an assurance definition to configure its scope.';
+                'Pick an organization and an audit to configure its scope.';
             return;
         }
         document.getElementById('oaScopeDefName').textContent =
@@ -572,7 +572,7 @@
             'v' + (d.currentVersionNumber || d.CurrentVersionNumber || h.versionId || '?');
         document.getElementById('oaScopeHeading').textContent = 'Scope: ' + (d.definitionName || d.DefinitionName || '');
         document.getElementById('oaScopeSubtitle').textContent =
-            'Configure the assurance scope using groups + conditions across 17 dimensions with AND / OR / NOT operators.';
+            'Configure the audit scope using groups + conditions across 17 dimensions with AND / OR / NOT operators.';
     }
 
     function renderReadonlyBannerIfNeeded() {
@@ -659,8 +659,9 @@
         lbl.value = g.groupLabel || '';
         lbl.addEventListener('input', function () { g.groupLabel = lbl.value; });
 
-        root.querySelector('[data-role="remove-group"]').addEventListener('click', function () {
-            if (!confirm('Remove this group and its conditions?')) return;
+        root.querySelector('[data-role="remove-group"]').addEventListener('click', async function () {
+            if (!await window.gracUi.confirm('Remove this group and its conditions?',
+                  { type: 'warning', title: 'Remove group', confirmText: 'Remove' })) return;
             state.model.groups.splice(gi, 1);
             renderGroups();
         });
@@ -723,8 +724,9 @@
             populateValues(root, c);
         });
 
-        root.querySelector('[data-role="remove-condition"]').addEventListener('click', function () {
-            if (!confirm('Remove this condition?')) return;
+        root.querySelector('[data-role="remove-condition"]').addEventListener('click', async function () {
+            if (!await window.gracUi.confirm('Remove this condition?',
+                  { type: 'warning', title: 'Remove condition', confirmText: 'Remove' })) return;
             g.conditions.splice(ci, 1);
             renderGroups();
         });

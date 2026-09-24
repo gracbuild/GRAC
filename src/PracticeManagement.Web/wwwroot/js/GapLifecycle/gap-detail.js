@@ -18,9 +18,13 @@
 // UI:
 //   * Single column (no left pane, no Downstream tab).
 //   * Top toolbar: back, state chip, compact stepper pills, refresh.
-//   * Action strip: whatever transitions the current state allows
-//     (typically Mark Invalid / Mark Duplicate; Delegate is auto).
-//   * Analysis tab: form + linked-artefacts chip strip (populated from
+//   * Action strip: whatever transitions the current state allows, minus
+//     MarkInvalid -- hidden from this UI on request (321 follow-up) even
+//     though the transition itself is unchanged server-side; typically
+//     just Mark Duplicate remains. Delegate is auto (never shown).
+//   * Analysis tab: "View Practice Instance" link (321, when the gap has
+//     one) + Failed Obligation(s) strip (migration 317, automatic gaps
+//     only) + form + linked-artefacts chip strip (both populated from
 //     /gaps/{id}/linked-artefacts after save).
 //   * Metadata & History tab: metadata dl + compact history list.
 // =====================================================================
@@ -37,7 +41,21 @@
     currentStateCode: "New",
     states: [],
     actions: [],
-    gapHeader: null
+    gapHeader: null,
+    // Migration 321. Set once the header names a linked Practice
+    // Instance -- drives the "View Practice Instance" link's href and
+    // visibility (renderPracticeInstanceLink()).
+    instanceLinkUrl: null,
+    // Migration 367 (broadened set), narrowed by 372 (blocking
+    // criterion). Captured by renderFailedObligations() from the same
+    // /linked-artefacts response the Failed Obligation(s) strip already
+    // renders from -- the obligations currently displayed under this
+    // gap that are not yet Implemented (Not Implemented, Partially
+    // Implemented, Not Set). unassessedObligations() below filters this
+    // down to only the Not Set / Not Started ones, which is what
+    // isBlockedByUnresolvedObligations() actually gates on -- the strip
+    // itself keeps showing all of them, unchanged.
+    failedObligations: []
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
@@ -62,6 +80,17 @@
 
     // Boot-time lock for the Severity dropdown -- Razor / plugins
     // sometimes strip the HTML `disabled` attribute, and this fires
+    // Wire the RCA checkbox so the RCA block appears / disappears the
+    // moment the analyst ticks it. Also runs once on load via
+    // applyAnalysisToForm's own call to toggleRcaBlockVisibility -- so
+    // an analysis that has RCA already recorded opens with the block
+    // visible without a click. Guarded because the field may not exist
+    // yet in some page states (e.g. read-only header-only view).
+    const anRcaBoot = document.getElementById("anRcaRequired");
+    if (anRcaBoot) {
+        anRcaBoot.addEventListener("change", toggleRcaBlockVisibility);
+    }
+
     // BEFORE any analysis load so it takes effect immediately.
     const anSevBoot = document.getElementById("anSeverityCode");
     if (anSevBoot) {
@@ -99,7 +128,18 @@
     document.getElementById("gapDetailSubtitle").textContent =
       `Organization ${state.orgId}. Validate, analyse, delegate.`;
 
+    // Migration 325. Read-only companion page -- full gap details plus
+    // Task/Exception/Risk cards, independent of analysis stage.
+    const gapViewLink = document.getElementById("gapOpenViewLink");
+    if (gapViewLink) {
+      gapViewLink.href = U("/Practice/Index/gap-view")
+        + "?gapId=" + encodeURIComponent(state.gapId)
+        + "&orgId=" + encodeURIComponent(state.orgId || 0);
+      gapViewLink.hidden = false;
+    }
+
     renderMetadata();
+    renderPracticeInstanceLink();  // migration 321
     renderSlaCard();       // migration 184
 
     state.states = (await apiGet("/states")) || [];
@@ -125,6 +165,7 @@
       }
       renderCompactStepper();
       renderSlaCard();
+      renderPracticeInstanceLink();  // migration 321
       await refreshActions();
       await refreshAnalysis();
       await refreshLinkedArtefacts();
@@ -184,10 +225,32 @@
     if (!container) return;
     const dormant = ["ResolutionPlanning", "Execution", "Verification", "Closed"];
     const terminalInvalid = ["Invalid", "Duplicate"];
-    const current = state.currentStateCode;
+    // 379: state.currentStateCode is only ever set from
+    // header.lifecycleStateCode, which sp_custom_gap_close never touches
+    // -- so a Closed gap keeps showing whatever step it was on before
+    // closing (almost always Delegated/"Analysed") unless the stepper
+    // itself checks the record's own status first. This reads only the
+    // local `current` used to pick the highlighted step below -- it does
+    // NOT reassign state.currentStateCode, which isAlreadyAnalysed(),
+    // the terminal-invalid checks and the actions fetch all still rely
+    // on for its real (lifecycle) meaning, unchanged.
+    const current = (state.gapHeader && state.gapHeader.statusCode === "Closed")
+        ? "Closed"
+        : state.currentStateCode;
 
     let path;
     if (terminalInvalid.includes(current))       path = ["New", current];
+    // 379: Closed needs its own branch, checked before the generic
+    // dormant one below (Closed is also listed in `dormant`, but that
+    // branch's ["New", current, "Delegated"] shape would place Closed
+    // BEFORE Delegated -- backwards for the one path that can actually
+    // happen today, New -> Delegated -> Closed. lifecycleStateCode still
+    // holds whatever stage the gap reached before it was closed (Close
+    // Gap never moves it), so it tells us whether Delegated came first.
+    else if (current === "Closed")
+      path = (state.gapHeader && state.gapHeader.lifecycleStateCode === "Delegated")
+           ? ["New", "Delegated", "Closed"]
+           : ["New", "Closed"];
     else if (dormant.includes(current))          path = ["New", current, "Delegated"];
     else if (current === "Delegated")            path = ["New", "Delegated"];
     else                                          path = ["New", "Delegated"];  // in-progress: New -> Analysed
@@ -238,11 +301,59 @@
       row("Severity",        h.severityName || h.severityCode) +
       row("Owner",           h.ownerName) +
       row("Owner emp id",    h.ownerEmployeeId) +
-      row("Due date",        h.dueDate ? new Date(h.dueDate).toLocaleDateString() : null) +
+      row("Due date",        h.dueDate ? window.gracFormatDateOnly(h.dueDate) : null) +
       row("Organization id", h.organizationId);
     if (!dl.innerHTML) dl.innerHTML = `<dt>--</dt><dd>No metadata available.</dd>`;
 
     renderRelatedTasks();
+    renderGapMappedPractices();
+  }
+
+  // Migration 382: read-only list of practices mapped to this Custom Gap
+  // (captured on the Add Custom Gap form). Appended to the header metadata.
+  async function renderGapMappedPractices() {
+    const dl = document.getElementById("gapDetailMetadata");
+    if (!dl) return;
+    let rows = [];
+    try {
+      const url = U(`/practice/api/gaps/custom/${state.gapId}/practices?organizationId=${encodeURIComponent(state.orgId || 0)}`);
+      const r = await fetch(url, { credentials: "same-origin" });
+      if (r.ok) { const b = await r.json(); rows = (b && (b.data || b.Data)) || []; }
+    } catch (err) { console.warn("gap mapped practices load failed", err); return; }
+    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId))));
+    dl.innerHTML += `<dt>Mapped practices</dt><dd>${names.length ? names.join(", ") : "None"}</dd>`;
+  }
+
+  // -------------------- Practice Instance link (migration 321) --------
+  // A plain "open in a new tab" link to gaps.cshtml's existing
+  // destination (resolve-workspace, ?mode=view) -- an iframe embed was
+  // tried first but hit connectivity issues a normal link doesn't (sir's
+  // follow-up), so this replaced it rather than adding a fallback next
+  // to a frame that shouldn't need one. Stays hidden for a gap with no
+  // linked instance (Custom / Assurance gaps, or an Implementation gap
+  // that has not been materialized).
+  function renderPracticeInstanceLink() {
+    const wrap = document.getElementById("gapInstanceLinkWrap");
+    const link = document.getElementById("gapInstanceLink");
+    if (!wrap || !link) return;
+    const h = state.gapHeader || {};
+    const instanceId = h.practiceInstanceId || h.PracticeInstanceId || null;
+    if (!instanceId) {
+      wrap.hidden = true;
+      state.instanceLinkUrl = null;
+      return;
+    }
+    // Built from location.origin rather than a bare relative path --
+    // there is no upside to leaving relative-URL resolution to chance
+    // versus spelling out the origin the page itself is already known
+    // to be running on.
+    state.instanceLinkUrl = window.location.origin
+      + U("/Practice/Index/resolve-workspace")
+      + "?instanceId=" + encodeURIComponent(instanceId)
+      + "&organizationId=" + encodeURIComponent(state.orgId || h.organizationId || 0)
+      + "&mode=view";
+    link.href = state.instanceLinkUrl;
+    wrap.hidden = false;
   }
 
   // -------------------- related tasks (BRD §15 / §14) -----------------
@@ -272,8 +383,60 @@
     return code === "invalid" || code === "duplicate";
   }
 
+  // -------------------- already-analysed mode (migration 324) ---------
+  // Delegated is terminal-VALID (is_terminal=1, is_valid_terminal=1) --
+  // the display name "Analysed" (175/319) is a label on that same
+  // state_code, not a separate one. Once a gap is here the server
+  // (sp_custom_gap_analysis_save, migration 324) rejects a second save
+  // outright (THROW 55143); this mirrors that same rule client-side so
+  // the analyst sees View instead of a form that would only fail on
+  // submit. Request C part 2: "Show View only. Hide/disable Analyse."
+  function isAlreadyAnalysed() {
+    const h = state.gapHeader || {};
+    if (h.lifecycleIsTerminal === true && h.lifecycleIsValidTerminal === true) return true;
+    return (state.currentStateCode || "").toLowerCase() === "delegated";
+  }
+
+  // -------------------- obligations/Operationalization gate (367) -----
+  // Mirrors the two new server-side guards in sp_custom_gap_analysis_save
+  // (THROW 55144 unresolved obligations, THROW 55145 not-Operationalized)
+  // so the analyst sees a locked form instead of one that would only
+  // fail on submit. Only meaningful for a gap materialized from a
+  // Practice Instance -- state.gapHeader.practiceInstanceId is null for
+  // Custom/Assurance/Exception/Risk gaps, and this returns false for
+  // those exactly like the server-side guards, which are scoped the
+  // same way.
+  // Migration 372: which currently-displayed obligations still block
+  // Analysis -- only those completely unmarked (Not Set / Not Started).
+  // Not Implemented and Partially Implemented no longer block (the
+  // server's sp_custom_gap_analysis_save THROW 55144 guard narrowed the
+  // same way) but stay visible, unchanged, on the Failed Obligation(s)
+  // strip below. A missing currentStatusCode (a pre-372 database, whose
+  // /linked-artefacts response has no CurrentStatusCode column yet)
+  // falls back to "Not Started" so this degrades to the old, broader
+  // client-side lock -- matching what the still-unmigrated server-side
+  // guard would enforce anyway.
+  function unassessedObligations() {
+    return (state.failedObligations || [])
+      .filter(o => (o.currentStatusCode || "Not Started") === "Not Started");
+  }
+
+  function isBlockedByUnresolvedObligations() {
+    const h = state.gapHeader || {};
+    if (!h.practiceInstanceId) return false;
+    if (unassessedObligations().length > 0) return true;
+    return h.isPracticeOperationalized === false;
+  }
+
   function applyTerminalInvalidMode() {
-    const locked = isTerminalInvalid();
+    const invalidLocked      = isTerminalInvalid();
+    const analysedLocked     = isAlreadyAnalysed();
+    // Migration 367: only meaningful when neither of the two locks above
+    // already applies -- an Invalid/Duplicate/Delegated gap is locked for
+    // its own reason regardless of obligation/Operationalization state.
+    const obligationsLocked  = !invalidLocked && !analysedLocked && isBlockedByUnresolvedObligations();
+    const locked = invalidLocked || analysedLocked || obligationsLocked;
+
     const banner = document.getElementById("gapTerminalInvalidBanner");
     // The generic red banner is a FALLBACK for terminal-invalid states
     // that don't have a richer specific card. Duplicate has the purple
@@ -282,8 +445,8 @@
     // hide the generic banner in those cases to avoid duplication.
     const hasSpecificCard = state.currentStateCode === "Duplicate"
                          || state.currentStateCode === "Invalid";
-    if (banner) banner.hidden = !locked || hasSpecificCard;
-    if (locked && !hasSpecificCard) {
+    if (banner) banner.hidden = !invalidLocked || hasSpecificCard;
+    if (invalidLocked && !hasSpecificCard) {
       const h = state.gapHeader || {};
       const stateName = h.lifecycleStateName || h.lifecycleStateCode || "";
       const titleEl = document.getElementById("gapTerminalInvalidTitle");
@@ -294,6 +457,42 @@
         `A ${stateName} gap does not need analysis, tasks, exceptions or risk candidates. ` +
         `Data below (if any) is kept read-only for audit.`;
     }
+
+    // Migration 324: the "already Analysed" banner -- a friendlier,
+    // non-error counterpart to the red terminal-invalid banner above.
+    // Reuses the exact same read-only-lock mechanism just below; only
+    // the messaging differs, since being Analysed is the successful
+    // outcome, not a problem.
+    const analysedBanner = document.getElementById("gapAlreadyAnalysedBanner");
+    if (analysedBanner) analysedBanner.hidden = !analysedLocked;
+
+    // Migration 367: amber banner explaining WHY analysis is blocked --
+    // unresolved obligations, the Practice not yet Operationalized, or
+    // both. Only shown when it is the reason the form is locked (i.e.
+    // neither the red nor the green banner above already applies).
+    const obligationsBanner = document.getElementById("gapObligationsBlockedBanner");
+    if (obligationsBanner) {
+      obligationsBanner.hidden = !obligationsLocked;
+      if (obligationsLocked) {
+        const h = state.gapHeader || {};
+        // Migration 372: count only the still-blocking (Not Set) ones --
+        // see unassessedObligations() above.
+        const unassessedCount = unassessedObligations().length;
+        const notOperationalized = h.isPracticeOperationalized === false;
+        const textEl = document.getElementById("gapObligationsBlockedText");
+        if (textEl) {
+          const parts = [];
+          if (unassessedCount > 0) {
+            parts.push(unassessedCount === 1
+              ? "1 obligation under this Practice has not been assessed yet"
+              : `${unassessedCount} obligations under this Practice have not been assessed yet`);
+          }
+          if (notOperationalized) parts.push("the Practice has not been Operationalized yet");
+          textEl.textContent = `Analysis is blocked until ${parts.join(" and ")}.`;
+        }
+      }
+    }
+
     const form = document.getElementById("gapAnalysisForm");
     if (form) {
       form.querySelectorAll("input, select, textarea, button").forEach(el => {
@@ -314,8 +513,23 @@
     //                 the implicit validation. Also deactivated at the
     //                 SQL layer in migration 175, but filter here too
     //                 in case a pre-175 server still returns it.
-    const AUTO_ONLY = new Set(["Delegate", "Validate"]);
-    const visible = state.actions.filter(a => !AUTO_ONLY.has(a.actionCode));
+    //   'ReopenObligation' -- migration 356. Fires automatically from
+    //                 sp_practice_gap_sync_for_instance when a new
+    //                 Obligation fails under this gap's Practice
+    //                 Instance after the gap was already Analysed. Its
+    //                 transition row has to stay Active for the SQL
+    //                 engine to accept that automatic call (see 356's
+    //                 header), so it is filtered here rather than
+    //                 deactivated server-side, the same way Delegate
+    //                 already is.
+    const AUTO_ONLY = new Set(["Delegate", "Validate", "ReopenObligation"]);
+    // Hidden from THIS UI on request -- 'MarkInvalid' is still a fully
+    // valid, functional transition at the lifecycle/API layer
+    // (gap_lifecycle_transition_master, unchanged); only its button is
+    // removed here. 'MarkDuplicate' is a separate action_code and stays
+    // visible -- only Mark Invalid was asked to be hidden.
+    const HIDDEN_BY_REQUEST = new Set(["MarkInvalid"]);
+    const visible = state.actions.filter(a => !AUTO_ONLY.has(a.actionCode) && !HIDDEN_BY_REQUEST.has(a.actionCode));
     container.innerHTML = "";
     if (!visible.length) return;
     visible.forEach(a => {
@@ -340,9 +554,63 @@
     const invWrap = document.getElementById("gapActionInvalidWrap");
     dupWrap.hidden = action.toStateCode !== "Duplicate";
     invWrap.hidden = action.toStateCode !== "Invalid";
-    document.getElementById("gapActionDuplicateOfId").value = "";
     document.getElementById("gapActionInvalidReason").value = "";
+    // Mark Duplicate: (re)populate the picker fresh every open rather
+    // than caching -- a gap raised a minute ago should already be
+    // selectable, and this list is cheap (capped at 200 rows).
+    if (!dupWrap.hidden) {
+      loadDuplicateOfGapOptions();
+    } else {
+      document.getElementById("gapActionDuplicateOfId").innerHTML =
+        '<option value="">-- select the gap this duplicates --</option>';
+    }
     show("gapActionModal");
+  }
+
+  // Mark Duplicate used to ask the analyst to type a raw gap id. That
+  // still is what gets saved (duplicateOfGapId, unchanged below) -- but
+  // the field is now a picker of this gap's OWN organisation's gaps,
+  // shown by title, so nobody has to go find and copy a number from
+  // another tab. Reuses the same Gap Centre list endpoint gaps.cshtml
+  // renders its grid from, so the two screens never disagree about what
+  // a gap is called.
+  //
+  // Capped at the API's own 200-row clamp
+  // (CustomGapService.ListGapCentreAsync / GapCentreController) -- an
+  // organisation with more open gaps than that would need a search box
+  // here rather than a plain list, which is outside what was asked.
+  async function loadDuplicateOfGapOptions() {
+    const sel  = document.getElementById("gapActionDuplicateOfId");
+    const hint = document.getElementById("gapActionDuplicateOfHint");
+    if (!sel) return;
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">Loading gaps...</option>';
+    if (hint) hint.textContent = "";
+    try {
+      const params = new URLSearchParams({
+        organizationId: String(state.orgId || ""),
+        page: "1",
+        pageSize: "200"
+      });
+      const r = await fetch(U("/practice/api/gaps/custom/centre?" + params.toString()),
+                             { credentials: "same-origin" });
+      const body = r.ok ? await r.json() : null;
+      const rows = (body && (body.rows || body.Rows)) || [];
+      // Never offer the gap being closed as a duplicate of itself.
+      const others = rows.filter(row => Number(row.customGapId || row.CustomGapId) !== state.gapId);
+      sel.innerHTML = '<option value="">-- select the gap this duplicates --</option>'
+        + others.map(row => {
+            const id    = row.customGapId || row.CustomGapId;
+            const title = row.title || row.Title || "(untitled)";
+            return `<option value="${id}">#${id} -- ${escapeHtml(title)}</option>`;
+          }).join("");
+      if (!others.length && hint) hint.textContent = "No other gaps found for this organization.";
+      sel.disabled = false;
+    } catch (err) {
+      console.error("loadDuplicateOfGapOptions failed", err);
+      sel.innerHTML = '<option value="">Could not load gaps</option>';
+      if (hint) hint.textContent = "Could not load this organization's gaps -- close and reopen this dialog to retry.";
+    }
   }
 
   async function onActionConfirmSubmit(ev) {
@@ -355,7 +623,7 @@
     const dupId  = Number(document.getElementById("gapActionDuplicateOfId").value) || null;
     const invR   = document.getElementById("gapActionInvalidReason").value.trim() || null;
     if (action.remarkRequired && !remark) { msg.textContent = "Remark is required for this action."; return; }
-    if (action.toStateCode === "Duplicate" && !dupId) { msg.textContent = "duplicate_of_gap_id is required."; return; }
+    if (action.toStateCode === "Duplicate" && !dupId) { msg.textContent = "Select the gap this is a duplicate of."; return; }
     if (action.toStateCode === "Invalid"   && !invR)  { msg.textContent = "Invalid reason is required.";     return; }
     const result = await apiPost(`/gaps/${state.gapId}/transition`, {
       actionCode:       action.actionCode,
@@ -377,6 +645,7 @@
     await refreshActions();
     await refreshHistory();
     renderMetadata();
+    renderPracticeInstanceLink();  // migration 321
     await refreshDuplicateCard();
     refreshInvalidCard();
   }
@@ -384,8 +653,13 @@
   // -------------------- analysis --------------------
   async function refreshAnalysis() {
     const a = await apiGet(`/gaps/${state.gapId}/analysis`);
-    if (!a) return;    // 404 = never analysed yet
-    applyAnalysisToForm(a);
+    // Never analysed yet? Apply an empty record anyway so the "auto"
+    // severity and any other Add-Gap-side facts (detection method for
+    // custom gaps, etc.) still populate from gapHeader inside
+    // applyAnalysisToForm's own fallbacks. Without this the analyst
+    // opened the page and saw a blank Severity select despite the
+    // "(auto)" label -- the code that fills it was never called.
+    applyAnalysisToForm(a || {});
   }
 
   async function onAnalysisSubmit(ev) {
@@ -402,43 +676,40 @@
       regulatoryImpactCode:    valOrNull("anRegulatoryImpactCode"),
       regulatoryImpactSummary: valOrNull("anRegulatoryImpactSummary"),
       rcaRequired:             document.getElementById("anRcaRequired").checked,
-      rcaMethodCode:           valOrNull("anRcaMethodCode"),
+      // rcaMethodCode retired -- the taxonomy picker was noise on an
+      // already-optional workflow. Sent as null so a server still on the
+      // old schema treats it as "no opinion" and keeps its stored value.
+      rcaMethodCode:           null,
       rcaSummary:              valOrNull("anRcaSummary"),
-      recommendedActionSummary: valOrNull("anRecommendedActionSummary"),
-      recommendTask:           false,
-      recommendException:      false,
-      recommendRisk:           false,
-      remediationPossible:     valOrNull("anRemediationPossible"),
-      businessRiskPresent:     valOrNull("anBusinessRiskPresent")
+      // Renamed input id: anRecommendedActionSummary -> anCorrectiveAction.
+      // Wire name (recommendedActionSummary) stays because that is what
+      // the API contract is keyed on.
+      recommendedActionSummary: valOrNull("anCorrectiveAction"),
+      // New free-text column added by migration 249. Optional.
+      preventiveAction:        valOrNull("anPreventiveAction"),
+      // Migration 323: three independent checkboxes, sent as-is. No
+      // longer derived from / deriving a mandatory Yes-No pair -- see
+      // gap-detail.cshtml's decision-checkboxes comment. None of the
+      // three is required; an analysis can be saved with all unchecked.
+      recommendTask:           document.getElementById("anGenerateTask").checked,
+      recommendException:      document.getElementById("anRequestException").checked,
+      recommendRisk:           document.getElementById("anCreateRisk").checked,
+      // 168's fields are no longer set by this UI. Sent as null so the
+      // server-side legacy columns are left exactly as they were
+      // (sp_custom_gap_analysis_save COALESCEs them, per migration 323) --
+      // never overwritten, never used to drive anything.
+      remediationPossible:     null,
+      businessRiskPresent:     null
     };
-    if (!payload.remediationPossible || !payload.businessRiskPresent) {
-      msg.textContent = "Please answer both decision questions before saving.";
-      alert("Please answer both decision questions before saving.");
-      return;
-    }
     const result = await apiPut(`/gaps/${state.gapId}/analysis`, payload);
     if (!result || result.success === false) {
       const err = (result && result.error) || "Save failed.";
       msg.textContent = err; alert(err);
       return;
     }
-    // Describe what got auto-created + auto-delegated.
-    const created = [];
-    if (payload.remediationPossible === "Y") created.push("a Task");
-    if (payload.remediationPossible === "N") created.push("an Exception request");
-    if (payload.businessRiskPresent  === "Y") created.push("a Risk candidate");
-    const suffix = created.length
-      ? `  Auto-created: ${created.join(" + ")}. Gap moved to Analysed.`
-      : "  Gap moved to Analysed.";
-    alert("Analysis saved." + suffix);
-    msg.textContent = "Analysis saved." + suffix;
-    msg.style.color = "#22543d";
-
-    // Refresh downstream state: header (state chip + terminal flags),
-    // stepper, actions, linked artefacts. The state chip itself is
-    // rendered by renderCompactStepper (no separate setStateChip
-    // helper -- that reference was a dead call that threw ReferenceError
-    // whenever an analysis save completed).
+    // Refresh downstream state FIRST, then report from it. The message
+    // below is built from what the server actually has, never from the
+    // payload we just sent -- see the note above buildSaveSummary().
     const fresh = await apiGet(`/gaps/${state.gapId}/header`);
     if (fresh) {
       state.gapHeader = fresh;
@@ -446,10 +717,75 @@
     }
     renderCompactStepper();
     renderMetadata();
+    renderPracticeInstanceLink();  // migration 321
     renderSlaCard();       // migration 184 -- new severity may have re-matched SLA
     await refreshActions();
-    await refreshLinkedArtefacts();
+    const artefacts = await refreshLinkedArtefacts();
     await refreshHistory();
+    // Migration 324: if this save just auto-delegated the gap to
+    // Analysed, lock the form into read-only/View mode immediately --
+    // otherwise the analyst would see an editable form (that the server
+    // will now reject on a second submit) until the next manual refresh.
+    applyTerminalInvalidMode();
+
+    const summary = buildSaveSummary(result, payload, fresh, artefacts);
+    alert(summary);
+    msg.textContent = summary;
+    // Still green: the analysis itself saved successfully whenever we
+    // reach this point (a failed save already returned earlier, above).
+    // A best-effort trigger failure is called out in the text itself
+    // ("Failed: ...") rather than by recoloring the whole message.
+    msg.style.color = "#22543d";
+  }
+
+  // Report what the save actually produced.
+  //
+  // This used to be built from the request payload: remediationPossible
+  // === "Y" printed "Auto-created: a Task", and the state was hardcoded
+  // to "Analysed". Both were wrong. Migration 199 rerouted the gap seam
+  // to raise an invisible Task Candidate, so "a Task" was a lie for
+  // several migrations and this message never noticed -- it was
+  // describing the request, not the result. The lifecycle proc has also
+  // moved the gap to Delegated, not Analysed, since 174.
+  //
+  // Reading /gaps/{id}/linked-artefacts instead means the message and
+  // the chip strip below it come from one source of truth for what
+  // WAS created. Migration 323 adds the other half: sp_custom_gap_
+  // analysis_save's new second result set (result.taskCreated/
+  // taskError/...) says WHY something the analyst asked for is
+  // missing, instead of a requested-but-failed trigger looking
+  // identical to one that was simply never ticked.
+  function buildSaveSummary(result, payload, header, artefacts) {
+    const created = [];
+    if (artefacts && artefacts.task)
+      created.push(`a Task (#${artefacts.task.artefactId})`);
+    if (artefacts && artefacts.exception)
+      created.push(`an Exception request (#${artefacts.exception.artefactId})`);
+    if (artefacts && artefacts.risk)
+      created.push(`a Risk candidate (#${artefacts.risk.artefactId})`);
+
+    const failed = [];
+    if (payload.recommendTask && !(artefacts && artefacts.task) && result && result.taskError)
+      failed.push(`Task (${result.taskError})`);
+    if (payload.recommendException && !(artefacts && artefacts.exception) && result && result.exceptionError)
+      failed.push(`Exception request (${result.exceptionError})`);
+    if (payload.recommendRisk && !(artefacts && artefacts.risk) && result && result.riskError)
+      failed.push(`Risk candidate (${result.riskError})`);
+    // Migration 324: sp_custom_gap_analysis_save now reports the auto-
+    // Delegate ("Analysed") transition's own outcome the same way it
+    // already reports Task/Exception/Risk -- a failure here is why the
+    // status stays on its previous value instead of becoming Analysed.
+    if (result && result.lifecycleTransitioned === false && result.lifecycleError)
+      failed.push(`Status update to Analysed (${result.lifecycleError})`);
+
+    const stateName = (result && result.lifecycleStateName)
+                   || (header && (header.lifecycleStateName || header.lifecycleStateCode))
+                   || state.currentStateCode || "";
+    const parts = ["Analysis saved."];
+    if (created.length) parts.push(`Linked: ${created.join(" + ")}.`);
+    if (failed.length)  parts.push(`Failed: ${failed.join(" + ")}.`);
+    if (stateName)      parts.push(`Gap is now ${stateName}.`);
+    return parts.join("  ");
   }
 
   // -------------------- linked artefacts --------------------
@@ -457,15 +793,21 @@
   // sp_custom_gap_linked_artefacts) and renders one chip per Task /
   // Exception / Risk that the gap owns. Chips deep-link to the
   // respective Centre so the user can inspect the artefact.
+  // Also renders the Failed Obligation(s) strip (migration 317) from the
+  // SAME response's failedObligations array -- one read serves both
+  // strips, so adding the Obligation strip did not add a second request.
+  // Returns the artefact payload so callers can report on it (see
+  // buildSaveSummary) without issuing a second identical request.
   async function refreshLinkedArtefacts() {
     const strip = document.getElementById("gapLinkedArtefactsStrip");
     const chips = document.getElementById("gapLinkedArtefactsChips");
-    if (!strip || !chips) return;
+    if (!strip || !chips) return null;
 
     const result = await apiGet(`/gaps/${state.gapId}/linked-artefacts`);
     if (!result) {
       strip.hidden = true;
-      return;
+      renderFailedObligations(null);
+      return null;
     }
     // Screen keys match PracticeScreen.cs entries:
     //   tasks (Task Center), exception-centre, risk-centre.
@@ -475,9 +817,11 @@
       { kind: "risk",      label: "Risk Candidate",   row: result.risk,      centre: "risk-centre" }
     ].filter(x => x.row);
 
+    renderFailedObligations(result.failedObligations);
+
     if (!rows.length) {
       strip.hidden = true;
-      return;
+      return result;   // no artefacts, but the read succeeded
     }
     strip.hidden = false;
     chips.innerHTML = "";
@@ -495,6 +839,49 @@
         <span class="chip-title">${escapeHtml(x.row.title || "(untitled)")}</span>
         <span class="chip-status">${escapeHtml(x.row.statusCode || "")}</span>`;
       chips.appendChild(a);
+    });
+    return result;
+  }
+
+  // Failed Obligation(s) strip (migration 317). Zero rows for any gap
+  // that is not an automatically generated Implementation gap -- the
+  // proc itself only ever returns rows for that case (see
+  // sp_custom_gap_linked_artefacts, migration 317), so this function does
+  // not need to re-check gap source; an empty/absent array just means
+  // "nothing to show", same as a manually created gap.
+  // Obligations have no detail page of their own to deep-link to (they
+  // live inside the source Practice Instance's own workspace, which this
+  // response does not carry an id for), so these render as plain
+  // (non-anchor) info chips rather than links, unlike the Task/Exception/
+  // Risk chips above.
+  function renderFailedObligations(list) {
+    // Migration 367: captured regardless of whether the strip elements
+    // exist on this page, so isBlockedByUnresolvedObligations() always
+    // has the current set -- applyTerminalInvalidMode() is called again
+    // right after every refreshLinkedArtefacts() (see init(), the manual
+    // refresh handler, and onAnalysisSubmit()), so this is always fresh
+    // before the lock is (re)computed.
+    state.failedObligations = list || [];
+
+    const strip = document.getElementById("gapFailedObligationsStrip");
+    const chips = document.getElementById("gapFailedObligationsChips");
+    if (!strip || !chips) return;
+
+    if (!list || !list.length) {
+      strip.hidden = true;
+      chips.innerHTML = "";
+      return;
+    }
+    strip.hidden = false;
+    chips.innerHTML = "";
+    list.forEach(o => {
+      const div = document.createElement("div");
+      div.className = "gap-linked-chip type-obligation";
+      div.innerHTML = `
+        <span class="chip-type">${escapeHtml(o.obligationTypeCode || "Obligation")}</span>
+        <span class="chip-title">${escapeHtml(o.obligationName || "(unnamed obligation)")}</span>
+        <span class="chip-status">${escapeHtml(o.loggedStatusCode || "")}</span>`;
+      chips.appendChild(div);
     });
   }
 
@@ -529,8 +916,24 @@
 
   // Extracted from refreshAnalysis so both paths (own analysis + parent
   // analysis for Duplicate gaps) populate the same form the same way.
+  // Show / hide the RCA fieldset in step with the RCA Required tick.
+  // Analyst does not need RCA -> block is not on the page at all, so a
+  // vacant fieldset does not read like an unfinished form.
+  function toggleRcaBlockVisibility() {
+    const box   = document.getElementById("anRcaRequired");
+    const block = document.getElementById("anRcaBlock");
+    if (!box || !block) return;
+    block.hidden = !box.checked;
+  }
+
   function applyAnalysisToForm(a) {
-    setVal("anDetectionMethodCode",  a.detectionMethodCode);
+    // Migration 250: fall back to the header's detection method when
+    // the analysis row has none yet. On a Custom gap the operator will
+    // have entered it at Add time; on other sources it stays null and
+    // the analyst picks one.
+    const detFromAnalysis = a.detectionMethodCode;
+    const detFromHeader   = (state.gapHeader && state.gapHeader.detectionMethodCode) || "";
+    setVal("anDetectionMethodCode",  detFromAnalysis || detFromHeader);
     // Severity is auto-derived at gap creation now (post-189). If the
     // analysis record is fresh (severityCode still null) but the gap
     // header carries a severity, show that instead of leaving the
@@ -546,16 +949,27 @@
     setVal("anRegulatoryImpactCode", a.regulatoryImpactCode);
     setVal("anBusinessImpactSummary",   a.businessImpactSummary || "");
     setVal("anRegulatoryImpactSummary", a.regulatoryImpactSummary || "");
-    document.getElementById("anRcaRequired").checked = !!a.rcaRequired;
-    setVal("anRcaMethodCode",              a.rcaMethodCode);
-    setVal("anRcaSummary",                 a.rcaSummary || "");
-    setVal("anRecommendedActionSummary",   a.recommendedActionSummary || "");
-    const remedVal = a.remediationPossible
-                  || (a.recommendTask ? "Y" : (a.recommendException ? "N" : ""));
-    const riskVal  = a.businessRiskPresent
-                  || (a.recommendRisk ? "Y" : "");
-    setVal("anRemediationPossible",  remedVal);
-    setVal("anBusinessRiskPresent",  riskVal);
+    const rcaBox = document.getElementById("anRcaRequired");
+    rcaBox.checked = !!a.rcaRequired;
+    // anRcaMethodCode retired. anRecommendedActionSummary renamed to
+    // anCorrectiveAction, and a new anPreventiveAction column was added
+    // by migration 249; both feed off the analysis record.
+    setVal("anRcaSummary",         a.rcaSummary || "");
+    setVal("anCorrectiveAction",   a.recommendedActionSummary || "");
+    setVal("anPreventiveAction",   a.preventiveAction || "");
+    toggleRcaBlockVisibility();
+    // Migration 323: three independent checkboxes, bound straight to the
+    // three flags -- no more deriving a Yes/No from them or a Yes/No
+    // deriving them (168's remediationPossible/businessRiskPresent are no
+    // longer read here; recommendTask/recommendException/recommendRisk
+    // are the columns' original, pre-168 meaning and are what the save
+    // path now writes directly).
+    const genTaskBox = document.getElementById("anGenerateTask");
+    const reqExcBox  = document.getElementById("anRequestException");
+    const createRiskBox = document.getElementById("anCreateRisk");
+    if (genTaskBox)    genTaskBox.checked    = !!a.recommendTask;
+    if (reqExcBox)     reqExcBox.checked     = !!a.recommendException;
+    if (createRiskBox) createRiskBox.checked = !!a.recommendRisk;
   }
 
   // -------------------- invalid-reason card (from 177) ---------------
@@ -628,7 +1042,7 @@
     const daysEl = document.getElementById("gapSlaDaysText");
     if (daysEl) daysEl.textContent = h.slaDaysEffective != null ? `${h.slaDaysEffective} days` : "-- days";
     const dueEl = document.getElementById("gapSlaDueText");
-    if (dueEl) dueEl.textContent = h.dueDate ? `Due ${new Date(h.dueDate).toLocaleDateString()}` : "";
+    if (dueEl) dueEl.textContent = h.dueDate ? `Due ${window.gracFormatDateOnly(h.dueDate)}` : "";
 
     // Pending override lock -- the server enforces one pending SLA
     // request per gap. Reflect that in the UI so double-clicks are

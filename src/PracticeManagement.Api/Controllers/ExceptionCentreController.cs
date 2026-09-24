@@ -24,6 +24,15 @@ public sealed class ExceptionCentreController(
     public async Task<IActionResult> ExceptionTypes(CancellationToken ct)
         => Ok(await svc.ListExceptionTypesAsync(ct));
 
+    // Review Frequency options for the Approve dialog's "Review frequency
+    // (if applicable)" select. Reuses sp_risk_review_frequency_list (293)
+    // unchanged -- frequency_master is a shared master table, not a
+    // Risk-owned one (see ExceptionReviewFrequencyRow). No organizationId:
+    // same reasoning as Risk Centre's own /review-frequencies.
+    [HttpGet("lookups/review-frequencies")]
+    public async Task<IActionResult> ReviewFrequencies(CancellationToken ct)
+        => Ok(await svc.ListReviewFrequenciesAsync(ct));
+
     // Lookup for the Linked Practice combo. Scoped to the org derived
     // upstream in the Web tier -- server-side scope check applies before
     // this endpoint is reachable (same session guard as everything else).
@@ -64,6 +73,28 @@ public sealed class ExceptionCentreController(
     {
         if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
         return Ok(await svc.ListAsync(organizationId, statusCode, requestType, page, pageSize, ct));
+    }
+
+    // Migration 327 -- "+ Add Custom Exception." Same route shape as
+    // List (POST vs GET on the collection route), same result shape as
+    // every other action below: {error} on failure, the new id on
+    // success. From here the row is an ordinary exception_request --
+    // Analysis, Submit for approval, Approve/Reject, History, the
+    // Exception Full View -- nothing downstream of this endpoint knows
+    // or cares that the row started here instead of a gap analysis.
+    [HttpPost]
+    public async Task<IActionResult> CreateCustom(
+        [FromBody] ExceptionCreateCustomRequest? body, CancellationToken ct)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        if (string.IsNullOrWhiteSpace(body.RequestTitle))
+            return BadRequest(new { error = "requestTitle is required." });
+
+        var r = await svc.CreateCustomAsync(body, ct);
+        return r.Success
+            ? StatusCode(StatusCodes.Status201Created, new { exceptionRequestId = r.ExceptionRequestId })
+            : BadRequest(new { error = r.Error });
     }
 
     [HttpGet("{id:long}")]
@@ -122,6 +153,74 @@ public sealed class ExceptionCentreController(
             logger.LogError(ex, "ExceptionCentre.ApproveSla failed for {Id}", id);
             return BadRequest(new { success = false, error = ex.Message, inner = ex.InnerException?.Message });
         }
+    }
+
+    // =================================================================
+    // Migration 257 -- Analysis stage
+    //
+    // A Pending request is analysed here, then submitted. Approve and
+    // Reject refuse anything that is not SubmittedForApproval (except the
+    // task-side request types, which never had an analysis stage).
+    // =================================================================
+    // Migration 260 -- the audit trail. Every action_code the procedures
+    // write, newest first; the UI decides what to show.
+    // A bare array, like the tasks and attachments listings above -- one
+    // shape for every collection this controller returns.
+    [HttpGet("{id:long}/history")]
+    public async Task<IActionResult> History(long id, CancellationToken ct)
+        => Ok(await svc.ListHistoryAsync(id, ct));
+
+    [HttpPost("{id:long}/analysis")]
+    public async Task<IActionResult> SaveAnalysis(
+        long id, [FromBody] ExceptionAnalysisSaveRequest? body, CancellationToken ct)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        var r = await svc.SaveAnalysisAsync(id, body, ct);
+        return r.Success ? Ok(new { exceptionRequestId = r.ExceptionRequestId })
+                         : BadRequest(new { error = r.Error });
+    }
+
+    [HttpPost("{id:long}/submit-for-approval")]
+    public async Task<IActionResult> SubmitForApproval(
+        long id, [FromBody] ExceptionSubmitForApprovalRequest? body, CancellationToken ct)
+    {
+        var req = body ?? new ExceptionSubmitForApprovalRequest(null, null);
+        var r = await svc.SubmitForApprovalAsync(id, req, ct);
+        return r.Success ? Ok(new { exceptionRequestId = r.ExceptionRequestId })
+                         : BadRequest(new { error = r.Error });
+    }
+
+    [HttpGet("{id:long}/tasks")]
+    public async Task<IActionResult> ListTasks(long id, CancellationToken ct)
+        => Ok(await svc.ListTasksAsync(id, ct));
+
+    /// <summary>
+    /// The "map an existing task" picker: tasks under this exception's
+    /// linked practice. Already-linked ones come back flagged, not hidden.
+    /// </summary>
+    [HttpGet("{id:long}/task-candidates")]
+    public async Task<IActionResult> ListTaskCandidates(
+        long id, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await svc.ListTaskCandidatesAsync(id, search, ct));
+
+    [HttpPost("{id:long}/tasks")]
+    public async Task<IActionResult> LinkTask(
+        long id, [FromBody] ExceptionTaskLinkRequest? body, CancellationToken ct)
+    {
+        if (body is null || body.TaskId <= 0)
+            return BadRequest(new { error = "taskId is required." });
+        var r = await svc.LinkTaskAsync(id, body, ct);
+        return r.Success ? Ok(new { exceptionRequestId = r.ExceptionRequestId, taskId = body.TaskId })
+                         : BadRequest(new { error = r.Error });
+    }
+
+    [HttpDelete("{id:long}/tasks/{taskId:long}")]
+    public async Task<IActionResult> UnlinkTask(
+        long id, long taskId, [FromQuery] string? callerDisplayName, CancellationToken ct)
+    {
+        var r = await svc.UnlinkTaskAsync(id, taskId, callerDisplayName, ct);
+        return r.Success ? Ok(new { exceptionRequestId = r.ExceptionRequestId, taskId })
+                         : BadRequest(new { error = r.Error });
     }
 
     [HttpGet("{id:long}/attachments")]

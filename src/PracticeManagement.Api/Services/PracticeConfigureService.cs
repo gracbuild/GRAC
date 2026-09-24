@@ -75,7 +75,28 @@ public sealed class PracticeConfigureService(
                 OrganizationRequirementId: reader["OrganizationRequirementId"] as long?,
                 RequirementCode:           reader["RequirementCode"] as string,
                 RequirementName:           reader["RequirementName"] as string,
-                ActiveInstanceCount:       ToInt(reader["ActiveInstanceCount"])));
+                ActiveInstanceCount:       ToInt(reader["ActiveInstanceCount"]),
+                // Migration 301. Read through HasColumn because the app and the
+                // database deploy separately: against a database still on the
+                // 218 procedure the column is absent, and reader["..."] would
+                // throw IndexOutOfRange, land in the catch below, and answer the
+                // page with "could not be loaded". An unapplied migration must
+                // cost the Frameworks row, not the whole Practice View.
+                MappedFrameworksJson:      HasColumn(reader, "MappedFrameworksJson")
+                                               ? reader["MappedFrameworksJson"] as string
+                                               : null,
+                // Migration 303, read through HasColumn for the same reason as
+                // the line above: against a pre-303 database the column is
+                // absent and reader["..."] would throw, turning a missing
+                // header row into "this practice could not be loaded".
+                PracticeImplementationStatus: HasColumn(reader, "PracticeImplementationStatus")
+                                               ? reader["PracticeImplementationStatus"] as string
+                                               : null,
+                // Migration 316, same HasColumn guard and the same reason: a
+                // database still on 303 does not return this column at all.
+                MappedSourceStatementsJson: HasColumn(reader, "MappedSourceStatementsJson")
+                                               ? reader["MappedSourceStatementsJson"] as string
+                                               : null));
         }
         catch (Exception ex)
         {
@@ -203,4 +224,12 @@ public sealed class PracticeConfigureService(
 
     private static int ToInt(object? value)
         => value is null || value == DBNull.Value ? 0 : Convert.ToInt32(value);
+
+    private static bool HasColumn(DbDataReader reader, string name)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+            if (string.Equals(reader.GetName(i), name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
 }

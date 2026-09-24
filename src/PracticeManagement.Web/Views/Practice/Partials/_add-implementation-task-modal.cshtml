@@ -161,7 +161,18 @@
     }
     function showDlg(d)  { if (typeof d.showModal === 'function') d.showModal(); else { d.setAttribute('open','open'); d.style.display='block'; } }
     function closeDlg(d) { if (typeof d.close === 'function') d.close();   else { d.removeAttribute('open'); d.style.display='none'; } }
-    function backdropClose(d) { d.addEventListener('click', function (e) { var r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeDlg(d); }); }
+    // Backdrop-click-to-close. Was a coordinate check (e.clientX/e.clientY
+    // against the dialog's own rect) -- that misfires on ANY click event
+    // whose coordinates are not real, including a programmatic click a
+    // browser extension, clipboard-sync tool, or assistive technology can
+    // dispatch on the focused field (clientX/clientY default to 0, which
+    // reads as "outside" a centred dialog) -- e.g. pressing Ctrl+C while a
+    // field inside the modal was focused could close the whole modal.
+    // event.target is the standard, coordinate-free way to detect a
+    // native <dialog> backdrop click: a real click on anything INSIDE the
+    // dialog always targets that descendant element, never the <dialog>
+    // node itself -- only a genuine backdrop click does.
+    function backdropClose(d) { d.addEventListener('click', function (e) { if (e.target === d) closeDlg(d); }); }
     // Cached diagnostic string surfaced to the UI when the fetch fails.
     var statusOptionsLastError = null;
 

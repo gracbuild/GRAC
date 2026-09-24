@@ -111,6 +111,7 @@
         });
     }
     function fmtDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         return isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toISOString().slice(0, 10);
@@ -261,7 +262,8 @@
     }
 
     async function markAll() {
-        if (!confirm('Mark all your unread notifications as read?')) return;
+        if (!await window.gracUi.confirm('Mark all your unread notifications as read?',
+              { title: 'Mark all read', confirmText: 'Mark all read' })) return;
         let url = U('/practice/api/task-notifications/me/mark-all');
         if (eventFilter) url += '?notifyEventCode=' + encodeURIComponent(eventFilter);
         try {

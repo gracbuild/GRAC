@@ -1,0 +1,208 @@
+@*
+    Task View  (dedicated full page)
+
+    Route: /Practice/Index/task-view?taskId=NNN
+
+    PURPOSE
+    -------
+    A well-structured, read-only layout of everything recorded against
+    one task, PLUS its own "Actions" menu -- Edit, Change Status (part
+    of Edit, migration 269), Change Owner (also part of Edit), Add Child
+    Tasks, Add Evidence, Add Update / Comment, Cancel Task (Close Task)
+    -- so the same things Task Center's row 3-dot menu offers can be
+    done from here directly, without a trip back to the grid.
+
+    NO DUPLICATE FORMS, NO DUPLICATE BUSINESS LOGIC (change request,
+    2026-09-22). The Actions menu opens the *exact same* dialogs Task
+    Center's row menu opens -- same API calls, same validation, same
+    permission / applicability rules, same success/error handling --
+    because both screens now build their menu from, and drive their
+    dialogs through, the same shared module:
+      * item list + applicability/disabled rules -> window.gracTaskActions.buildMenu()
+      * Edit / Complete / Close / Add Evidence dialogs -> window.gracTaskActions
+        (wwwroot/js/Shared/task-actions.js, markup in
+        Partials/_task-action-dialogs.cshtml)
+      * Add Child Task -> window.gracTaskForm.open() (already shared
+        before this change: Shared/task-form.js + _task-form-dialog.cshtml)
+    See wwwroot/js/TaskCentre/task-view.js for how this page wires the
+    Actions button to that shared module using the task header this page
+    already has (GET /practice/api/tasks/{id}) -- no second fetch, and
+    the same status-based fields (isTerminal / isChild / isEligible /
+    taskType) Task Center's own row menu reads off its grid row.
+
+    DATA SOURCE -- one existing API call, nothing new added except one
+    column projected by the view it already reads from:
+      * Task detail -> GET /practice/api/tasks/{id}   (the exact call
+                        tasks.cshtml's own View dialog has always made,
+                        and the same one the Edit dialog re-fetches from)
+      * organization_name -> migration 326's one-column addition to
+                        vw_pm_practice_task (same reissue-with-one-more-
+                        column pattern migration 325 used for the Gap
+                        header's IdentifiedDate)
+
+    "Related Gap / Risk / Exception" reuses the task's own existing
+    source-navigation fields (sourceTypeCode/sourceRecordId/
+    sourceReference, BRD §15) to link out to that artefact's own
+    existing full view -- gap-view, exception-view, or risk-centre's
+    candidate/register deep links -- never a new page.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="tvHeading">Task View</h1>
+        <p class="pm-hint">Everything recorded for this task, read-only.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        @* "Open in Task Center" is gone -- replaced by the Actions button
+           below, which does everything that link used to send the user
+           away for. "Back to Task Center" stays: it is still how you get
+           back to the grid. *@
+        <button type="button" class="pm-button" id="tvActionsBtn" aria-haspopup="true" aria-expanded="false">
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
+        <a class="pm-button" href="~/Practice/Index/tasks">
+            <i class="fa-solid fa-arrow-left"></i> Back to Task Center
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="tvUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="tvUnavailableTitle">Task not found.</h2>
+        <p id="tvUnavailableBody">Open this page from Task Center's row menu.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="tvRoot" hidden>
+
+    <div class="pm-toolbar" style="justify-content:space-between">
+        <div>
+            <span class="pm-badge" id="tvStatusChip">-</span>
+        </div>
+        <button class="pm-button icon" id="tvRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <h3 class="tv-section">Task Details</h3>
+    <dl class="tv-facts" id="tvFacts"></dl>
+
+    <div class="tv-related-strip">
+        <div id="tvRelatedWrap" hidden>
+            <dt id="tvRelatedLabel">Related</dt>
+            <dd id="tvRelatedValue"></dd>
+        </div>
+        <div id="tvParentWrap" hidden>
+            <dt>Parent Task</dt>
+            <dd><a id="tvParentLink" href="#"></a></dd>
+        </div>
+    </div>
+
+    <div id="tvDescriptionWrap" hidden>
+        <h3 class="tv-section">Description</h3>
+        <p id="tvDescription" class="tv-description"></p>
+    </div>
+
+    <div id="tvCompletionWrap" hidden>
+        <h3 class="tv-section">Completion</h3>
+        <dl class="tv-facts" id="tvCompletionFacts"></dl>
+    </div>
+
+    <div id="tvChildrenWrap" hidden>
+        <h3 class="tv-section">Child Tasks (<span id="tvChildrenCount">0</span>)</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Task #</th><th>Activity</th><th>Owner</th><th>Mandatory</th><th>Target</th><th>Status</th></tr></thead>
+                <tbody id="tvChildrenBody"></tbody>
+            </table>
+        </div>
+        <p class="tv-warn" id="tvChildrenWarning" hidden></p>
+    </div>
+
+    <div id="tvGovernanceWrap" hidden>
+        <h3 class="tv-section">Exception Centre Requests</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Type</th><th>Asked for</th><th>Status</th><th>Requested by</th><th>Decision</th></tr></thead>
+                <tbody id="tvGovernanceBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="tvEvidenceWrap" hidden>
+        <h3 class="tv-section">Evidence <span class="pm-badge" id="tvEvidenceCount"></span></h3>
+        <p class="pm-hint" id="tvEvidenceEmpty" hidden>No evidence uploaded.</p>
+        <div class="pm-table-wrap" id="tvEvidenceTable" hidden>
+            <table>
+                <thead><tr><th>File</th><th>Uploaded by</th><th>Uploaded</th><th>&nbsp;</th></tr></thead>
+                <tbody id="tvEvidenceBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <h3 class="tv-section">Created / Updated</h3>
+    <dl class="tv-facts" id="tvCreatedUpdatedFacts"></dl>
+
+    <h3 class="tv-section">Activity</h3>
+    <div id="tvActivityList"></div>
+
+</section>
+
+<style>
+    #tvRoot .tv-section {
+        margin: 18px 0 8px; font-size: 13px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .04em; color: #4a5568;
+    }
+    #tvRoot .tv-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
+        gap: 8px 20px; margin: 0 0 4px;
+        padding: 12px 14px; background: #f7fafc; border-radius: 6px;
+    }
+    #tvRoot .tv-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+    }
+    #tvRoot .tv-facts dd {
+        margin: 0 0 6px; font-size: 13px; color: #2d3748; overflow-wrap: anywhere;
+        white-space: pre-wrap;
+    }
+    #tvRoot .tv-facts dd.tv-empty { color: #a0aec0; font-style: italic; }
+
+    .tv-related-strip {
+        display: flex; flex-wrap: wrap; gap: 20px 32px; margin: 10px 0 0;
+    }
+    .tv-related-strip dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+    }
+    .tv-related-strip dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
+    .tv-related-strip dd a { color: #3182ce; }
+
+    .tv-description { white-space: pre-wrap; color: #0f172a; font-size: 13px; margin: 0; }
+    .tv-hint { font-size: 11px; color: #94a3b8; }
+    .tv-warn { font-size: 12px; color: #854d0e; margin: 6px 0 0; }
+    .tv-pending-badge {
+        display: inline-block; padding: 1px 6px; border-radius: 999px;
+        font-size: 10px; font-weight: 700; background: #fef9c3; color: #854d0e;
+    }
+
+    #tvActivityList ul { list-style: none; margin: 0; padding: 0; }
+    #tvActivityList li {
+        border-left: 2px solid #e2e8f0; padding: 4px 0 8px 10px; margin-bottom: 2px;
+    }
+    .tv-activity-head { font-size: 12px; font-weight: 600; color: #0f172a; }
+    .tv-activity-remark { font-size: 12px; color: #334155; white-space: pre-wrap; }
+</style>
+
+@* Shared Edit / Complete / Close / Add Evidence dialogs, and the
+   shared Add Child Task / New Task dialog -- both already used by Task
+   Center, reused here unchanged so this page's Actions menu opens the
+   exact same forms. *@
+<partial name="Partials/_task-action-dialogs" />
+<partial name="Partials/_task-form-dialog" />
+
+<script src="~/js/TaskCentre/task-view.js" asp-append-version="true"></script>
+<script src="~/js/Shared/task-actions.js" asp-append-version="true"></script>
+<script src="~/js/Shared/task-form.js" asp-append-version="true"></script>

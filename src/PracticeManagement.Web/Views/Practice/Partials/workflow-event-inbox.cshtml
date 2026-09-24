@@ -249,7 +249,7 @@
 
     function dueCell(row) {
         if (!row.dueDate) return '<span style="color:#94a3b8;">-</span>';
-        const d = String(row.dueDate).substring(0, 10);
+        const d = (typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(row.dueDate)||''):String(row.dueDate).substring(0,10));
         if (!row.isOverdue) return window.__wfCommon.escape(d);
         return '<span style="color:#b91c1c; font-weight:600;">' + window.__wfCommon.escape(d)
              + ' (+' + (row.daysOverdue || 0) + 'd)</span>';
@@ -381,7 +381,7 @@
         document.getElementById('ebDrawerTitle').textContent = h.checklistName || 'Checklist';
         document.getElementById('ebDrawerMeta').textContent =
             [h.eventName, h.subjectLabel, h.scopeRoleName || h.scopeAssetCategoryName,
-             h.dueDate ? 'due ' + String(h.dueDate).substring(0, 10) : null]
+             h.dueDate ? 'due ' + (typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(h.dueDate)||''):String(h.dueDate).substring(0,10)) : null]
             .filter(Boolean).join('  ·  ');
 
         renderItems();
@@ -463,8 +463,9 @@
         // the mapping screen, and the procedure rejects it without one.
         let na = item.naJustification || null;
         if (status === 'NotApplicable' && item.itemOrigin === 'OBLIGATION' && !na) {
-            na = window.prompt('Why is this obligation not applicable for this subject?\n'
-                             + 'An auditor will read this.', '');
+            na = await window.gracUi.prompt(
+                'Why is this obligation not applicable for this subject? An auditor will read this.',
+                { title: 'Not applicable', inputLabel: 'Justification', confirmText: 'Save justification' });
             if (na === null || !na.trim()) {
                 window.__wfCommon.setMessage('ebItemMessage',
                     'Not Applicable needs a justification; nothing was saved.', 'error');
@@ -652,7 +653,7 @@
                         '<td>' + window.__wfCommon.escape(t.eventCode) + '</td>',
                         '<td>' + window.__wfCommon.escape(scope) + '</td>',
                         '<td>' + window.__wfCommon.escape(t.reasonCode) + ' &times;' + t.occurrenceCount + '</td>',
-                        '<td>' + window.__wfCommon.escape(String(t.lastSeenDt).substring(0, 10)) + '</td>' ].join('')
+                        '<td>' + window.__wfCommon.escape((typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(t.lastSeenDt)||''):String(t.lastSeenDt).substring(0,10))) + '</td>' ].join('')
                     : [ '<td>' + decisionBadge(t.decision) + '</td>',
                         '<td>' + window.__wfCommon.escape(t.checklistName || '-') + '</td>',
                         '<td>' + window.__wfCommon.escape(t.eventCode) + '</td>',
@@ -660,7 +661,7 @@
                         '<td>' + window.__wfCommon.escape(t.reasonCode)
                             + (t.reasonDetail ? '<br><span style="font-size:11px; color:#94a3b8;">'
                                 + window.__wfCommon.escape(t.reasonDetail) + '</span>' : '') + '</td>',
-                        '<td>' + window.__wfCommon.escape(String(t.enteredDt).substring(0, 10)) + '</td>' ].join('');
+                        '<td>' + window.__wfCommon.escape((typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(t.enteredDt)||''):String(t.enteredDt).substring(0,10))) + '</td>' ].join('');
                 body.appendChild(tr);
             }
         } catch (err) {

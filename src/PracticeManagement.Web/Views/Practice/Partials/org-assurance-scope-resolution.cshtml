@@ -55,7 +55,7 @@
             </select>
         </label>
         <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
-            <span>Assurance Definition</span>
+            <span>Audit</span>
             <select id="oaRsPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
                 <option value="">Select an organization first</option>
             </select>
@@ -372,7 +372,7 @@
         const body = document.getElementById('oaRsHistoryBody');
         if (!state.orgId || !state.definitionId) {
             body.innerHTML = '<tr><td colspan="4" class="pm-empty">Pick a definition to load history.</td></tr>';
-            wf.updatePager('oa-rs-history', { pageNumber: 1, totalCount: 0 });
+            wf.updatePager('oa-rs-history', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="4" class="pm-empty">Loading...</td></tr>';
@@ -508,7 +508,7 @@
         const body = document.getElementById('oaRsEntityBody');
         if (!state.selectedResolutionId) {
             body.innerHTML = '<tr><td colspan="4" class="pm-empty">No snapshot selected.</td></tr>';
-            wf.updatePager('oa-rs-entities', { pageNumber: 1, totalCount: 0 });
+            wf.updatePager('oa-rs-entities', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
         body.innerHTML = '<tr><td colspan="4" class="pm-empty">Loading...</td></tr>';
@@ -623,6 +623,7 @@
         el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
     }
     function formatDateTime(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
         if (!v) return '';
         const d = new Date(v);
         if (isNaN(d.getTime())) return String(v);

@@ -1,0 +1,390 @@
+@*
+    Exception Centre (migrations 161-163).
+    Rendered from Manage.cshtml when Model.Key == "exception-centre".
+
+    Admin lands on a list of Pending / Approved / Rejected requests
+    (org-scoped), can Approve (effective-until + note + optional
+    attachment) or Reject (reason). Auto-populated from gap analysis
+    when analyst ticks "Recommend an exception".
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>Requests raised from gap analyses. Approve with an effective-until date + note, or reject with a reason.</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="excListView" hidden>
+    @* Migration 255. The two-tab strip (184: Gap Candidate / SLA
+       Candidate) is gone — sir asked for SLA Candidate to stop being a
+       tab. Both buckets were already one table with one column set; the
+       tabs only filtered requestType, and Type was already a column.
+
+       SLA Candidate rows are NOT hidden from the system, only from the
+       tab strip: they move behind the Type filter below, defaulted to
+       Gap Candidate. Dropping them entirely would strand the
+       TASK_SLA_EXTENSION and TASK_PRIORITY_REDUCTION approvals that
+       Task Centre routes here — nobody could approve them again. *@
+    <div class="pm-toolbar">
+        <select id="excFilterOrganization"><option value="">Select organization</option></select>
+        <select id="excFilterType" title="Filter by request type">
+            <option value="GAP_CANDIDATE" selected>Gap Candidate</option>
+            <option value="SLA_CANDIDATE">SLA Candidate</option>
+            @* Migration 327. *@
+            <option value="CUSTOM">Custom Exception</option>
+            <option value="">All types</option>
+        </select>
+        <select id="excFilterStatus">
+            @* Default. A Pending default hid a request as soon as it was
+               submitted for approval — the row is SubmittedForApproval by
+               then, and the grid read "No Pending exception requests". *@
+            <option value="" selected>All statuses</option>
+            <option value="Pending">Pending</option>
+            @* Migration 257: the state between analysis and decision. *@
+            <option value="SubmittedForApproval">Submitted for approval</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Withdrawn">Withdrawn</option>
+            <option value="Expired">Expired</option>
+        </select>
+        @* Migration 327. Mirrors gaps.cshtml's "+ Add Gap" -- same
+           pm-button primary styling, same "opens a dialog, Save posts,
+           list refreshes" interaction -- but the dialog itself follows
+           THIS file's own .pm-modal pattern (Approve/Reject below),
+           not gaps.cshtml's inline-styled <dialog>. *@
+        <button class="pm-button primary" id="excAddCustomBtn" type="button" title="Add Custom Exception">
+            <i class="fa-solid fa-plus"></i> Add Custom Exception
+        </button>
+        <button class="pm-button" id="excExpireDueBtn" type="button" title="Sweep and expire Approved rows past their Valid Until date">
+            <i class="fa-solid fa-hourglass-end"></i> Expire due
+        </button>
+        <button class="pm-button icon" id="excRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="excTable">
+            <thead>
+                <tr>
+                    <th>Request</th>
+                    <th>Type</th>
+                    <th>Gap</th>
+                    <th>Requested</th>
+                    <th>Status</th>
+                    <th>Effective</th>
+                    <th>Approved by</th>
+                    <th>Att</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="excTableBody">
+                <tr><td colspan="9" class="pm-empty-row">Select an organization to load requests.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* Standard grid pager (pm-grid.js). sp_exception_request_list has
+       always paged at 25; this screen sent no page parameter, so request
+       26 onwards was unreachable. *@
+    <div id="excPager"></div>
+</section>
+
+@* Approve modal *@
+<div class="pm-modal" id="excApproveModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Approve exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-approve aria-label="Close">&times;</button>
+        </header>
+        <form id="excApproveForm" enctype="multipart/form-data">
+            <input type="hidden" id="excApproveId" />
+            <dl class="exc-meta" id="excApproveMeta"></dl>
+
+            @* Migration 257: the "Request details" block that used to sit
+               here -- exception type, owner, justification, risk/impact,
+               linked practice, linked requirement ref -- moved to the
+               Exception Analysis page. Asking the approver to write the
+               requester's case was backwards; the approver judges it.
+
+               The analysis is rendered read-only into #excApproveMeta
+               above, so the decision is made with the case in view. *@
+            <h3 style="margin: 16px 0 8px; font-size: 13px; color: #4a5568; text-transform: uppercase;">Approval</h3>
+            @* Migration 260. The dates arrive pre-filled with what the
+               analyst proposed; changing them is allowed and recorded as
+               its own history row, so the trail below shows who moved the
+               window rather than leaving it buried in the approval note. *@
+            <p class="pm-hint" id="excApproveProposed" hidden></p>
+            <div class="pm-form-grid">
+                <label>
+                    <span>Effective from</span>
+                    <input type="date" id="excApproveEffectiveFrom" />
+                </label>
+                <label>
+                    <span>Effective until (Valid Until)<span class="pm-required">*</span></span>
+                    <input type="date" id="excApproveEffectiveUntil" required />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Approval note<span class="pm-required">*</span></span>
+                    <textarea id="excApproveNote" rows="4" maxlength="5000" required
+                              placeholder="Rationale for approval, conditions, monitoring plan..."></textarea>
+                </label>
+                @* Compensating control removed (257). *@
+                <label class="pm-form-grid-full">
+                    <span>Review frequency <span class="pm-hint">(if applicable)</span></span>
+                    <select id="excApproveReviewFrequency">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                @* Evidence-style capture -- same vocabulary as
+                   practice_instance_evidence. Attachment optional; if
+                   supplied, pick a method and provide the matching
+                   fields. Manual -> file; Automated -> location + locator. *@
+                <label class="pm-form-grid-full">
+                    <span>Approval evidence <span class="pm-hint">(optional)</span></span>
+                    <select id="excApproveMethod">
+                        <option value="">-- none --</option>
+                        <option value="Manual">Manual (upload a file)</option>
+                        <option value="Automated">Automated (link an external record)</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="excApproveEvidenceTypeWrap" hidden>
+                    <span>Evidence type</span>
+                    <select id="excApproveEvidenceType">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                <label class="pm-form-grid-full" id="excApproveFileWrap" hidden>
+                    <span>Approval note file<span class="pm-required">*</span></span>
+                    <input type="file" id="excApproveFile" />
+                </label>
+                <label id="excApproveLocationWrap" hidden>
+                    <span>Location<span class="pm-required">*</span></span>
+                    <input type="text" id="excApproveLocation" maxlength="500"
+                           placeholder="e.g. SharePoint / ServiceNow / DocuSign" />
+                </label>
+                <label id="excApproveLocatorWrap" hidden>
+                    <span>Locator<span class="pm-required">*</span></span>
+                    <input type="text" id="excApproveLocator" maxlength="500"
+                           placeholder="e.g. https://... or record id" />
+                </label>
+            </div>
+            @* Migration 260. exception_request_history, shown where the
+               decision is made: the approver can see what was already
+               done to this request before adding to it. *@
+            <h3 style="margin: 16px 0 8px; font-size: 13px; color: #4a5568; text-transform: uppercase;">History</h3>
+            <div class="pm-table-wrap">
+                <table id="excApproveHistoryTable">
+                    <thead>
+                        <tr><th>When</th><th>Action</th><th>By</th><th>Detail</th></tr>
+                    </thead>
+                    <tbody id="excApproveHistoryBody">
+                        <tr><td colspan="4" class="pm-empty-row">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="pm-form-message" id="excApproveMessage" role="status" aria-live="polite"></p>
+            @* Both decisions sit on the approver's own form. Reject was
+               dropped from the row 3-dot menu because rejecting is a
+               judgement made with the request open, not a shortcut from
+               the grid — this button hands off to the Reject modal, which
+               still owns the mandatory reason. *@
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-approve>Cancel</button>
+                <button type="button" class="pm-button danger" id="excApproveRejectBtn">
+                    <i class="fa-solid fa-ban"></i> Reject
+                </button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Approve</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* Reject modal *@
+<div class="pm-modal" id="excRejectModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Reject exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-reject aria-label="Close">&times;</button>
+        </header>
+        <form id="excRejectForm">
+            <input type="hidden" id="excRejectId" />
+            <dl class="exc-meta" id="excRejectMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Rejection reason<span class="pm-required">*</span></span>
+                    <textarea id="excRejectReason" rows="4" maxlength="5000" required
+                              placeholder="Why this exception cannot be granted..."></textarea>
+                </label>
+            </div>
+            <p class="pm-form-message" id="excRejectMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-reject>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-ban"></i> Reject</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* Add Custom Exception modal (migration 327).
+   Enter Basic Details -> Save -> Exception Request Created (Pending,
+   request_type_code = 'CUSTOM') -> the existing Analysis / Submit /
+   Approve-Reject flow, unchanged from here on. Same .pm-modal /
+   .pm-modal-panel / .pm-modal-footer structure as Approve and Reject
+   above -- not gaps.cshtml's inline-styled <dialog>, because this is
+   the pattern already established in THIS file. *@
+<div class="pm-modal" id="excAddCustomModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Add Custom Exception</h2>
+            <button class="pm-modal-close" type="button" data-close-exc-add-custom aria-label="Close">&times;</button>
+        </header>
+        <form id="excAddCustomForm">
+            <dl class="exc-meta" id="excAddCustomOrgMeta"></dl>
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Exception Title / Subject<span class="pm-required">*</span></span>
+                    <input type="text" id="newExcTitle" maxlength="300" required
+                           placeholder="A short, specific title for this exception" />
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Exception Description</span>
+                    <textarea id="newExcDescription" rows="3" maxlength="4000"
+                              placeholder="What is being excepted, and from what requirement..."></textarea>
+                </label>
+                <label class="pm-form-grid-full">
+                    <span>Reason / Justification</span>
+                    <textarea id="newExcJustification" rows="3" maxlength="4000"
+                              placeholder="Why this exception is being requested..."></textarea>
+                </label>
+                <label>
+                    <span>Exception Type</span>
+                    <select id="newExcType">
+                        <option value="">-- select --</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Owner</span>
+                    <select id="newExcOwner">
+                        <option value="">-- unassigned --</option>
+                    </select>
+                </label>
+                @* Migration 328. The same reusable cascading Practice
+                   Picker Risk Centre's own "Map a practice" dialog uses
+                   (window.__practicePicker, practice-picker.js) -- pick one
+                   practice at a time, Add it to the list below, repeat.
+                   Promoted to a full-width row: the picker's four levels
+                   each need real width, and this dialog is already
+                   pm-modal-wide, so there is no narrow-column problem to
+                   work around the way Risk Centre's own scope-panel column
+                   had. *@
+                <div class="pm-form-grid-full">
+                    <span>Related Control / Practice(s) <span class="pm-hint">(where applicable -- add as many as apply)</span></span>
+                    <div id="newExcPracticePickerHost"></div>
+                    <div class="exc-practice-add-row">
+                        <button type="button" class="pm-button" id="newExcPracticeAddBtn">
+                            <i class="fa-solid fa-plus"></i> Add to list
+                        </button>
+                        <span class="pm-hint" id="newExcPracticeAddHint"></span>
+                    </div>
+                    <ul class="exc-practice-list" id="newExcPracticeList"></ul>
+                </div>
+                <label class="pm-form-grid-full">
+                    <span>Related Obligation / Requirement <span class="pm-hint">(where applicable)</span></span>
+                    <input type="text" id="newExcRequirementRef" maxlength="200"
+                           placeholder="e.g. ISO 27001 A.9.2, or a clause / control reference" />
+                </label>
+                <label>
+                    <span>Related Gap ID <span class="pm-hint">(optional)</span></span>
+                    <input type="number" id="newExcGapId" min="1" step="1"
+                           placeholder="Leave blank if none" />
+                </label>
+                <label>
+                    <span>Valid From</span>
+                    <input type="date" id="newExcValidFrom" />
+                </label>
+                <label>
+                    <span>Valid Until / Expiry Date</span>
+                    <input type="date" id="newExcValidUntil" />
+                </label>
+            </div>
+            @* Sir's requirement #4: a visible, non-disruptive marker.
+               Read-only -- this is not a field the analyst sets, it is
+               what request_type_code = 'CUSTOM' will read back as on
+               every screen that already shows Type (grid, row menu,
+               Exception View). *@
+            <p class="pm-hint">Source: Custom Exception. Requested By, requested date and status (Pending) are set
+               automatically -- Requested By is recorded as you, the signed-in user, not a field you choose.
+               Supporting evidence can be attached once the record is saved, from the same Analysis / Approve
+               screens every exception already uses.</p>
+            <p class="pm-form-message" id="excAddCustomMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-exc-add-custom>Cancel</button>
+                <button type="submit" class="pm-button primary" id="excAddCustomSubmit">
+                    <i class="fa-solid fa-plus"></i> Save
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .exc-status-chip { display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .exc-pending   { background: #fefcbf; color: #744210; }
+    .exc-approved  { background: #c6f6d5; color: #22543d; }
+    .exc-rejected  { background: #fed7d7; color: #742a2a; }
+    .exc-withdrawn { background: #edf2f7; color: #4a5568; }
+
+    .exc-meta {
+        display: grid; grid-template-columns: 120px 1fr; row-gap: 6px; column-gap: 12px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+    }
+    .exc-meta dt { color: #718096; font-weight: 600; margin: 0;
+                   text-transform: uppercase; font-size: 11px; align-self: center; }
+    .exc-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+
+    /* Modal overlay (same defensive CSS as gap-detail so pm-modal
+       renders as a proper popup regardless of global stylesheet). */
+
+
+
+    /* Wider variant for the Approve modal (12+ fields fit comfortably). */
+    .pm-modal-panel.pm-modal-wide { max-width: 900px; }
+
+
+    /* .pm-modal / .pm-modal-panel / .pm-modal-footer moved to
+           practice-management.css -- they were identical in three
+           views and absent from any fourth that used the classes.
+           The .pm-modal-close override below is kept deliberately:
+           the global rule is a bordered button, this is a glyph. */
+        .pm-modal-close { background: transparent; border: 0; padding: 0;
+        font-size: 26px; line-height: 1; cursor: pointer; color: #718096; }
+    .pm-modal-close:hover { color: #e53e3e; }
+
+    /* Migration 328 -- the Add Custom Exception dialog's own
+       Practice Picker "Add to list" row and the resulting list. */
+    .exc-practice-add-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .exc-practice-list { list-style: none; margin: 8px 0 0; padding: 0;
+        display: flex; flex-direction: column; gap: 6px; }
+    .exc-practice-list li { display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; background: #f7fafc; border-radius: 6px; padding: 6px 10px;
+        font-size: 13px; color: #2d3748; }
+    .exc-practice-list button { background: transparent; border: 0; color: #718096;
+        cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
+    .exc-practice-list button:hover { color: #e53e3e; }
+
+</style>
+
+@* Before the screen's own script -- the pager is mounted during init. *@
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+@* Migration 328. Reusable cascading Practice Picker (migration 282) --
+   the same file Risk Centre's own Map Practice dialog loads. Before
+   exception-centre.js, which mounts it as soon as the Add Custom
+   Exception dialog opens (same ordering reason risk-centre.cshtml
+   states for its own load of this file). *@
+<script src="~/js/practice-picker.js" asp-append-version="true"></script>
+<script src="~/js/ExceptionCentre/exception-centre.js" asp-append-version="true"></script>

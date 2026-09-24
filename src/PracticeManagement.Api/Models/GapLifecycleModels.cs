@@ -40,7 +40,34 @@ public sealed record GapHeader(
     string? SlaMasterName        = null,
     int?    SlaDaysEffective     = null,
     string? SlaSourceCode        = null,
-    bool    SlaOverridePending   = false);
+    bool    SlaOverridePending   = false,
+    // Migration 250: detection method captured at Add-Gap time on
+    // custom gaps. Optional and last -- absent on pre-250 headers,
+    // legacy rows, and non-Custom gaps. The gap-detail form reads
+    // this as a fallback when the analysis row has no value yet.
+    string? DetectionMethodCode  = null,
+    string? DetectionMethodName  = null,
+    // Migration 321: the Practice Instance this gap materialized from
+    // (source_reference_id/source_reference_type = 'PracticeInstance'),
+    // if any. Null for Custom/Assurance gaps and for an un-materialized
+    // Implementation row. The gap-detail screen's Practice Instance tab
+    // shows itself only when PracticeInstanceId is present.
+    long?   PracticeInstanceId   = null,
+    string? PracticeInstanceCode = null,
+    string? PracticeInstanceName = null,
+    // Migration 325: when the gap was identified/raised (custom_gap.
+    // entered_dt). Optional and last -- absent on a pre-325 header proc,
+    // same tolerance pattern as every other field added here since 177.
+    // Feeds the Gap View page's "Identified Date" fact.
+    DateTime? IdentifiedDate     = null,
+    // Migration 367: whether the related Practice Instance is currently
+    // Operationalized (same live dependency-resolution computation as
+    // the Repository/Register screens and the Practice page). Null when
+    // there is no linked Practice Instance (Custom/Assurance gaps) or on
+    // a pre-367 header proc. gap-detail.js uses this, together with the
+    // linked-artefacts "failed obligations" list, to gate the Analyze
+    // action for Implementation-sourced gaps.
+    bool?   IsPracticeOperationalized = null);
 
 // ---- Lifecycle state master ----------------------------------------
 public sealed record GapLifecycleStateRow(
@@ -93,11 +120,20 @@ public sealed record GapAnalysisModel(
     string? RcaMethodCode,
     string? RcaSummary,
     string? RecommendedActionSummary,
-    // Legacy flags (proc keeps them in sync with decisions below).
+    // Migration 249: separate free-text answer to "so this class of gap
+    // does not recur". NULL when the operator has not offered one.
+    string? PreventiveAction,
+    // Migration 323: these are the three independent decisions again --
+    // "Generate Task" / "Request Exception" / "Create Risk" on the
+    // Analysis tab bind straight to these three (their original,
+    // pre-168 meaning; 168-252 briefly derived them from the two Y/N
+    // fields below instead). Any combination is valid.
     bool RecommendTask,
     bool RecommendException,
     bool RecommendRisk,
-    // Decision model (migration 168). "Y" / "N" -- always present after 168.
+    // Migration 168, retired by 323: no longer driven by/driving the
+    // three flags above. Returned only so a historical row's stored
+    // value is still visible; the Analysis tab no longer reads these.
     string? RemediationPossible,
     string? BusinessRiskPresent,
     long? AnalysedByEmployeeId,
@@ -120,21 +156,61 @@ public sealed record GapAnalysisSaveRequest(
     string? RcaMethodCode,
     string? RcaSummary,
     string? RecommendedActionSummary,
-    // Legacy fields (kept for backward compat; new UI uses the two
-    // decision fields below). If both legacy and new are supplied, the
-    // proc gives new priority and derives legacy from it. Migration 168.
+    // Migration 249: separate free-text answer to "so this class of gap
+    // does not recur". NULL when the operator has not offered one.
+    string? PreventiveAction,
+    // Migration 323: three independent decisions, each with its own
+    // auto-trigger, any combination valid -- replaces the 168 model
+    // below. The Analysis tab's three checkboxes (Generate Task /
+    // Request Exception / Create Risk) map straight onto these.
     bool RecommendTask,
     bool RecommendException,
     bool RecommendRisk,
-    // Sir's decision model (migration 168):
-    //   remediation_possible='Y' -> Task Centre; ='N' -> Exception Centre
-    //   business_risk_present='Y' -> Risk Centre
-    string? RemediationPossible,   // "Y" | "N" | null (falls back to legacy)
-    string? BusinessRiskPresent,   // "Y" | "N" | null (falls back to legacy)
+    // Migration 168, retired by 323: the UI no longer populates these
+    // (always sends null). Kept as accepted parameters only so an
+    // older caller does not break; the proc no longer reads them to
+    // drive anything and no longer derives them from the three flags
+    // above -- a value already stored on the row is left untouched.
+    string? RemediationPossible,
+    string? BusinessRiskPresent,
     long? AnalysedByEmployeeId,
     string? CallerDisplayName);
 
-public sealed record GapAnalysisSaveResult(bool Success, long CustomGapId, string? Error);
+// Migration 323: TaskCreated/ExceptionCreated/RiskCreated/*Error carry
+// sp_custom_gap_analysis_save's second result set -- whether each
+// requested (Generate Task / Request Exception / Create Risk)
+// auto-trigger actually succeeded, and its error text if it did not.
+// All default false/null so an older, pre-323 database (whose proc
+// returns only the first result set) still binds -- GapLifecycleService
+// leaves these at their defaults when the second result set is absent.
+// Migration 324: LifecycleTransitioned/LifecycleError/LifecycleStateCode/
+// LifecycleStateName carry the "Auto-transition to Delegated" step's own
+// outcome, the same way TaskCreated/... already report the three
+// auto-triggers. Before 324 this step was wrapped in a TRY/CATCH that
+// only PRINTed on failure -- and, on a gap with no lifecycle_state_id
+// yet (every Custom gap opened before 324), the transition was skipped
+// entirely with no error at all, which is why the gap's status silently
+// never reached "Analysed". LifecycleStateCode/LifecycleStateName are the
+// gap's fresh post-save lifecycle state, read once the auto-transition
+// attempt (successful or not) is done, so a caller has the true status
+// directly from the save call. All four default to false/null so a
+// database still on the pre-324 proc (single result set, or the pre-324
+// shape of the second one) degrades to those defaults instead of
+// throwing -- same HasColumn-guarded pattern as TaskCreated/... below.
+public sealed record GapAnalysisSaveResult(
+    bool Success,
+    long CustomGapId,
+    string? Error,
+    bool TaskCreated = false,
+    string? TaskError = null,
+    bool ExceptionCreated = false,
+    string? ExceptionError = null,
+    bool RiskCreated = false,
+    string? RiskError = null,
+    bool LifecycleTransitioned = false,
+    string? LifecycleError = null,
+    string? LifecycleStateCode = null,
+    string? LifecycleStateName = null);
 
 // ---- Materialize (on-demand custom_gap for a practice_instance) ----
 public sealed record GapMaterializeFromInstanceRequest(
@@ -159,10 +235,31 @@ public sealed record GapLinkedArtefactRow(
     string? Title,
     string? StatusCode);
 
+// ---- Failed Obligation(s) behind an automatically generated gap ----
+// Migration 317. Populated ONLY for a gap that IS an Implementation gap
+// materialized from a Practice Instance (custom_gap.source_reference_type
+// = 'PracticeInstance') -- sourced from practice_gap_obligation (245),
+// the same snapshot the sync proc already keeps current on every
+// obligation save. Empty for every manually created gap (Assurance,
+// Custom, Exception, Risk, Audit source, or a hand-entered Custom gap),
+// so a manual gap is never shown against an Obligation it has nothing
+// to do with.
+public sealed record GapFailedObligationRow(
+    long ObligationId,          // practice_instance_obligation_id
+    string? ObligationName,     // snapshotted at the moment it entered the gap
+    string? ObligationTypeCode,
+    string LoggedStatusCode,    // "Not Implemented" | "Partially Implemented" | "Not Started" -- snapshot, taken when this row was (re)inserted; does not track later status changes
+    DateTime? AddedDt,
+    // Migration 372: fresh, live-joined status (never stale, unlike LoggedStatusCode above).
+    // Optional/nullable so a pre-372 database (column not yet present in the result set) degrades
+    // gracefully -- see GapLifecycleService.ListLinkedArtefactsAsync's HasColumn() guard.
+    string? CurrentStatusCode = null);
+
 public sealed record GapLinkedArtefactsResult(
     GapLinkedArtefactRow? Task,
     GapLinkedArtefactRow? Exception,
-    GapLinkedArtefactRow? Risk);
+    GapLinkedArtefactRow? Risk,
+    IReadOnlyList<GapFailedObligationRow> FailedObligations);
 
 // ---- Downstream link (many:many gap -> Task/Exception/Risk) ---------
 public sealed record GapDownstreamLinkRow(

@@ -1,0 +1,302 @@
+@*
+    Event Profiles
+    Screen key: `event-profiles`
+    Feature flag: `screen.event-profiles`
+    Migrations: 329 (schema) / 330 (procs) / 331 (resolution) / 332 (menu) /
+    340-344 (custom obligations reach the event-driven flow + the
+    Checklists tab / View Mapped Profiles below)
+
+    TWO TABS, ONE ORGANIZATION SELECTOR
+    ------------------------------------
+    Profiles (Profile -> Event -> Checklist, unchanged from 329-332) and
+    Checklists (the reverse view: one row per obligation+event "checklist"
+    that exists, whichever of catalog / practice-level custom / instance-only
+    custom it is -- see sp_event_driven_checklist_list, migration 344). Both
+    tabs share #epOrganization: an organization picked on one tab is still
+    picked after switching to the other, so the selector lives in the shared
+    toolbar above both list sections rather than inside #epRoot's own.
+
+    "VIEW MAPPED PROFILES" IS A REVERSE LOOKUP, NOT A SECOND FORWARD MAPPING
+    --------------------------------------------------------------------------
+    The Checklists tab's 3-dot menu answers "which profiles will receive
+    this checklist" by reading real event_obligation_applicability rows
+    (scope_dimension = PROFILE, is_applicable = 1, status = Active) --
+    never a hardcoded or UI-only list. It reuses the epViewDialog show/hide
+    pattern below (its own dialog, #ecMappedDialog) rather than a new modal
+    mechanism.
+
+    WHAT A PROFILE IS
+    -----------------
+    A named population expressed as attribute criteria -- Location,
+    Department, Role today -- that event-driven obligations are mapped to:
+
+        Profile -> Event Type -> Obligation
+
+    It replaces "Role -> Obligation", which could express only one
+    attribute and therefore could not say "India / Kerala + IT Operations
+    + System Administrator or IT Manager".
+
+    WHY THE CRITERIA ROWS ARE NOT HARD-CODED HERE
+    ---------------------------------------------
+    The form renders one row per dimension returned by
+    /scope/profiles/dimensions, which reads
+    grac_practice.event_profile_dimension_master. So a fifth criterion
+    seeded in SQL appears on this screen with no change to this file. If
+    you find yourself adding `if (dimensionCode === "...")` below, the
+    dimension master is the place to change instead.
+
+    WHY THE PREVIEW COUNT IS PROMINENT
+    ----------------------------------
+    A profile that matches nobody looks exactly like a profile that works
+    until an onboarding produces no checklist weeks later. The count is
+    shown while the criteria are being edited, not after saving.
+
+    The obligation editor is wwwroot/js/scope-checklist-editor.js -- the
+    same module Role Master and Asset Category Assurance use. Only the
+    scope dimension differs.
+
+    THE VALUE PICKERS ARE .pm-checkcombo
+    ------------------------------------
+    Each criterion's values use the project's own multi-select -- the same
+    markup practice.js emits for a `comboChecks` field and resolve-workspace
+    uses for its asset filters, styled by the .pm-checkcombo* rules already
+    in practice-management.css (trigger, chips, placeholder, caret, menu,
+    search, options). The first cut used a native <select multiple>, which
+    was the only control on this screen that did not look like the product
+    and would have drifted further on the first theme change.
+
+    Selected values render as .pm-checkcombo-chip spans, not a comma-joined
+    string: the stylesheet expects chips inside [data-checkcombo-text], and
+    plain text silently loses both the chip and the .pm-checkcombo-placeholder
+    treatment. Ticking "All" disables the TRIGGER rather than the checkboxes
+    -- .pm-checkcombo-trigger:disabled already has its styling, and leaving
+    the trigger live would let the menu open on an unconstrained criterion.
+
+    STATUS IS NOT ON THIS FORM
+    --------------------------
+    Nobody adds a profile in order to switch it off, so a new one is always
+    Active. An edit sends back the status the profile already has, never a
+    form value -- otherwise editing the criteria of a deliberately
+    deactivated profile would silently switch it back on. Status is changed
+    from the row's Activate / Deactivate action, which is the one place the
+    change is the point rather than a side effect.
+
+    Note on placement: the markup lives here, the behaviour lives in
+    wwwroot/js/EventProfiles/event-profiles.js. Razor parses the at-sigil
+    inside script blocks in .cshtml files and compiles what follows as
+    C#, so keeping the logic in a .js file removes a whole class of build
+    error that node --check cannot catch.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="epUnavailable" hidden>
+    <div class="pm-empty"><i class="fa-solid fa-users-gear pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="epUnavailableTitle">Event Profiles is not yet enabled for this organization.</h2>
+        <p id="epUnavailableBody">Ask a GRAC Admin to turn on <code>screen.event-profiles</code>.</p>
+    </div>
+</section>
+
+@* ================= SHARED TOOLBAR: organization + tabs ================= *@
+<div class="pm-toolbar" id="epSharedToolbar" hidden style="margin-bottom:10px;">
+    <select id="epOrganization"><option value="">Loading...</option></select>
+    @* Same .pm-tabs markup scope-checklist-editor.js's own Onboarding /
+       Offboarding tabs use (data-scope-tabs) -- one tab-styling convention,
+       not two. *@
+    <div class="pm-tabs" role="tablist" id="epTabs" style="margin-left:auto;">
+        <button type="button" role="tab" id="epTabProfiles" class="active" aria-selected="true">Profiles</button>
+        <button type="button" role="tab" id="epTabChecklists" aria-selected="false">Checklists</button>
+    </div>
+</div>
+
+@* ================= LIST: Profiles ================= *@
+<section class="pm-panel" id="epRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="epStatus">
+            <option value="">All statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+        </select>
+        <input type="search" id="epSearch" placeholder="Search profiles..." />
+        <button class="pm-button primary" id="epAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Profile
+        </button>
+        <button class="pm-button icon" id="epRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right"></i>
+        </button>
+    </div>
+
+    @* Coverage strip: how far each profile has been triaged. Same two
+       numbers migration 130 split apart -- decided, and of those, applicable. *@
+    <div id="epCoverage" style="display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 14px 0;"></div>
+    <div id="epMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Profile Name</th>
+                    <th>Description</th>
+                    <th>Criteria</th>
+                    <th style="width:110px;">Status</th>
+                    <th style="width:130px;">Checklists</th>
+                    <th style="width:60px;"></th>
+                </tr>
+            </thead>
+            <tbody id="epBody">
+                <tr><td colspan="6" class="pm-empty">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div id="epPager"></div>
+</section>
+
+@* ================= LIST: Checklists (migration 344) =================
+   One row per obligation+event "checklist" that exists -- catalog,
+   practice-level custom or instance-only custom, per sp_event_driven_
+   checklist_list. Practice Instance shows the Practice for the first two
+   kinds and the real instance only for the third (confirmed design, see
+   the note at the top of this file); Event always names the leaf
+   (Onboarding / Offboarding) so the two are never ambiguous. *@
+<section class="pm-panel" id="ecRoot" hidden>
+    <div class="pm-toolbar">
+        <input type="search" id="ecSearch" placeholder="Search checklists..." />
+        <button class="pm-button icon" id="ecRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right"></i>
+        </button>
+    </div>
+
+    <div id="ecMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Practice Instance</th>
+                    <th>Obligation Name</th>
+                    <th style="width:150px;">Event</th>
+                    <th style="width:60px;"></th>
+                </tr>
+            </thead>
+            <tbody id="ecBody">
+                <tr><td colspan="4" class="pm-empty">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div id="ecPager"></div>
+</section>
+
+@* ================= CREATE / EDIT ================= *@
+<dialog id="epFormDialog" class="pm-dialog" style="border:none; border-radius:8px; padding:0; max-width:860px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="epForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h2 id="epFormTitle" style="margin:0; font-size:18px;">Add Profile</h2>
+            <button type="button" id="epFormClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+
+        <div id="epFormMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+
+        @* Status is NOT asked for here. A new profile is always Active --
+           nobody adds one in order to switch it off -- and an existing
+           profile keeps whatever status it has, so an edit cannot silently
+           reactivate something that was deliberately deactivated. Status is
+           changed from the row's Activate / Deactivate action, which is the
+           one place it means something. *@
+        <label style="display:block; font-size:13px; color:#334155;">
+            Profile Name *
+            <input type="text" id="epName" maxlength="200" required
+                   style="width:100%; padding:7px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" />
+        </label>
+
+        <label style="display:block; margin-top:12px; font-size:13px; color:#334155;">
+            Description
+            <textarea id="epDescription" rows="2" maxlength="1000"
+                      style="width:100%; padding:7px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;"
+                      placeholder="What population is this, in your own words?"></textarea>
+        </label>
+
+        <h3 style="margin:18px 0 4px 0; font-size:14px; color:#334155;">Applicability criteria</h3>
+        <p style="margin:0 0 10px 0; font-size:12px; color:#64748b;">
+            A person is in this profile when they match <strong>every</strong> criterion below.
+            Within one criterion, <strong>any</strong> of the selected values counts.
+            Leave a criterion on <em>All</em> to place no constraint on it.
+        </p>
+
+        @* Rows are built from the dimension master at runtime -- see the
+           note at the top of this file. *@
+        <div id="epCriteria"><div class="pm-empty">Loading criteria...</div></div>
+
+        <div id="epPreview"
+             style="margin-top:14px; padding:10px 12px; border-radius:4px; background:#f1f5f9; font-size:13px; color:#334155;">
+            Matching employees will be counted once you choose some criteria.
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="epFormCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="epFormSave" class="pm-button primary">Save Profile</button>
+        </div>
+    </form>
+</dialog>
+
+@* ================= VIEW (read-only) ================= *@
+<dialog id="epViewDialog" class="pm-dialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h2 id="epViewTitle" style="margin:0; font-size:18px;">Profile</h2>
+            <button type="button" id="epViewClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="epViewBody"></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="epViewDone" class="pm-button">Close</button>
+        </div>
+    </div>
+</dialog>
+
+@* ============= VIEW MAPPED PROFILES (Checklists tab, read-only) =============
+   Same show/hide pattern as #epViewDialog above -- the row action answers
+   "which profiles will receive this checklist" from saved
+   event_obligation_applicability rows (sp_event_checklist_mapped_profiles_list,
+   migration 344), not a second forward-mapping screen. *@
+<dialog id="ecMappedDialog" class="pm-dialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <div style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h2 id="ecMappedTitle" style="margin:0; font-size:18px;">Mapped Profiles</h2>
+            <button type="button" id="ecMappedClose" aria-label="Close"
+                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <p id="ecMappedSubtitle" style="margin:0 0 12px 0; font-size:12px; color:#64748b;"></p>
+        <div id="ecMappedBody"></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="ecMappedDone" class="pm-button">Close</button>
+        </div>
+    </div>
+</dialog>
+
+@* ================= CONFIGURE CHECKLISTS ================= *@
+<section class="pm-panel" id="epConfigure" hidden>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+        <div>
+            <p class="pm-eyebrow">Event Profiles / Configure Checklists</p>
+            <h2 id="epConfigureTitle" style="margin:2px 0 4px 0; font-size:18px;">Profile</h2>
+            <p id="epConfigureSummary" style="margin:0; font-size:12px; color:#64748b;"></p>
+        </div>
+        <button class="pm-button" id="epConfigureBack" type="button">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Profiles
+        </button>
+    </div>
+    <div id="epConfigureHost"></div>
+</section>
+
+<partial name="Partials/_workflow-common" model="Model" />
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/EventProfiles/event-profiles.js" asp-append-version="true"></script>

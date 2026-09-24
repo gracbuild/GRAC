@@ -61,6 +61,106 @@
     #rvRoot .rv-grid .rv-num  { white-space: nowrap; }
     #rvRoot .rv-actions { text-align: right; white-space: nowrap; }
 
+    /* 287. Retired rows only appear when asked for, and when they do they
+       must not read as work waiting to be done. Muted, not hidden, and
+       carrying a chip that names the state -- the row is still fully
+       openable, which is the point of showing it at all. */
+    #rvRoot .rv-grid tr.rv-retired td { background: #fbfcfe; color: #8792a6; }
+    #rvRoot .rv-grid tr.rv-retired .rv-name { font-weight: 600; }
+    #rvRoot .rv-retired-chip {
+        background: #edf2f7; border-radius: 999px; color: #4a5568;
+        font-size: 10px; font-weight: 700; letter-spacing: .04em;
+        margin-left: 6px; padding: 1px 7px; text-transform: uppercase;
+        white-space: nowrap;
+    }
+    /* Sits in the toolbar next to Search, so it needs the toolbar's own
+       vertical rhythm rather than a checkbox's default baseline. */
+    #rvRoot .rv-toggle {
+        align-items: center; color: #536077; cursor: pointer;
+        display: inline-flex; font-size: 13px; gap: 6px; line-height: 1;
+        white-space: nowrap;
+    }
+    /* A bare, unstyled checkbox renders at the browser's native size --
+       visibly oversized and baseline-misaligned next to a 13px label. A
+       plain 14x14 + accent-color + margin:0 override was tried first, but
+       the browser's own native control still carried extra reserved space
+       around the 14x14 box beyond what the CSS box model reports (worse on
+       some platforms than others), which kept reading as "too much room
+       before the label" no matter how far the flex gap was pulled in.
+       appearance:none removes the native control entirely and draws the
+       box and its checkmark by hand instead, so the 14x14 box plus this
+       gap is the only spacing there is -- guaranteed, on every browser and
+       OS, rather than left to native rendering. Border colour matches the
+       toolbar's own inputs/selects (.pm-toolbar input/select, #d5dce7 in
+       practice-management.css); fill matches --grac-blue like every other
+       checkbox in this module (.pm-subscription-tree input[type="checkbox"]
+       in practice-management.css). */
+    /* This div also carries .pm-toolbar (for the toolbar's own flex/gap
+       rules), and practice-management.css's ".pm-toolbar input" reaches
+       every <input> inside it -- including this checkbox -- with
+       padding: 7px 9px and min-width: 220px, sized for the text/select
+       controls it was written for. Those two properties are never set
+       above, so they were not overridden by specificity and were
+       rendering the checkbox as a tall, 220px-wide filled bar instead of
+       a 14x14 box. padding/min-width are reset to 0 here so nothing but
+       this rule's own 14x14 box model applies. */
+    #rvRoot .rv-toggle input[type="checkbox"] {
+        -webkit-appearance: none; appearance: none;
+        background: #fff; border: 1px solid #d5dce7; border-radius: 3px;
+        cursor: pointer; flex: 0 0 auto; height: 14px; margin: 0;
+        min-width: 0; padding: 0; position: relative; width: 14px;
+    }
+    #rvRoot .rv-toggle input[type="checkbox"]:checked {
+        background: var(--grac-blue, #2465ca); border-color: var(--grac-blue, #2465ca);
+    }
+    #rvRoot .rv-toggle input[type="checkbox"]:checked::after {
+        border: solid #fff; border-width: 0 2px 2px 0; content: "";
+        height: 7px; left: 4px; position: absolute; top: 1px;
+        transform: rotate(45deg); width: 3px;
+    }
+    #rvRoot .rv-toggle input[type="checkbox"]:focus-visible {
+        outline: 2px solid var(--grac-blue, #2465ca); outline-offset: 1px;
+    }
+
+    /* ---- Practice group rows ----
+       One wide row per Practice, spanning every column, with the
+       instances it owns nested directly beneath it -- same shape as the
+       control-group rows on the Practices grid (renderRequirementControlGroups
+       in practice.js), reused here for the same reason: a group header is
+       a band across the table, not another data row. */
+    #rvRoot .rv-grid tr.rv-group-row td {
+        background: #f3f6fb; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        padding: 7px 12px;
+    }
+    #rvRoot .rv-group-toggle {
+        background: none; border: 0; color: #536077; cursor: pointer;
+        font-size: 11px; padding: 2px 4px; margin-right: 2px;
+    }
+    #rvRoot .rv-group-toggle:hover { color: var(--grac-blue, #2465ca); }
+    #rvRoot .rv-group-code {
+        color: var(--grac-ink, #25345a); font-weight: 700; margin-right: 8px;
+    }
+    #rvRoot .rv-group-name { color: #536077; margin-right: 8px; }
+    #rvRoot .rv-group-count {
+        color: var(--grac-muted, #758095); font-size: 11px; white-space: nowrap;
+    }
+    /* Child rows carry the indent -- the group header supplies the
+       Practice identity once, so it is never repeated per instance. */
+    #rvRoot .rv-grid tr.rv-child-row td.rv-name { padding-left: 26px; position: relative; }
+    #rvRoot .rv-grid tr.rv-child-row td.rv-name::before {
+        border-left: 2px solid var(--grac-line, #e2e7f0); content: "";
+        left: 12px; position: absolute; top: 0; bottom: 0;
+    }
+
+    /* Sits under the page subtitle, not in the toolbar: it describes what
+       the whole page is showing rather than being another control. */
+    .rv-scope-filter {
+        align-items: center; color: #536077; display: flex; font-size: 13px;
+        gap: 6px; margin: 4px 0 0;
+    }
+    .rv-scope-filter i { color: #a0aec0; font-size: 11px; }
+    .rv-scope-filter a { color: #2b6cb0; }
+
     /* Below this the fixed columns stop fitting; let the table scroll
        sideways rather than crush the names. */
     #rvRoot .rv-scroll { overflow-x: auto; }
@@ -77,6 +177,11 @@
     }
     #rvRoot .rv-toolbar #rvOrganization { width: 220px; flex: 0 0 auto; }
     #rvRoot .rv-toolbar #rvSearch { flex: 1 1 240px; max-width: 420px; }
+    /* Owner / Status: short, fixed controls like Organization -- a
+       filter's width should say "this picks from a short list", not
+       compete with Search for the row's stretch space. */
+    #rvRoot .rv-toolbar #rvOwner,
+    #rvRoot .rv-toolbar #rvStatus { width: 160px; flex: 0 0 auto; }
     #rvRoot .rv-toolbar .pm-badge { margin-left: auto; }
 </style>
 
@@ -85,6 +190,14 @@
         <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
         <h1>@Model.Title</h1>
         <p id="rvScopeNote">Practice instances waiting on you.</p>
+        @* 287. A filtered list must say it is filtered. Without this a
+           drill-down showing two rows is indistinguishable from an
+           organization that only has two instances. *@
+        <p id="rvScopeFilter" class="rv-scope-filter" hidden>
+            <i class="fa-solid fa-filter" aria-hidden="true"></i>
+            <span id="rvScopeFilterText"></span>
+            <a href="#" id="rvScopeFilterClear">Show all instances</a>
+        </p>
     </div>
 </div>
 
@@ -99,7 +212,30 @@
 <section class="pm-panel" id="rvRoot" hidden>
     <div class="pm-toolbar rv-toolbar">
         <select id="rvOrganization"><option value="">Loading...</option></select>
+        @* 315. Options are filled from the same response the grid already
+           loads (owners/statuses in scope for the selected organization),
+           not enumerated here -- see load()'s populateFilterOptions(). *@
+        <select id="rvOwner"><option value="">All owners</option></select>
+        <select id="rvStatus"><option value="">All statuses</option></select>
+        @* Search sits right after the dropdown filters and before Show
+           retired -- Organization -> Owner -> Status -> Search -> Show
+           retired. Same id, same placeholder, same JS wiring; only its
+           position moved (previously last, after Show retired). *@
         <input type="search" id="rvSearch" placeholder="Filter by instance or practice..." />
+        @* 287. Off by default. This list is a work queue, and one that
+           silently included retired instances would be worse than one
+           that could not show them -- but a retired instance had nowhere
+           to be seen at all before this, which is what made retirement a
+           one-way door. *@
+        @* 287/retired-filter: was a "Show retired" checkbox; now a two-option
+           dropdown, consistent with the Owner / Status filters. Default
+           "Active only" keeps retired instances out of this work queue;
+           "Include Retired" asks the server for them (same includeRetired
+           flag on the wire, computed from .value below). *@
+        <select id="rvIncludeRetired" title="Retired instances">
+            <option value="false" selected>Active only</option>
+            <option value="true">Include Retired</option>
+        </select>
         <button class="pm-button icon" id="rvRefreshBtn" type="button" title="Refresh">
             <i class="fa-solid fa-rotate-right"></i>
         </button>
@@ -107,9 +243,18 @@
     </div>
 
     <div id="rvList"><div class="pm-empty compact">Loading...</div></div>
+
+    @* Standard grid pager (pm-grid.js). Server-side: onChange refetches
+       the page rather than slicing a local array, because the procedure
+       has always paged -- this screen simply had no way to ask for page
+       two until migration 290 gave it a total. *@
+    <div id="rvPager"></div>
 </section>
 
 <partial name="Partials/_workflow-common" model="Model" />
+
+@* Before the screen's own script -- the pager is mounted during init. *@
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
 
 <script>
 (function () {
@@ -119,8 +264,29 @@
 
     const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
     const esc = v => window.__wfCommon.escape(v);
+    // 287. This screen was read-only until Retire / Restore landed on the
+    // row menu, so it had no POST and no token. Same lookup
+    // resolve-workspace.cshtml uses.
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
+    // 287. Drill-down context, when this screen was opened from a
+    // Practice or an Organization Requirement rather than from the menu.
+    // Read once: the filter is fixed for the life of the page and is
+    // cleared by navigating, not by re-reading the URL.
+    const RV_PARAMS  = new URLSearchParams(window.location.search);
+    const scopeParam = k => {
+        const v = Number(RV_PARAMS.get(k) || 0);
+        return v > 0 ? v : null;
+    };
+    const RV_PRACTICE_ID   = scopeParam('practiceId');
+    const RV_REQUIREMENT_ID = scopeParam('organizationRequirementId');
+    const RV_SCOPE_LABEL   = RV_PARAMS.get('scopeLabel') || '';
+
+    // 290. `pager` is the pm-grid handle (null when pm-grid.js is absent);
+    // `total` is the server's count of everything the filter matched, as
+    // opposed to rows.length, which is only what this page holds.
     let orgId = null, rows = [], isAdmin = false, timer = null;
+    let pager = null, total = 0;
 
     async function init() {
         const orgs = await window.__wfCommon.loadOrgs();
@@ -131,11 +297,85 @@
         document.getElementById('rvRoot').hidden = false;
         window.__wfCommon.populateOrgSelect('rvOrganization', orgs);
 
-        document.getElementById('rvOrganization').addEventListener('change', load);
+        // 287. A drill-down carries the organization its parent record
+        // belonged to. Without honouring it the page would load whichever
+        // organization the shared picker defaults to and then apply a
+        // practice filter from a different one -- an empty list that
+        // looks like "this practice has no instances".
+        const scopeOrg = RV_PARAMS.get('organizationId');
+        if (scopeOrg) {
+            const sel = document.getElementById('rvOrganization');
+            if ([...sel.options].some(o => String(o.value) === String(scopeOrg))) sel.value = scopeOrg;
+        }
+
+        // 290. Mounted before the first load() so the very first fetch
+        // already carries a page number. attach() returns null when
+        // pm-grid.js has not loaded, and every use below is optional-
+        // chained, so the list still fetches its first page unpaged.
+        pager = window.__pmGrid ? window.__pmGrid.attach({
+            hostId:   'rvPager',
+            onChange: load          // refetch -- never slice locally
+        }) : null;
+
+        // Changing organisation is a different data set, and both
+        // filters change what matches, so all three go back to page 1.
+        // reset(true) is silent -- it moves the pager without firing
+        // onChange -- because load() is called right after.
+        document.getElementById('rvOrganization').addEventListener('change', function () {
+            // 315. Owner and Status options are scoped to one
+            // organisation (sp_resolve_instance_list's result sets 2/3).
+            // A value picked under the previous organisation almost
+            // certainly does not exist under the new one, and leaving it
+            // selected would silently filter the new list down to
+            // nothing. load() repopulates both from the response that
+            // follows.
+            resetFilterSelect('rvOwner', 'All owners');
+            resetFilterSelect('rvStatus', 'All statuses');
+            pager?.reset(true); load();
+        });
+        // Refresh is NOT a filter change: it re-reads the page the user
+        // is on, so it must not reset.
         document.getElementById('rvRefreshBtn').addEventListener('click', load);
+        // 287. Reloads rather than filtering client-side: retired rows
+        // are not in the payload at all until the server is asked for
+        // them, so there is nothing local to filter.
+        document.getElementById('rvIncludeRetired').addEventListener('change', function () {
+            pager?.reset(true); load();
+        });
+        // 315. Owner / Status filters -- same reset-to-page-1 pattern as
+        // every other filter on this screen (see
+        // docs/grid-and-pagination-standard.md, "Filters go back to
+        // page 1"). Filtered server-side by sp_resolve_instance_list, not
+        // client-side: the grid is paged, so a value on a page not
+        // currently loaded must still be reachable by picking it here.
+        document.getElementById('rvOwner').addEventListener('change', function () {
+            pager?.reset(true); load();
+        });
+        document.getElementById('rvStatus').addEventListener('change', function () {
+            pager?.reset(true); load();
+        });
+
+        // 287. Drill-down banner. Clearing it navigates rather than
+        // re-fetching, because the scope came in on the URL and leaving
+        // it there would make Back re-apply the filter the user just
+        // dismissed.
+        if (RV_PRACTICE_ID || RV_REQUIREMENT_ID) {
+            const box = document.getElementById('rvScopeFilter');
+            document.getElementById('rvScopeFilterText').textContent =
+                RV_SCOPE_LABEL
+                    ? 'Showing instances of ' + RV_SCOPE_LABEL + '.'
+                    : (RV_PRACTICE_ID
+                        ? 'Showing instances of one practice.'
+                        : 'Showing instances of one requirement.');
+            document.getElementById('rvScopeFilterClear').addEventListener('click', function (e) {
+                e.preventDefault();
+                window.location.assign(U('/Practice/Index/resolve'));
+            });
+            box.hidden = false;
+        }
         document.getElementById('rvSearch').addEventListener('input', function () {
             window.clearTimeout(timer);
-            timer = window.setTimeout(load, 250);
+            timer = window.setTimeout(function () { pager?.reset(true); load(); }, 250);
         });
         await load();
     }
@@ -147,44 +387,169 @@
 
         host.innerHTML = '<div class="pm-empty compact">Loading...</div>';
         const search = document.getElementById('rvSearch').value || '';
+        const ownerId = document.getElementById('rvOwner')?.value || '';
+        const status  = document.getElementById('rvStatus')?.value || '';
+        pager?.busy(true);
         try {
+            const includeRetired = document.getElementById('rvIncludeRetired')?.value === 'true';
+            // 290. Was '&pageSize=200'. The procedure has always paged
+            // and clamps its page-size parameter to 200, so that one big
+            // page was a hard ceiling: instance 201 was unreachable by
+            // any means.
+            // Omitted entirely when pm-grid.js is missing, in which case
+            // the procedure's own defaults apply.
+            const paging = pager
+                ? '&pageNumber=' + pager.page() + '&pageSize=' + pager.size()
+                : '';
             const r = await fetch(U('/practice/api/workflow/resolve/instances?organizationId=')
                         + encodeURIComponent(orgId)
                         + '&search=' + encodeURIComponent(search)
-                        + '&pageSize=200',
+                        + '&includeRetired=' + (includeRetired ? 'true' : 'false')
+                        // Sent only when set. The procedure treats NULL as
+                        // "no opinion", and an empty string would not cast.
+                        + (RV_PRACTICE_ID ? '&practiceId=' + encodeURIComponent(RV_PRACTICE_ID) : '')
+                        + (RV_REQUIREMENT_ID ? '&organizationRequirementId=' + encodeURIComponent(RV_REQUIREMENT_ID) : '')
+                        // 315. Owner / Status filters -- same "sent only
+                        // when set" rule as the drill-down params above.
+                        + (ownerId ? '&ownerEmployeeId=' + encodeURIComponent(ownerId) : '')
+                        + (status  ? '&status=' + encodeURIComponent(status) : '')
+                        + paging,
                         { credentials: 'same-origin' });
             if (!r.ok) {
                 const b = await r.json().catch(() => ({}));
+                pager?.clear();
                 host.innerHTML = '<div class="pm-empty compact">'
                     + esc(b.error || ('Could not load instances (HTTP ' + r.status + ').')) + '</div>';
                 return;
             }
             const body = await r.json();
             rows    = body.data || body.Data || [];
+            // Row count as well as the total, so a short last page reads
+            // "176-190 of 190" instead of assuming every page is full.
+            // An API that predates 290 sends no total; setTotal(undefined)
+            // is what makes the pager fall back to a "Page N" label.
+            total   = Number(body.totalRows ?? body.TotalRows);
+            pager?.setTotal(Number.isFinite(total) ? total : undefined, rows.length);
             isAdmin = !!(body.isAdmin ?? body.IsAdmin);
             document.getElementById('rvScopeNote').textContent = isAdmin
                 ? 'Every practice instance in this organization.'
                 : 'Practice instances you own.';
+            // 315. Owners / Statuses are scoped to the organisation, not
+            // to the current filter or page, so they are repopulated from
+            // every response -- cheap (a handful of options) and it means
+            // a value that appears after, say, an owner is reassigned
+            // shows up on the next load without a page refresh.
+            populateFilterOptions(body.owners || body.Owners || [], body.statuses || body.Statuses || []);
             render();
         } catch (err) {
             console.error('resolve: list failed', err);
+            // Clears the pager's busy flag too, so Prev/Next do not stay
+            // disabled after a failed load.
+            pager?.clear();
             host.innerHTML = '<div class="pm-empty compact">Could not load instances.</div>';
+        }
+    }
+
+    // 315. Rebuilds the Owner and Status <select> option lists, keeping
+    // whichever value was already selected when it still appears in the
+    // new list -- e.g. a Refresh must not silently reset the filter the
+    // user is looking at. Falls back to "All ..." only when the previous
+    // selection is no longer offered (organisation just changed, or the
+    // API predates migration 315 and never sent any options).
+    function resetFilterSelect(id, allLabel) {
+        const sel = document.getElementById(id);
+        if (sel) sel.innerHTML = '<option value="">' + esc(allLabel) + '</option>';
+    }
+
+    function populateFilterOptions(owners, statuses) {
+        const ownerSel  = document.getElementById('rvOwner');
+        const statusSel = document.getElementById('rvStatus');
+        if (ownerSel) {
+            const current = ownerSel.value;
+            ownerSel.innerHTML = '<option value="">All owners</option>'
+                + owners.map(function (o) {
+                    const id   = F(o, 'ownerEmployeeId');
+                    const name = F(o, 'ownerName') || ('#' + id);
+                    return '<option value="' + esc(id) + '">' + esc(name) + '</option>';
+                }).join('');
+            if (owners.some(function (o) { return String(F(o, 'ownerEmployeeId')) === current; })) ownerSel.value = current;
+        }
+        if (statusSel) {
+            const current = statusSel.value;
+            statusSel.innerHTML = '<option value="">All statuses</option>'
+                + statuses.map(function (s) {
+                    const name = F(s, 'implementationStatus') || '';
+                    return '<option value="' + esc(name) + '">' + esc(name) + '</option>';
+                }).join('');
+            if (statuses.some(function (s) { return (F(s, 'implementationStatus') || '') === current; })) statusSel.value = current;
         }
     }
 
     const F = (row, k) => row[k] ?? row[k.charAt(0).toUpperCase() + k.slice(1)] ?? null;
 
+    // 315/329. The noun ("adopted" / "resolved") is dropped from the
+    // printed text -- the OBLIGATIONS / DEPENDENCIES column header
+    // already says what is being counted, so repeating it on every row
+    // was noise. The colour (done vs pending vs none) still carries the
+    // same pass/pending signal the words used to spell out, and the noun
+    // survives as a hover title so the number's meaning is one hover
+    // away rather than gone.
     function progress(done, total, noun) {
         done = Number(done || 0); total = Number(total || 0);
-        if (!total) return '<span class="rv-progress none">no ' + noun + '</span>';
+        if (!total) return '<span class="rv-progress none" title="no ' + noun + '">0</span>';
         const cls = done >= total ? 'done' : 'pending';
-        return '<span class="rv-progress ' + cls + '">' + done + ' / ' + total + ' ' + noun + '</span>';
+        return '<span class="rv-progress ' + cls + '" title="' + done + ' ' + noun + '">' + done + '</span>';
+    }
+
+    // 315. Practice grouping. Keyed by practiceId, falling back to
+    // practice code/name for the rare row that somehow carries neither --
+    // stable across re-renders (search, filters, Refresh, an expand
+    // click) so collapsedGroups keeps meaning the same group between
+    // them.
+    const collapsedGroups = new Set();
+
+    function groupKey(row) {
+        const id = F(row, 'practiceId');
+        return (id != null && id > 0) ? 'id:' + id : 'code:' + (F(row, 'practiceCode') || F(row, 'practiceName') || '');
+    }
+
+    // Groups THIS PAGE's rows -- the server still sorts and pages by
+    // instance code (unchanged), so a Practice whose instances straddle
+    // two pages appears, in reduced form, on both. Groups are then
+    // ordered by Practice code so the hierarchy reads top-to-bottom by
+    // Practice rather than by whichever instance happened to sort first.
+    // A Practice with no instances never appears here -- this list has
+    // always been instance-first (one row in, one row out), so there is
+    // no "empty Practice" case to render; see the PRD's point 2, "handled
+    // appropriately".
+    function groupRows(list) {
+        const groups = new Map();
+        list.forEach(function (row) {
+            const key = groupKey(row);
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    key:          key,
+                    practiceCode: F(row, 'practiceCode') || '',
+                    practiceName: F(row, 'practiceName') || '',
+                    rows:         []
+                });
+            }
+            groups.get(key).rows.push(row);
+        });
+        return [...groups.values()].sort(function (a, b) {
+            return a.practiceCode.localeCompare(b.practiceCode, undefined, { numeric: true, sensitivity: 'base' });
+        });
     }
 
     function render() {
         const host = document.getElementById('rvList');
+        // 290. Counts everything the filter matched, not just this page.
+        // Before paging the two were the same number; now "25 instances"
+        // on a 137-instance organisation would be a lie. Falls back to
+        // the page's own length when the server sent no total.
+        const shown = Number.isFinite(total) && total > 0 ? total : rows.length;
         document.getElementById('rvCount').textContent =
-            rows.length + ' instance' + (rows.length === 1 ? '' : 's');
+            shown + ' instance' + (shown === 1 ? '' : 's');
 
         if (!rows.length) {
             host.innerHTML = '<div class="pm-empty compact">'
@@ -195,61 +560,238 @@
             return;
         }
 
-        // Practice code and name go in one cell, code above name, so the
-        // long framework titles stop stealing width from everything else.
+        // 315. Code, Instance, [Owner], Obligations, Dependencies,
+        // Status, Actions -- Practice is no longer a column of its own;
+        // the group header row below supplies it once per Practice
+        // instead of once per instance.
+        const colCount = 6 + (isAdmin ? 1 : 0);
+        const groups = groupRows(rows);
+
         host.innerHTML = '<div class="rv-scroll"><table class="rv-grid">'
             + '<colgroup>'
               + '<col style="width:110px">'          // instance code
               + '<col>'                              // instance name
-              + '<col style="width:30%">'            // practice
               + (isAdmin ? '<col style="width:130px">' : '')
-              + '<col style="width:135px">'          // obligations
-              + '<col style="width:140px">'          // dependencies
+              + '<col style="width:110px">'          // obligations
+              + '<col style="width:110px">'          // dependencies
               + '<col style="width:140px">'          // status
               + '<col style="width:120px">'          // action
             + '</colgroup>'
             + '<thead><tr>'
-              + '<th>Code</th><th>Instance</th><th>Practice</th>'
+              + '<th>Code</th><th>Instance</th>'
               + (isAdmin ? '<th>Owner</th>' : '')
-              + '<th>Obligations</th><th>Dependencies</th><th>Status</th><th></th>'
+              + '<th>Obligations</th><th>Dependencies</th><th>Status</th><th>Actions</th>'
             + '</tr></thead><tbody>'
-            + rows.map(function (row) {
-                const name     = F(row, 'instanceName') || '';
-                const pCode    = F(row, 'practiceCode') || '';
-                const pName    = F(row, 'practiceName') || '';
-                const dept     = F(row, 'department') || '';
-                const owner    = F(row, 'ownerName') || '';
-
-                return '<tr>'
-                    + '<td class="rv-code">' + esc(F(row, 'instanceCode')) + '</td>'
-                    + '<td class="rv-truncate" title="' + esc(name) + '">' + esc(name)
-                        + (dept ? '<span class="rv-sub rv-truncate">' + esc(dept) + '</span>' : '')
+            + groups.map(function (g) {
+                // 315. Collapsed state survives this render only -- it is
+                // not sent anywhere and not remembered across a Refresh
+                // that changes what is on the page, which is the same
+                // lifetime pm-grid's own state has.
+                const collapsed = collapsedGroups.has(g.key);
+                return '<tr class="rv-group-row">'
+                        + '<td class="rv-group-cell" colspan="' + colCount + '">'
+                            + '<button type="button" class="rv-group-toggle" data-group-toggle="' + esc(g.key) + '" '
+                              + 'aria-expanded="' + (collapsed ? 'false' : 'true') + '" '
+                              + 'title="' + (collapsed ? 'Expand' : 'Collapse') + ' ' + esc(g.practiceCode) + '">'
+                                + '<i class="fa-solid fa-chevron-' + (collapsed ? 'right' : 'down') + '" aria-hidden="true"></i>'
+                            + '</button>'
+                            + '<span class="rv-group-code">' + esc(g.practiceCode) + '</span>'
+                            + (g.practiceName ? '<span class="rv-group-name">' + esc(g.practiceName) + '</span>' : '')
+                            + '<span class="rv-group-count">' + g.rows.length + ' instance' + (g.rows.length === 1 ? '' : 's') + '</span>'
                         + '</td>'
-                    + '<td class="rv-truncate" title="' + esc([pCode, pName].filter(Boolean).join(' - ')) + '">'
-                        + esc(pCode)
-                        + (pName ? '<span class="rv-sub rv-truncate">' + esc(pName) + '</span>' : '')
-                        + '</td>'
-                    + (isAdmin
-                        ? '<td class="rv-truncate" title="' + esc(owner) + '">'
-                          + (owner ? esc(owner) : '<span class="rv-progress none">no owner</span>') + '</td>'
-                        : '')
-                    + '<td class="rv-num">' + progress(F(row, 'adoptedObligations'), F(row, 'totalObligations'), 'adopted') + '</td>'
-                    + '<td class="rv-num">' + progress(F(row, 'resolvedDependencies'), F(row, 'totalDependencies'), 'resolved') + '</td>'
-                    + '<td>' + window.__wfCommon.badge(F(row, 'implementationStatus')) + '</td>'
-                    + '<td class="rv-actions"><button class="pm-button small" type="button" data-open="'
-                        + esc(F(row, 'practiceInstanceId')) + '">'
-                        + '<i class="fa-solid fa-link"></i> Resolve</button></td>'
-                    + '</tr>';
+                    + '</tr>'
+                    + (collapsed ? '' : g.rows.map(rowHtml).join(''));
             }).join('')
             + '</tbody></table></div>';
 
-        host.querySelectorAll('button[data-open]').forEach(function (b) {
-            b.addEventListener('click', function () {
-                window.location.assign(U('/Practice/Index/resolve-workspace')
-                    + '?instanceId=' + encodeURIComponent(this.getAttribute('data-open'))
-                    + '&organizationId=' + encodeURIComponent(orgId));
+        host.querySelectorAll('[data-group-toggle]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const key = this.getAttribute('data-group-toggle');
+                if (collapsedGroups.has(key)) collapsedGroups.delete(key); else collapsedGroups.add(key);
+                render();          // client-side only -- the fetched page is unchanged
+            });
+        });
+        host.querySelectorAll('.rv-menu-trigger').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                openRvActionMenu(this);
             });
         });
     }
+
+    // 315. One instance row. Everything render() used to build inline
+    // per-row, unchanged, except the Practice cell it no longer needs --
+    // the group header above it carries that now instead of repeating it
+    // on every instance.
+    function rowHtml(row) {
+        const name  = F(row, 'instanceName') || '';
+        const dept  = F(row, 'department') || '';
+        const owner = F(row, 'ownerName') || '';
+
+        // 287. Retired rows can now be in this payload. Testing for
+        // 'active' rather than 'retired' because retirement writes
+        // 'Inactive' while parts of the schema also carry 'Retired' --
+        // the positive test is the only one neither spelling can defeat.
+        const retired = String(F(row, 'status') || '').trim().toLowerCase() !== 'active';
+
+        return '<tr class="rv-child-row' + (retired ? ' rv-retired' : '') + '">'
+            + '<td class="rv-code">' + esc(F(row, 'instanceCode')) + '</td>'
+            + '<td class="rv-truncate rv-name" title="' + esc(name) + '">' + esc(name)
+                + (retired ? '<span class="rv-retired-chip">Retired</span>' : '')
+                + (dept ? '<span class="rv-sub rv-truncate">' + esc(dept) + '</span>' : '')
+                + '</td>'
+            + (isAdmin
+                ? '<td class="rv-truncate" title="' + esc(owner) + '">'
+                  + (owner ? esc(owner) : '<span class="rv-progress none">no owner</span>') + '</td>'
+                : '')
+            + '<td class="rv-num">' + progress(F(row, 'adoptedObligations'), F(row, 'totalObligations'), 'adopted') + '</td>'
+            + '<td class="rv-num">' + progress(F(row, 'resolvedDependencies'), F(row, 'totalDependencies'), 'resolved') + '</td>'
+            + '<td>' + window.__wfCommon.badge(F(row, 'implementationStatus')) + '</td>'
+            // The single "Resolve" button was replaced with a 3-dot menu
+            // carrying two actions:
+            //   * Operationalize -- opens the workspace in edit mode
+            //   * View          -- opens the same page in read-only mode
+            //                      (mode=view). resolve-workspace hides
+            //                      its Save / Retire / per-card Save
+            //                      buttons in that mode so the viewer
+            //                      sees the current state without
+            //                      accidentally editing it.
+            // Same 3-dot trigger every other grid uses -- pm-action-
+            // trigger is the icon-only shape, no .pm-button chrome.
+            // rv-menu-trigger is kept as a hook for the click handler.
+            + '<td class="rv-actions">'
+                + '<button class="pm-action-trigger rv-menu-trigger" type="button" '
+                  + 'data-instance-id="' + esc(F(row, 'practiceInstanceId')) + '" '
+                  // 287. The menu offers Retire or Restore, never both,
+                  // and the row's own status is what decides. Carried on
+                  // the trigger so the menu builder does not have to go
+                  // back to the row it came from.
+                  + 'data-instance-status="' + esc(F(row, 'status')) + '" '
+                  + 'data-instance-name="' + esc(F(row, 'instanceName')) + '" '
+                  + 'aria-haspopup="menu" aria-expanded="false" title="Actions">'
+                    + '<i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+                    + '<span class="visually-hidden">Actions</span>'
+                + '</button>'
+            + '</td>'
+            + '</tr>';
+    }
+
+    // Lightweight action menu -- one popover reused across rows. Closes on
+    // outside click / Escape so it does not shadow the next row's trigger.
+    let rvOpenMenu = null;
+    function openRvActionMenu(trigger) {
+        closeRvActionMenu();
+        const instanceId = trigger.getAttribute('data-instance-id');
+        // 287. Retire and Restore are one lifecycle act in two
+        // directions, so exactly one is offered. Testing for 'active'
+        // rather than for 'retired' because retirement writes 'Inactive'
+        // while parts of the schema also carry 'Retired' -- the positive
+        // test is the only one neither spelling can defeat.
+        const isActive = String(trigger.getAttribute('data-instance-status') || '')
+                            .trim().toLowerCase() === 'active';
+        const menu = document.createElement('div');
+        menu.className = 'pm-action-menu rv-menu';
+        menu.setAttribute('role', 'menu');
+        menu.innerHTML =
+            '<button type="button" role="menuitem" data-rv-action="view">'
+                + '<i class="fa-solid fa-eye" aria-hidden="true"></i> View</button>'
+          + '<button type="button" role="menuitem" data-rv-action="operationalize">'
+                + '<i class="fa-solid fa-link" aria-hidden="true"></i> Operationalize</button>'
+          + (isActive
+              ? '<button type="button" role="menuitem" data-rv-action="retire">'
+                    + '<i class="fa-solid fa-box-archive" aria-hidden="true"></i> Retire instance</button>'
+              : '<button type="button" role="menuitem" data-rv-action="restore">'
+                    + '<i class="fa-solid fa-box-open" aria-hidden="true"></i> Restore instance</button>');
+        // Position below the trigger, right-aligned so it does not spill
+        // off the viewport on the last row.
+        const rect = trigger.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top      = (rect.bottom + 4) + 'px';
+        menu.style.right    = (window.innerWidth - rect.right) + 'px';
+        menu.style.zIndex   = '1000';
+        document.body.appendChild(menu);
+        trigger.setAttribute('aria-expanded', 'true');
+        rvOpenMenu = { menu, trigger };
+
+        const instanceName = trigger.getAttribute('data-instance-name') || 'this practice instance';
+
+        menu.querySelectorAll('[data-rv-action]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                const action = this.getAttribute('data-rv-action');
+                // Retire / restore act on the row and stay here (287);
+                // everything else navigates into the workspace.
+                if (action === 'retire' || action === 'restore') {
+                    closeRvActionMenu();
+                    setRetirement(instanceId, instanceName, action === 'retire');
+                    return;
+                }
+                const base = U('/Practice/Index/resolve-workspace')
+                    + '?instanceId=' + encodeURIComponent(instanceId)
+                    + '&organizationId=' + encodeURIComponent(orgId);
+                window.location.assign(action === 'view' ? base + '&mode=view' : base);
+            });
+        });
+    }
+
+    // ---------- retire / restore from the row (migration 287) ----------
+    // The same two endpoints the workspace calls, so the row menu and the
+    // workspace cannot diverge in what they enforce -- ownership and the
+    // "parent practice must be active" rule both live in the procedures.
+    // Reason is asked for in the same dialog that confirms the act
+    // (migration 355), not as a separate popup afterward -- typing a
+    // reason and clicking Retire/Restore IS the confirmation.
+    async function setRetirement(instanceId, instanceName, retiring) {
+        const message = retiring
+            ? 'Retire ' + instanceName + '? '
+              + 'It stops appearing as an active instance. Its assurance history, '
+              + 'evidence and closed tasks are kept.'
+            : 'Restore ' + instanceName + '? '
+              + 'It becomes an active instance again and returns to work queues '
+              + 'and assurance scheduling.';
+        const remark = await window.gracUi.promptRequired(message,
+              { type: retiring ? 'warning' : 'confirm',
+                title: retiring ? 'Retire instance' : 'Restore instance',
+                confirmText: retiring ? 'Retire' : 'Restore',
+                inputLabel: retiring ? 'Reason for retiring' : 'Reason for restoring',
+                requiredNote: 'A reason for ' + (retiring ? 'retiring' : 'restoring') + ' is required.' });
+        if (remark === null) return;
+
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/' + (retiring ? 'retire' : 'restore')), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ practiceInstanceId: Number(instanceId), remark: remark })
+            });
+            const body = await r.json().catch(function () { return {}; });
+            if (!r.ok) {
+                // The procedures answer with a sentence naming the actual
+                // blocker -- another owner's instance, an inactive parent
+                // practice -- so it is shown as sent.
+                window.alert(body.error
+                    || ('Could not ' + (retiring ? 'retire' : 'restore')
+                        + ' this instance (HTTP ' + r.status + ').'));
+                return;
+            }
+            await load();
+        } catch (err) {
+            console.error('resolve: ' + (retiring ? 'retire' : 'restore') + ' failed', err);
+            window.alert('Could not ' + (retiring ? 'retire' : 'restore') + ' this instance.');
+        }
+    }
+
+    function closeRvActionMenu() {
+        if (!rvOpenMenu) return;
+        rvOpenMenu.trigger.setAttribute('aria-expanded', 'false');
+        rvOpenMenu.menu.remove();
+        rvOpenMenu = null;
+    }
+    document.addEventListener('click', function (e) {
+        if (!rvOpenMenu) return;
+        if (!rvOpenMenu.menu.contains(e.target) && e.target !== rvOpenMenu.trigger) closeRvActionMenu();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeRvActionMenu();
+    });
 })();
 </script>

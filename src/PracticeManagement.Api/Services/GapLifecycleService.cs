@@ -548,6 +548,7 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var c = new SqlConnection(cs);
         await c.OpenAsync(ct);
+        await Infrastructure.ViewScopeSession.ApplyAsync(c, ct);   // 415: View Data Scope
         return c;
     }
 

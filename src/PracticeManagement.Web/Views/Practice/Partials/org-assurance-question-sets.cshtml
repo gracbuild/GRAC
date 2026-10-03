@@ -119,43 +119,43 @@
 </section>
 
 @* ---------- Add / Edit Question Set dialog ---------- *@
-<dialog id="qsSetDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="qsSetForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="qsSetDialogTitle" style="margin:0; font-size:18px;">Add Question Set</h2>
-            <button type="button" id="qsSetClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="qsSetDialog" style="max-width:640px; width:92%;">
+    <form id="qsSetForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="qsSetDialogTitle">Add Question Set</h2>
+            <button class="pm-icon-button" type="button" id="qsSetClose" aria-label="Close">&times;</button>
         </div>
-        <div id="qsSetMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="qsSetMessage" style="display:none;"></div>
         <input type="hidden" id="qsSetEditId" />
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Code <span style="color:#b91c1c;">*</span></span>
-                <input id="qsSetCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="qsSetCode" type="text" maxlength="80" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Status</span>
-                <select id="qsSetStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                <select class="pm-input" id="qsSetStatus">
                     <option value="Active" selected>Active</option>
                     <option value="Draft">Draft</option>
                     <option value="Inactive">Inactive</option>
                 </select>
             </label>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
-            <span>Name <span style="color:#b91c1c;">*</span></span>
-            <input id="qsSetName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Name <span class="required">*</span></span>
+            <input class="pm-input" id="qsSetName" type="text" maxlength="240" required />
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Owner</span>
-            <select id="qsSetOwnerEmployee" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+            <select class="pm-input" id="qsSetOwnerEmployee">
                 <option value="">Loading employees...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Description</span>
-            <textarea id="qsSetDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="qsSetDescription" rows="3" maxlength="4000"></textarea>
         </label>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="qsSetCancel" class="pm-button">Cancel</button>
             <button type="submit" id="qsSetSubmit" class="pm-button primary">Save</button>
         </div>
@@ -163,51 +163,51 @@
 </dialog>
 
 @* ---------- Add / Edit Question dialog ---------- *@
-<dialog id="qsQuestionDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="qsQuestionForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="qsQuestionDialogTitle" style="margin:0; font-size:18px;">Add Question</h2>
-            <button type="button" id="qsQuestionClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="qsQuestionDialog" style="max-width:720px; width:94%;">
+    <form id="qsQuestionForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="qsQuestionDialogTitle">Add Question</h2>
+            <button class="pm-icon-button" type="button" id="qsQuestionClose" aria-label="Close">&times;</button>
         </div>
-        <div id="qsQuestionMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="qsQuestionMessage" style="display:none;"></div>
         <input type="hidden" id="qsQuestionEditId" />
         <div style="display:grid; grid-template-columns:1fr 120px 120px 120px; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Code <span style="color:#b91c1c;">*</span></span>
-                <input id="qsQuestionCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="qsQuestionCode" type="text" maxlength="80" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Order</span>
-                <input id="qsQuestionOrder" type="number" min="0" step="1" value="0" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="qsQuestionOrder" type="number" min="0" step="1" value="0" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Weight</span>
-                <input id="qsQuestionWeight" type="number" step="0.01" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="qsQuestionWeight" type="number" step="0.01" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Mandatory</span>
                 <input id="qsQuestionMandatory" type="checkbox" style="margin-top:10px; align-self:flex-start;" />
             </label>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Question Type (Admin)</span>
-            <select id="qsQuestionType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+            <select class="pm-input" id="qsQuestionType">
                 <option value="">Loading question types...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
-            <span>Question Text <span style="color:#b91c1c;">*</span></span>
-            <textarea id="qsQuestionText" rows="3" maxlength="4000" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Question Text <span class="required">*</span></span>
+            <textarea class="pm-input" id="qsQuestionText" rows="3" maxlength="4000" required></textarea>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Help Text</span>
-            <textarea id="qsQuestionHelp" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="qsQuestionHelp" rows="2" maxlength="4000"></textarea>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Expected Response</span>
-            <textarea id="qsQuestionExpected" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="qsQuestionExpected" rows="2" maxlength="4000"></textarea>
         </label>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="qsQuestionCancel" class="pm-button">Cancel</button>
             <button type="submit" id="qsQuestionSubmit" class="pm-button primary">Save</button>
         </div>
@@ -443,7 +443,7 @@
             if (id != null) state.setsById[String(id)] = row;
             const isSelected = state.selectedSetId != null && String(state.selectedSetId) === String(id);
             return '<tr data-id="' + id + '"'
-                 + (isSelected ? ' style="background:#eff6ff;"' : '')
+                 + (isSelected ? ' style="background:var(--primary-50);"' : '')
                  + '><td>' + wf.escape(code) + '</td>'
                  + '<td>' + wf.escape(name) + '</td>'
                  + '<td>' + wf.escape(owner) + '</td>'
@@ -472,7 +472,7 @@
         // Re-render sets to highlight the selected row.
         // (Cheap because rows are already in DOM; simplest is a full reload.)
         document.querySelectorAll('#qsSetBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(setId)) ? '#eff6ff' : '';
+            tr.style.background = (tr.getAttribute('data-id') === String(setId)) ? 'var(--primary-50)' : '';
         });
         renderSelectedSetHeader();
         document.getElementById('qsAddQuestionBtn').disabled = false;
@@ -526,7 +526,7 @@
                      + '<td>' + wf.escape(code) + '</td>'
                      + '<td style="max-width:420px; overflow:hidden; text-overflow:ellipsis;">' + wf.escape(text) + '</td>'
                      + '<td>' + wf.escape(type) + '</td>'
-                     + '<td style="text-align:center;">' + (mand ? '<i class="fa-solid fa-check" style="color:#166534;"></i>' : '') + '</td>'
+                     + '<td style="text-align:center;">' + (mand ? '<i class="fa-solid fa-check" style="color:var(--success-700);"></i>' : '') + '</td>'
                      + '<td style="text-align:right;">' + wf.escape(wt == null ? '' : String(wt)) + '</td>'
                      + '<td>' + trigger(id, 'question') + '</td>'
                      + '</tr>';
@@ -816,8 +816,8 @@
     function showSetMessage(kind, text) {
         const el = document.getElementById('qsSetMessage');
         el.style.display = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent = text;
     }
     function clearSetMessage() {
@@ -827,8 +827,8 @@
     function showQuestionMessage(kind, text) {
         const el = document.getElementById('qsQuestionMessage');
         el.style.display = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent = text;
     }
     function clearQuestionMessage() {

@@ -56,7 +56,7 @@
     state.taskId = Number(params.get("taskId")) || 0;
 
     if (!state.taskId) {
-      unavailable("No task was specified.", "Open this page from Task Center's row menu.");
+      unavailable("No task was specified.", "Open this page from Task Board's row menu.");
       return;
     }
 
@@ -424,7 +424,7 @@
 
     if (!shown.length) {
       const p = document.createElement("div");
-      p.style.cssText = "padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;";
+      p.style.cssText = "padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;";
       p.textContent = "No actions available";
       actionsMenuEl.appendChild(p);
     }

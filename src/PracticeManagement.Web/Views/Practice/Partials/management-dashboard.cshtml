@@ -1,0 +1,43 @@
+@*
+    Management dashboard (migration 414) -- the landing page of the
+    Governance, Issues & Actions and Audit & Assurance parent menus.
+    One partial for all three screen keys:
+        governance-dashboard, issues-actions-dashboard, audit-assurance-dashboard
+    Structure (common to all three, only meaningful blocks shown):
+        heading -> KPIs per section -> ageing -> distributions -> lists
+    Data: GET /practice/api/management-dashboard/{module} (one call;
+    counts computed in SQL). Governance also reads the existing
+    subscribed-frameworks and dashboard-summary queries, which already
+    return its standards and practices figures.
+    Every tile, band and bar opens the EXISTING list page with that
+    page's own filters (Shared/dashboard-drill.js on the receiving end).
+    Only the sections whose child screen the caller may VIEW are shown
+    (ViewBag.DashboardSections, PracticeController.CanViewScreen).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var sections = ViewBag.DashboardSections as string[] ?? [];
+    var module = PracticeManagement.Web.Models.ManagementDashboards.ModuleOf(Model.Key);
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / Dashboard</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="mdRoot"
+         data-module="@module" data-screen="@Model.Key" data-sections="@string.Join(",", sections)">
+    <div class="pm-toolbar">
+        <select id="mdOrganization" title="Organization"><option value="">Select organization</option></select>
+        <button class="pm-button icon" id="mdRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+        </button>
+    </div>
+    <div id="mdMessage" class="pm-empty compact" hidden></div>
+    <div id="mdBody"></div>
+</section>
+
+<script src="~/js/ManagementDashboard/management-dashboard.js" asp-append-version="true"></script>

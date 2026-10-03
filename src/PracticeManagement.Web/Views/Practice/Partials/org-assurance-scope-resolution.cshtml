@@ -48,15 +48,15 @@
 
 <section class="pm-panel" id="oaRsRoot" hidden>
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaRsPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaRsPickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+        <label class="pm-field" style="flex:1; min-width:320px;">
             <span>Audit</span>
-            <select id="oaRsPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaRsPickDef">
                 <option value="">Select an organization first</option>
             </select>
         </label>
@@ -71,18 +71,18 @@
         <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
             <span style="font-weight:600;" id="oaRsDefName">Definition</span>
             <span class="pm-badge" id="oaRsDefStatus">Status</span>
-            <span style="color:#64748b;" id="oaRsDefVersion">Version</span>
+            <span style="color:var(--fg-muted);" id="oaRsDefVersion">Version</span>
         </div>
     </div>
 
     <div id="oaRsMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
     <div style="display:grid; grid-template-columns:minmax(360px, 480px) 1fr; gap:12px; margin-top:12px;">
         @* LEFT: history list *@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <h2 style="font-size:15px; margin:0; color:#0f172a;">Resolution History</h2>
+                <h2 style="font-size:15px; margin:0; color:var(--fg-strong);">Resolution History</h2>
                 <button class="pm-button icon" id="oaRsRefreshBtn" type="button" title="Refresh">
                     <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                 </button>
@@ -114,8 +114,8 @@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <h2 style="font-size:15px; margin:0; color:#0f172a;" id="oaRsDetailTitle">Snapshot</h2>
-                    <p style="font-size:12px; color:#64748b; margin:4px 0 0;" id="oaRsDetailSubtitle">Select a row from the history to view its snapshot.</p>
+                    <h2 style="font-size:15px; margin:0; color:var(--fg-strong);" id="oaRsDetailTitle">Snapshot</h2>
+                    <p style="font-size:12px; color:var(--fg-muted); margin:4px 0 0;" id="oaRsDetailSubtitle">Select a row from the history to view its snapshot.</p>
                 </div>
             </div>
 
@@ -124,9 +124,9 @@
             </div>
 
             <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Filter by Dimension</span>
-                    <select id="oaRsEntityDimFilter" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                    <select class="pm-input" id="oaRsEntityDimFilter">
                         <option value="">All</option>
                     </select>
                 </label>
@@ -411,7 +411,7 @@
             const by      = row.resolvedBy         || row.ResolvedBy || '';
             const total   = row.totalEntityCount   || row.TotalEntityCount || 0;
             const isSel   = state.selectedResolutionId && String(state.selectedResolutionId) === String(id);
-            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '')
+            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:var(--primary-50);"' : '')
                  + '><td>' + wf.escape(when) + '</td>'
                  + '<td>' + wf.badge(purpose) + '</td>'
                  + '<td>' + wf.escape(by) + '</td>'
@@ -434,7 +434,7 @@
     async function selectResolution(resolutionId) {
         state.selectedResolutionId = resolutionId;
         document.querySelectorAll('#oaRsHistoryBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(resolutionId)) ? '#eff6ff' : '';
+            tr.style.background = (tr.getAttribute('data-id') === String(resolutionId)) ? 'var(--primary-50)' : '';
         });
         state.entities = { page: 1, pageSize: 50, total: 0, rows: [], dim: '', search: '' };
         document.getElementById('oaRsEntityDimFilter').value = '';
@@ -483,10 +483,10 @@
                 const code  = s.dimensionCode || '';
                 const name  = s.dimensionName || code;
                 const count = s.entityCount || 0;
-                return '<div style="border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; background:#f8fafc; min-width:160px;">'
-                     + '<div style="font-size:11px; color:#64748b;">' + wf.escape(name) + '</div>'
-                     + '<div style="font-size:20px; font-weight:600; color:#0f172a;">' + wf.escape(String(count)) + '</div>'
-                     + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div>'
+                return '<div style="border:1px solid var(--border); border-radius:6px; padding:8px 12px; background:var(--neutral-50); min-width:160px;">'
+                     + '<div style="font-size:11px; color:var(--fg-muted);">' + wf.escape(name) + '</div>'
+                     + '<div style="font-size:20px; font-weight:600; color:var(--fg-strong);">' + wf.escape(String(count)) + '</div>'
+                     + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(code) + '</div>'
                      + '</div>';
             }).join('');
         }
@@ -619,8 +619,8 @@
         const el = document.getElementById('oaRsMessage');
         el.hidden = false;
         el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function formatDateTime(v) {
         if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }

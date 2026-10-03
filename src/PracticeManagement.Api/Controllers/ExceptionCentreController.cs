@@ -69,10 +69,14 @@ public sealed class ExceptionCentreController(
         [FromQuery] string? requestType,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
+        // Migration 414 -- management dashboard drill-down (?drillCode=,
+        // statusText=, severityText=, minAgeDays=, maxAgeDays=, noOwner=).
+        // Every value absent = the list exactly as before.
+        [FromQuery] ListDrillQuery? drill = null,
         CancellationToken ct = default)
     {
         if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
-        return Ok(await svc.ListAsync(organizationId, statusCode, requestType, page, pageSize, ct));
+        return Ok(await svc.ListAsync(organizationId, statusCode, requestType, page, pageSize, drill?.ToFilter(), ct));
     }
 
     // Migration 327 -- "+ Add Custom Exception." Same route shape as

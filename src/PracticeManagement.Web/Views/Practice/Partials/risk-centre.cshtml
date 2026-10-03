@@ -48,7 +48,11 @@
     <div>
         <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
         <h1>@Model.Title</h1>
-        <p>Assess before register. Risk candidates raised by Gap, Exception, Assurance, Obligation and other GRAC sources are assessed here before entering the Risk Register; authorised users can also create a custom risk directly.</p>
+        @* Per-page description: each Risk Management submenu (migration 383)
+           reuses this partial with its own PracticeScreen.Description, so the
+           subheading names the specific page instead of always the candidate
+           flow. The legacy combined risk-centre page keeps its own description. *@
+        <p>@Model.Description</p>
     </div>
 </div>
 
@@ -137,6 +141,21 @@
         </button>
     </div>
 
+    @* Dashboard drill-down (413): says which dashboard filter this list
+       is showing, with a way back and a way out. Hidden until a tile,
+       band or heatmap cell is clicked. *@
+    <div class="pm-filter-banner" id="candDrillBanner" hidden>
+        <span data-drill-text></span>
+        <span class="pm-filter-banner-actions">
+            <button class="pm-button" type="button" data-dash-back>
+                <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Dashboard
+            </button>
+            <button class="pm-button" type="button" data-drill-clear="cand">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i> Clear filter
+            </button>
+        </span>
+    </div>
+
     <div class="pm-table-wrap">
         <table id="riskTable">
             @* Analyst and Att columns dropped from the Risk Candidates grid
@@ -167,6 +186,30 @@
     @* Standard grid pager (pm-grid.js). Server-side: the page
        controls refetch, they never slice a local array. *@
     <div id="candPager"></div>
+
+    @* --- Awaiting approval (§19): the approver's work queue. Moved here
+       from the Dashboard (2026-10-01) -- it is a worklist of candidates,
+       and the Dashboard is now statistics only. The server returns only
+       analyses waiting on a decision; refresh() reloads it with the grid. --- *@
+    <h3 class="risk-subhead">Awaiting approval</h3>
+    <div class="pm-table-wrap">
+        <table id="approvalTable">
+            <thead>
+                <tr>
+                    <th>Candidate</th><th>Risk statement</th><th>Category</th>
+                    <th>Rating</th><th>Owner</th><th>Analysed</th><th>Waiting</th>
+                    <th aria-label="Actions"></th>
+                </tr>
+            </thead>
+            <tbody id="approvalTableBody">
+                <tr><td colspan="8" class="pm-empty-row">Nothing awaiting approval.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* Standard grid pager (pm-grid.js). Server-side: the page
+       controls refetch, they never slice a local array. *@
+    <div id="apprPager"></div>
 </section>
 
 @* ================= Tab 2 — Risk Register (BRD §9, §17, §23) ========= *@
@@ -233,6 +276,21 @@
         <button class="pm-button primary" id="regCustomBtn" type="button">
             <i class="fa-solid fa-plus"></i> Create custom risk
         </button>
+    </div>
+
+    @* Dashboard drill-down (413): says which dashboard filter this list
+       is showing, with a way back and a way out. Hidden until a tile,
+       band or heatmap cell is clicked. *@
+    <div class="pm-filter-banner" id="regDrillBanner" hidden>
+        <span data-drill-text></span>
+        <span class="pm-filter-banner-actions">
+            <button class="pm-button" type="button" data-dash-back>
+                <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Dashboard
+            </button>
+            <button class="pm-button" type="button" data-drill-clear="reg">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i> Clear filter
+            </button>
+        </span>
     </div>
 
     <div class="pm-table-wrap">
@@ -416,6 +474,21 @@
         </button>
     </div>
 
+    @* Dashboard drill-down (413): says which dashboard filter this list
+       is showing, with a way back and a way out. Hidden until a tile,
+       band or heatmap cell is clicked. *@
+    <div class="pm-filter-banner" id="revDrillBanner" hidden>
+        <span data-drill-text></span>
+        <span class="pm-filter-banner-actions">
+            <button class="pm-button" type="button" data-dash-back>
+                <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Dashboard
+            </button>
+            <button class="pm-button" type="button" data-drill-clear="rev">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i> Clear filter
+            </button>
+        </span>
+    </div>
+
     <div class="pm-table-wrap">
         @* Bulk review bar. Hidden until something is selected -- a
            permanently visible "0 selected" toolbar is furniture. *@
@@ -515,124 +588,78 @@
 <section class="pm-panel" id="riskDashboardView" hidden>
     <div class="pm-toolbar">
         <select id="dashFilterOrganization" class="risk-org-filter" title="Organization"><option value="">Select organization</option></select>
-        <label class="risk-inline-label">
-            Trend window
-            <select id="dashTrendMonths">
-                <option value="6">6 months</option>
-                <option value="12" selected>12 months</option>
-                <option value="24">24 months</option>
-            </select>
-        </label>
         <button class="pm-button icon" id="dashRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
             <i class="fa-solid fa-arrows-rotate"></i>
         </button>
     </div>
 
-    @* --- Risk Candidates block (§23) --- *@
-    <h3 class="risk-subhead">Risk candidates</h3>
-    <div class="risk-tiles" id="dashCandidateTiles"></div>
+    @* Risk Management dashboard (413). One call to /dashboard paints every
+       block; every tile, band, heatmap cell and Top 5 row drills into the
+       EXISTING Candidates / Register / Review lists (no second list page),
+       which then show a filter banner with the way back. *@
 
-    @* --- Approval queue (§19) --- *@
-    <h3 class="risk-subhead">Awaiting approval</h3>
-    <div class="pm-table-wrap">
-        <table id="approvalTable">
-            <thead>
-                <tr>
-                    <th>Candidate</th><th>Risk statement</th><th>Category</th>
-                    <th>Rating</th><th>Owner</th><th>Analysed</th><th>Waiting</th>
-                    <th aria-label="Actions"></th>
-                </tr>
-            </thead>
-            <tbody id="approvalTableBody">
-                <tr><td colspan="8" class="pm-empty-row">Nothing awaiting approval.</td></tr>
-            </tbody>
-        </table>
-    </div>
+    @* Layout (change request 2026-10-01): two rows, each split
+       25% | 25% | 50% (.risk-dash-row).
+         Row 1 -- left 50%: Risk candidate tiles (one row of 4) above
+                  Risk register tiles (4 + 1), on one shared 4-column
+                  grid so the two sets line up; right 50%: the two
+                  heatmaps side by side.
+         Row 2 -- Candidate ageing | Risk review ageing (the register's
+                  ageing) | Top 5 risks by rating.
+       The dashboard ends there. The approval queue moved to the Risk
+       Candidates tab (it is a worklist, and the approver needs it);
+       Overdue risk actions and the Notification outbox were removed. *@
 
-    @* Standard grid pager (pm-grid.js). Server-side: the page
-       controls refetch, they never slice a local array. *@
-    <div id="apprPager"></div>
-
-    @* --- Candidate ageing (§23) --- *@
-    <h3 class="risk-subhead">Candidate ageing <span class="pm-hint">(open candidates only)</span></h3>
-    <div class="risk-two-col">
-        <div class="risk-bars" id="dashAgeing"></div>
-        <div class="pm-table-wrap">
-            <table id="ageingTable">
-                <thead>
-                    <tr><th>Candidate</th><th>Source</th><th>Status</th><th>Analyst</th><th>Age</th></tr>
-                </thead>
-                <tbody id="ageingTableBody">
-                    <tr><td colspan="5" class="pm-empty-row">No open candidates.</td></tr>
-                </tbody>
-            </table>
+    @* --- Row 1: summaries + heatmaps --- *@
+    <div class="risk-dash-row">
+        <div class="risk-dash-span2">
+            <h3 class="risk-subhead">Risk candidates</h3>
+            <div class="risk-tiles risk-tiles-4" id="dashCandidateTiles"></div>
+            <h3 class="risk-subhead">Risk register</h3>
+            <div class="risk-tiles risk-tiles-4" id="dashRegisterTiles"></div>
+        </div>
+        <div>
+            @* Heatmaps: two, never combined. Cells are the organisation's
+               own risk matrix; counts are open risks. *@
+            <h3 class="risk-subhead">Risk rating <span class="pm-hint">(open risks)</span></h3>
+            <div class="risk-heatmaps">
+                <div>
+                    <h4 class="risk-subhead">Inherent <span class="pm-hint">likelihood &times; impact &rarr; inherent rating</span></h4>
+                    <div class="risk-heatmap" id="dashHeatInherent"></div>
+                    <p class="pm-hint" id="dashHeatInherentNote"></p>
+                </div>
+                <div>
+                    <h4 class="risk-subhead">Residual <span class="pm-hint">likelihood &times; impact &rarr; residual rating</span></h4>
+                    <div class="risk-heatmap" id="dashHeatResidual"></div>
+                    <p class="pm-hint" id="dashHeatResidualNote"></p>
+                </div>
+            </div>
         </div>
     </div>
 
-    @* --- Risk Register block (§23) --- *@
-    <h3 class="risk-subhead">Risk register</h3>
-    <div class="risk-tiles" id="dashRegisterTiles"></div>
-
-    <div class="risk-grid-4">
-        <div><h4 class="risk-subhead">By rating</h4>       <div class="risk-bars" id="dashByRating"></div></div>
-        <div><h4 class="risk-subhead">By category</h4>     <div class="risk-bars" id="dashByCategory"></div></div>
-        <div><h4 class="risk-subhead">By source</h4>       <div class="risk-bars" id="dashBySource"></div></div>
-        <div><h4 class="risk-subhead">By business unit</h4><div class="risk-bars" id="dashByUnit"></div></div>
-        <div><h4 class="risk-subhead">By owner</h4>        <div class="risk-bars" id="dashByOwner"></div></div>
-        <div><h4 class="risk-subhead">Candidates by source</h4><div class="risk-bars" id="dashCandBySource"></div></div>
-    </div>
-
-    @* --- Trend (§23) --- *@
-    <h3 class="risk-subhead">Risk trend</h3>
-    <div class="pm-table-wrap">
-        <table id="trendTable">
-            <thead>
-                <tr><th>Month</th><th>Candidates raised</th><th>Risks registered</th><th>Risks closed</th><th>Net</th></tr>
-            </thead>
-            <tbody id="trendTableBody"></tbody>
-        </table>
-    </div>
-
-    @* --- Overdue risk actions (§23), read from Task Centre --- *@
-    <h3 class="risk-subhead">Overdue risk actions <span class="pm-hint">(from Task Centre)</span></h3>
-    <div class="pm-table-wrap">
-        <table id="overdueTable">
-            <thead>
-                <tr><th>Task</th><th>Title</th><th>Owner</th><th>Priority</th><th>Due</th><th>SLA</th></tr>
-            </thead>
-            <tbody id="overdueTableBody">
-                <tr><td colspan="6" class="pm-empty-row">No overdue risk actions.</td></tr>
-            </tbody>
-        </table>
-    </div>
-
-    @* --- Notification outbox (§21) --- *@
-    <h3 class="risk-subhead">
-        Notification outbox
-        <span class="pm-hint">records who should be told — delivery is a dispatcher's job</span>
-    </h3>
-    <div class="pm-toolbar">
-        <select id="notifFilterStatus">
-            <option value="">All</option>
-            <option value="Pending" selected>Pending</option>
-            <option value="Sent">Sent</option>
-            <option value="Failed">Failed</option>
-            <option value="Suppressed">Suppressed</option>
-        </select>
-        <button class="pm-button" id="notifSweepBtn" type="button">
-            <i class="fa-solid fa-rotate"></i> Run sweep
-        </button>
-        <span class="pm-hint" id="notifCounts"></span>
-    </div>
-    <div class="pm-table-wrap">
-        <table id="notifTable">
-            <thead>
-                <tr><th>Event</th><th>Subject</th><th>Recipient</th><th>Why</th><th>Status</th><th>Occurred</th></tr>
-            </thead>
-            <tbody id="notifTableBody">
-                <tr><td colspan="6" class="pm-empty-row">No notifications recorded.</td></tr>
-            </tbody>
-        </table>
+    @* --- Row 2: ageing + Top 5 --- *@
+    <div class="risk-dash-row">
+        <div>
+            <h3 class="risk-subhead">Candidate ageing <span class="pm-hint">(open candidates only)</span></h3>
+            <div class="risk-bars" id="dashAgeing"></div>
+        </div>
+        <div>
+            <h3 class="risk-subhead">Risk review ageing <span class="pm-hint">(pending and overdue only)</span></h3>
+            <div class="risk-bars" id="dashReviewAgeing"></div>
+        </div>
+        <div>
+            <h3 class="risk-subhead">Top 5 risks by rating</h3>
+            <div class="pm-table-wrap">
+                <table id="topRiskTable">
+                    <thead>
+                        <tr><th>Risk</th><th>Owner</th><th>Inherent rating</th><th>Residual rating</th></tr>
+                    </thead>
+                    <tbody id="topRiskTableBody">
+                        <tr><td colspan="4" class="pm-empty-row">No open risks.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </section>
 
@@ -672,6 +699,13 @@
                     <span>
                         Allow the legacy "Accept" triage
                         <span class="pm-hint">superseded by Register — enable only while migrating</span>
+                    </span>
+                </label>
+                <label class="pm-form-grid-full risk-check">
+                    <input type="checkbox" id="cfgAllowOpenResidual" />
+                    <span>
+                        Allow residual risk analysis while treatment tasks are still open
+                        <span class="pm-hint">off: residual analysis opens only when every treatment task is closed</span>
                     </span>
                 </label>
                 <label class="pm-form-grid-full">
@@ -770,7 +804,7 @@
                 </label>
                 <label>
                     <span>Proposed owner</span>
-                    <select id="trOwner"><option value="">Task Centre's owner ladder</option></select>
+                    <select id="trOwner"><option value="">Task Board's owner ladder</option></select>
                 </label>
                 <label class="pm-form-grid-full risk-check">
                     <input type="checkbox" id="trAllowAdditional" />
@@ -842,13 +876,22 @@
             <input type="hidden" id="anCandidateId" />
             <dl class="risk-meta" id="anMeta"></dl>
 
-            @* FIVE FIELDS, DELIBERATELY.
+            @* FEW FIELDS, DELIBERATELY.
+               Risk title is typed by the analyst (417): the title derived
+               from the candidate was often not a fit name for the risk.
+               Business function is NOT asked here -- it is captured per
+               impact in the risk analysis (Impact details), so a second
+               input here was a duplicate.
                Category, likelihood and impact are NOT asked here — they
                are stage 2, done from the Risk Register once the risk is
                recorded. A candidate arriving from a Gap rarely carries
                enough to score honestly, and demanding a score at the
                front door produces invented numbers, not safer ones. *@
             <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Risk title<span class="pm-required">*</span></span>
+                    <input type="text" id="anTitle" maxlength="300" required />
+                </label>
                 <label class="pm-form-grid-full">
                     <span>Risk statement<span class="pm-required">*</span></span>
                     <textarea id="anStatement" rows="2" maxlength="1000" required
@@ -898,10 +941,6 @@
                 <label>
                     <span>Risk owner<span class="pm-required">*</span></span>
                     <select id="anOwner" required><option value="">-- select --</option></select>
-                </label>
-                <label>
-                    <span>Business function<span class="pm-required">*</span></span>
-                    <select id="anBusinessFunction" required><option value="">-- select --</option></select>
                 </label>
                 @* Asked here, before Save, not as a follow-up popup after
                    the assessment is already saved -- the note only ever
@@ -1027,10 +1066,8 @@
                     <span>Risk owner<span class="pm-required">*</span></span>
                     <select id="cxOwner" required><option value="">-- select --</option></select>
                 </label>
-                <label>
-                    <span>Business function<span class="pm-required">*</span></span>
-                    <select id="cxBusinessFunction" required><option value="">-- select --</option></select>
-                </label>
+                @* Business function removed (417), same as the candidate
+                   assessment: it is captured per impact in Impact details. *@
             </div>
             <p class="pm-form-message" id="cxMessage" role="status" aria-live="polite"></p>
             <footer class="pm-modal-footer">
@@ -1094,7 +1131,7 @@
         <div>
             <p class="pm-eyebrow">Risk Centre / Risk Register</p>
             <h1 id="raPageTitle">Risk analysis</h1>
-            <p id="raPageSubtitle">Score the risk, set its scope, and choose how it will be treated.</p>
+            <p id="raPageSubtitle">Score and assess the risk.</p>
         </div>
         <div class="ra-head-actions">
             <span id="raHeadStatus"></span>
@@ -1125,6 +1162,24 @@
                 <p>Recorded at assessment. Read-only here — change it from the register.</p>
             </div>
             <dl class="pm-detail-grid" id="raMeta"></dl>
+        </section>
+
+        @* ---- Impact Details (moved here from Risk Treatment,
+           change request 2026-09-26) ---------------------------------
+           Above Inherent scoring: what the risk impacts is assessed
+           before it is scored. Filled by riskMapping.mount() with
+           impactOnly -- the same component, /mapping call and "Save
+           impact details" path the Treatment page used; Existing
+           Controls stays on Treatment. *@
+        <section class="pm-panel" id="raImpactPanel">
+            <div class="pm-section-heading">
+                <h2>Impact Details</h2>
+                <p>
+                    What this risk impacts &mdash; assets, vendors, people, teams and committees,
+                    by Operationalize category.
+                </p>
+            </div>
+            <div id="raImpactScope" class="risk-map-host"></div>
         </section>
 
         @* ---- Row 2: how it scores ----------------------------------- *@
@@ -1256,80 +1311,13 @@
             </div>
         </section>
 
-        @* ---- Impact Details -----------------------------------------
-           ABOVE Existing Controls, immediately below Analysis Details:
-           what the risk impacts is read with the analysis that scored
-           it, not with the practices that control it.
-
-           Filled by the SAME riskMapping.mount() as the scope panel
-           below, via impactHostId -- one /mapping call, one refresh, one
-           save path. This host holds only the by-category table; the
-           panel supplies the heading. *@
-        <section class="pm-panel" id="raImpactPanel">
-            <div class="pm-section-heading">
-                <h2>Impact Details</h2>
-                <p>
-                    What this risk impacts &mdash; assets, vendors, people, teams and committees,
-                    by Operationalize category.
-                </p>
-            </div>
-            <div id="raImpactScope" class="risk-map-host"></div>
-        </section>
-
-        @* ---- Scope ---------------------------------------------------
-           riskMapping.mount() fills this host. The panel supplies the
-           heading, so the component is mounted with showHeading:false —
-           otherwise the page would carry two headings for one section. *@
-        <section class="pm-panel" id="raScopePanel">
-            <div class="pm-section-heading">
-                <h2>Existing Controls</h2>
-                @* Five lines of prose above a section that is itself two
-                   sections made the panel top-heavy before a single
-                   practice was visible. One line; the rules it dropped
-                   (every category, mapped once) are inherent behaviour,
-                   not something the reader has to be told up front. *@
-                <p>
-                    Practices that control this risk, the dependencies each one brings in,
-                    and what the risk impacts.
-                </p>
-            </div>
-            <div id="raMapping" class="risk-map-host"></div>
-        </section>
-
-        @* ---- Treatment ----------------------------------------------- *@
-        <section class="pm-panel">
-            <div class="pm-section-heading">
-                <h2>Treatment option</h2>
-                <p>
-                    Terminate, Treat or Transfer raises a Risk Treatment Task in Task Center owned
-                    by the risk owner. Tolerate raises nothing and continues to Risk Acceptance.
-                    Re-saving does not create a second task.
-                </p>
-            </div>
-            <div class="risk-treat-options" id="raTreatmentOptions">
-                <label class="risk-treat-opt">
-                    <input type="radio" name="raTreatment" value="Terminate" />
-                    <span class="t">Terminate / Avoid</span>
-                    <span class="d">Stop the activity that creates the risk.</span>
-                </label>
-                <label class="risk-treat-opt">
-                    <input type="radio" name="raTreatment" value="Treat" />
-                    <span class="t">Treat / Reduce</span>
-                    <span class="d">Apply controls to reduce likelihood or impact.</span>
-                </label>
-                <label class="risk-treat-opt">
-                    <input type="radio" name="raTreatment" value="Transfer" />
-                    <span class="t">Transfer / Share</span>
-                    <span class="d">Insure, outsource or contractually share the exposure.</span>
-                </label>
-                <label class="risk-treat-opt">
-                    <input type="radio" name="raTreatment" value="Tolerate" />
-                    <span class="t">Tolerate / Accept</span>
-                    <span class="d">Accept the risk as it stands, with a review date.</span>
-                </label>
-            </div>
-        </section>
-
+        @* ---- Impact Details, Existing Controls (Map Practice) and Treatment
+           option MOVED to the Treatment page (Risk Analysis -> Treatment flow
+           change). Risk Analysis now focuses on scoring/assessment only; the
+           practice mapping component (one riskMapping.mount, both hosts) and
+           the treatment-option selection are hosted on riskTreatmentPageView
+           (twMapping / twImpactScope / twTreatment). See risk-centre.js
+           openTreatmentWorkModal / onApplyTreatmentOption. *@
         @* ---- Action bar ----------------------------------------------
            Sticky to the bottom of the viewport. On a form this tall the
            alternative is scrolling to the end to save, then scrolling
@@ -1515,7 +1503,7 @@
             <dl class="pm-detail-grid" id="rrTreatmentMeta"></dl>
             <div class="risk-tiles" id="rrTiles"></div>
 
-            <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Center</span></h3>
+            <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Board</span></h3>
             <div class="pm-table-wrap">
                 @* Seven columns, not eight: the Actions column of the
                    Treatment page is absent because this view is read-only.
@@ -2140,7 +2128,7 @@
             <div id="rdTreatmentWork" class="rd-when-treated" hidden>
                 <div class="risk-gate" id="rdGate"></div>
                 <div class="risk-tiles" id="rdTiles"></div>
-                <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Centre</span></h3>
+                <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Board</span></h3>
                 <div class="pm-table-wrap">
                     @* Seven columns: taskRow(readOnly:true) omits the
                        Actions column rather than rendering a disabled
@@ -2212,48 +2200,135 @@
     <div class="ra-form">
         <input type="hidden" id="twRiskId" />
 
-        @* ---- Row 1: the risk, beside where the treatment stands ----- *@
-        <div class="ra-row ra-row-split">
-            <section class="pm-panel">
-                <div class="pm-section-heading">
-                    <h2>Risk</h2>
-                    <p>The risk this treatment work belongs to.</p>
-                </div>
-                <dl class="pm-detail-grid" id="twMeta"></dl>
-            </section>
+        @* ---- Row 1: Risk context (change request 2026-09-27) ----------
+           Full width and the SAME compact layout as the Analysis page's
+           Risk context: Risk ID / Owner / Source / Current inherent /
+           Current residual, then Statement, Threat and Vulnerability one
+           full row each (riskContextCompactHtml in risk-centre.js). *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Risk context</h2>
+                <p>The risk this treatment work belongs to.</p>
+            </div>
+            <dl class="pm-detail-grid" id="twMeta"></dl>
+        </section>
 
-            <section class="pm-panel">
-                <div class="pm-section-heading">
-                    <h2>Treatment progress</h2>
-                    <p>Residual analysis unlocks once every treatment task is closed.</p>
-                </div>
-                @* The gate, stated plainly. sp_risk_treatment_state returns
-                   both the answer and the reason, so a disabled button can
-                   explain itself instead of just being grey. *@
-                <div class="risk-gate" id="twGate"></div>
-                <div class="risk-tiles" id="twTiles"></div>
-            </section>
-        </div>
+        @* ---- Row 2: Treatment progress (its own full-width row) ------ *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Treatment progress</h2>
+                <p>Residual analysis unlocks once every treatment task is closed.</p>
+            </div>
+            @* The gate, stated plainly. sp_risk_treatment_state returns
+               both the answer and the reason, so a disabled button can
+               explain itself instead of just being grey. *@
+            <div class="risk-gate" id="twGate"></div>
+            <div class="risk-tiles" id="twTiles"></div>
+        </section>
+
+        @* ---- Row 3: Existing Controls / Map Practice Instance ----------
+           Moved up to follow Treatment progress (2026-09-27). What is
+           mapped is a PRACTICE INSTANCE (migration 387); the tasks raised
+           from a mapped instance's gaps appear under Treatment tasks.
+           riskMapping.mount() fills this host (same component, new host id).
+           showHeading:false -- the panel supplies the heading.
+           practiceGrid:true (410) -- a grid (Practice / Practice Instance,
+           Tasks, Status, Actions); a row opens the card in
+           #riskMapPracticeDetailModal. *@
+        <section class="pm-panel" id="twScopePanel">
+            <div class="pm-section-heading">
+                <h2>Existing Controls</h2>
+                <p>
+                    Practice instances that control this risk and the dependencies each one brings in.
+                </p>
+            </div>
+            <div id="twMapping" class="risk-map-host"></div>
+        </section>
+
+        @* ---- Treatment option (moved here from Risk Analysis) -------
+           The treatment decision now lives on the Treatment page. Same four
+           options and the SAME dispatch API (/register/{id}/treatment-option)
+           the Analysis page used before -- onApplyTreatmentOption in
+           risk-centre.js. Choosing an option is optional and no longer gates
+           navigation; Tolerate / Accept still routes to Risk Acceptance. *@
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Treatment option</h2>
+                <p>
+                    Terminate, Treat or Transfer raises a Risk Treatment Task in Task Center owned
+                    by the risk owner. Tolerate raises nothing and continues to Risk Acceptance.
+                    Re-saving does not create a second task.
+                </p>
+            </div>
+            <div class="risk-treat-options" id="twTreatmentOptions">
+                <label class="risk-treat-opt">
+                    <input type="radio" name="twTreatment" value="Terminate" />
+                    <span class="t">Terminate / Avoid</span>
+                    <span class="d">Stop the activity that creates the risk.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="twTreatment" value="Treat" />
+                    <span class="t">Treat / Reduce</span>
+                    <span class="d">Apply controls to reduce likelihood or impact.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="twTreatment" value="Transfer" />
+                    <span class="t">Transfer / Share</span>
+                    <span class="d">Insure, outsource or contractually share the exposure.</span>
+                </label>
+                <label class="risk-treat-opt">
+                    <input type="radio" name="twTreatment" value="Tolerate" />
+                    <span class="t">Tolerate / Accept</span>
+                    <span class="d">Accept the risk as it stands, with a review date.</span>
+                </label>
+            </div>
+            <div class="ra-actionbar-buttons" style="margin-top:12px;">
+                <button type="button" class="pm-button primary" id="twApplyTreatmentBtn">
+                    <i class="fa-solid fa-circle-check"></i> Apply treatment option
+                </button>
+            </div>
+        </section>
+
+        @* Impact Details moved to the Risk Analysis page, above Inherent
+           scoring (change request 2026-09-26). *@
 
         @* ---- Treatment tasks ---------------------------------------- *@
         <section class="pm-panel">
             <div class="pm-section-heading">
-                <h2>Treatment tasks <span class="pm-hint">from Task Center</span></h2>
+                <h2>Treatment tasks <span class="pm-hint">from Task Board</span></h2>
                 <p>
-                    Parent tasks own the commitment; sub tasks distribute the work. A parent
-                    cannot be completed while a mandatory sub task is still open.
+                    The risk's own treatment tasks, tasks raised from the gaps of its mapped
+                    practice instances, and open tasks mapped here. Parent tasks own the
+                    commitment; sub tasks distribute the work. A parent cannot be completed
+                    while a mandatory sub task is still open.
                 </p>
+            </div>
+            @* Task actions live with the task list (2026-09-27): "Map open
+               task" links an existing open task as treatment work; "Add
+               treatment task" moved up from the page action bar. Add sub
+               task lives on each task's row menu only (2026-09-27).
+               .primary (2026-10-03): the same house-blue style as this
+               page's other panel actions ("Map a practice instance",
+               "Apply treatment option"); plain .pm-button is the white
+               secondary style. *@
+            <div class="ra-actionbar-buttons" style="margin-bottom:12px;">
+                <button type="button" class="pm-button primary" id="twMapOpenTaskBtn">
+                    <i class="fa-solid fa-link"></i> Map open task
+                </button>
+                <button type="button" class="pm-button primary" id="twAddTaskBtn">
+                    <i class="fa-solid fa-plus"></i> Add treatment task
+                </button>
             </div>
             <div class="pm-table-wrap">
                 <table id="twTable">
                     <thead>
                         <tr>
-                            <th>Task</th><th>Title</th><th>Owner</th><th>Priority</th>
+                            <th>Task</th><th>Title</th><th>From</th><th>Owner</th><th>Priority</th>
                             <th>Due</th><th>Status</th><th>Sub tasks</th><th aria-label="Actions"></th>
                         </tr>
                     </thead>
                     <tbody id="twTableBody">
-                        <tr><td colspan="8" class="pm-empty-row">No treatment work raised.</td></tr>
+                        <tr><td colspan="9" class="pm-empty-row">No treatment work raised.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -2270,9 +2345,6 @@
             <p class="pm-form-message" id="twMessage" role="status" aria-live="polite"></p>
             <div class="ra-actionbar-buttons">
                 <button type="button" class="pm-button" id="twCloseBtn">Close</button>
-                <button type="button" class="pm-button" id="twAddChildBtn">
-                    <i class="fa-solid fa-plus"></i> Add sub task
-                </button>
                 <button type="button" class="pm-button primary" id="twResidualBtn" disabled>
                     <i class="fa-solid fa-scale-balanced"></i> Residual risk analysis
                 </button>
@@ -2398,7 +2470,7 @@
             <dl class="pm-detail-grid" id="acTreatmentMeta"></dl>
             <div class="risk-tiles" id="acTiles"></div>
 
-            <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Center</span></h3>
+            <h3 class="risk-subhead">Treatment tasks <span class="pm-hint">from Task Board</span></h3>
             <div class="pm-table-wrap">
                 @* Seven columns: taskRow() omits the Actions column when
                    called with readOnly:true rather than rendering a
@@ -2779,6 +2851,51 @@
     </div>
 </div>
 
+@* ===================================================================
+    Map open task (387) -- links existing open Task Board tasks to the
+    risk as treatment work (risk_treatment_task_link). The list excludes
+    the risk's own tasks and tasks already mapped here; a mapped task
+    counts toward the treatment gate like the risk's own tasks.
+=================================================================== *@
+<div class="pm-modal" id="riskMapOpenTaskModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Map open task</h2>
+            <button class="pm-modal-close" type="button" data-close-map-open-task aria-label="Close">&times;</button>
+        </header>
+        <form id="riskMapOpenTaskForm">
+            <input type="hidden" id="motRiskId" />
+            <div class="pm-form-grid">
+                <label class="pm-form-grid-full">
+                    <span>Search</span>
+                    <input type="search" id="motSearch" maxlength="200"
+                           placeholder="Task number or title" autocomplete="off" />
+                </label>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th aria-label="Select"></th><th>Task</th><th>Title</th>
+                            <th>Owner</th><th>Due</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="motTableBody">
+                        <tr><td colspan="6" class="pm-empty-row">No open tasks to map.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="pm-form-message" id="motMessage" role="status" aria-live="polite"></p>
+            <footer class="pm-modal-footer">
+                <button type="button" class="pm-button" data-close-map-open-task>Cancel</button>
+                <button type="submit" class="pm-button primary">
+                    <i class="fa-solid fa-link"></i> Map selected
+                </button>
+            </footer>
+        </form>
+    </div>
+</div>
+
 @* ================= Stage-2 approval modal (BRD §19) ================= *@
 <div class="pm-modal" id="riskRegApprovalModal" hidden>
     <div class="pm-modal-panel pm-modal-wide">
@@ -2815,7 +2932,7 @@
 <div class="pm-modal" id="regStatusModal" hidden>
     <div class="pm-modal-panel">
         <header>
-            <h2>Change risk status</h2>
+            <h2>Retire risk</h2>
             <button class="pm-modal-close" type="button" data-close-reg-status aria-label="Close">&times;</button>
         </header>
         <form id="regStatusForm">
@@ -2823,25 +2940,23 @@
             <dl class="risk-meta" id="rsMeta"></dl>
             <div class="pm-form-grid">
                 <label class="pm-form-grid-full">
-                    <span>New status<span class="pm-required">*</span></span>
-                    <select id="rsStatus" required>
-                        <option value="Active">Active</option>
-                        <option value="UnderTreatment">Under treatment</option>
-                        <option value="Accepted">Accepted</option>
-                        <option value="Monitoring">Monitoring</option>
-                        <option value="Closed">Closed</option>
-                        <option value="Retired">Retired</option>
+                    <span>New status</span>
+                    @* Change request 2026-09-30: this dialog is "Retire risk"
+                       now -- the status is fixed to Retired and not editable.
+                       Same endpoint (/register/{id}/status) and procedure. *@
+                    <select id="rsStatus" disabled>
+                        <option value="Retired" selected>Retired</option>
                     </select>
                 </label>
                 <label class="pm-form-grid-full">
-                    <span>Reason / remark <span class="pm-hint">(required to close or retire)</span></span>
+                    <span>Reason / remark<span class="pm-required">*</span></span>
                     <textarea id="rsRemark" rows="3" maxlength="4000"></textarea>
                 </label>
             </div>
             <p class="pm-form-message" id="rsMessage" role="status" aria-live="polite"></p>
             <footer class="pm-modal-footer">
                 <button type="button" class="pm-button" data-close-reg-status>Cancel</button>
-                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Apply</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-box-archive"></i> Retire</button>
             </footer>
         </form>
     </div>
@@ -2970,45 +3085,45 @@
 
 <style>
     /* ---- tabs ---- */
-    .risk-tabs { display: flex; gap: 4px; margin: 0 0 12px 0; border-bottom: 1px solid #e2e8f0; }
+    .risk-tabs { display: flex; gap: 4px; margin: 0 0 12px 0; border-bottom: 1px solid var(--border); }
     .risk-tab {
         background: transparent; border: 0; border-bottom: 2px solid transparent;
-        padding: 10px 16px; font-size: 14px; font-weight: 600; color: #718096; cursor: pointer;
+        padding: 10px 16px; font-size: 14px; font-weight: 600; color: var(--fg-muted); cursor: pointer;
     }
-    .risk-tab:hover { color: #2d3748; }
-    .risk-tab.is-active { color: #2b6cb0; border-bottom-color: #2b6cb0; }
+    .risk-tab:hover { color: var(--neutral-700); }
+    .risk-tab.is-active { color: var(--primary-600); border-bottom-color: var(--primary-500); }
 
     /* ---- chips ---- */
-    .risk-status-chip { display: inline-block; padding: 2px 8px; border-radius: 999px;
+    .risk-status-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
         font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .risk-pending    { background: #fefcbf; color: #744210; }
-    .risk-analysing  { background: #bee3f8; color: #2a4365; }
-    .risk-clarify    { background: #feebc8; color: #7b341e; }
+    .risk-pending    { background: var(--warning-50); color: var(--warning-700); }
+    .risk-analysing  { background: var(--primary-100); color: var(--neutral-700); }
+    .risk-clarify    { background: var(--warning-100); color: var(--danger-700); }
     .risk-analysed   { background: #c4f1f9; color: #234e52; }
-    .risk-registered { background: #c6f6d5; color: #22543d; }
-    .risk-accepted   { background: #c6f6d5; color: #22543d; }
-    .risk-rejected   { background: #fed7d7; color: #742a2a; }
+    .risk-registered { background: var(--success-100); color: var(--success-700); }
+    .risk-accepted   { background: var(--success-100); color: var(--success-700); }
+    .risk-rejected   { background: var(--danger-200); color: var(--danger-700); }
     .risk-duplicate  { background: #e9d8fd; color: #44337a; }
-    .risk-withdrawn  { background: #edf2f7; color: #4a5568; }
+    .risk-withdrawn  { background: var(--bg-subtle); color: var(--fg-secondary); }
 
-    .risk-severity-chip { display: inline-block; padding: 2px 8px; border-radius: 4px;
+    .risk-severity-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
         font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .risk-sev-critical { background: #742a2a; color: #fff; }
-    .risk-sev-high     { background: #fed7d7; color: #742a2a; }
-    .risk-sev-medium   { background: #fefcbf; color: #744210; }
-    .risk-sev-low      { background: #c6f6d5; color: #22543d; }
+    .risk-sev-critical { background: var(--danger-700); color: var(--fg-on-dark); }
+    .risk-sev-high     { background: var(--danger-200); color: var(--danger-700); }
+    .risk-sev-medium   { background: var(--warning-50); color: var(--warning-700); }
+    .risk-sev-low      { background: var(--success-100); color: var(--success-700); }
 
-    .risk-source-chip { display: inline-block; padding: 2px 8px; border-radius: 4px;
-        background: #edf2f7; color: #2d3748; font-size: 11px; font-weight: 600; }
+    .risk-source-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
+        background: var(--bg-subtle); color: var(--neutral-700); font-size: 11px; font-weight: 600; }
 
     /* ---- meta / history / trace ---- */
     .risk-meta {
         display: grid; grid-template-columns: 150px 1fr; row-gap: 6px; column-gap: 12px;
-        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md); font-size: 13px;
     }
-    .risk-meta dt { color: #718096; font-weight: 600; margin: 0;
+    .risk-meta dt { color: var(--fg-muted); font-weight: 600; margin: 0;
                     text-transform: uppercase; font-size: 11px; align-self: center; }
-    .risk-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+    .risk-meta dd { margin: 0; color: var(--neutral-700); word-break: break-word; }
 
     /* .risk-meta is a TRACK grid (label column | value column) and so it
        needs dt and dd to be separate grid items — the exact opposite of
@@ -3100,62 +3215,79 @@
         .ac-grid .ac-note textarea { min-height: 84px; }
     }
 
-    .risk-subhead { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
-                    color: #718096; margin: 16px 0 8px; }
+    /* .risk-subhead, .risk-tile(s), .risk-bar(s), .risk-two-col and
+       .risk-grid-4 moved to practice-management.css (section 11b, 414):
+       the module dashboards share them. */
     .risk-history table { width: 100%; font-size: 12px; border-collapse: collapse; }
-    .risk-history th, .risk-history td { padding: 6px 8px; border-bottom: 1px solid #edf2f7; text-align: left; }
-    .risk-history th { color: #718096; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+    .risk-history th, .risk-history td { padding: 6px 8px; border-bottom: 1px solid var(--neutral-100); text-align: left; }
+    .risk-history th { color: var(--fg-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; }
 
     .risk-trace { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
-    .risk-trace-step { padding: 6px 10px; background: #edf2f7; border-radius: 6px; color: #2d3748; }
-    .risk-trace-step a { color: #2b6cb0; text-decoration: none; }
+    .risk-trace-step { padding: 6px 10px; background: var(--bg-subtle); border-radius: var(--radius-md); color: var(--neutral-700); }
+    .risk-trace-step a { color: var(--primary-600); text-decoration: none; }
     .risk-trace-step a:hover { text-decoration: underline; }
-    .risk-trace-arrow { color: #a0aec0; }
+    .risk-trace-arrow { color: var(--fg-subtle); }
 
     /* ---- dashboard (BRD §23) ---- */
     .risk-tab-action { margin-left: auto; align-self: center; }
-    .risk-inline-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #4a5568; }
+    .risk-inline-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg-secondary); }
 
-    .risk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-                  gap: 10px; margin-bottom: 8px; }
-    .risk-tile { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px;
-                 padding: 12px 14px; }
-    .risk-tile .v { font-size: 24px; font-weight: 700; color: #2d3748; line-height: 1.1; }
-    .risk-tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-                    color: #718096; margin-top: 4px; }
-    .risk-tile.is-clickable { cursor: pointer; }
-    .risk-tile.is-clickable:hover { border-color: #2b6cb0; background: #ebf8ff; }
-    .risk-tile.is-alert .v { color: #c53030; }
 
-    .risk-grid-4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-                   gap: 16px; margin-bottom: 8px; }
-    .risk-two-col { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 16px; }
-    @@media (max-width: 900px) { .risk-two-col { grid-template-columns: 1fr; } }
+    /* Heatmaps (413). A grid of divs, same no-dependency rule as the
+       bars: rows = likelihood (highest on top), columns = impact. The
+       cell colour is the matrix cell's own colour_hex. */
+    .risk-heatmaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                     gap: 16px; margin-bottom: 8px; }
 
-    /* A bar chart made of divs. Deliberate: this dashboard must render
-       with no charting dependency, and a labelled proportional bar is
-       what these tiles actually need. */
-    .risk-bars { display: flex; flex-direction: column; gap: 6px; }
-    .risk-bar-row { display: grid; grid-template-columns: 130px 1fr 46px;
-                    align-items: center; gap: 8px; font-size: 12px; }
-    .risk-bar-row .lbl { color: #4a5568; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .risk-bar-row .trk { background: #edf2f7; border-radius: 4px; height: 14px; overflow: hidden; }
-    .risk-bar-row .fil { background: #2b6cb0; height: 100%; border-radius: 4px; }
-    .risk-bar-row .num { text-align: right; color: #2d3748; font-weight: 600; }
-    .risk-bar-row.is-clickable { cursor: pointer; }
-    .risk-bar-row.is-clickable:hover .lbl { color: #2b6cb0; text-decoration: underline; }
+    /* Dashboard rows (2026-10-01): 25% | 25% | 50%. min-width:0 lets a
+       column shrink below its content (a table or heatmap) instead of
+       pushing the row wider than the panel. Inside the 50% column the two
+       heatmaps sit side by side. Below 1200px the 50% block drops under
+       the two 25% blocks; below 900px everything stacks. */
+    .risk-dash-row { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 16px;
+                     align-items: start; margin-bottom: 8px; }
+    .risk-dash-row > * { min-width: 0; }
+    .risk-dash-row .risk-heatmaps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* Row 1's left half holds both tile sets: candidate (4) and register
+       (4 + 1) share one 4-column grid, so the cards line up column by
+       column and with Row 2's 25% blocks below (2 cards = 25%). */
+    .risk-dash-row > .risk-dash-span2 { grid-column: span 2; }
+    .risk-dash-row .risk-tiles-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    @@media (max-width: 1200px) {
+        .risk-dash-row { grid-template-columns: 1fr 1fr; }
+        .risk-dash-row > :last-child { grid-column: 1 / -1; }
+    }
+    @@media (max-width: 900px) {
+        .risk-dash-row { grid-template-columns: 1fr; }
+        .risk-dash-row > .risk-dash-span2 { grid-column: 1 / -1; }
+    }
+    @@media (max-width: 640px) {
+        .risk-dash-row .risk-heatmaps { grid-template-columns: 1fr; }
+        .risk-dash-row .risk-tiles-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .risk-heatmap { display: grid; gap: 3px; font-size: 12px; }
+    .risk-heatmap .hm-axis { color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis;
+                             white-space: nowrap; align-self: center; }
+    .risk-heatmap .hm-axis.col { text-align: center; }
+    .risk-heatmap .hm-cell { min-height: 40px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+                             background: var(--bg-subtle); color: var(--neutral-700);
+                             display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .risk-heatmap .hm-cell.is-empty { font-weight: 400; color: var(--fg-muted); }
+    .risk-heatmap .hm-cell.is-clickable { cursor: pointer; }
+    .risk-heatmap .hm-cell.is-clickable:hover { outline: 2px solid var(--primary-600); outline-offset: -2px; }
+    .risk-heatmap .hm-corner { color: var(--fg-muted); font-size: 11px; align-self: end; }
 
     .risk-check { display: flex; align-items: flex-start; gap: 8px; }
     .risk-check input { margin-top: 3px; }
 
     .risk-rating-preview {
-        padding: 8px 12px; border-radius: 6px; background: #edf2f7; color: #4a5568;
+        padding: 8px 12px; border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--fg-secondary);
         font-weight: 600; font-size: 13px; display: inline-block; min-width: 220px;
     }
-    .risk-rating-preview[data-rating="Critical"] { background: #742a2a; color: #fff; }
-    .risk-rating-preview[data-rating="High"]     { background: #fed7d7; color: #742a2a; }
-    .risk-rating-preview[data-rating="Medium"]   { background: #fefcbf; color: #744210; }
-    .risk-rating-preview[data-rating="Low"]      { background: #c6f6d5; color: #22543d; }
+    .risk-rating-preview[data-rating="Critical"] { background: var(--danger-700); color: var(--fg-on-dark); }
+    .risk-rating-preview[data-rating="High"]     { background: var(--danger-200); color: var(--danger-700); }
+    .risk-rating-preview[data-rating="Medium"]   { background: var(--warning-50); color: var(--warning-700); }
+    .risk-rating-preview[data-rating="Low"]      { background: var(--success-100); color: var(--success-700); }
 
     /* Modal overlay (defensive CSS same as exception + gap-detail so
        pm-modal renders as a proper popup regardless of global stylesheet). */
@@ -3171,8 +3303,13 @@
            The .pm-modal-close override below is kept deliberately:
            the global rule is a bordered button, this is a glyph. */
         .pm-modal-close { background: transparent; border: 0; padding: 0;
-        font-size: 26px; line-height: 1; cursor: pointer; color: #718096; }
-    .pm-modal-close:hover { color: #e53e3e; }
+        font-size: 26px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+
+    /* Existing Controls row popup (410): opened from a row far down the
+       Treatment page, so it sits lower than the shared .pm-modal's 40px,
+       clear of the top bar. */
+    #riskMapPracticeDetailModal { padding-top: 96px; }
 
     /* ==================================================================
        `pm-form-grid-full` — an alias, and why it is needed.
@@ -3372,13 +3509,13 @@
     .risk-page .pm-detail-grid .pm-detail-span { grid-column: 1 / -1; }
     .risk-page .pm-detail-grid dt {
         font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--grac-muted, #758095); margin: 0 0 3px;
+        color: var(--fg-muted); margin: 0 0 3px;
     }
     /* margin:0 — the grid gap owns the spacing now. A bottom margin here
        would add to the gap and only under the last row of each column,
        which is what made the old list look ragged. */
     .risk-page .pm-detail-grid dd {
-        margin: 0; font-size: 13px; color: var(--grac-ink, #172033);
+        margin: 0; font-size: 13px; color: var(--fg-default);
         overflow-wrap: anywhere; line-height: 1.45;
     }
 
@@ -3386,7 +3523,7 @@
        chip in a modal, so it fills its cell. */
     .risk-page .risk-rating-preview { display: block; width: 100%; min-width: 0; }
     .risk-page .form-field > span {
-        color: #536077; display: block; font-size: 13px; font-weight: 650; margin-bottom: 6px;
+        color: var(--fg-secondary); display: block; font-size: 13px; font-weight: 650; margin-bottom: 6px;
     }
 
     @* The 220px cap this rule used to lift is gone: the mapped practices
@@ -3407,9 +3544,9 @@
         position: sticky; bottom: 0; z-index: 5;
         display: flex; align-items: center; justify-content: space-between;
         gap: 14px; flex-wrap: wrap;
-        background: #fff;
-        border: 1px solid var(--grac-line, #e2e7f0);
-        border-radius: 8px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
         box-shadow: 0 -2px 10px rgba(37, 52, 90, 0.06);
         padding: 12px 14px;
     }
@@ -3443,30 +3580,30 @@
         padding: 0;
     }
     .risk-flow-step {
-        background: #fff;
-        border: 1px solid var(--grac-line, #e2e7f0);
-        border-radius: 8px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
         padding: 10px 12px;
         min-width: 0;
     }
     /* The step the page is FOR. Nothing else on the rail competes with it. */
-    .risk-flow-step.is-current { border-color: #90cdf4; box-shadow: 0 0 0 2px #ebf8ff inset; }
+    .risk-flow-step.is-current { border-color: var(--primary-200); box-shadow: 0 0 0 2px var(--focus-ring) inset; }
     /* Treatment that is not finished. Same amber the gate uses, so the
        two say the same thing in the same colour. */
-    .risk-flow-step.is-warn    { border-color: #fbd38d; background: #fffaf0; }
+    .risk-flow-step.is-warn    { border-color: var(--warning-200); background: var(--warning-50); }
     .risk-flow-step .n {
-        align-items: center; background: #edf2f7; border-radius: 999px;
-        color: #4a5568; display: inline-flex; font-size: 10px; font-weight: 750;
+        align-items: center; background: var(--bg-subtle); border-radius: var(--radius-pill);
+        color: var(--fg-secondary); display: inline-flex; font-size: 10px; font-weight: 750;
         height: 16px; justify-content: center; margin-right: 6px; width: 16px;
     }
     .risk-flow-step .k {
-        color: #718096; font-size: 11px; font-weight: 700;
+        color: var(--fg-muted); font-size: 11px; font-weight: 700;
         letter-spacing: .04em; text-transform: uppercase;
     }
     .risk-flow-step .v { font-size: 13px; margin-top: 6px; }
-    .risk-flow-step .s { color: var(--grac-muted, #758095); font-size: 11px; margin-top: 4px; }
+    .risk-flow-step .s { color: var(--fg-muted); font-size: 11px; margin-top: 4px; }
     .risk-flow-arrow {
-        align-items: center; color: #a0aec0; display: flex;
+        align-items: center; color: var(--fg-subtle); display: flex;
         font-size: 14px; padding: 0 10px;
     }
 
@@ -3477,29 +3614,29 @@
        word. Deliberately NOT a colour difference: the chips inside the
        steps already carry severity colour and a second colour system on
        top of them would fight it. */
-    .rd-step.is-pending { background: #fbfcfe; border-style: dashed; }
+    .rd-step.is-pending { background: var(--neutral-50); border-style: dashed; }
     .rd-step.is-pending .v, .rd-step.is-pending .s { opacity: .7; }
-    .rd-step.is-done .n { background: #c6f6d5; color: #22543d; }
+    .rd-step.is-done .n { background: var(--success-100); color: var(--success-700); }
 
     .rd-body { display: flex; flex-direction: column; gap: 14px; }
 
     /* A section with nothing to show yet. It says what has to happen
        first — an empty panel reads as a broken feature. */
     .rd-na {
-        align-items: center; background: #f9fafb; border: 1px dashed var(--grac-line, #e2e7f0);
-        border-radius: 8px; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 16px;
+        align-items: center; background: var(--neutral-50); border: 1px dashed var(--border);
+        border-radius: var(--radius-md); display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 16px;
     }
     .rd-na-tag {
-        background: #edf2f7; border-radius: 999px; color: #718096; font-size: 10px;
+        background: var(--bg-subtle); border-radius: var(--radius-pill); color: var(--fg-muted); font-size: 10px;
         font-weight: 700; letter-spacing: .05em; padding: 3px 9px; text-transform: uppercase;
         white-space: nowrap;
     }
-    .rd-na p { color: #718096; font-size: 12px; margin: 0; }
-    .rd-na strong { color: #4a5568; }
+    .rd-na p { color: var(--fg-muted); font-size: 12px; margin: 0; }
+    .rd-na strong { color: var(--fg-secondary); }
 
     /* Where a required field has no value. Muted, so a page of real
        values is not shouted at by its gaps. */
-    .rd-none { color: #a0aec0; font-style: italic; }
+    .rd-none { color: var(--fg-subtle); font-style: italic; }
 
     /* ---- Print --------------------------------------------------------
        The page is a record of one risk, so printing it should produce
@@ -3510,9 +3647,9 @@
     @@media print {
         .main-sidebar, .main-header, .main-footer, .pm-breadcrumb,
         .risk-tabs, .ra-head-actions, .pm-action-trigger { display: none !important; }
-        .content-wrapper, body { background: #fff !important; margin: 0 !important; }
+        .content-wrapper, body { background: var(--bg-surface) !important; margin: 0 !important; }
         #riskDetailPageView .pm-panel {
-            border: 1px solid #cbd5e0 !important; box-shadow: none !important;
+            border: 1px solid var(--border-strong) !important; box-shadow: none !important;
             break-inside: avoid; page-break-inside: avoid;
         }
         #riskDetailPageView .rmp-card,
@@ -3560,8 +3697,8 @@
        an extra item is exactly what broke the row. Borders, not an icon
        font, so it cannot depend on which Font Awesome build is loaded. */
     .risk-page .risk-flow-4 .risk-flow-step:not(:last-child)::after {
-        border-right: 1.5px solid #cbd5e0;
-        border-top: 1.5px solid #cbd5e0;
+        border-right: 1.5px solid var(--border-strong);
+        border-top: 1.5px solid var(--border-strong);
         content: "";
         height: 6px; width: 6px;
         margin-top: -4px;
@@ -3602,6 +3739,35 @@
     @@media (max-width: 640px) {
         #riskDetailPageView .pm-detail-grid { grid-template-columns: minmax(0, 1fr); }
     }
+    /* Risk context (#rdContext) -- change request 2026-09-26:
+       Row 1 Risk ID/Source/Owner/Record status/Registered, Row 2 Title/
+       Category, then Statement, Threat and Vulnerability each on its
+       own full-width row (.pm-detail-span, set in risk-centre.js)
+       because they carry long text. FIVE columns kept down to 1100px
+       so row 1 stays on one line, then two, then one. .rd-row-start
+       pins Title to column 1 so row 2 always starts on a new line. Long values wrap (.pm-detail-item
+       min-width:0, dd overflow-wrap:anywhere). Traceability sits outside
+       this <dl> and is unaffected. */
+    #riskDetailPageView #rdContext { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    /* Risk Analysis page's Risk context (#raMeta) -- same request, same
+       shape: Row 1 Risk ID/Owner/Source/Current inherent/Current
+       residual in five columns, then Statement, Threat and Vulnerability
+       one full-width row each (.pm-detail-span). Collapses with the
+       #rdContext rules below. */
+    #riskAnalysisPageView #raMeta { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    /* Treatment page Risk context -- same layout as #raMeta (2026-09-27). */
+    #riskTreatmentPageView #twMeta { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    #riskDetailPageView #rdContext .rd-row-start { grid-column-start: 1; }
+    @@media (max-width: 1100px) {
+        #riskDetailPageView #rdContext { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        #riskAnalysisPageView #raMeta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        #riskTreatmentPageView #twMeta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 640px) {
+        #riskDetailPageView #rdContext { grid-template-columns: minmax(0, 1fr); }
+        #riskAnalysisPageView #raMeta { grid-template-columns: minmax(0, 1fr); }
+        #riskTreatmentPageView #twMeta { grid-template-columns: minmax(0, 1fr); }
+    }
 
     /* The step number on each section heading, tying the panels below to
        the rail above. */
@@ -3613,8 +3779,8 @@
     .risk-page .ra-step { scroll-margin-top: 12px; }
 
     .ra-step-badge {
-        align-items: center; background: #2b6cb0; border-radius: 999px;
-        color: #fff; display: inline-flex; font-size: 11px; font-weight: 750;
+        align-items: center; background: var(--primary-500); border-radius: var(--radius-pill);
+        color: var(--fg-on-dark); display: inline-flex; font-size: 11px; font-weight: 750;
         height: 18px; justify-content: center; margin-right: 7px; width: 18px;
     }
     /* A heading with an action on its right (step 2's link to the
@@ -3625,8 +3791,8 @@
     .risk-page .ra-heading-row > div { min-width: 0; }
 
     /* Inherent -> residual, in words, under the rating preview. */
-    .risk-delta { font-size: 13px; font-weight: 650; color: #2d3748; padding: 4px 0; }
-    .risk-delta .arrow { color: #a0aec0; margin: 0 6px; }
+    .risk-delta { font-size: 13px; font-weight: 650; color: var(--neutral-700); padding: 4px 0; }
+    .risk-delta .arrow { color: var(--fg-subtle); margin: 0 6px; }
 
     /* Step 2 is a read-only lens on Task Center's data. Its table is the
        Treatment page's, minus the actions column. */
@@ -3653,15 +3819,15 @@
        scanned rather than read. */
     .risk-stage-chip { display: inline-block; padding: 2px 8px; border-radius: 10px;
                        font-size: 11px; font-weight: 600; white-space: nowrap;
-                       background: #edf2f7; color: #4a5568; }
+                       background: var(--bg-subtle); color: var(--fg-secondary); }
     .risk-stage-chip[data-stage="AnalysisDue"],
     .risk-stage-chip[data-stage="TreatmentDue"],
     .risk-stage-chip[data-stage="ResidualDue"],
-    .risk-stage-chip[data-stage="AcceptanceDue"] { background: #fefcbf; color: #744210; }
-    .risk-stage-chip[data-stage="ReviewDue"]     { background: #fed7d7; color: #742a2a; }
-    .risk-stage-chip[data-stage="InTreatment"]   { background: #bee3f8; color: #2a4365; }
-    .risk-stage-chip[data-stage="Accepted"]      { background: #c6f6d5; color: #22543d; }
-    .risk-stage-chip[data-stage="Closed"]        { background: #e2e8f0; color: #718096; }
+    .risk-stage-chip[data-stage="AcceptanceDue"] { background: var(--warning-50); color: var(--warning-700); }
+    .risk-stage-chip[data-stage="ReviewDue"]     { background: var(--danger-200); color: var(--danger-700); }
+    .risk-stage-chip[data-stage="InTreatment"]   { background: var(--primary-100); color: var(--neutral-700); }
+    .risk-stage-chip[data-stage="Accepted"]      { background: var(--success-100); color: var(--success-700); }
+    .risk-stage-chip[data-stage="Closed"]        { background: var(--neutral-200); color: var(--fg-muted); }
 
     /* ---- Treatment option picker ------------------------------------
        Radio cards rather than a <select>. Four options whose
@@ -3672,13 +3838,13 @@
                           gap: 8px; margin: 8px 0 4px; }
     .risk-treat-opt { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px;
                       align-items: start; padding: 10px 12px; cursor: pointer;
-                      border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-    .risk-treat-opt:hover { border-color: #2b6cb0; background: #ebf8ff; }
+                      border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface); }
+    .risk-treat-opt:hover { border-color: var(--primary-600); background: var(--primary-50); }
     .risk-treat-opt input { margin-top: 2px; }
-    .risk-treat-opt .t { font-weight: 600; font-size: 13px; color: #2d3748; }
-    .risk-treat-opt .d { grid-column: 2; font-size: 11px; color: #718096; line-height: 1.35; }
-    .risk-treat-opt:has(input:checked) { border-color: #2b6cb0; background: #ebf8ff;
-                                         box-shadow: inset 0 0 0 1px #2b6cb0; }
+    .risk-treat-opt .t { font-weight: 600; font-size: 13px; color: var(--neutral-700); }
+    .risk-treat-opt .d { grid-column: 2; font-size: 11px; color: var(--fg-muted); line-height: 1.35; }
+    .risk-treat-opt:has(input:checked) { border-color: var(--primary-500); background: var(--primary-50);
+                                         box-shadow: inset 0 0 0 1px var(--primary-600); }
 
     /* ---- Scope panel (practices + assets) ---------------------------
        Two columns on desktop because practices and assets are read
@@ -3706,9 +3872,9 @@
        of its own above Existing Controls, and a top border on the first
        thing in a panel is a stray rule under the heading, not a
        divider between two subjects. */
-    .risk-scope-block + .risk-scope-deps { border-top: 1px solid #e2e8f0; padding-top: 22px; }
+    .risk-scope-block + .risk-scope-deps { border-top: 1px solid var(--border); padding-top: 22px; }
     .risk-scope h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase;
-                     letter-spacing: .04em; color: #718096; }
+                     letter-spacing: .04em; color: var(--fg-muted); }
     /* Section title and its one action share a line, so the action does
        not cost a row of vertical space of its own. */
     .risk-scope-head { display: flex; align-items: center; justify-content: space-between;
@@ -3745,7 +3911,10 @@
        min-width:0 on every cell is what stops a long asset or category
        name widening its flex item and pushing the row past the table —
        the usual flexbox overflow trap. */
-    .risk-asset-row { display: flex; gap: 8px; align-items: flex-end; width: 100%; }
+    /* 2026-09-28: the filter / picker text names each control ("All Asset
+       Category", "All Department", ...), so there is no label above them
+       and the row centres on the one 40px line. */
+    .risk-asset-row { display: flex; gap: 8px; align-items: center; width: 100%; }
     .risk-asset-filter { flex: 1 1 0; min-width: 0; }
     .risk-asset-picker { flex: 2 1 0; min-width: 0; }
     .risk-asset-row .pm-hint { display: block; margin: 0 0 2px; }
@@ -3775,54 +3944,54 @@
     .rmp-list { display: flex; flex-direction: column; gap: 12px; }
 
     .rmp-card {
-        border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;
+        border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface);
         padding: 14px 16px; transition: border-color .12s ease;
     }
-    .rmp-card:hover { border-color: #cbd5e0; }
+    .rmp-card:hover { border-color: var(--border-strong); }
 
     .rmp-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
     .rmp-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
     .rmp-title h5 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.35;
-                    color: var(--grac-ink, #172033); overflow-wrap: anywhere; }
+                    color: var(--fg-default); overflow-wrap: anywhere; }
 
     /* Lighter than the old row button: an unmap is destructive and rare,
        so it should be findable, not prominent. Colour arrives on hover. */
-    .rmp-remove { background: transparent; border: 0; cursor: pointer; color: #cbd5e0;
-                  font-size: 13px; line-height: 1; padding: 5px 7px; border-radius: 6px;
+    .rmp-remove { background: transparent; border: 0; cursor: pointer; color: var(--neutral-300);
+                  font-size: 13px; line-height: 1; padding: 5px 7px; border-radius: var(--radius-md);
                   flex: 0 0 auto; }
-    .rmp-remove:hover { color: #e53e3e; background: #fff5f5; }
-    .rmp-remove[disabled] { color: #edf2f7; cursor: not-allowed; }
-    .rmp-remove[disabled]:hover { color: #edf2f7; background: transparent; }
+    .rmp-remove:hover { color: var(--danger-700); background: var(--danger-50); }
+    .rmp-remove[disabled] { color: var(--neutral-100); cursor: not-allowed; }
+    .rmp-remove[disabled]:hover { color: var(--neutral-100); background: transparent; }
 
     /* Named facts instead of an undecoded breadcrumb. auto-fit so they
        use the block's width and wrap as a set rather than one per line. */
     .rmp-facts {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 10px 20px; margin: 12px 0 0; padding: 12px 0 0;
-        border-top: 1px dashed #edf1f6;
+        border-top: 1px dashed var(--neutral-100);
     }
     .rmp-fact { min-width: 0; }
     .rmp-facts dt { margin: 0 0 2px; font-size: 10px; font-weight: 600;
-                    text-transform: uppercase; letter-spacing: .05em; color: #a0aec0; }
+                    text-transform: uppercase; letter-spacing: .05em; color: var(--fg-subtle); }
     .rmp-facts dd { margin: 0; font-size: 12px; line-height: 1.45;
-                    color: #2d3748; overflow-wrap: anywhere; }
+                    color: var(--neutral-700); overflow-wrap: anywhere; }
 
     /* Tasks: inset, shaded, one step smaller. */
-    .rmp-tasks { margin-top: 12px; padding: 9px 11px; border-radius: 6px;
-                 background: #f8fafc; border: 1px solid #eef2f7; }
+    .rmp-tasks { margin-top: 12px; padding: 9px 11px; border-radius: var(--radius-md);
+                 background: var(--neutral-50); border: 1px solid var(--neutral-100); }
     .rmp-tasks-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
                        font-size: 10px; font-weight: 600; text-transform: uppercase;
-                       letter-spacing: .05em; color: #a0aec0; }
+                       letter-spacing: .05em; color: var(--fg-subtle); }
     .rmp-task-table { width: 100%; border-collapse: collapse; font-size: 12px; }
     .rmp-task-table th { padding: 0 8px 5px; text-align: left; font-size: 10px;
                          font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-                         color: #a0aec0; }
-    .rmp-task-table td { padding: 6px 8px; color: #2d3748; vertical-align: middle;
-                         border-top: 1px solid #e8eef5; overflow-wrap: anywhere; }
+                         color: var(--fg-subtle); }
+    .rmp-task-table td { padding: 6px 8px; color: var(--neutral-700); vertical-align: middle;
+                         border-top: 1px solid var(--border); overflow-wrap: anywhere; }
     .rmp-task-table th:first-child, .rmp-task-table td:first-child { padding-left: 0; }
     .rmp-task-table th:last-child,  .rmp-task-table td:last-child  { padding-right: 0; }
-    .rmp-dash { color: #cbd5e0; }
-    .rmp-no-tasks { margin: 0; font-size: 11px; font-style: italic; color: #a0aec0; }
+    .rmp-dash { color: var(--neutral-300); }
+    .rmp-no-tasks { margin: 0; font-size: 11px; font-style: italic; color: var(--fg-subtle); }
 
     /* ---- The practice's own dependencies, read-only ------------------
        Same inset treatment as .rmp-tasks, so both read as subordinate to
@@ -3831,21 +4000,21 @@
        to them here -- the practice owns them and unmapping the practice
        is what removes them. No pointer cursor, no hover state, nothing
        that would suggest otherwise. */
-    .rmp-deps { margin-top: 12px; padding: 9px 11px; border-radius: 6px;
-                background: #f8fafc; border: 1px solid #eef2f7; }
+    .rmp-deps { margin-top: 12px; padding: 9px 11px; border-radius: var(--radius-md);
+                background: var(--neutral-50); border: 1px solid var(--neutral-100); }
     .rmp-deps-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
                       font-size: 10px; font-weight: 600; text-transform: uppercase;
-                      letter-spacing: .05em; color: #a0aec0; }
+                      letter-spacing: .05em; color: var(--fg-subtle); }
     .rmp-dep-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
                       gap: 8px 18px; margin: 0; }
     .rmp-dep-group { min-width: 0; }
     .rmp-dep-groups dt { margin: 0 0 3px; font-size: 10px; font-weight: 600;
-                         text-transform: uppercase; letter-spacing: .04em; color: #a0aec0; }
+                         text-transform: uppercase; letter-spacing: .04em; color: var(--fg-subtle); }
     .rmp-dep-groups dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; }
     .rmp-dep-chip { display: inline-block; padding: 2px 8px; border-radius: 10px;
-                    background: #edf2f7; border: 1px solid #e2e8f0; color: #2d3748;
+                    background: var(--bg-subtle); border: 1px solid var(--border); color: var(--neutral-700);
                     font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-    .rmp-no-deps { margin: 0; font-size: 11px; font-style: italic; color: #a0aec0; }
+    .rmp-no-deps { margin: 0; font-size: 11px; font-style: italic; color: var(--fg-subtle); }
 
     /* The read-only Impact Details cell: chips, wrapping, in the box the
        picker would have occupied. Same chip as the practice cards, so
@@ -3853,8 +4022,8 @@
     .risk-dep-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0; }
 
     /* Count pill beside a section or group title. */
-    .rmp-count { display: inline-block; min-width: 20px; padding: 1px 7px; border-radius: 9px;
-                 background: #edf2f7; color: #4a5568; font-size: 11px; font-weight: 650;
+    .rmp-count { display: inline-block; min-width: 20px; padding: 1px 7px; border-radius: var(--radius-md);
+                 background: var(--bg-subtle); color: var(--fg-secondary); font-size: 11px; font-weight: 650;
                  text-align: center; letter-spacing: 0; }
     .rmp-count.sm { min-width: 16px; padding: 0 5px; font-size: 10px; }
 
@@ -3866,57 +4035,57 @@
        combination is exactly the one that survives unmapping a
        practice, so it must be visible rather than collapsed into one of
        the other two. */
-    .risk-src-badge { display: inline-block; padding: 1px 6px; border-radius: 8px;
+    .risk-src-badge { display: inline-block; padding: 1px 6px; border-radius: var(--radius-md);
                       font-size: 10px; font-weight: 600; letter-spacing: .02em;
                       text-transform: uppercase; }
-    .risk-src-badge[data-src="Primary"]            { background: #bee3f8; color: #2a4365; }
+    .risk-src-badge[data-src="Primary"]            { background: var(--primary-100); color: var(--neutral-700); }
     .risk-src-badge[data-src="Additional"]         { background: #e9d8fd; color: #44337a; }
-    .risk-src-badge[data-src="Direct"]             { background: #c6f6d5; color: #22543d; }
-    .risk-src-badge[data-src="DirectAndInherited"] { background: #feebc8; color: #7b341e; }
+    .risk-src-badge[data-src="Direct"]             { background: var(--success-100); color: var(--success-700); }
+    .risk-src-badge[data-src="DirectAndInherited"] { background: var(--warning-100); color: var(--danger-700); }
 
     /* ---- Gate notice -------------------------------------------------
        A disabled button that cannot say why is a dead end. Every gate in
        this flow returns its own reason text, and this is where it goes. */
-    .risk-gate { padding: 10px 12px; border-radius: 6px; font-size: 12px;
-                 background: #ebf8ff; border: 1px solid #bee3f8; color: #2a4365;
+    .risk-gate { padding: 10px 12px; border-radius: var(--radius-md); font-size: 12px;
+                 background: var(--primary-50); border: 1px solid var(--primary-100); color: var(--neutral-700);
                  margin-bottom: 10px; }
-    .risk-gate.is-blocked { background: #fffaf0; border-color: #fbd38d; color: #7b341e; }
-    .risk-gate.is-ready   { background: #f0fff4; border-color: #9ae6b4; color: #22543d; }
+    .risk-gate.is-blocked { background: var(--warning-50); border-color: var(--warning-200); color: var(--danger-700); }
+    .risk-gate.is-ready   { background: var(--success-50); border-color: var(--success-200); color: var(--success-700); }
 
     /* ---- Risk calendar ----------------------------------------------
        A month grid, borrowing practice-calendar.css's proportions so the
        two calendars in the product feel like one idea. Deliberately not
        a week or day view: a review date has no time component, so hours
        would be a grid of empty cells. */
-    .risk-cal-title { font-weight: 600; color: #2d3748; min-width: 160px; text-align: center; }
-    .risk-cal { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
+    .risk-cal-title { font-weight: 600; color: var(--neutral-700); min-width: 160px; text-align: center; }
+    .risk-cal { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 14px; }
     .risk-cal-head, .risk-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
     .risk-cal-head > div { padding: 6px 8px; font-size: 11px; font-weight: 600;
                            text-transform: uppercase; letter-spacing: .04em;
-                           color: #718096; background: #f7fafc; border-bottom: 1px solid #e2e8f0; }
-    .risk-cal-cell { min-height: 92px; padding: 4px 6px; border-right: 1px solid #edf2f7;
-                     border-bottom: 1px solid #edf2f7; background: #fff; }
+                           color: var(--fg-muted); background: var(--neutral-50); border-bottom: 1px solid var(--border); }
+    .risk-cal-cell { min-height: 92px; padding: 4px 6px; border-right: 1px solid var(--neutral-100);
+                     border-bottom: 1px solid var(--neutral-100); background: var(--bg-surface); }
     .risk-cal-cell:nth-child(7n) { border-right: 0; }
-    .risk-cal-cell.is-outside { background: #fafafa; }
-    .risk-cal-cell.is-outside .d { color: #cbd5e0; }
-    .risk-cal-cell.is-today { background: #ebf8ff; }
-    .risk-cal-cell .d { font-size: 11px; font-weight: 600; color: #4a5568; }
-    .risk-cal-cell.is-today .d { color: #2b6cb0; }
+    .risk-cal-cell.is-outside { background: var(--neutral-50); }
+    .risk-cal-cell.is-outside .d { color: var(--neutral-300); }
+    .risk-cal-cell.is-today { background: var(--primary-50); }
+    .risk-cal-cell .d { font-size: 11px; font-weight: 600; color: var(--fg-secondary); }
+    .risk-cal-cell.is-today .d { color: var(--primary-600); }
     .risk-cal-ev { display: block; width: 100%; text-align: left; margin-top: 3px;
-                   padding: 2px 5px; border: 0; border-radius: 4px; cursor: pointer;
+                   padding: 2px 5px; border: 0; border-radius: var(--radius-sm); cursor: pointer;
                    font-size: 10px; line-height: 1.3; overflow: hidden;
                    text-overflow: ellipsis; white-space: nowrap;
-                   background: #edf2f7; color: #2d3748; }
+                   background: var(--bg-subtle); color: var(--neutral-700); }
     .risk-cal-ev:hover { filter: brightness(0.95); }
-    .risk-cal-ev[data-rating="Critical"] { background: #742a2a; color: #fff; }
-    .risk-cal-ev[data-rating="High"]     { background: #fed7d7; color: #742a2a; }
-    .risk-cal-ev[data-rating="Medium"]   { background: #fefcbf; color: #744210; }
-    .risk-cal-ev[data-rating="Low"]      { background: #c6f6d5; color: #22543d; }
-    .risk-cal-ev.is-overdue { box-shadow: inset 2px 0 0 #c53030; font-weight: 700; }
-    .risk-cal-more { font-size: 10px; color: #718096; margin-top: 2px; }
+    .risk-cal-ev[data-rating="Critical"] { background: var(--danger-700); color: var(--fg-on-dark); }
+    .risk-cal-ev[data-rating="High"]     { background: var(--danger-200); color: var(--danger-700); }
+    .risk-cal-ev[data-rating="Medium"]   { background: var(--warning-50); color: var(--warning-700); }
+    .risk-cal-ev[data-rating="Low"]      { background: var(--success-100); color: var(--success-700); }
+    .risk-cal-ev.is-overdue { box-shadow: inset 2px 0 0 var(--danger-700); font-weight: 700; }
+    .risk-cal-more { font-size: 10px; color: var(--fg-muted); margin-top: 2px; }
 
-    .risk-overdue { color: #c53030; font-weight: 600; }
-    .risk-duetoday { color: #b7791f; font-weight: 600; }
+    .risk-overdue { color: var(--danger-700); font-weight: 600; }
+    .risk-duetoday { color: var(--warning-600); font-weight: 600; }
 
     /* ---- Treatment task hierarchy -----------------------------------
        Parent tasks own the commitment; sub tasks distribute the work.
@@ -3934,9 +4103,9 @@
        off the parent instead of four separately-shifted rows. */
     .tw-toggle {
         background: none; border: 0; cursor: pointer; padding: 0 6px 0 0;
-        color: #4a5568; font-size: 11px; line-height: 1;
+        color: var(--fg-secondary); font-size: 11px; line-height: 1;
     }
-    .tw-toggle:hover { color: #2b6cb0; }
+    .tw-toggle:hover { color: var(--primary-600); }
     .tw-toggle i { transition: transform .12s ease; display: inline-block; }
     .tw-toggle[aria-expanded="true"] i { transform: rotate(90deg); }
 
@@ -3944,14 +4113,14 @@
        has a toggle -- otherwise the column looks ragged. */
     .tw-toggle-spacer { display: inline-block; width: 17px; }
 
-    .risk-page tr.tw-parent.is-open > td { background: #f7fafc; }
+    .risk-page tr.tw-parent.is-open > td { background: var(--neutral-50); }
 
-    .risk-page tr.tw-sub > td { background: #fbfdff; }
+    .risk-page tr.tw-sub > td { background: var(--bg-surface); }
     .risk-page tr.tw-sub > td:first-child {
         padding-left: 26px;
-        box-shadow: inset 3px 0 0 #bee3f8;
+        box-shadow: inset 3px 0 0 var(--primary-100);
     }
-    .risk-page tr.tw-sub .tw-sub-mark { color: #90cdf4; margin-right: 4px; }
+    .risk-page tr.tw-sub .tw-sub-mark { color: var(--primary-200); margin-right: 4px; }
 
     /* Compact: the hierarchy adds rows, so each row gives some back.
        Only the treatment table -- the register grids are untouched. */
@@ -3961,7 +4130,7 @@
     /* A child whose parent is not in this list (raised against a legacy
        candidate, say) has no toggle to reveal it, so it is never hidden
        and says why it is standing on its own. */
-    .risk-page tr.tw-orphan > td:first-child { box-shadow: inset 3px 0 0 #fbd38d; }
+    .risk-page tr.tw-orphan > td:first-child { box-shadow: inset 3px 0 0 var(--warning-200); }
 
 </style>
 
@@ -3975,21 +4144,39 @@
 <div class="pm-modal" id="riskMapPracticeModal" hidden>
     <div class="pm-modal-panel pm-modal-wide">
         <header>
-            <h2>Map a practice</h2>
+            <h2>Map a practice instance</h2>
             <button class="pm-modal-close" type="button" data-close-map-practice aria-label="Close">&times;</button>
         </header>
         <p class="pm-hint">
-            Choose the framework, then narrow down to the practice. Each list loads only
-            what sits under the selection above it, so a large practice set is never
-            fetched in one go. Practices already mapped to this risk are not offered.
+            Choose the framework, then narrow down to the practice and its instance (387). Each
+            list loads only what sits under the selection above it, so a large practice set is
+            never fetched in one go. Instances already mapped to this risk are shown disabled.
+            Tasks raised from the gaps of a mapped instance appear under Treatment tasks.
         </p>
         <div id="riskMapPickerHost"></div>
         <p class="pm-form-message" id="riskMapPickerMessage" role="status" aria-live="polite"></p>
         <footer class="pm-modal-footer">
             <button type="button" class="pm-button" data-close-map-practice>Cancel</button>
             <button type="button" class="pm-button primary" id="riskMapPickerConfirm">
-                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice
+                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice instance
             </button>
+        </footer>
+    </div>
+</div>
+
+@* Existing Controls row popup (410). The Treatment page lists mapped
+   practice instances as a grid; a row click shows that instance's full
+   card here -- the same practiceItem() markup the card list uses, so the
+   facts, dependencies, tasks and unmap control are unchanged. *@
+<div class="pm-modal" id="riskMapPracticeDetailModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="riskMapPracticeDetailTitle">Practice instance</h2>
+            <button class="pm-modal-close" type="button" data-close-map-practice-detail aria-label="Close">&times;</button>
+        </header>
+        <div id="riskMapPracticeDetailBody" class="risk-map-host"></div>
+        <footer class="pm-modal-footer">
+            <button type="button" class="pm-button" data-close-map-practice-detail>Close</button>
         </footer>
     </div>
 </div>

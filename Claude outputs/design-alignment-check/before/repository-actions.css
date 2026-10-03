@@ -1,0 +1,389 @@
+.row-actions {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.action-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #536077;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.action-menu-trigger:hover,
+.action-menu-trigger[aria-expanded="true"] {
+  border-color: #d5dce7;
+  background: #f7f9fc;
+  color: #2465ca;
+}
+
+.action-menu-trigger i,
+.action-menu-trigger i::before {
+  display: inline-block !important;
+  color: currentColor !important;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.action-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  min-width: 145px;
+  padding: 5px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 10px 25px #17203322;
+}
+
+.action-menu-item {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #344054;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.action-menu-item:hover {
+  background: #f2f6fc;
+}
+
+.action-menu-item i {
+  width: 13px;
+  color: #667085;
+}
+
+.action-menu-item.danger,
+.action-menu-item.danger i {
+  color: #a92828;
+}
+
+.drill-down-row {
+  cursor: pointer;
+}
+
+.drill-down-row:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td {
+  background: var(--grac-row-hover-bg, #eaf4ff);
+  color: var(--grac-row-hover-text, inherit);
+}
+
+.drill-down-row:focus {
+  outline: 2px solid #2465ca;
+  outline-offset: -2px;
+}
+
+.page-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.toolbar-icon-button {
+  display: grid;
+  flex: 0 0 40px;
+  place-items: center;
+  width: 40px;
+  padding: 0;
+}
+
+.checkbox-combo {
+  position: relative;
+  margin-top: 6px;
+}
+
+.checkbox-combo-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 41px;
+  padding: 9px 10px;
+  border: 1px solid #d5dce7;
+  border-radius: 7px;
+  background: white;
+  color: #344054;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.checkbox-combo-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkbox-combo-trigger i {
+  color: #667085;
+  font-size: 11px;
+}
+
+.checkbox-combo-menu {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  max-height: 190px;
+  overflow: hidden;
+  padding: 5px;
+  border: 1px solid #dfe5ee;
+  border-radius: 7px;
+  background: white;
+  box-shadow: 0 10px 25px #17203322;
+}
+
+.checkbox-combo.open .checkbox-combo-menu {
+  display: grid;
+  gap: 4px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.checkbox-combo-search {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 7px 8px;
+  border: 1px solid #d5dce7;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.checkbox-combo-options {
+  max-height: 145px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.checkbox-combo-option {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 7px;
+  border-radius: 5px;
+  color: #344054;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.checkbox-combo-option:hover {
+  background: #f2f6fc;
+}
+
+.checkbox-combo-option input {
+  margin: 0;
+}
+
+.checkbox-combo-empty {
+  color: #98a2b3;
+  display: block;
+  font-size: 12px;
+  padding: 8px;
+}
+
+/* Tree-grid rows (matches Control Management repository tree tables). */
+.tree-grid-wrap {
+  overflow-x: auto;
+  padding: 2px;
+  border-radius: 10px;
+  background: #f6f8fb;
+}
+
+.tree-grid-wrap table {
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  font-size: 12px;
+}
+
+.tree-grid-wrap th {
+  padding: 7px 9px;
+  border-bottom: 0;
+  background: transparent;
+  color: #667085;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.tree-row {
+  position: relative;
+  transition: transform .15s ease, var(--grac-row-hover-transition, background-color .16s ease, box-shadow .16s ease);
+}
+
+.tree-row td {
+  padding: 7px 9px;
+  border-top: 1px solid #e6ecf5;
+  border-bottom: 1px solid #e6ecf5;
+  background: #fff;
+  color: #344054;
+  line-height: 1.25;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.tree-row td:first-child {
+  border-left: 1px solid #e6ecf5;
+  border-radius: 9px 0 0 9px;
+}
+
+.tree-row td:last-child {
+  border-right: 1px solid #e6ecf5;
+  border-radius: 0 9px 9px 0;
+  width: 52px;
+  text-align: center;
+}
+
+.tree-row:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td {
+  background: var(--grac-row-hover-bg, #eaf4ff);
+  color: var(--grac-row-hover-text, inherit);
+  box-shadow: none;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 145px;
+  padding-left: calc(var(--tree-depth, 0) * 18px);
+}
+
+.tree-toggle,
+.tree-toggle-spacer {
+  display: inline-grid;
+  flex: 0 0 20px;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+
+.tree-toggle {
+  border: 1px solid #d7e3f5;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #2563eb;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+
+.tree-toggle:hover {
+  background: #dbeafe;
+  transform: scale(1.04);
+}
+
+.tree-toggle i {
+  font-size: 9px;
+}
+
+.tree-reference {
+  display: inline-flex;
+  align-items: center;
+  color: #1f2937;
+  font-weight: 650;
+}
+
+.tree-title {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  color: #344054;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-type {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid #dbe4ef;
+  border-radius: 999px;
+  background: #f6f9fd;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tree-description {
+  display: inline-block;
+  max-width: 360px;
+  overflow: hidden;
+  color: #667085;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pager (matches Control Management). */
+.audit-pager,
+.grid-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 4px 2px;
+  color: #53627a;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.audit-pager > div,
+.grid-pager > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.audit-pager label,
+.grid-pager label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-pager select,
+.grid-pager select {
+  min-width: 72px;
+  height: 34px;
+  border: 1px solid #d7e0ec;
+  border-radius: 8px;
+  padding: 0 8px;
+  background: #fff;
+  color: #172033;
+  font-weight: 650;
+}
+
+.audit-pager .toolbar-icon-button:disabled,
+.grid-pager .toolbar-icon-button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.button.tiny {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 750;
+}

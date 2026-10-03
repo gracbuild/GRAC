@@ -1,7 +1,8 @@
 // =====================================================================
 // EventProfileService
 //
-// Facade over the migration-330 procedures:
+// Facade over the migration-330 procedures (407: People / Asset profile
+// types -- ProfileType, cascading dimension values, asset preview):
 //   sp_event_profile_dimension_list
 //   sp_event_profile_dimension_values
 //   sp_event_profile_list
@@ -46,7 +47,7 @@ public interface IEventProfileService
     Task<EventProfileCommandResult> SetStatusAsync(long organizationId, long profileId, string status, long? actorEmployeeId, CancellationToken cancellationToken);
     Task<EventProfileCommandResult> DeleteAsync(long organizationId, long profileId, long? actorEmployeeId, CancellationToken cancellationToken);
 
-    Task<EventProfilePreviewResult> PreviewMembersAsync(long organizationId, long? profileId, int sampleSize, CancellationToken cancellationToken);
+    Task<EventProfilePreviewResult> PreviewMembersAsync(long organizationId, long? profileId, int sampleSize, string? subjectEntity, CancellationToken cancellationToken);
 }
 
 public sealed class EventProfileService(IConfiguration configuration, ILogger<EventProfileService> logger) : IEventProfileService
@@ -76,7 +77,8 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
                 ValueKind:      reader["ValueKind"]?.ToString() ?? "ID",
                 IsMultiValued:  reader["IsMultiValued"] is bool m && m,
                 HasValueSource: reader["HasValueSource"] is bool h && h,
-                DisplayOrder:   Convert.ToInt32(reader["DisplayOrder"])));
+                DisplayOrder:   Convert.ToInt32(reader["DisplayOrder"]),
+                ParentDimensionCode: reader["ParentDimensionCode"] as string));
 
         return new EventProfileDimensionResult(rows);
     }
@@ -101,7 +103,8 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
             rows.Add(new EventProfileDimensionValueRow(
                 Id:        reader["Id"] as long?,
                 TextValue: reader["TextValue"] as string,
-                Name:      reader["Name"] as string));
+                Name:      reader["Name"] as string,
+                ParentId:  reader["ParentId"] as long?));
 
         return new EventProfileDimensionValueResult(rows);
     }
@@ -148,6 +151,7 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
                 ProfileName:               reader["ProfileName"]?.ToString() ?? "",
                 Description:               reader["Description"] as string,
                 SubjectEntity:             reader["SubjectEntity"]?.ToString() ?? EventSubjectEntities.Employee,
+                ProfileType:               reader["ProfileType"] as string,
                 Status:                    reader["Status"]?.ToString() ?? "Active",
                 CriteriaSummary:           reader["CriteriaSummary"] as string,
                 MappedObligationCount:     ToInt(reader["MappedObligationCount"]),
@@ -184,6 +188,7 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
         var name        = reader["ProfileName"]?.ToString() ?? "";
         var description = reader["Description"] as string;
         var subject     = reader["SubjectEntity"]?.ToString() ?? EventSubjectEntities.Employee;
+        var profileType = reader["ProfileType"] as string;
         var status      = reader["Status"]?.ToString() ?? "Active";
         var enteredBy   = reader["EnteredBy"] as string;
         var enteredDt   = reader["EnteredDate"] as DateTime?;
@@ -242,6 +247,7 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
             ProfileName:    name,
             Description:    description,
             SubjectEntity:  subject,
+            ProfileType:    profileType,
             Status:         status,
             EnteredBy:      enteredBy,
             EnteredDate:    enteredDt,
@@ -408,7 +414,8 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
     // Preview
     // ==============================================================
     public async Task<EventProfilePreviewResult> PreviewMembersAsync(
-        long organizationId, long? profileId, int sampleSize, CancellationToken cancellationToken)
+        long organizationId, long? profileId, int sampleSize, string? subjectEntity,
+        CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command    = connection.CreateCommand();
@@ -418,9 +425,12 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
         AddParam(command, "@organization_id", DbType.Int64, organizationId);
         AddParam(command, "@profile_id",      DbType.Int64, (object?)profileId ?? DBNull.Value);
         AddParam(command, "@sample_size",     DbType.Int32, sampleSize <= 0 ? 10 : sampleSize);
+        // 407: used by the procedure only when no profile is given.
+        AddParam(command, "@subject_entity",  DbType.String, (object?)subjectEntity ?? DBNull.Value, 60);
 
         var matched = 0;
         var total   = 0;
+        var subject = subjectEntity ?? EventSubjectEntities.Employee;
         var sample  = new List<EventProfileMemberRow>();
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -428,18 +438,19 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
         if (await reader.ReadAsync(cancellationToken))
         {
             matched = ToInt(reader["MatchedCount"]);
-            total   = ToInt(reader["TotalActiveEmployees"]);
+            total   = ToInt(reader["TotalActive"]);
+            subject = reader["SubjectEntity"]?.ToString() ?? subject;
         }
 
         if (await reader.NextResultAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken))
                 sample.Add(new EventProfileMemberRow(
-                    EmployeeId:   Convert.ToInt64(reader["EmployeeId"]),
-                    EmployeeCode: reader["EmployeeCode"] as string,
-                    EmployeeName: reader["EmployeeName"] as string,
-                    Designation:  reader["Designation"] as string));
+                    MemberId:     Convert.ToInt64(reader["MemberId"]),
+                    MemberCode:   reader["MemberCode"] as string,
+                    MemberName:   reader["MemberName"] as string,
+                    MemberDetail: reader["MemberDetail"] as string));
 
-        return new EventProfilePreviewResult(matched, total, sample);
+        return new EventProfilePreviewResult(matched, total, total, subject, sample);
     }
 
     // ==============================================================
@@ -452,6 +463,7 @@ public sealed class EventProfileService(IConfiguration configuration, ILogger<Ev
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

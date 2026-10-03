@@ -51,15 +51,15 @@
 
 <section class="pm-panel" id="oaTgRoot" hidden>
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaTgPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaTgPickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+        <label class="pm-field" style="flex:1; min-width:320px;">
             <span>Audit</span>
-            <select id="oaTgPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaTgPickDef">
                 <option value="">Select an organization first</option>
             </select>
         </label>
@@ -69,7 +69,7 @@
         <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
             <span style="font-weight:600;" id="oaTgDefName">Definition</span>
             <span class="pm-badge" id="oaTgDefStatus">Status</span>
-            <span style="color:#64748b;" id="oaTgDefVersion">Version</span>
+            <span style="color:var(--fg-muted);" id="oaTgDefVersion">Version</span>
         </div>
         <div style="display:flex; gap:6px;">
             <button class="pm-button" id="oaTgReloadBtn" type="button">Reload</button>
@@ -80,12 +80,12 @@
     </div>
 
     <div id="oaTgReadonlyBanner" hidden
-         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+         style="margin:8px 0; padding:10px 12px; border-radius:var(--radius-md); background:var(--warning-100); color:var(--warning-700); font-size:13px;">
         This version is not a Draft, so triggers are shown read-only.
     </div>
 
     <div id="oaTgMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
     <div class="pm-table-wrap" style="margin-top:12px;">
         <table>
@@ -107,59 +107,59 @@
 </section>
 
 @* ---------- Add / Edit Trigger dialog ---------- *@
-<dialog id="oaTgDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="oaTgForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaTgDialogTitle" style="margin:0; font-size:18px;">Add Trigger</h2>
-            <button type="button" id="oaTgClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="oaTgDialog" style="max-width:820px; width:96%;">
+    <form id="oaTgForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaTgDialogTitle">Add Trigger</h2>
+            <button class="pm-icon-button" type="button" id="oaTgClose" aria-label="Close">&times;</button>
         </div>
-        <div id="oaTgDialogMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="oaTgDialogMessage" style="display:none;"></div>
         <input type="hidden" id="oaTgEditId" />
 
         @* Common fields *@
         <div style="display:grid; grid-template-columns:1fr 1fr 130px; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Code <span style="color:#b91c1c;">*</span></span>
-                <input id="oaTgCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="oaTgCode" type="text" maxlength="80" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Name <span style="color:#b91c1c;">*</span></span>
-                <input id="oaTgName" type="text" maxlength="200" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Name <span class="required">*</span></span>
+                <input class="pm-input" id="oaTgName" type="text" maxlength="200" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Type <span style="color:#b91c1c;">*</span></span>
-                <select id="oaTgType" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            <label class="pm-field">
+                <span>Type <span class="required">*</span></span>
+                <select class="pm-input" id="oaTgType" required></select>
             </label>
         </div>
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#475569; margin-top:10px;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-secondary); margin-top:10px;">
             <input id="oaTgEnabled" type="checkbox" checked /> Enabled
         </label>
 
         @* SCHEDULED fields *@
-        <div id="oaTgSchedFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
-            <div style="font-weight:600; color:#0f172a; font-size:13px; margin-bottom:8px;">Schedule</div>
+        <div id="oaTgSchedFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--neutral-50);">
+            <div style="font-weight:600; color:var(--fg-strong); font-size:13px; margin-bottom:8px;">Schedule</div>
             <div style="display:grid; grid-template-columns:1fr 140px 140px; gap:10px; align-items:start;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Frequency</span>
-                    <select id="oaTgSchedFreq" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                    <select class="pm-input" id="oaTgSchedFreq"></select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Start Date</span>
-                    <input id="oaTgSchedFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgSchedFrom" type="date" />
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>End Date</span>
-                    <input id="oaTgSchedTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgSchedTo" type="date" />
                 </label>
             </div>
             <div style="display:grid; grid-template-columns:120px 130px 130px 130px; gap:10px; align-items:start; margin-top:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Time of Day</span>
-                    <input id="oaTgSchedTime" type="time" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgSchedTime" type="time" />
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Day of Week (WEEKLY)</span>
-                    <select id="oaTgSchedDow" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                    <select class="pm-input" id="oaTgSchedDow">
                         <option value="">-- any --</option>
                         <option value="1">Monday</option><option value="2">Tuesday</option>
                         <option value="3">Wednesday</option><option value="4">Thursday</option>
@@ -167,66 +167,66 @@
                         <option value="7">Sunday</option>
                     </select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Day of Month (MONTHLY)</span>
-                    <input id="oaTgSchedDom" type="number" min="1" max="31" step="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgSchedDom" type="number" min="1" max="31" step="1" />
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Month of Year (ANNUAL)</span>
-                    <input id="oaTgSchedMoy" type="number" min="1" max="12" step="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgSchedMoy" type="number" min="1" max="12" step="1" />
                 </label>
             </div>
         </div>
 
         @* EVENT_DRIVEN fields *@
-        <div id="oaTgEventFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
-            <div style="font-weight:600; color:#0f172a; font-size:13px; margin-bottom:8px;">Event</div>
+        <div id="oaTgEventFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--neutral-50);">
+            <div style="font-weight:600; color:var(--fg-strong); font-size:13px; margin-bottom:8px;">Event</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Event Code</span>
-                    <select id="oaTgEventCode" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                    <select class="pm-input" id="oaTgEventCode"></select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Event Source</span>
-                    <input id="oaTgEventSource" type="text" maxlength="100" placeholder="e.g. Vendor, User, Asset, PolicyStore"
-                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgEventSource" type="text" maxlength="100" placeholder="e.g. Vendor, User, Asset, PolicyStore"
+                           />
                 </label>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <label class="pm-field" style="margin-top:10px;">
                 <span>Event Filter (JSON, optional)</span>
-                <textarea id="oaTgEventFilter" rows="3" placeholder='{"minAmount":10000}'
-                          style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical; font-family:monospace;"></textarea>
+                <textarea class="pm-input" id="oaTgEventFilter" rows="3" placeholder='{"minAmount":10000}'
+                          style="font-family:monospace;"></textarea>
             </label>
         </div>
 
         @* CONTINUOUS fields *@
-        <div id="oaTgContFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
-            <div style="font-weight:600; color:#0f172a; font-size:13px; margin-bottom:8px;">Continuous</div>
+        <div id="oaTgContFields" hidden style="margin-top:12px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--neutral-50);">
+            <div style="font-weight:600; color:var(--fg-strong); font-size:13px; margin-bottom:8px;">Continuous</div>
             <div style="display:grid; grid-template-columns:200px 1fr 1fr; gap:10px; align-items:start;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Source</span>
-                    <select id="oaTgContSource" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                    <select class="pm-input" id="oaTgContSource"></select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Endpoint</span>
-                    <input id="oaTgContEndpoint" type="text" maxlength="500" placeholder="URL / connection / topic"
-                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgContEndpoint" type="text" maxlength="500" placeholder="URL / connection / topic"
+                           />
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <label class="pm-field">
                     <span>Rule Code</span>
-                    <input id="oaTgContRule" type="text" maxlength="80" placeholder="Rule identifier"
-                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                    <input class="pm-input" id="oaTgContRule" type="text" maxlength="80" placeholder="Rule identifier"
+                           />
                 </label>
             </div>
         </div>
 
         @* Description *@
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:12px;">
+        <label class="pm-field" style="margin-top:12px;">
             <span>Description</span>
-            <textarea id="oaTgDescription" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="oaTgDescription" rows="2" maxlength="4000"></textarea>
         </label>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="oaTgCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaTgSubmit" class="pm-button primary">Save Trigger</button>
         </div>
@@ -524,8 +524,8 @@
         body.innerHTML = state.triggers.map(function (t, idx) {
             const typeName = triggerTypeName(t.triggerType);
             const enabled  = t.isEnabled
-                ? '<i class="fa-solid fa-check" style="color:#166534;" aria-hidden="true"></i>'
-                : '<i class="fa-solid fa-xmark" style="color:#b91c1c;" aria-hidden="true"></i>';
+                ? '<i class="fa-solid fa-check" style="color:var(--success-700);" aria-hidden="true"></i>'
+                : '<i class="fa-solid fa-xmark" style="color:var(--danger-700);" aria-hidden="true"></i>';
             const details = detailSummary(t);
             return '<tr data-idx="' + idx + '">'
                 + '<td>' + wf.escape(t.triggerCode) + '</td>'
@@ -865,8 +865,8 @@
     function showDialogMessage(kind, text) {
         const el = document.getElementById('oaTgDialogMessage');
         el.style.display    = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent      = text;
     }
     function clearDialogMessage() {
@@ -877,8 +877,8 @@
         const el = document.getElementById('oaTgMessage');
         el.hidden = false;
         el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function intOrNull(v) { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
     function onlyDate(v) {

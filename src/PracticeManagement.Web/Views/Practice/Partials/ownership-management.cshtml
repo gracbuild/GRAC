@@ -15,25 +15,25 @@
 
 <style>
     #omRoot { max-width: 1180px; }
-    #omRoot .om-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 14px; }
+    #omRoot .om-hint { color: var(--fg-muted); font-size: 12px; margin: 0 0 14px; }
     #omRoot .om-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 0 0 14px; }
     #omRoot .om-field { display: flex; flex-direction: column; gap: 4px; min-width: 260px; }
-    #omRoot .om-field label { font-size: 12px; font-weight: 600; color: var(--grac-ink, #25345a); }
-    #omRoot .om-field select { padding: 7px 10px; border: 1px solid var(--grac-line, #d7deea); border-radius: 6px; min-height: 36px; }
-    #omRoot .om-count { font-size: 12px; color: var(--grac-muted, #758095); align-self: center; }
-    #omRoot .om-msg { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px; display: none; }
-    #omRoot .om-msg.info  { display: block; background: #eef4ff; color: #25345a; border: 1px solid #cdddff; }
-    #omRoot .om-msg.error { display: block; background: #fdecec; color: #8a1c1c; border: 1px solid #f5c2c2; }
-    #omRoot .om-msg.success { display: block; background: #e9f8ef; color: #1f6b3b; border: 1px solid #bfe6cd; }
+    #omRoot .om-field label { font-size: 12px; font-weight: 600; color: var(--fg-default); }
+    #omRoot .om-field select { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); min-height: 36px; }
+    #omRoot .om-count { font-size: 12px; color: var(--fg-muted); align-self: center; }
+    #omRoot .om-msg { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius-md); font-size: 13px; display: none; }
+    #omRoot .om-msg.info  { display: block; background: var(--primary-50); color: var(--primary-800); border: 1px solid var(--primary-100); }
+    #omRoot .om-msg.error { display: block; background: var(--danger-50); color: var(--danger-700); border: 1px solid var(--danger-200); }
+    #omRoot .om-msg.success { display: block; background: var(--success-50); color: var(--success-700); border: 1px solid var(--success-200); }
     #omRoot table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    #omRoot th, #omRoot td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grac-line, #eef1f6); vertical-align: middle; }
-    #omRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--grac-muted, #758095); }
-    #omRoot .om-module { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a); font-size: 11px; font-weight: 600; }
-    #omRoot .om-type { color: var(--grac-muted, #758095); font-size: 12px; }
-    #omRoot .om-newowner select { padding: 6px 8px; border: 1px solid var(--grac-line, #d7deea); border-radius: 6px; min-width: 200px; }
-    #omRoot .om-empty { padding: 26px; text-align: center; color: var(--grac-muted, #758095); }
+    #omRoot th, #omRoot td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    #omRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted); }
+    #omRoot .om-module { display: inline-block; padding: 1px 8px; border-radius: var(--radius-md); background: var(--border); color: var(--fg-default); font-size: 11px; font-weight: 600; }
+    #omRoot .om-type { color: var(--fg-muted); font-size: 12px; }
+    #omRoot .om-newowner select { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 200px; }
+    #omRoot .om-empty { padding: 26px; text-align: center; color: var(--fg-muted); }
     #omRoot .om-actions-bar { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
-    #omRoot .om-pill { font-size: 11px; font-weight: 600; color: #8a5a00; background: #fff3d6; border: 1px solid #f0dca0; border-radius: 10px; padding: 1px 7px; }
+    #omRoot .om-pill { font-size: 11px; font-weight: 600; color: var(--warning-700); background: var(--warning-100); border: 1px solid var(--warning-200); border-radius: 10px; padding: 1px 7px; }
 </style>
 
 <div id="omRoot">

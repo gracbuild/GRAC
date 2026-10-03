@@ -52,21 +52,21 @@
 
 <section class="pm-panel" id="oaExRoot" hidden>
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaExPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaExPickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:280px;">
+        <label class="pm-field" style="flex:1; min-width:280px;">
             <span>Filter by Definition (optional)</span>
-            <select id="oaExPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaExPickDef">
                 <option value="">All definitions</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Status</span>
-            <select id="oaExFilterStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaExFilterStatus">
                 <option value="">All</option>
             </select>
         </label>
@@ -79,13 +79,15 @@
     </div>
 
     <div id="oaExMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
+    @* Audit & Assurance dashboard drill-down (414). *@
+    <div id="oaExDrillBanner" hidden></div>
 
     <div style="display:grid; grid-template-columns:minmax(420px, 560px) 1fr; gap:12px; margin-top:12px;">
         @* LEFT: executions list *@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <h2 style="font-size:15px; margin:0; color:#0f172a;">Executions</h2>
+                <h2 style="font-size:15px; margin:0; color:var(--fg-strong);">Executions</h2>
                 <button class="pm-button icon" id="oaExRefreshBtn" type="button" title="Refresh">
                     <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                 </button>
@@ -118,8 +120,8 @@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <h2 style="font-size:15px; margin:0; color:#0f172a;" id="oaExDetailTitle">Execution Details</h2>
-                    <p style="font-size:12px; color:#64748b; margin:4px 0 0;" id="oaExDetailSubtitle">Select a row to view execution details, immutable config snapshots and entity progress.</p>
+                    <h2 style="font-size:15px; margin:0; color:var(--fg-strong);" id="oaExDetailTitle">Execution Details</h2>
+                    <p style="font-size:12px; color:var(--fg-muted); margin:4px 0 0;" id="oaExDetailSubtitle">Select a row to view execution details, immutable config snapshots and entity progress.</p>
                 </div>
             </div>
 
@@ -127,7 +129,7 @@
             <div id="oaExDetailTiles" hidden style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
 
             @* Snapshot tabs *@
-            <div id="oaExTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid #e2e8f0; margin-bottom:8px;">
+            <div id="oaExTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:8px;">
                 <button class="pm-tab active" data-tab="entities" type="button">Entities</button>
                 <button class="pm-tab"        data-tab="definition" type="button">Definition Snapshot</button>
                 <button class="pm-tab"        data-tab="workflow" type="button">Workflow</button>
@@ -139,15 +141,15 @@
             @* Entities tab *@
             <div id="oaExTabEntities" hidden>
                 <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-                    <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <label class="pm-field">
                         <span>Filter by Dimension</span>
-                        <select id="oaExEntityDim" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; min-width:200px;">
+                        <select class="pm-input" id="oaExEntityDim" style="min-width:200px;">
                             <option value="">All</option>
                         </select>
                     </label>
-                    <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                    <label class="pm-field">
                         <span>Entity Status</span>
-                        <select id="oaExEntityStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                        <select class="pm-input" id="oaExEntityStatus">
                             <option value="">All</option>
                             <option value="NotStarted">Not Started</option>
                             <option value="InProgress">In Progress</option>
@@ -185,11 +187,11 @@
 
             @* Snapshot tabs -- all render pre-formatted JSON so the auditor
                can see EXACTLY what was in force at materialize time. *@
-            <div id="oaExTabDefinition" hidden><pre id="oaExDefinitionPre" style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
-            <div id="oaExTabWorkflow"   hidden><pre id="oaExWorkflowPre"   style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
-            <div id="oaExTabEvidence"   hidden><pre id="oaExEvidencePre"   style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
-            <div id="oaExTabScoring"    hidden><pre id="oaExScoringPre"    style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
-            <div id="oaExTabQuestions"  hidden><pre id="oaExQuestionsPre"  style="max-height:420px; overflow:auto; background:#f8fafc; padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabDefinition" hidden><pre id="oaExDefinitionPre" style="max-height:420px; overflow:auto; background:var(--neutral-50); padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabWorkflow"   hidden><pre id="oaExWorkflowPre"   style="max-height:420px; overflow:auto; background:var(--neutral-50); padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabEvidence"   hidden><pre id="oaExEvidencePre"   style="max-height:420px; overflow:auto; background:var(--neutral-50); padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabScoring"    hidden><pre id="oaExScoringPre"    style="max-height:420px; overflow:auto; background:var(--neutral-50); padding:8px; font-size:12px;"></pre></div>
+            <div id="oaExTabQuestions"  hidden><pre id="oaExQuestionsPre"  style="max-height:420px; overflow:auto; background:var(--neutral-50); padding:8px; font-size:12px;"></pre></div>
         </div>
     </div>
 </section>
@@ -198,26 +200,26 @@
 @* 120 -- Per-entity Auditor assign dialog. Same lightweight overlay style
    as the Materialize dialog so the pattern stays consistent. *@
 <div id="oaExAuditorDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
-    <div style="background:#fff; width:460px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+    <div style="background:var(--bg-surface); width:460px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:var(--radius-md); padding:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <h2 style="margin:0; font-size:16px;">Assign Auditor</h2>
             <button class="pm-button icon" id="oaExAudClose" type="button"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <p id="oaExAudEntityLabel" style="font-size:12px; color:#64748b; margin:0 0 12px;"></p>
+        <p id="oaExAudEntityLabel" style="font-size:12px; color:var(--fg-muted); margin:0 0 12px;"></p>
 
-        <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+        <div class="pm-field" style="min-width:0;">
             <span>Auditor</span>
             <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                <select id="oaExAudRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Role">
+                <select class="pm-input" id="oaExAudRole" style="min-width:0;" aria-label="Auditor Role">
                     <option value="">Loading roles...</option>
                 </select>
-                <select id="oaExAudEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Employee (current holder)">
+                <select class="pm-input" id="oaExAudEmp" style="min-width:0;" aria-label="Auditor Employee (current holder)">
                     <option value="">-- pick a role first --</option>
                 </select>
             </div>
         </div>
 
-        <div id="oaExAudMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+        <div id="oaExAudMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
         <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
             <button class="pm-button" id="oaExAudCancel" type="button">Cancel</button>
@@ -227,43 +229,43 @@
 </div>
 
 <div id="oaExMatDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
-    <div style="background:#fff; width:520px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+    <div style="background:var(--bg-surface); width:520px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:var(--radius-md); padding:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <h2 style="margin:0; font-size:16px;">Materialize Execution</h2>
             <button class="pm-button icon" id="oaExMatClose" type="button"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <p style="font-size:12px; color:#64748b; margin:0 0 12px;">Creates an immutable execution record from a definition + resolved scope. The active version's Definition, Questions, Evidence, Workflow and Scoring configuration is snapshotted onto the execution.</p>
+        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 12px;">Creates an immutable execution record from a definition + resolved scope. The active version's Definition, Questions, Evidence, Workflow and Scoring configuration is snapshotted onto the execution.</p>
 
         <div style="display:grid; gap:8px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Definition <span style="color:#dc2626;">*</span></span>
-                <select id="oaExMatDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <label class="pm-field">
+                <span>Definition <span style="color:var(--danger-700);">*</span></span>
+                <select class="pm-input" id="oaExMatDef">
                     <option value="">Loading...</option>
                 </select>
                 <span id="oaExMatHint" hidden
-                      style="font-size:11px; color:#b45309; background:#fef3c7; border:1px solid #fde68a; border-radius:4px; padding:6px 8px; margin-top:6px;"></span>
+                      style="font-size:11px; color:var(--warning-700); background:var(--warning-100); border:1px solid var(--warning-200); border-radius:var(--radius-sm); padding:6px 8px; margin-top:6px;"></span>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Scope Resolution Snapshot <span style="color:#dc2626;">*</span></span>
-                <select id="oaExMatScope" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <label class="pm-field">
+                <span>Scope Resolution Snapshot <span style="color:var(--danger-700);">*</span></span>
+                <select class="pm-input" id="oaExMatScope">
                     <option value="">Pick a definition first</option>
                 </select>
-                <span style="font-size:11px; color:#94a3b8; margin-top:2px;">Only snapshots that belong to an Approved/Active version can be materialized.</span>
+                <span style="font-size:11px; color:var(--fg-subtle); margin-top:2px;">Only snapshots that belong to an Approved/Active version can be materialized.</span>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Execution Name</span>
                 <input id="oaExMatName" type="text" placeholder="(auto)" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Execution Code</span>
                 <input id="oaExMatCode" type="text" placeholder="(auto)" />
             </label>
             <div style="display:flex; gap:8px;">
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Planned Start</span>
                     <input id="oaExMatStart" type="date" />
                 </label>
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Planned End</span>
                     <input id="oaExMatEnd" type="date" />
                 </label>
@@ -271,28 +273,28 @@
             @* 120 hybrid role+employee Owner picker.
                minmax(0,1fr) + min-width:0 so long option text can't push a
                column wider than its slot. SP auto-resolves the missing side. *@
-            <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <div class="pm-field" style="min-width:0;">
                 <span>Owner</span>
                 <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                    <select id="oaExMatOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                    <select class="pm-input" id="oaExMatOwnerRole" style="min-width:0;" aria-label="Owner Role">
                         <option value="">Loading roles...</option>
                     </select>
-                    <select id="oaExMatOwnerEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                    <select class="pm-input" id="oaExMatOwnerEmp" style="min-width:0;" aria-label="Owner Employee (current holder)">
                         <option value="">-- pick a role first --</option>
                     </select>
                 </div>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Assigned Team</span>
                 <input id="oaExMatTeam" type="text" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Notes</span>
                 <textarea id="oaExMatNotes" rows="2"></textarea>
             </label>
         </div>
 
-        <div id="oaExMatMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+        <div id="oaExMatMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
         <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
             <button class="pm-button" id="oaExMatCancel" type="button">Cancel</button>
@@ -304,11 +306,13 @@
 <style>
     .pm-tab {
         border:none; background:transparent; padding:6px 10px; font-size:13px;
-        color:#64748b; cursor:pointer; border-bottom:2px solid transparent;
+        color:var(--fg-muted); cursor:pointer; border-bottom:2px solid transparent;
     }
-    .pm-tab.active { color:#0f172a; border-bottom-color:#0f172a; font-weight:600; }
+    .pm-tab.active { color:var(--fg-strong); border-bottom-color:var(--neutral-900); font-weight:600; }
 </style>
 
+@* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -316,6 +320,13 @@
     if (!wf) { console.error('__wfCommon missing'); return; }
 
     const API = '/practice/api/org-assurance';
+    // Audit & Assurance dashboard drill-down (414): ?status= is this
+    // screen's own Status filter; ?drill= (planned / inprogress /
+    // completed / overdue / upcoming) is sp_org_assurance_execution_list's.
+    const EX_DRILL = (function () {
+        const d = window.__pmDrill ? window.__pmDrill.read() : null;
+        return d && d.active ? d : null;
+    })();
     const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
     const state = {
@@ -420,9 +431,16 @@
         wireAuditorDialog();  // 120 -- per-entity auditor
 
         state.orgId = orgs[0].value;
+        // 414: the dashboard's organization wins when it is one of these.
+        if (EX_DRILL && orgs.some(function (o) { return String(o.value) === EX_DRILL.organizationId; }))
+            state.orgId = EX_DRILL.organizationId;
         orgSel.value = state.orgId;
 
         await Promise.all([populateDefinitionFilter(), loadStatuses()]);
+        if (EX_DRILL && EX_DRILL.status) {
+            state.filterStatus = EX_DRILL.status;
+            window.__pmDrill.preselect('oaExFilterStatus', EX_DRILL.status);
+        }
         if (state.filterDefinitionId) {
             const sel = document.getElementById('oaExPickDef');
             if (sel && [...sel.options].some(function (o) { return o.value === String(state.filterDefinitionId); })) {
@@ -533,6 +551,11 @@
             if (state.filterDefinitionId) qs.set('definitionId', String(state.filterDefinitionId));
             if (state.filterStatus)       qs.set('statusCode',   state.filterStatus);
             if (state.search)             qs.set('search',       state.search);
+            // 414: dashboard drill-down.
+            if (EX_DRILL) {
+                window.__pmDrill.appendTo(qs, EX_DRILL);
+                window.__pmDrill.banner('oaExDrillBanner', EX_DRILL);
+            }
             qs.set('page',     String(state.list.page));
             qs.set('pageSize', String(state.list.pageSize));
             const r = await fetch(U(API + '/executions?' + qs.toString()), { credentials: 'same-origin' });
@@ -568,10 +591,10 @@
             const done     = Number(row.completedEntityCount || row.CompletedEntityCount || 0);
             const total    = Number(row.totalEntityCount     || row.TotalEntityCount     || 0);
             const isSel    = state.selectedExecId && String(state.selectedExecId) === String(id);
-            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '') + '>'
+            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:var(--primary-50);"' : '') + '>'
                  + '<td><div>' + wf.escape(name) + '</div>'
-                 + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div></td>'
-                 + '<td>' + wf.escape(defName) + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(defCode) + (ver ? ' &middot; v' + ver : '') + '</div></td>'
+                 + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(code) + '</div></td>'
+                 + '<td>' + wf.escape(defName) + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(defCode) + (ver ? ' &middot; v' + ver : '') + '</div></td>'
                  + '<td>' + wf.badge(status) + '</td>'
                  + '<td style="text-align:right;">' + done + ' / ' + total + '</td>'
                  + '<td><button class="pm-action-trigger" data-id="' + id + '" aria-label="Row actions">'
@@ -718,7 +741,7 @@
     async function selectExecution(id) {
         state.selectedExecId = id;
         document.querySelectorAll('#oaExListBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? '#eff6ff' : '';
+            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? 'var(--primary-50)' : '';
         });
         state.entities = { page: 1, pageSize: 100, total: 0, rows: [], dim: '', status: '', search: '' };
         document.getElementById('oaExEntityDim').value = '';
@@ -795,9 +818,9 @@
     }
 
     function tile(label, value) {
-        return '<div style="border:1px solid #e2e8f0; border-radius:6px; padding:6px 10px; background:#f8fafc; min-width:120px;">'
-             + '<div style="font-size:11px; color:#64748b;">' + wf.escape(label) + '</div>'
-             + '<div style="font-size:14px; font-weight:600; color:#0f172a;">' + wf.escape(value || '') + '</div>'
+        return '<div style="border:1px solid var(--border); border-radius:6px; padding:6px 10px; background:var(--neutral-50); min-width:120px;">'
+             + '<div style="font-size:11px; color:var(--fg-muted);">' + wf.escape(label) + '</div>'
+             + '<div style="font-size:14px; font-weight:600; color:var(--fg-strong);">' + wf.escape(value || '') + '</div>'
              + '</div>';
     }
     function setPre(id, json) {
@@ -882,7 +905,7 @@
             const auditor = (auRole && auEmp) ? (auRole + ' (' + auEmp + ')')
                           : (auRole ? auRole + ' (role only)'
                           : (auEmp  ? auEmp
-                          : '<span style="color:#94a3b8;">(unassigned)</span>'));
+                          : '<span style="color:var(--fg-subtle);">(unassigned)</span>'));
             return '<tr data-entity-id="' + eid + '">'
                  + '<td>' + wf.escape(dim) + '</td>'
                  + '<td>' + wf.escape(name) + '</td>'
@@ -917,9 +940,9 @@
         const el = document.getElementById('oaExAudMsg');
         el.hidden = false;
         el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
-        el.style.border     = '1px solid ' + (kind === 'error' ? '#fecaca' : '#bbf7d0');
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
+        el.style.border     = '1px solid ' + (kind === 'error' ? 'var(--danger-200)' : 'var(--success-200)');
     }
 
     async function openAuditorDialog(entityId) {
@@ -1210,14 +1233,14 @@
     function setMessage(kind, text) {
         const el = document.getElementById('oaExMessage');
         el.hidden = false; el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function showMatMsg(kind, text) {
         const el = document.getElementById('oaExMatMsg');
         el.hidden = false; el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function formatDate(v) {
         if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }

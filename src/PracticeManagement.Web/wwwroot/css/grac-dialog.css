@@ -1,7 +1,7 @@
 .grac-dialog-overlay {
     align-items: center;
     animation: gracDialogFadeIn 160ms ease-out;
-    background: rgba(15, 23, 42, 0.42);
+    background: var(--overlay);
     display: flex;
     inset: 0;
     justify-content: center;
@@ -16,11 +16,11 @@
 
 .grac-dialog {
     animation: gracDialogRiseIn 180ms ease-out;
-    background: #fff;
-    border: 1px solid #dbe4f0;
-    border-radius: 14px;
-    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
-    color: #172033;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-modal);
+    color: var(--fg-default);
     max-width: 440px;
     overflow: hidden;
     width: min(440px, 100%);
@@ -39,7 +39,7 @@
 
 .grac-dialog-icon {
     align-items: center;
-    border-radius: 13px;
+    border-radius: var(--radius-md);
     display: inline-flex;
     font-size: 18px;
     height: 42px;
@@ -47,11 +47,11 @@
     width: 42px;
 }
 
-.grac-dialog-icon.success { background: #e8f7ef; color: #12824c; }
-.grac-dialog-icon.info { background: #eaf2ff; color: #2367c9; }
-.grac-dialog-icon.warning { background: #fff6e5; color: #b56a00; }
-.grac-dialog-icon.error { background: #fdecee; color: #bd2b3a; }
-.grac-dialog-icon.confirm { background: #eef4ff; color: #2458b8; }
+.grac-dialog-icon.success { background: var(--success-100); color: var(--success-700); }
+.grac-dialog-icon.info { background: var(--primary-50); color: var(--primary-600); }
+.grac-dialog-icon.warning { background: var(--warning-50); color: var(--warning-700); }
+.grac-dialog-icon.error { background: var(--danger-50); color: var(--danger-700); }
+.grac-dialog-icon.confirm { background: var(--primary-50); color: var(--primary-600); }
 
 .grac-dialog-title {
     font-size: 18px;
@@ -61,7 +61,7 @@
 }
 
 .grac-dialog-message {
-    color: #56657d;
+    color: var(--fg-muted);
     font-size: 14px;
     line-height: 1.55;
     margin: 0;
@@ -69,9 +69,9 @@
 }
 
 .grac-dialog-input {
-    border: 1px solid #cfd9e8;
-    border-radius: 8px;
-    color: #172033;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     font-size: 14px;
     margin-top: 12px;
     min-height: 38px;
@@ -80,14 +80,14 @@
 }
 
 .grac-dialog-input:focus {
-    border-color: #2c6ed5;
-    box-shadow: 0 0 0 3px rgba(44, 110, 213, 0.14);
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px var(--focus-ring);
     outline: none;
 }
 
 .grac-dialog-actions {
     align-items: center;
-    border-top: 1px solid #edf2f8;
+    border-top: 1px solid var(--neutral-100);
     display: flex;
     gap: 10px;
     justify-content: flex-end;
@@ -95,8 +95,8 @@
 }
 
 .grac-dialog-button {
-    border: 1px solid #cfd9e8;
-    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 14px;
     font-weight: 700;
@@ -105,15 +105,15 @@
 }
 
 .grac-dialog-button.secondary {
-    background: #fff;
-    color: #26354d;
+    background: var(--bg-surface);
+    color: var(--neutral-700);
 }
 
 .grac-dialog-button.primary {
-    background: #2b6ed3;
-    border-color: #2b6ed3;
-    box-shadow: 0 8px 18px rgba(43, 110, 211, 0.22);
-    color: #fff;
+    background: var(--primary-500);
+    border-color: var(--primary-500);
+    box-shadow: none;
+    color: var(--fg-on-dark);
 }
 
 .grac-dialog-button:hover {

@@ -45,6 +45,13 @@ public static class EventSubjectEntities
 
     public static bool IsValid(string? value)
         => value is Employee or Asset;
+
+    // Migration 407: the Profile list's Profile Type filter "All". A list
+    // filter only -- never a subject a profile or a raise can carry.
+    public const string All = "ALL";
+
+    public static bool IsValidListFilter(string? value)
+        => IsValid(value) || value is All;
 }
 
 public static class EventLifecycleActions
@@ -437,7 +444,13 @@ public sealed record EventDrivenChecklistRow(
     // The event's parent in the event_type_master domain/leaf tree (230) --
     // context only, e.g. distinguishing two domains that happen to share a
     // leaf name. EventTypeName alone already says Onboarding vs Offboarding.
-    string? EventDomainName);
+    string? EventDomainName,
+    // Migration 408: which kind of subject the checklist is raised for,
+    // from the organisation's event_definition.entity_category.
+    // SubjectEntity = EMPLOYEE / ASSET (event_profile.subject_entity values);
+    // ChecklistType = People / Asset (the Profile Type words, 407).
+    string? SubjectEntity = null,
+    string? ChecklistType = null);
 
 public sealed record EventDrivenChecklistResult(
     IReadOnlyList<EventDrivenChecklistRow> Rows,

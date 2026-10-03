@@ -251,3 +251,100 @@ Short fixed lists in Risk Centre — Candidate ageing, Treatment tasks,
 the dashboard tiles — were deliberately left alone. They fetch a bounded
 set by design, and a pager under a list that will never have a second
 page is noise.
+
+## Sticky column header (2026-10-01)
+
+Every grid keeps its column header row visible while its rows scroll.
+This is CSS only, in `wwwroot/css/practice-management.css` section 8. There
+is no JS, no new grid component, and nothing for a screen to opt into.
+
+**Where it applies**
+
+- Every `.pm-table-wrap` grid. That is the shared grid container: about 95
+  grids across the partials and JS renderers use it.
+- Grids that have their own wrapper add the class `.pm-sticky-grid` to that
+  wrapper. Today this is the Operationalize grid (`resolve.cshtml`,
+  `<div class="rv-scroll pm-sticky-grid">`).
+
+**How it works**
+
+- The wrap is already `overflow:auto` for horizontal scroll. Because of
+  that, a sticky header can only stick to the wrap, never to the page. So
+  the wrap is capped with `max-height: var(--pm-grid-max-h)`:
+  ```
+  max(320px, calc(100vh - var(--pm-page-head-h) - 14px - 96px))
+  ```
+  This is the viewport left below the frozen page heading (see below),
+  with room left for the pager.
+  The rows scroll inside the wrap. A grid shorter than the cap looks and
+  behaves exactly as before.
+- `thead` is `position: sticky; top: 0; z-index: 2`. The whole `thead` is
+  sticky, not each `th`, so two-row headers stay stacked correctly (for
+  example Governance Overview above its metric row). Header and body are
+  one `<table>`, so the columns stay aligned under horizontal scroll.
+- With `border-collapse` the header's bottom border belongs to the table
+  and would scroll away. It is redrawn as an inset 1px `var(--border)`
+  line on the last header row, and the real border is set to transparent.
+  At rest this looks the same as before.
+- Wraps that already have their own cap keep it:
+  - inline `max-height` (dialogs, the event inbox, the repository pickers);
+  - `.pm-role-perms-table` at 60vh. Its own sticky `th` rule was removed
+    as a duplicate.
+- The 3-dot row menus portal to `<body>` and close on any scroll (the
+  capture listener in `practice.js`), so the inner scroll never leaves a
+  menu floating. Sorting, filters and the pager are untouched.
+- In print, the cap and stickiness are switched off, so a printed grid
+  shows every row.
+
+**Not covered, by design**
+
+These are editors or small fixed lists, not scrolling grids:
+
+- inline editor tables: `.pm-dependency-grid`, `rw-dep-table`,
+  `risk-dep-table`;
+- small history tables in dialogs;
+- the task list nested in a Risk card (`rmp-task-table`).
+
+A new list grid gets the behaviour simply by using `.pm-table-wrap`.
+
+## Frozen page heading (2026-10-01)
+
+The page heading stays at the top of the window while the page scrolls.
+The page heading is the shared `.pm-page-heading` (title, eyebrow,
+description, actions), and every screen renders exactly one visible
+heading.
+
+**CSS** (`practice-management.css` section 1):
+
+- `.pm-page-heading` is `position: sticky; top: 0; z-index: 50`.
+  - The top bar is not fixed (`body` has no `layout-navbar-fixed`), so
+    it scrolls away and the heading takes the top edge.
+  - z-index 50 is above in-page content and in-page menus
+    (`.pm-checkcombo-menu` and `.tp-menu` are 40, grid `thead` is 2), so
+    they scroll under it.
+  - It is below the body-level 3-dot menu (1000), the full-page dialog
+    (1020), the AdminLTE sidebar and top bar (1037/1038), and
+    `.pm-modal` (1100).
+- The freeze is switched off:
+  - at the existing `max-width: 720px` breakpoint, where the heading
+    stacks into a column;
+  - on windows shorter than 560px;
+  - in print.
+
+**Height** (`wwwroot/js/site.js`, loaded on every layout page):
+
+- The script publishes the live height of the visible, sticky heading as
+  `--pm-page-head-h` on `<html>`. It is `0px` when the freeze is off.
+- It uses a ResizeObserver on the headings, plus a MutationObserver for
+  headings rendered later and for Risk Centre's view swaps. Updates are
+  batched to one per animation frame.
+
+**With the grid header:**
+
+- The grid cap above subtracts `--pm-page-head-h`. When the page is
+  scrolled to a grid, the whole grid fits under the page heading, and its
+  sticky column header sits directly below the page heading.
+- The column header sticks inside the grid's own scroll box (top 0 of the
+  wrap), not to the page. So it is never above or over the page heading.
+  If the page is scrolled further, the heading (z 50) covers the grid
+  like any other content.

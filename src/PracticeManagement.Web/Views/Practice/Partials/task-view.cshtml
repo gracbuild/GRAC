@@ -64,7 +64,7 @@
             <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
         </button>
         <a class="pm-button" href="~/Practice/Index/tasks">
-            <i class="fa-solid fa-arrow-left"></i> Back to Task Center
+            <i class="fa-solid fa-arrow-left"></i> Back to Task Board
         </a>
     </div>
 </div>
@@ -73,7 +73,7 @@
     <div class="pm-empty">
         <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
         <h2 id="tvUnavailableTitle">Task not found.</h2>
-        <p id="tvUnavailableBody">Open this page from Task Center's row menu.</p>
+        <p id="tvUnavailableBody">Open this page from Task Board's row menu.</p>
     </div>
 </section>
 
@@ -124,7 +124,7 @@
     </div>
 
     <div id="tvGovernanceWrap" hidden>
-        <h3 class="tv-section">Exception Centre Requests</h3>
+        <h3 class="tv-section">Exceptions &amp; Waivers Requests</h3>
         <div class="pm-table-wrap">
             <table>
                 <thead><tr><th>Type</th><th>Asked for</th><th>Status</th><th>Requested by</th><th>Decision</th></tr></thead>
@@ -155,45 +155,45 @@
 <style>
     #tvRoot .tv-section {
         margin: 18px 0 8px; font-size: 13px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: .04em; color: #4a5568;
+        text-transform: uppercase; letter-spacing: .04em; color: var(--fg-secondary);
     }
     #tvRoot .tv-facts {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
         gap: 8px 20px; margin: 0 0 4px;
-        padding: 12px 14px; background: #f7fafc; border-radius: 6px;
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md);
     }
     #tvRoot .tv-facts dt {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted);
     }
     #tvRoot .tv-facts dd {
-        margin: 0 0 6px; font-size: 13px; color: #2d3748; overflow-wrap: anywhere;
+        margin: 0 0 6px; font-size: 13px; color: var(--neutral-700); overflow-wrap: anywhere;
         white-space: pre-wrap;
     }
-    #tvRoot .tv-facts dd.tv-empty { color: #a0aec0; font-style: italic; }
+    #tvRoot .tv-facts dd.tv-empty { color: var(--fg-subtle); font-style: italic; }
 
     .tv-related-strip {
         display: flex; flex-wrap: wrap; gap: 20px 32px; margin: 10px 0 0;
     }
     .tv-related-strip dt {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted);
     }
     .tv-related-strip dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
-    .tv-related-strip dd a { color: #3182ce; }
+    .tv-related-strip dd a { color: var(--primary-600); }
 
-    .tv-description { white-space: pre-wrap; color: #0f172a; font-size: 13px; margin: 0; }
-    .tv-hint { font-size: 11px; color: #94a3b8; }
-    .tv-warn { font-size: 12px; color: #854d0e; margin: 6px 0 0; }
+    .tv-description { white-space: pre-wrap; color: var(--fg-strong); font-size: 13px; margin: 0; }
+    .tv-hint { font-size: 11px; color: var(--fg-subtle); }
+    .tv-warn { font-size: 12px; color: var(--warning-700); margin: 6px 0 0; }
     .tv-pending-badge {
-        display: inline-block; padding: 1px 6px; border-radius: 999px;
-        font-size: 10px; font-weight: 700; background: #fef9c3; color: #854d0e;
+        display: inline-block; padding: 1px 6px; border-radius: var(--radius-pill);
+        font-size: 10px; font-weight: 700; background: var(--warning-50); color: var(--warning-700);
     }
 
     #tvActivityList ul { list-style: none; margin: 0; padding: 0; }
     #tvActivityList li {
-        border-left: 2px solid #e2e8f0; padding: 4px 0 8px 10px; margin-bottom: 2px;
+        border-left: 2px solid var(--border); padding: 4px 0 8px 10px; margin-bottom: 2px;
     }
-    .tv-activity-head { font-size: 12px; font-weight: 600; color: #0f172a; }
-    .tv-activity-remark { font-size: 12px; color: #334155; white-space: pre-wrap; }
+    .tv-activity-head { font-size: 12px; font-weight: 600; color: var(--fg-strong); }
+    .tv-activity-remark { font-size: 12px; color: var(--neutral-700); white-space: pre-wrap; }
 </style>
 
 @* Shared Edit / Complete / Close / Add Evidence dialogs, and the

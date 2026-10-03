@@ -138,6 +138,51 @@
 --     including why PracticeScreen.cs's page heading was deliberately
 --     left alone this time (sir scoped this one to the menu only).
 --
+--   363 / 364 -- display renames that were never carried here (caught
+--     while applying 384): 'source-statements' reads 'Control Statements'
+--     (363); 'organization-controls' reads 'Standards & Frameworks' and
+--     'repository-subscriptions' reads 'Standards & Frameworks (Admin)'
+--     (364). Before this, every re-run of this script silently reverted
+--     both migrations.
+--
+--   383 -- Risk Management submenus: see the rows/links tagged 383.
+--
+--   384 -- Sidebar renames + My Notification parent (2026-09-26, per sir):
+--     labels: nav-assurance 'Audit Assurance', nav-documents 'Policies &
+--     Documents', nav-oversight 'Issues & Actions', gaps 'Gap Register',
+--     tasks 'Task Board', exception-centre 'Exceptions & Waivers',
+--     dashboard 'Home', my-notifications 'My Notification' (menu_keys
+--     unchanged). module_type: every 'Oversight' row -> 'Issues &
+--     Actions', every 'Audit Management' row -> 'Audit Assurance', the
+--     three document rows -> 'Policies & Documents', my-notifications /
+--     my-acknowledgements / the two new rows -> 'My Notification'.
+--     Structure: nav-documents is a ROOT again (display_order 400, its
+--     pre-359 slot) and my-notifications is a ROOT (display_order 50) that
+--     keeps its page url (page-and-parent, as 276). New placeholder rows
+--     'my-practices' (10) and 'my-approvals' (20), url '#', plus
+--     'my-acknowledgements' (30, moved from nav-documents) hang under it.
+--     When sir supplies the My Practices / My Approvals links, change
+--     menu_url on BOTH rows here as well, or the next run resets it to '#'.
+--
+--   390 -- Home route + "My" group on the Home page (2026-09-27):
+--     dashboard menu_url 'Practice/Index' -> 'dashboard' (the token
+--     _PracticeMenuTree maps to the canonical /Practice; the literal
+--     /Practice/Index bound areaKey='Index' and 404'd). Section 2b sets
+--     menu_master.show_in_sidebar = 0 for 'my-notifications' and its
+--     whole subtree -- the rows stay Active so their permission grants
+--     and pages survive; only the sidebar hides them. Skipped when the
+--     column does not exist yet (390 not run).
+--
+--   416 -- Dashboard submenus (2026-10-02): nav-governance,
+--     nav-oversight, nav-assurance lose their dashboard url (NULL) and
+--     risk-centre goes back to '#', so a parent click only expands. New
+--     first children 'governance-dashboard' (99), 'issues-actions-
+--     dashboard' (223), 'audit-assurance-dashboard' (439) carry the
+--     dashboard urls; risk-centre-dashboard moves 286 -> 280. Note that
+--     Section 3 of THIS script grants every role full rights on them, as
+--     on every other active row; 416 itself grants only VIEW, and only
+--     to roles that can VIEW one of the dashboard's child screens.
+--
 -- Re-runnable: yes. A second run makes no changes.
 -- Rollback: database/274_menu_master_seed_rollback.sql
 -- DEPENDS ON: 022 (menu_master, organization_role_menu_permission),
@@ -217,7 +262,7 @@ USING (VALUES
     -- un-retires the screen on the next run of this snapshot.
     (N'practice-instances'            , N'Practice Instances'                , N'Practice/Index/practice-instances'          ,  115, N'network-wired'         , N'Practice Management'        , N'Inactive'),
     (N'Operationalize'                , N'Operationalize'                    , N'/Practice/Index/resolve'                    ,  230, N'gears'                 , N'Practice Management'        , N'Active'),
-    (N'organization-controls'         , N'Repository Subscriptions'          , N'Practice/Index/organization-controls'       ,  100, N'bookmark'              , N'Governance'                 , N'Active'),
+    (N'organization-controls'         , N'Standards & Frameworks'            , N'Practice/Index/organization-controls'       ,  100, N'bookmark'              , N'Governance'                 , N'Active'),   -- renamed by 364
     (N'role-menu-permissions'         , N'Role Menu Permission'              , N'Practice/Index/role-menu-permissions'       ,  120, N'list-check'            , N'Organization Administration', N'Active'),
     (N'Configure'                     , N'Configure'                         , N'/Practice/Index/organization-requirements'  ,  110, N'user-lock'             , N'Organization Administration', N'InActive'),
     (N'teams'                         , N'Team Management'                   , N'Practice/Index/teams'                       ,   90, N'people-group'          , N'Organization Administration', N'Inactive'),
@@ -231,9 +276,9 @@ USING (VALUES
     (N'workbench-teams'               , N'Teams'                             , N'Practice/Index/workbench-teams'             ,  280, N'people-group'          , N'Registers'                  , N'Inactive'),
     (N'workbench-tools'               , N'Tools'                             , N'Practice/Index/workbench-tools'             ,  250, N'screwdriver-wrench'    , N'Registers'                  , N'Inactive'),
     (N'workbench-vendors'             , N'Vendors'                           , N'Practice/Index/workbench-vendors'           ,  260, N'handshake'             , N'Registers'                  , N'Inactive'),
-    (N'dashboard'                     , N'Dashboard'                         , N'Practice/Index'                             ,    0, N'chart-line'            , N'Dashboard'                  , N'Active'),
-    (N'organization-administration'   , N'Administration'                    , N'Practice/Index/organization-administration' ,  195, N'building-user'         , N'Organization'               , N'Active'),
-    (N'source-statements'             , N'Source Statements'                 , N'Practice/Index/source-statements'           ,  105, N'file-lines'            , N'Governance'                 , N'Active'),
+    (N'dashboard'                     , N'Home'                              , N'dashboard'                                  ,    0, N'house'                 , N'Dashboard'                  , N'Active'),   -- renamed by 384, icon by 403
+    (N'organization-administration'   , N'Organization'                      , N'Practice/Index/organization-administration' ,  490, N'building'              , N'Organization'               , N'Active'),   -- promoted to root by 402; placed above Settings (display_order) by 405
+    (N'source-statements'             , N'Control Statements'                , N'Practice/Index/source-statements'           ,  105, N'file-lines'            , N'Governance'                 , N'Active'),   -- renamed by 363
     (N'organization-requirements'     , N'Organization Practices'            , N'Practice/Index/organization-requirements'   ,  110, N'list-check'            , N'Practice Management'        , N'Active'),
     (N'menu-master'                   , N'Menu Master'                       , N'Practice/Index/menu-master'                 ,    6, N'bars'                  , N'System'                     , N'Active'),
     (N'audit-trace'                   , N'Audit Traceability'                , N'Practice/Index/audit-trace'                 ,  900, N'timeline'              , N'Governance'                 , N'Active'),
@@ -257,19 +302,22 @@ USING (VALUES
     -- Calendar moved from Assurance to Oversight by 275. The snapshot is
     -- authoritative and applied with UPDATE, so it has to carry the new
     -- placement or a re-run would drag Calendar back under Assurance.
-    (N'assurance-calendar'            , N'Calendar'                          , N'Practice/Index/assurance-calendar'          ,  290, N'calendar-days'         , N'Oversight'                  , N'Active'),
+    (N'assurance-calendar'            , N'Calendar'                          , N'Practice/Index/assurance-calendar'          ,  290, N'calendar-days'         , N'Issues & Actions'           , N'Active'),   -- module_type by 384
     (N'Assurance - Dashboard'         , N'Assurance Dashboard'               , N'Practice/Index/assurance-dashboard'         ,  690, N'chart-column'          , N'Assurance Management'       , N'InActive'),
     (N'assurance-dashboard'           , N'Assurance Dashboard'               , N'Practice/Index/assurance-dashboard'         ,  600, N'chart-line'            , N'Assurance Management'       , N'Inactive'),
-    (N'tasks'                         , N'Task Center'                       , N'Practice/Index/tasks'                       ,  228, N'list-check'            , N'Oversight'                  , N'Active'),
-    (N'gaps'                          , N'Gap Center'                        , N'Practice/Index/gaps'                        ,  224, N'triangle-exclamation'  , N'Oversight'                  , N'Active'),
+    (N'tasks'                         , N'Task Board'                        , N'Practice/Index/tasks'                       ,  228, N'list-check'            , N'Issues & Actions'           , N'Active'),   -- renamed by 384
+    (N'gaps'                          , N'Gap Register'                      , N'Practice/Index/gaps'                        ,  224, N'triangle-exclamation'  , N'Issues & Actions'           , N'Active'),   -- renamed by 384
     (N'nav-administration'            , N'Administration'                    , NULL                                          ,  500, N'user-shield'           , N'Administration'             , N'InActive'),
-    (N'nav-governance'                , N'Governance'                        , NULL                                          ,  100, N'landmark'              , N'Governance'                 , N'Active'),
+    (N'nav-governance'                , N'Governance'                        , NULL                                          ,  100, N'landmark'              , N'Governance'                 , N'Active'),   -- url NULL again by 416 (its Dashboard is a child)
+    (N'governance-dashboard'          , N'Dashboard'                         , N'Practice/Index/governance-dashboard'        ,   99, N'chart-pie'             , N'Governance'                 , N'Active'),   -- added by 416, first child of nav-governance
     (N'nav-operations'                , N'Operations'                        , NULL                                          ,  300, N'gears'                 , N'Operations'                 , N'Inactive'),
-    (N'nav-organization'              , N'Organization'                      , NULL                                          ,  500, N'building'              , N'Organization'               , N'Active'),
-    (N'nav-oversight'                 , N'Oversight'                         , NULL                                          ,  200, N'binoculars'            , N'Oversight'                  , N'Active'),
+    (N'nav-organization'              , N'Settings'                          , NULL                                          ,  500, N'gear'                  , N'Organization'               , N'Active'),
+    (N'nav-oversight'                 , N'Issues & Actions'                  , NULL                                          ,  200, N'binoculars'            , N'Issues & Actions'           , N'Active'),   -- renamed by 384; url NULL again by 416
+    (N'issues-actions-dashboard'      , N'Dashboard'                         , N'Practice/Index/issues-actions-dashboard'    ,  223, N'chart-pie'             , N'Issues & Actions'           , N'Active'),   -- added by 416, first child of nav-oversight
     (N'nav-registers'                 , N'Registers'                         , NULL                                          ,  600, N'network-wired'         , N'Registers'                  , N'Inactive'),
-    (N'repository-subscriptions'      , N'Repository Subscriptions (Admin)'  , N'Practice/Index/repository-subscriptions'    ,   50, N'bookmark'              , N'Organization Setup'         , N'Inactive'),
-    (N'nav-assurance'                 , N'Audit Management'                         , NULL                                          ,  300, N'clipboard-check'         , N'Audit Management'                  , N'Active'),
+    (N'repository-subscriptions'      , N'Standards & Frameworks (Admin)'    , N'Practice/Index/repository-subscriptions'    ,   50, N'bookmark'              , N'Organization Setup'         , N'Inactive'),   -- renamed by 364
+    (N'nav-assurance'                 , N'Audit Assurance'                   , NULL                                          ,  300, N'clipboard-check'       , N'Audit Assurance'            , N'Active'),   -- renamed by 384; url NULL again by 416
+    (N'audit-assurance-dashboard'     , N'Dashboard'                         , N'Practice/Index/audit-assurance-dashboard'   ,  439, N'chart-pie'             , N'Audit Assurance'            , N'Active'),   -- added by 416, first child of nav-assurance
     (N'event-assurance'               , N'Event Assurance'                   , N'Practice/Index/event-assurance'             ,  457, N'shield-halved'         , N'Workflow'                   , N'Active'),
     (N'nav-workflow'                  , N'Workflow'                          , NULL                                          ,  450, N'diagram-project'       , N'Workflow'                   , N'InActive'),
     (N'workflow-checklists'           , N'Checklists'                        , N'Practice/Index/workflow-checklists'         ,  455, N'list-check'            , N'Workflow'                   , N'Active'),
@@ -281,30 +329,37 @@ USING (VALUES
     (N'workflow-stages'               , N'Workflow Stages'                   , N'Practice/Index/workflow-stages'             ,  452, N'route'                 , N'Workflow'                   , N'Active'),
     -- Audit Management containers, added by 276. Both are pages AND
     -- parents; the sidebar honours a parent's menu_url since 276.
-    (N'org-audit-definition'          , N'Audit Definition'                  , N'Practice/org-audit-definition'              ,  440, N'file-shield'           , N'Audit Management'                  , N'Active'),
-    (N'org-audit-configuration'       , N'Audit Configuration'               , N'Practice/org-audit-configuration'           ,  450, N'sliders'               , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-definitions'     , N'Audit Definitions'             , N'Practice/org-assurance-definitions'         ,   10, N'file-shield'           , N'Audit Management'                  , N'Inactive'),
-    (N'org-assurance-scope-builder'   , N'Scope Builder'                     , N'Practice/org-assurance-scope-builder'       ,   20, N'diagram-project'       , N'Audit Management'                  , N'Inactive'),
-    (N'org-assurance-question-sets'   , N'Question Sets'                     , N'Practice/org-assurance-question-sets'       ,   30, N'clipboard-list'        , N'Audit Management'                  , N'Inactive'),
-    (N'org-assurance-evidence-config' , N'Evidence Config'                   , N'Practice/org-assurance-evidence-config'     ,   10, N'file-circle-check'     , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-workflow-config' , N'Workflow Config'                   , N'Practice/org-assurance-workflow-config'     ,   20, N'sitemap'               , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-scoring-config'  , N'Scoring Config'                    , N'Practice/org-assurance-scoring-config'      ,   30, N'gauge'                 , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-plans'           , N'Audit Plans'                   , N'Practice/org-assurance-plans'               ,  466, N'calendar-days'         , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-triggers'        , N'Triggers'                          , N'Practice/org-assurance-triggers'            ,   40, N'bolt'                  , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-scope-resolution', N'Scope Resolution'                  , N'Practice/org-assurance-scope-resolution'    ,   50, N'circle-nodes'          , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-executions'      , N'Executions'                        , N'Practice/org-assurance-executions'          ,  469, N'play-circle'           , N'Audit Management'                  , N'Active'),
-    (N'org-assurance-observations'    , N'Observations'                      , N'Practice/org-assurance-observations'        ,  470, N'triangle-exclamation'  , N'Audit Management'                  , N'Active'),
-    (N'asset-category-assurance'      , N'Asset Category Assurance'          , N'Practice/Index/asset-category-assurance'    ,  316, N'boxes-stacked'         , N'Operations'                 , N'Active'),
+    (N'org-audit-definition'          , N'Audit Definition'                  , N'Practice/org-audit-definition'              ,  440, N'file-shield'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-audit-configuration'       , N'Audit Configuration'               , N'Practice/org-audit-configuration'           ,  450, N'sliders'               , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-definitions'     , N'Audit Definitions'                 , N'Practice/org-assurance-definitions'         ,   10, N'file-shield'           , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
+    (N'org-assurance-scope-builder'   , N'Scope Builder'                     , N'Practice/org-assurance-scope-builder'       ,   20, N'diagram-project'       , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
+    (N'org-assurance-question-sets'   , N'Question Sets'                     , N'Practice/org-assurance-question-sets'       ,   30, N'clipboard-list'        , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
+    (N'org-assurance-evidence-config' , N'Evidence Config'                   , N'Practice/org-assurance-evidence-config'     ,   10, N'file-circle-check'     , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-workflow-config' , N'Workflow Config'                   , N'Practice/org-assurance-workflow-config'     ,   20, N'sitemap'               , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-scoring-config'  , N'Scoring Config'                    , N'Practice/org-assurance-scoring-config'      ,   30, N'gauge'                 , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-plans'           , N'Audit Plans'                       , N'Practice/org-assurance-plans'               ,  466, N'calendar-days'         , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-triggers'        , N'Triggers'                          , N'Practice/org-assurance-triggers'            ,   40, N'bolt'                  , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-scope-resolution', N'Scope Resolution'                  , N'Practice/org-assurance-scope-resolution'    ,   50, N'circle-nodes'          , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-executions'      , N'Executions'                        , N'Practice/org-assurance-executions'          ,  469, N'play-circle'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-observations'    , N'Observations'                      , N'Practice/org-assurance-observations'        ,  470, N'triangle-exclamation'  , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'asset-category-assurance'      , N'Asset Category Assurance'          , N'Practice/Index/asset-category-assurance'    ,  316, N'boxes-stacked'         , N'Operations'                 , N'Inactive'),   -- retired by 409 (Asset Profiles replace it)
     -- Added by migration 332, after the export. The snapshot UPDATEs what
     -- it finds, so leaving this out would delete the Event Profiles menu
     -- row on the next run of this script.
     (N'event-profiles'                , N'Event Profiles'                    , N'Practice/Index/event-profiles'              ,  317, N'users-gear'            , N'Organization'               , N'Active'),
-    (N'document-uploads'              , N'Document Library'                  , N'Practice/Index/document-uploads'            ,   10, N'file-lines'            , N'Documents'                  , N'Active'),   -- renamed by 358, re-nested by 359
-    (N'document-acknowledgements'     , N'Document Acknowledgements'         , N'Practice/Index/document-acknowledgements'   ,   20, N'file-signature'        , N'Documents'                  , N'Active'),
-    (N'my-acknowledgements'           , N'My Acknowledgements'               , N'Practice/Index/my-acknowledgements'         ,   30, N'inbox'                 , N'Documents'                  , N'Active'),
-    (N'nav-documents'                 , N'Document Management'               , NULL                                          ,  130, N'folder-open'           , N'Governance'                 , N'Active'),   -- moved by 359
-    (N'exception-centre'              , N'Exception Centre'                  , N'Practice/Index/exception-centre'            ,  270, N'shield-halved'         , N'Oversight'                  , N'Active'),
-    (N'risk-centre'                   , N'Risk Management'                   , N'Practice/Index/risk-centre'                 ,  280, N'triangle-exclamation'  , N'Risk Management'            , N'Active'),   -- renamed + promoted to root by 373
+    (N'document-uploads'              , N'Document Library'                  , N'Practice/Index/document-uploads'            ,   10, N'file-lines'            , N'Policies & Documents'       , N'Active'),   -- renamed by 358, re-nested by 359, module_type by 384
+    (N'document-acknowledgements'     , N'Document Acknowledgements'         , N'Practice/Index/document-acknowledgements'   ,   20, N'file-signature'        , N'Policies & Documents'       , N'Active'),   -- module_type by 384
+    (N'my-acknowledgements'           , N'My Acknowledgements'               , N'Practice/Index/my-acknowledgements'         ,   30, N'inbox'                 , N'My Notification'            , N'Active'),   -- moved under my-notifications by 384
+    (N'nav-documents'                 , N'Policies & Documents'              , NULL                                          ,  400, N'folder-open'           , N'Policies & Documents'       , N'Active'),   -- moved by 359; renamed + root again by 384
+    (N'exception-centre'              , N'Exceptions & Waivers'              , N'Practice/Index/exception-centre'            ,  270, N'shield-halved'         , N'Issues & Actions'           , N'Active'),   -- renamed by 384
+    (N'risk-centre'                   , N'Risk Management'                   , N'#'                                          ,  280, N'triangle-exclamation'  , N'Risk Management'            , N'Active'),   -- root parent group; url '#' by 383 (and again by 416 -- its Dashboard is a child)
+    -- Risk Management submenus (383) -- children of 'risk-centre'; parent wired in Section 2.
+    (N'risk-centre-candidates'        , N'Risk Candidate'                    , N'Practice/Index/risk-centre-candidates'      ,  281, N'inbox'                 , N'Risk Management'            , N'Active'),
+    (N'risk-centre-register'          , N'Risk Register'                     , N'Practice/Index/risk-centre-register'        ,  282, N'book'                  , N'Risk Management'            , N'Active'),
+    (N'risk-centre-accept'            , N'Accept Risk'                       , N'Practice/Index/risk-centre-accept'          ,  283, N'circle-check'          , N'Risk Management'            , N'Active'),
+    (N'risk-centre-review'            , N'Review Risk'                       , N'Practice/Index/risk-centre-review'          ,  284, N'rotate-left'           , N'Risk Management'            , N'Active'),
+    (N'risk-centre-calendar'          , N'Calendar'                          , N'Practice/Index/risk-centre-calendar'        ,  285, N'calendar-days'         , N'Risk Management'            , N'Active'),
+    (N'risk-centre-dashboard'         , N'Dashboard'                         , N'Practice/Index/risk-centre-dashboard'       ,  280, N'chart-pie'             , N'Risk Management'            , N'Active'),   -- first child since 416 (was 286)
     -- Inactive since 289 -- HIDDEN, NOT SUPERSEDED. Nothing replaces this
     -- screen: it is the only way to adopt Control Management SLA masters
     -- and tune warning / escalation thresholds and notify roles, and its
@@ -313,7 +368,11 @@ USING (VALUES
     -- change or a new SLA master needs adopting. The route still resolves
     -- for a direct link while it is hidden.
     (N'org-sla-config'                , N'SLA Configuration'                 , N'Practice/org-sla-config'                    ,  550, N'clock'                 , N'Governance'                 , N'Inactive'),
-    (N'my-notifications'              , N'My Notifications'                  , N'Practice/Index/my-notifications'            ,  270, N'bell'                  , N'Oversight'                  , N'Active'),
+    (N'my-notifications'              , N'My Notification'                   , N'Practice/Index/my-notifications'            ,   50, N'bell'                  , N'My Notification'            , N'Active'),   -- root parent by 384 (keeps its page url)
+    -- My Notification submenus (384) -- children of 'my-notifications'; parent wired in Section 2.
+    -- url '#' until sir supplies the real links; set them here AND in the live row.
+    (N'my-practices'                  , N'My Practices'                      , N'#'                                          ,   10, N'list-check'            , N'My Notification'            , N'Active'),
+    (N'my-approvals'                  , N'My Approvals'                      , N'#'                                          ,   20, N'circle-check'          , N'My Notification'            , N'Active'),
     (N'risk-acceptance-authority'     , N'Risk Acceptance Approval Authority', N'Practice/Index/risk-acceptance-authority'   ,  260, N'user-shield'           , N'Organization'               , N'Active')
 ) AS s(menu_key, menu_name, menu_url, display_order, icon_class, module_type, status)
 ON t.menu_key = s.menu_key
@@ -380,7 +439,6 @@ JOIN  (VALUES
     (N'workbench-teams'               , N'nav-registers'),
     (N'workbench-tools'               , N'nav-registers'),
     (N'workbench-vendors'             , N'nav-registers'),
-    (N'organization-administration'   , N'nav-organization'),
     (N'source-statements'             , N'nav-governance'),
     (N'organization-requirements'     , N'nav-governance'),
     (N'menu-master'                   , N'nav-administration'),
@@ -415,12 +473,24 @@ JOIN  (VALUES
     (N'event-profiles'                , N'nav-organization'),   -- added by 332
     (N'document-uploads'              , N'nav-documents'),   -- renamed by 358, re-nested by 359
     (N'document-acknowledgements'     , N'nav-documents'),
-    (N'my-acknowledgements'           , N'nav-documents'),
-    (N'nav-documents'                 , N'nav-governance'),   -- added by 359
+    (N'my-acknowledgements'           , N'my-notifications'),   -- moved by 384
     (N'exception-centre'              , N'nav-oversight'),
     (N'org-sla-config'                , N'nav-governance'),
-    (N'my-notifications'              , N'nav-oversight'),
-    (N'risk-acceptance-authority'     , N'nav-organization')
+    -- 'my-notifications' and 'nav-documents' links removed by 384 -- both are roots now.
+    (N'my-practices'                  , N'my-notifications'),   -- added by 384
+    (N'my-approvals'                  , N'my-notifications'),   -- added by 384
+    -- Risk Management submenus (383) -> parent 'risk-centre'.
+    (N'risk-centre-candidates'        , N'risk-centre'),
+    (N'risk-centre-register'          , N'risk-centre'),
+    (N'risk-centre-accept'            , N'risk-centre'),
+    (N'risk-centre-review'            , N'risk-centre'),
+    (N'risk-centre-calendar'          , N'risk-centre'),
+    (N'risk-centre-dashboard'         , N'risk-centre'),
+    (N'risk-acceptance-authority'     , N'nav-organization'),
+    -- Module Dashboard submenus (416).
+    (N'governance-dashboard'          , N'nav-governance'),
+    (N'issues-actions-dashboard'      , N'nav-oversight'),
+    (N'audit-assurance-dashboard'     , N'nav-assurance')
 ) AS x(child_key, parent_key) ON x.child_key = m.menu_key
 JOIN   grac_practice.menu_master p ON p.menu_key = x.parent_key
 WHERE  ISNULL(m.parent_menu_id, -1) <> p.menu_id;
@@ -460,21 +530,56 @@ JOIN  (VALUES
     (N'nav-governance'),
     (N'nav-operations'),
     (N'nav-organization'),
+    (N'organization-administration'),   -- promoted to a root by 402 (now "Organization")
     (N'nav-oversight'),
     (N'nav-registers'),
     (N'repository-subscriptions'),
     (N'nav-assurance'),
     (N'nav-workflow'),
-    (N'risk-centre')   -- added by 373 -- promoted from a child of
+    (N'risk-centre'),  -- added by 373 -- promoted from a child of
                         -- 'nav-oversight' to a root (see the removed
                         -- parent-link pair above); menu_key unchanged,
                         -- now displayed as 'Risk Management'.
     -- 'nav-documents' removed by 359 -- it is no longer a root, it is
     -- now a child of 'nav-governance' (see the parent-link list above).
+    (N'nav-documents'),      -- root again by 384 (Policies & Documents)
+    (N'my-notifications')    -- root by 384 (My Notification parent)
 ) AS r(menu_key) ON r.menu_key = m.menu_key
 WHERE  m.parent_menu_id IS NOT NULL;
 
 PRINT '274: root menus cleared of a parent = ' + CAST(@@ROWCOUNT AS NVARCHAR(20));
+GO
+
+-- =====================================================================
+-- 2b. Sidebar visibility (390). The "My" group lives on the Home page, so
+--     'my-notifications' and every row beneath it are hidden from the
+--     sidebar. status stays Active: status is also the permission filter.
+--     Dynamic SQL because show_in_sidebar only exists once 390 has run.
+-- =====================================================================
+IF COL_LENGTH('grac_practice.menu_master','show_in_sidebar') IS NOT NULL
+    EXEC sp_executesql N'
+        ;WITH my_tree AS (
+            SELECT menu_id FROM grac_practice.menu_master WHERE menu_key = N''my-notifications''
+            UNION ALL
+            SELECT c.menu_id FROM grac_practice.menu_master c JOIN my_tree p ON c.parent_menu_id = p.menu_id
+        )
+        UPDATE m SET show_in_sidebar = 0, updated_by = N''seed-274'', updated_dt = SYSUTCDATETIME()
+          FROM grac_practice.menu_master m JOIN my_tree t ON t.menu_id = m.menu_id
+         WHERE m.show_in_sidebar = 1;';
+GO
+
+-- =====================================================================
+-- 2c. Sidebar visibility (401). The standalone "Role Menu Permission"
+--     screen moved into Role Master, so it is hidden from the sidebar.
+--     status stays Active (status is also the permission filter, and the
+--     unified editor's save still posts through the role-menu-permissions
+--     API). Dynamic SQL: show_in_sidebar only exists once 390 has run.
+-- =====================================================================
+IF COL_LENGTH('grac_practice.menu_master','show_in_sidebar') IS NOT NULL
+    EXEC sp_executesql N'
+        UPDATE grac_practice.menu_master
+           SET show_in_sidebar = 0, updated_by = N''seed-274'', updated_dt = SYSUTCDATETIME()
+         WHERE menu_key = N''role-menu-permissions'' AND show_in_sidebar = 1;';
 GO
 
 -- =====================================================================

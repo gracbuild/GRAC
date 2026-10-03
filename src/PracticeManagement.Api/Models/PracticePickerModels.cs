@@ -61,6 +61,21 @@ public sealed record PracticePickerPractice(
     string? MapSourceCode = null);
 
 /// <summary>
+/// Level 5 (migration 387) -- an active practice INSTANCE of one practice.
+/// AlreadyMappedToRisk / MapSourceCode are decided in SQL for the risk
+/// named in the request; false / null for every other caller.
+/// </summary>
+public sealed record PracticePickerInstance(
+    long    PracticeInstanceId,
+    string? InstanceCode,
+    string? InstanceName,
+    string? Department,
+    string? PrimaryOwner,
+    long    PracticeId,
+    bool    AlreadyMappedToRisk = false,
+    string? MapSourceCode = null);
+
+/// <summary>
 /// Edit mode -- the full path back up from a practice, so a form opened
 /// on an existing record can show Framework / Structure / Control / Practice
 /// without the user re-walking the tree. Null when the practice is not

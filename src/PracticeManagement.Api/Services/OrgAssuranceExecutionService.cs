@@ -103,6 +103,8 @@ public sealed class OrgAssuranceExecutionService(
         AddParam(command, "@search",          DbType.String, (object?)query.Search       ?? DBNull.Value, 200);
         AddParam(command, "@page",            DbType.Int32,  Math.Max(1, query.Page));
         AddParam(command, "@page_size",       DbType.Int32,  Math.Clamp(query.PageSize, 1, 200));
+        // 414: dashboard drill-down, sent only when declared.
+        await Infrastructure.ListDrillParameters.AddAsync(connection, command, "sp_org_assurance_execution_list", query.Drill, cancellationToken);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -358,6 +360,7 @@ public sealed class OrgAssuranceExecutionService(
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

@@ -1,0 +1,905 @@
+﻿/* ==================================================================
+   master-layout.css
+   -----------------
+   Master Page layout + alignment refinement. Chrome only: the topbar,
+   the signed-in user block, the breadcrumb, the sidebar and the content
+   gutter. Every page that renders through Views/Shared/_Layout.cshtml
+   picks these up, so no screen needs its own copy.
+
+   WHY A NEW FILE RATHER THAN EDITING cacca-styles.css
+     The chrome rules are spread across three stylesheets that load in
+     this order:
+         cacca-styles.css        (the bulk of the chrome)
+         control-management.css  (re-states .content, .breadcrumb,
+                                  .user-panel .info)
+         practice-management.css (screen surfaces)
+     A change made in the first is silently overridden by the later two,
+     so a fix there would look correct in the file and wrong in the
+     browser. This file loads LAST, which makes the cascade predictable,
+     leaves 55 KB of legacy CSS untouched, and is trivially revertible by
+     removing one <link>.
+
+   SCOPE
+     Layout, spacing, alignment, weight and colour only. No markup, no
+     behaviour, no business logic. Nothing here changes what a control
+     does -- only where it sits and how it reads.
+
+   DESIGN SOURCE
+     GRAC design system: navy chrome + white work surface, blue as the
+     only action colour, gold never on a control, Lato for UI, a 4-px
+     spacing grid, 8-px canonical radius, flat fills, one soft shadow per
+     card. Deliberately classic and dense, not decorative.
+   ================================================================== */
+
+:root {
+    /* Chrome geometry, expressed once so header and content share a grid. */
+    --ml-topbar-h: 56px;
+    --ml-gutter: 20px;
+    --ml-brand-h: 76px;
+
+    /* Palette -- GRAC tokens. Names are prefixed so they cannot collide
+       with the --grac-* variables control-management.css already owns. */
+    --ml-navy: #0C1129;
+    --ml-page: #F9FAFB;
+    --ml-surface: #FFFFFF;
+    --ml-border: #E5E7EB;
+    --ml-ink: #1F2937;
+    --ml-muted: #6B7280;
+    --ml-primary: #467CEB;
+    --ml-primary-600: #3568D4;
+}
+
+/* ==================================================================
+   1. Top header
+   ------------------------------------------------------------------
+   AdminLTE leaves the navbar height to its content, so the bar grew or
+   shrank with whatever was inside it. Pinning it to 56 px and giving it
+   the same horizontal gutter as the content area puts the toggle,
+   breadcrumb, user block and action icons on one baseline, and lines the
+   breadcrumb up with the page heading below it.
+   ================================================================== */
+.main-header.navbar {
+    align-items: center;
+    background: var(--ml-surface);
+    border-bottom: 1px solid var(--ml-border);
+    box-shadow: none;
+    height: var(--ml-topbar-h);
+    min-height: var(--ml-topbar-h);
+    padding: 0 var(--ml-gutter);
+}
+
+.main-header.navbar > .navbar-nav {
+    align-items: center;
+    height: 100%;
+}
+
+/* Every direct affordance in the bar is centred on the same axis and
+   sized to the same 36-px hit target. */
+.main-header.navbar .nav-item > .nav-link {
+    align-items: center;
+    border-radius: 8px;
+    color: var(--ml-ink);
+    display: flex;
+    min-height: 36px;
+    padding: 0 8px;
+}
+
+.main-header.navbar .nav-item > .nav-link:hover {
+    background: #F3F4F6;
+}
+
+/* Sidebar toggle: optical size match with the icon buttons opposite. */
+.main-header.navbar [data-widget="pushmenu"] > svg {
+    display: block;
+    height: 18px;
+    width: 18px;
+}
+
+.main-header.navbar [data-widget="fullscreen"] {
+    color: var(--ml-muted);
+    font-size: 15px;
+}
+
+/* The toggle and the breadcrumb are separate <li>s; this is the only
+   gap between them, so the breadcrumb starts on a predictable offset. */
+.main-header.navbar .navbar-nav:first-child > .nav-item + .nav-item {
+    margin-left: 4px;
+}
+
+.main-header.navbar .navbar-nav.ml-auto > .nav-item + .nav-item {
+    margin-left: 2px;
+}
+
+/* ==================================================================
+   2. Breadcrumb
+   ------------------------------------------------------------------
+   cacca-styles gives it a white background and control-management gives
+   it a 10-px left pad; together they made it sit off the header grid.
+   Flattened and de-indented so "Home / ... / Risk Centre" starts exactly
+   where the page title beneath it starts.
+   ================================================================== */
+.main-header .breadcrumb {
+    align-items: center;
+    background: transparent !important;
+    border-radius: 0;
+    display: flex;
+    font-size: 13px;
+    line-height: 1;
+    margin: 0 !important;
+    padding: 0;
+}
+
+.main-header .breadcrumb-item {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+}
+
+.main-header .breadcrumb-item,
+.main-header .breadcrumb a {
+    color: var(--ml-muted);
+}
+
+.main-header .breadcrumb a:hover {
+    color: var(--ml-primary);
+    text-decoration: none;
+}
+
+.main-header .breadcrumb-item.active {
+    color: var(--ml-ink);
+    font-weight: 700;
+}
+
+/* ==================================================================
+   3. Signed-in user block
+   ------------------------------------------------------------------
+   The markup is  [ .image > img ] [ .info > #spnUserName + #spnUserRole ].
+   Three separate rules were fighting over its vertical position:
+   control-management.css padded .info down by 5 px, .info had no column
+   layout so the two lines did not share a left edge, and the avatar had
+   no explicit box. The result was the mis-registration in the reference
+   screenshot. Fixed by making .info a centred column and giving the
+   avatar a fixed square.
+   ================================================================== */
+.main-header .user-panel {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+}
+
+.main-header .user-panel > .image {
+    display: flex;
+    flex: 0 0 auto;
+}
+
+.main-header .user-panel > .image > img {
+    border-radius: 50%;
+    box-shadow: none;
+    display: block;
+    height: 34px;
+    object-fit: cover;
+    width: 34px;
+}
+
+/* Two lines, one left edge, optically centred against the avatar. */
+.main-header .user-panel > .info {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.25;
+    padding: 0 !important;   /* supersedes control-management's padding-top */
+    text-align: left;
+}
+
+.main-header .user-panel .info #spnUserName {
+    color: var(--ml-ink);
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 18px;
+    margin: 0;
+    max-width: 230px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: baseline;
+    white-space: nowrap;
+}
+
+.main-header .user-panel .info #spnUserRole {
+    color: var(--ml-muted);
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 15px;
+    margin: 0;
+    max-width: 230px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The whole block is one link; keep it from inheriting the icon padding. */
+.main-header .navbar-nav .nav-item.dropdown > .nav-link {
+    padding: 0 6px;
+}
+
+/* ==================================================================
+   4. Sidebar -- brand / logo
+   ------------------------------------------------------------------
+   Was a 60-px logo in an 82-px bar, absolutely positioned at left:1rem
+   while the bar itself padded to 14 px -- so it read oversized against
+   44-px menu rows and sat hard against the top-left corner.
+
+   Now: 48-px mark, left-aligned, with 14 px of air above it and a
+   matching amount below.
+
+   The left anchor is 22 px, which is not arbitrary -- it is exactly
+   where the menu icons start (.sidebar padding-left 10 + .nav-link
+   padding-left 12). So the logo, every nav icon and the whole label
+   column share one left edge down the sidebar.
+
+   The logos stay absolutely positioned because the expanded/collapsed
+   pair cross-fades in place; only their anchor changes.
+   ================================================================== */
+.main-sidebar .brand-link {
+    align-items: flex-start;
+    border-bottom: 1px solid rgba(255, 255, 255, .07) !important;
+    display: flex;
+    height: var(--ml-brand-h);
+    justify-content: flex-start;
+    padding: 0 16px;
+    position: relative;
+}
+
+.main-sidebar .brand-link .brand-image {
+    height: 48px;
+    margin: 0 !important;
+    max-height: none !important;
+    object-fit: contain;
+    width: auto;
+}
+
+.main-sidebar .brand-link .logo-expanded {
+    left: 22px;
+    top: 14px;
+    transform: none;
+}
+
+/* Collapsed rail: the mark stays CENTRED rather than left-aligned.
+   On a 72-px rail there is no label column to align to, so an off-centre
+   mark just reads as a mistake. */
+.main-sidebar .brand-link .logo-collapsed {
+    left: 50%;
+    top: 18px;
+    transform: translateX(-50%);
+}
+
+body.sidebar-collapse .main-sidebar .brand-link .logo-collapsed {
+    height: 38px;
+    top: 19px;
+}
+
+body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
+    height: 48px;
+}
+
+/* ==================================================================
+   5. Sidebar -- surface
+   ------------------------------------------------------------------
+   The gradient and the glowing active pill read as consumer-app styling.
+   The GRAC system calls for flat fills and a single action colour, which
+   is also what "classic enterprise" wants. Flattened to the navy token;
+   the active item becomes a solid blue with no glow.
+   ================================================================== */
+.main-sidebar.sidebar-dark-primary,
+[class*="sidebar-dark-"] {
+    background: var(--ml-navy) !important;
+}
+
+.main-sidebar .sidebar {
+    padding: 6px 10px 16px;
+}
+
+/* ==================================================================
+   6. Sidebar -- top-level items
+   ------------------------------------------------------------------
+   One row height (44 px, the system's density figure), one radius, one
+   indent. Icons share a fixed 22-px column so every label starts on the
+   same x, whatever glyph precedes it.
+   ================================================================== */
+.main-sidebar .nav-sidebar > .nav-item {
+    margin: 2px 0;
+}
+
+.main-sidebar .nav-sidebar > .nav-item > .nav-link {
+    align-items: center;
+    border-radius: 8px;
+    color: #D5DEEE !important;
+    display: flex;
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: .1px;
+    margin: 0;
+    min-height: 44px;
+    padding: 10px 12px !important;
+    transition: background-color .16s ease, color .16s ease;
+}
+
+/* No translate on hover -- a menu that shifts sideways reads as playful,
+   and it breaks the icon column alignment mid-interaction. */
+.main-sidebar .nav-sidebar > .nav-item > .nav-link:hover {
+    background: rgba(255, 255, 255, .08) !important;
+    color: #FFFFFF !important;
+    transform: none;
+}
+
+.main-sidebar .nav-sidebar > .nav-item > .nav-link.active,
+.main-sidebar .nav-sidebar > .nav-item > .nav-link.active-current {
+    background: var(--ml-primary) !important;
+    box-shadow: none;
+    color: #FFFFFF !important;
+    font-weight: 700;
+}
+
+/* An open parent is a state, not an action -- a tint, never the action
+   blue, so the blue always means "this is the page you are on". */
+.main-sidebar .nav-sidebar > .nav-item.menu-open > .nav-link.active:not(:only-child),
+.main-sidebar .nav-sidebar > .nav-item.menu-open > .nav-link.active-parent {
+    background: rgba(255, 255, 255, .10) !important;
+    box-shadow: none;
+    color: #FFFFFF !important;
+    font-weight: 700;
+}
+
+.main-sidebar .nav-sidebar .nav-icon {
+    flex: 0 0 22px;
+    font-size: 15px;
+    margin-right: 10px;
+    text-align: center;
+    width: 22px;
+}
+
+.main-sidebar .nav-sidebar > .nav-item > .nav-link > p {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Expand / collapse chevron.
+   AdminLTE positions this absolutely (right:1rem; top:.7rem) and the
+   markup nests it inside the <p>, so it is NOT a flex item -- pulling it
+   right with margin-left:auto would not work. Keep it absolute and
+   centre it on the row instead, because a fixed .7rem top no longer
+   centres against the 44-px row height set above.
+
+   position/display/visibility/color/z-index are restated here rather
+   than left to AdminLTE's own rule (which supplies them) -- reported:
+   for a NESTED parent (a submenu item that is itself a parent, e.g.
+   Document Management under Governance) the chevron did not show at
+   all, only for top-level parents. AdminLTE's own selector is just as
+   depth-agnostic as this one, so the gap was not proven to be there,
+   but this makes the icon's own visibility independent of load order
+   or any other stylesheet's cascade, for every nesting depth alike. */
+.main-sidebar .nav-sidebar .nav-link > .right,
+.main-sidebar .nav-sidebar .nav-link > p > .right {
+    color: inherit;
+    display: inline-block !important;
+    font-size: 11px;
+    line-height: 1;
+    margin-left: 0 !important;
+    opacity: .75;
+    position: absolute !important;
+    right: 12px !important;
+    top: 50% !important;
+    transform: translateY(-50%);
+    transition: transform .18s ease;
+    visibility: visible !important;
+    z-index: 2;
+}
+
+/* AdminLTE's own open-state rule is a bare rotate(-90deg), which would
+   discard the centring translate. Restate both. */
+.main-sidebar .nav-sidebar > .nav-item.menu-open > .nav-link > .right,
+.main-sidebar .nav-sidebar > .nav-item.menu-open > .nav-link > p > .right {
+    transform: translateY(-50%) rotate(-90deg);
+}
+
+/* The rule above only matches a TOP-LEVEL parent (a ".nav-item" that is
+   a direct child of ".nav-sidebar"), because until now no submenu item
+   ever had children of its own -- every parent-with-a-chevron was a
+   top-level item like Governance or Audit Management. Now that
+   Document Management (a second-level item, nested inside Governance's
+   own .nav-treeview) has its own children, it needs the identical
+   open-state rotation, or its chevron renders but never turns to show
+   the expanded state -- it would look frozen/decorative instead of a
+   working indicator. Restating the same rule with ".nav-treeview >"
+   ahead of ".nav-item" (rather than ".nav-sidebar >") reuses the exact
+   same mechanism for ANY nested parent, at any depth, the same way
+   Section 7a's indentation fix generalised rather than special-cased
+   Document Management specifically. */
+.main-sidebar .nav-sidebar .nav-treeview > .nav-item.menu-open > .nav-link > .right,
+.main-sidebar .nav-sidebar .nav-treeview > .nav-item.menu-open > .nav-link > p > .right {
+    transform: translateY(-50%) rotate(-90deg);
+}
+
+/* ==================================================================
+   7. Sidebar -- submenu
+   ------------------------------------------------------------------
+   The child rows carried three different left offsets (a 28-px margin,
+   an 8-px treeview margin and the connector pseudo-elements at 18/30 px)
+   so Oversight's children did not line up with each other. All child
+   rows now share ONE indent and the connector rail sits under the parent
+   icon column.
+   ================================================================== */
+.main-sidebar .nav-sidebar .nav-treeview {
+    margin: 2px 0 6px;
+    padding: 0;
+}
+
+/* Vertical rail, aligned to the centre of the parent's 22-px icon. */
+.main-sidebar .nav-sidebar .nav-treeview::before {
+    background: rgba(255, 255, 255, .14);
+    bottom: 6px;
+    left: 23px;
+    top: 6px;
+    width: 1px;
+}
+
+/* The elbow connectors were doing the same job as the rail at a
+   different offset, which is what made the indent look uneven. */
+.main-sidebar .nav-sidebar .nav-treeview > .nav-item::before,
+.main-sidebar .nav-sidebar .nav-treeview > .nav-item::after {
+    display: none;
+}
+
+.main-sidebar .nav-sidebar .nav-treeview > .nav-item {
+    margin: 1px 0;
+}
+
+.main-sidebar .nav-sidebar .nav-treeview .nav-link {
+    align-items: center;
+    border-radius: 8px !important;
+    color: #B9C6DC !important;
+    display: flex;
+    font-size: 13px;
+    font-weight: 500;
+    margin: 0 0 0 34px;
+    min-height: 36px;
+    padding: 7px 12px !important;
+    transition: background-color .16s ease, color .16s ease;
+}
+
+.main-sidebar .nav-sidebar .nav-treeview .nav-link:hover {
+    background: rgba(255, 255, 255, .07) !important;
+    color: #FFFFFF !important;
+}
+
+.main-sidebar .nav-sidebar .nav-treeview .nav-link .nav-icon {
+    flex: 0 0 16px;
+    font-size: 9px;
+    margin-right: 9px;
+    width: 16px;
+}
+
+/* Long submenu labels (e.g. "Document Acknowledgements") were never
+   clipped the way Section 6's top-level <p> rule clips long top-level
+   labels -- this rule only had font-size/line-height/margin. A label
+   wider than the row's available space grew the <p> itself (its
+   default flex min-width is "auto", i.e. its own content size, so a
+   flex item never shrinks below that on its own), which grew the row,
+   which grew past the sidebar's fixed width -- pushing the row's own
+   chevron (position: absolute; right: 12px, relative to that now
+   over-wide row) out past the visible edge, and forcing the whole
+   sidebar to scroll/shift so every row's LEFT edge clipped instead.
+   That is what made Document Management's chevron disappear: not a
+   missing element (it is in the DOM, identically to a top-level one),
+   but a long sibling label pushing the whole row -- and everything
+   after it -- out of view.
+
+   min-width: 0 lets the <p> shrink below its own content size (the
+   flexbox default it lacked); overflow/text-overflow/white-space
+   match Section 6's existing top-level treatment exactly, so a long
+   label now ellipsises instead of growing the row. The chevron itself
+   is unaffected: it is positioned absolutely against .nav-link (its
+   containing block, an ANCESTOR of this <p>), not against this <p>,
+   so it is not clipped by this <p>'s own overflow -- the same reason
+   Section 6's identical pattern already lets the top-level chevrons
+   show correctly today. */
+.main-sidebar .nav-sidebar .nav-treeview .nav-link p {
+    font-size: 13px;
+    line-height: 1.3;
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Selected child: same left edge as its siblings. The previous rule
+   re-stated margin-left, so the active row stepped out of the column. */
+[class*="sidebar-dark-"] .nav-treeview > .nav-item > .nav-link.active,
+.main-sidebar .nav-sidebar .nav-treeview .nav-item > .nav-link.active,
+.main-sidebar .nav-sidebar .nav-treeview .nav-item > .nav-link.active-current {
+    background: rgba(70, 124, 235, .16) !important;
+    box-shadow: inset 2px 0 0 var(--ml-primary);
+    color: #FFFFFF !important;
+    font-weight: 700;
+    margin-left: 34px;
+}
+
+.main-sidebar .nav-sidebar .nav-treeview .nav-link.active .nav-icon,
+.main-sidebar .nav-sidebar .nav-treeview .nav-link.active-current .nav-icon {
+    color: #8FB4FF;
+}
+
+/* Collapsed rail hides the connector entirely. */
+body.sidebar-collapse .main-sidebar .nav-sidebar .nav-treeview::before {
+    display: none;
+}
+
+/* ==================================================================
+   7a. Sidebar -- third-level (and deeper) submenu indentation
+   ------------------------------------------------------------------
+   Section 7 above styles every ".nav-treeview .nav-link" the same way
+   regardless of depth (margin-left: 34px), because the tree partial
+   (_PracticeMenuTree.cshtml) renders the identical "nav nav-treeview"
+   markup at every nesting level. That is fine for the 2-level menus
+   this file was originally written for, but once a group gains a
+   third level (e.g. Governance -> Document Management -> Document
+   Library), the level-2 parent and its level-3 children land at the
+   same left edge and the hierarchy becomes visually unreadable.
+
+   These rules only add specificity for a NESTED .nav-treeview (a
+   ".nav-treeview .nav-treeview" -- i.e. two levels deep from the
+   top-level item) so a third-level link steps in by another 34px,
+   reusing the same indent increment Section 6/7 already established
+   rather than inventing a new one. Second-level items are untouched.
+*/
+.main-sidebar .nav-sidebar .nav-treeview .nav-treeview .nav-link {
+    margin-left: 68px;
+}
+
+.main-sidebar .nav-sidebar .nav-treeview .nav-treeview::before {
+    left: 57px;
+}
+
+/* Selected third-level child: same fix as the second-level note above --
+   the active-state rule re-states margin-left, so it needs its own
+   nested override or a selected level-3 item snaps back to 34px. */
+[class*="sidebar-dark-"] .nav-treeview .nav-treeview > .nav-item > .nav-link.active,
+.main-sidebar .nav-sidebar .nav-treeview .nav-treeview .nav-item > .nav-link.active,
+.main-sidebar .nav-sidebar .nav-treeview .nav-treeview .nav-item > .nav-link.active-current {
+    margin-left: 68px !important;
+}
+
+body.sidebar-collapse .main-sidebar .nav-sidebar .nav-treeview .nav-treeview::before {
+    display: none;
+}
+
+/* ==================================================================
+   7b. Sidebar overlapping content between 768px and 991px
+   ------------------------------------------------------------------
+   Reported: expanding a menu group (e.g. Governance) makes the sidebar
+   sit ON TOP of the page instead of beside it -- the breadcrumb and
+   page heading render partly hidden behind the sidebar's left edge.
+
+   ROOT CAUSE, found in lib/FrontEnd/dist/css/adminlte.css: AdminLTE
+   ships two media queries that both target .content-wrapper's
+   margin-left and OVERLAP in range:
+
+     @media (min-width: 768px) { ... margin-left: 250px; }   (line ~11646)
+     @media (max-width: 991.98px) { ... margin-left: 0; }    (line ~11671)
+
+   Both match at any width from 768px to 991.98px inclusive. Equal
+   specificity, so the LATER rule in the file wins -- the max-width
+   block, which zeroes the margin. The sidebar itself (.main-sidebar)
+   is NOT hidden in that same range (it only slides off at <768px), so
+   the visible result is exactly what was reported: a full sidebar,
+   fixed and on top, over content that no longer has room reserved
+   for it. AdminLTE calls this its tablet "off-canvas" mode; nothing
+   in this app's markup asks for it, and nothing dims the content
+   behind the sidebar the way a deliberate off-canvas overlay would,
+   so it just reads as broken.
+
+   "Expanding a menu group" is not the cause, only the trigger the
+   user happened to notice it on: opening Governance's children makes
+   the sidebar list taller, which can turn on the page's vertical
+   scrollbar, which narrows the viewport by the scrollbar's width --
+   enough, right at that boundary, to tip the layout from the 992px+
+   push behaviour into this 768-991px band.
+
+   FIX: this app is used in an ordinary desktop browser window, not a
+   tablet, so the push layout (sidebar beside content) should hold
+   everywhere down to the point the sidebar itself goes off-canvas
+   (<768px). Re-declaring the same selector AdminLTE uses, after it in
+   the cascade (this file loads last -- see the note at the top of
+   this file), settles the conflict the other way without touching
+   the vendor file. Matches the selector AdminLTE line ~11646 uses,
+   minus the media query it was wrongly also given.
+   ================================================================== */
+body:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .content-wrapper,
+body:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-footer,
+body:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-header {
+    margin-left: 250px;
+}
+
+/* Collapsing the sidebar (the hamburger toggle) must still remove the
+   reserved space at every one of these widths, the same as it already
+   does above and below this band -- otherwise collapsing would leave a
+   blank 250px gutter down the left of the content. */
+body.sidebar-collapse:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .content-wrapper,
+body.sidebar-collapse:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-footer,
+body.sidebar-collapse:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-header {
+    margin-left: 0;
+}
+
+/* ==================================================================
+   7c. Sidebar-mini hover/focus flyout -- push content too
+   ------------------------------------------------------------------
+   Reported separately from 7b, at any viewport width: with the
+   sidebar collapsed (the hamburger toggle, not a screen-width
+   breakpoint), hovering the mouse over it -- or tabbing into one of
+   its links with the keyboard -- makes AdminLTE expand the collapsed
+   4.6rem rail out to its full 250px as a CSS-only flyout:
+
+     lib/FrontEnd/dist/css/adminlte.css (line ~14259, inside the
+     @media (min-width: 768px) block):
+       .sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand):hover,
+       .sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand).sidebar-focused {
+           width: 250px;
+       }
+
+   That rule only widens .main-sidebar itself -- .content-wrapper /
+   .main-header / .main-footer keep the narrow-rail margin (4.6rem)
+   they were given for the COLLAPSED state, because nothing reserves
+   the extra room while the flyout is open. The result is the sidebar
+   sitting on top of the page for as long as the hover/focus lasts,
+   at every width -- distinct from 7b's 768-991px band bug above, and
+   the one the user actually reported ("menu bar collapse cheythu
+   irikunna time lu mouse over lu menu expand cheyyumbo").
+
+   FIX, per the user's choice ("push content on hover too"): reserve
+   the same 250px the flyout itself expands to, so the page reflows
+   out of the way instead of being covered. Mirroring the vendor's
+   own :hover/.sidebar-focused pair with a pure CSS sibling selector
+   is not possible here -- .main-header sits BEFORE .main-sidebar in
+   _Layout.cshtml's markup, and CSS has no "previous sibling"
+   selector -- so a small script in _Layout.cshtml (just above the
+   closing </script> of the existing sidebar-state block) toggles a
+   `sidebar-hover-push` class on <body> for both triggers (mouse
+   hover and keyboard focus, matching the vendor's own two triggers
+   exactly) and this rule reacts to it.
+
+   !important IS NEEDED, unlike 7b above: at desktop widths (>=992px
+   -- the normal case, and the one first reported as "still no
+   change" after 7c shipped without !important) AdminLTE has a THIRD
+   margin-left rule, separate from the 768px/991.98px pair 7b deals
+   with:
+
+     lib/FrontEnd/dist/css/adminlte.css (line ~14205, inside
+     @media (min-width: 992px)):
+       .sidebar-mini.sidebar-collapse .content-wrapper,
+       .sidebar-mini.sidebar-collapse .main-footer,
+       .sidebar-mini.sidebar-collapse .main-header {
+           margin-left: 4.6rem !important;
+       }
+
+   !important always outranks a normal rule regardless of
+   specificity or source order, so the extra class on this selector
+   was never enough on its own at that width. Matching !important
+   here, with this selector's higher specificity, is what actually
+   wins.
+   ================================================================== */
+body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .content-wrapper,
+body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-footer,
+body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-header {
+    margin-left: 250px !important;
+    transition: margin-left .3s ease-in-out;
+}
+
+/* ==================================================================
+   8. Content gutter
+   ------------------------------------------------------------------
+   The single biggest alignment defect: .content padded 18 px and the
+   Bootstrap .container-fluid inside it added another 15 px, so page
+   content sat 33 px from the sidebar while the breadcrumb above sat on
+   the navbar's own padding. Collapsing the inner padding and matching
+   the header gutter puts the breadcrumb, the page heading, the tab
+   strip, the filter bar and the table on ONE left edge -- and the same
+   right edge.
+   ================================================================== */
+.content-wrapper {
+    background: var(--ml-page);
+}
+
+.content-wrapper > .content {
+    padding: var(--ml-gutter) var(--ml-gutter) 24px;
+}
+
+.content-wrapper > .content > .container-fluid {
+    margin: 0;
+    max-width: none;
+    padding-left: 0;
+    padding-right: 0;
+    width: 100%;
+}
+
+/* ==================================================================
+   9. Surface consistency
+   ------------------------------------------------------------------
+   One radius and one border colour across the cards the Master Page
+   frames, so a heading block, a panel and a table container do not each
+   round differently. Values match the GRAC system (8 px, #E5E7EB, one
+   soft shadow) and the existing .pm-* / .page-heading definitions, so
+   this only removes drift rather than restyling anything.
+   ================================================================== */
+.content-wrapper .pm-page-heading,
+.content-wrapper .page-heading,
+.content-wrapper .pm-panel,
+.content-wrapper .panel {
+    border-color: var(--ml-border);
+    border-radius: 8px;
+}
+
+.content-wrapper .pm-page-heading,
+.content-wrapper .page-heading {
+    margin-bottom: 16px;
+    padding: 16px 20px;
+}
+
+.content-wrapper .pm-panel,
+.content-wrapper .panel {
+    padding: 16px 20px;
+}
+
+/* Page title / description hierarchy: one step apart, not three. */
+.content-wrapper .pm-page-heading h1,
+.content-wrapper .page-heading h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -.1px;
+    line-height: 1.25;
+    margin: 2px 0 0;
+}
+
+.content-wrapper .pm-page-heading > div > p:last-child,
+.content-wrapper .page-heading > div > p:last-child {
+    margin-top: 4px;
+}
+
+.content-wrapper .pm-eyebrow,
+.content-wrapper .eyebrow {
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+}
+
+/* Action rows in a heading sit on the title's optical centre. */
+.content-wrapper .pm-actions,
+.content-wrapper .page-heading-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* ==================================================================
+   10. Reduced motion
+   ------------------------------------------------------------------
+   The chrome transitions above are decorative; honour the OS setting.
+   ================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    .main-sidebar .nav-sidebar > .nav-item > .nav-link,
+    .main-sidebar .nav-sidebar .nav-treeview .nav-link,
+    .main-sidebar .nav-sidebar .nav-link > p > .right,
+    body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .content-wrapper,
+    body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-footer,
+    body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini-xs):not(.layout-top-nav) .main-header {
+        transition: none;
+    }
+}
+
+/* ==================================================================
+   11. Collapsed sidebar + hover-to-expand
+   ------------------------------------------------------------------
+   THE BUG THIS FIXES
+     AdminLTE collapses the sidebar by zeroing the label:
+         .sidebar-mini.sidebar-collapse .nav-sidebar .nav-link p
+             { width: 0; white-space: nowrap }
+     and re-shows it on hover by restoring display / margin-left /
+     visibility -- but NOT the width. That works in stock AdminLTE only
+     because its own <p> has no overflow, so the text simply spills out
+     of the zero-width box and stays readable.
+
+     Section 6 above adds `overflow: hidden` to that same <p> so long
+     menu names ellipsis instead of wrapping. width:0 + overflow:hidden
+     clips the label to nothing -- which is why the expanded-on-hover
+     rail showed icons only.
+
+     The fix restores an honest width in the two states AdminLTE treats
+     as "expanded": :hover and .sidebar-focused (keyboard focus). The
+     selectors deliberately mirror AdminLTE's own, plus `body`, so they
+     out-specify the width:0 rule without !important.
+   ================================================================== */
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand):hover .sidebar .nav-sidebar .nav-link p,
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand).sidebar-focused .sidebar .nav-sidebar .nav-link p {
+    display: block;
+    margin-left: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    visibility: visible;
+    white-space: nowrap;
+    width: auto;
+}
+
+/* The chevron rides inside that same <p>. Keep it pinned and centred
+   while the rail is expanded by hover. */
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand):hover .nav-sidebar .nav-link > p > .right,
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand).sidebar-focused .nav-sidebar .nav-link > p > .right {
+    display: inline-block;
+    visibility: visible;
+    width: auto;
+}
+
+/* ------------------------------------------------------------------
+   Collapsed rail (not hovered): icons centred on the rail's own axis.
+   Without this the icon keeps the expanded 12-px left padding and sits
+   noticeably off-centre in a 73.6-px rail.
+   ------------------------------------------------------------------ */
+body.sidebar-collapse .main-sidebar:not(:hover):not(.sidebar-focused) .sidebar {
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+body.sidebar-collapse .main-sidebar:not(:hover):not(.sidebar-focused) .nav-sidebar > .nav-item > .nav-link {
+    justify-content: center;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+}
+
+body.sidebar-collapse .main-sidebar:not(:hover):not(.sidebar-focused) .nav-sidebar .nav-icon {
+    margin-right: 0;
+}
+
+/* A chevron on a rail with no labels is noise -- and it would sit on
+   top of the centred icon. */
+body.sidebar-collapse .main-sidebar:not(:hover):not(.sidebar-focused) .nav-sidebar .nav-link > p > .right,
+body.sidebar-collapse .main-sidebar:not(:hover):not(.sidebar-focused) .nav-sidebar .nav-link > .right {
+    display: none;
+}
+
+/* ------------------------------------------------------------------
+   Hover expansion: match AdminLTE's own 250-px width and .3s timing so
+   the panel, the brand bar and the labels arrive together instead of
+   the text snapping in after the width has finished animating.
+   ------------------------------------------------------------------ */
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand) {
+    transition: width .3s ease-in-out;
+}
+
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand):hover .nav-sidebar > .nav-item > .nav-link {
+    justify-content: flex-start;
+}
+
+/* The expanded-on-hover rail is 250 px, the same as the docked sidebar,
+   so the 22-px logo/icon column lines up in both states. */
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand):hover .brand-link .logo-expanded,
+body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand).sidebar-focused .brand-link .logo-expanded {
+    left: 22px;
+    transform: none;
+}
+
+/* Submenus stay closed on the bare rail; they only make sense once the
+   panel is wide enough to show their labels. */
+body.sidebar-collapse .main-sidebar:not(:hover):not(.sidebar-focused) .nav-sidebar .nav-treeview {
+    display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.sidebar-mini.sidebar-collapse .main-sidebar:not(.sidebar-no-expand) {
+        transition: none;
+    }
+}

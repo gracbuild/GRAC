@@ -239,7 +239,9 @@ USING (VALUES
     (N'Location',    N'Location',    6),
     (N'Person',      N'Person',      7),
     (N'Team',        N'Team',        8),
-    (N'Committee',   N'Committee',   9)
+    (N'Committee',   N'Committee',   9),
+    (N'Department',  N'Department',  10),  -- added by 385 (Impact Details category)
+    (N'BusinessFunction', N'Business Function', 11)   -- added by 386
 ) AS s(dependency_type_code, dependency_type_name, display_order)
 ON t.dependency_type_code = s.dependency_type_code
 WHEN NOT MATCHED BY TARGET THEN
@@ -487,7 +489,9 @@ BEGIN
         SELECT N'Location',    N'grac_practice.organization_location',               N'location_id',    N'location_name',    N'location_name'    UNION ALL
         SELECT N'Person',      N'grac_practice.organization_employee',               N'employee_id',    N'employee_name',    N'employee_name'    UNION ALL
         SELECT N'Team',        N'grac_practice.organization_team',                   N'team_id',        N'team_name',        N'team_name'        UNION ALL
-        SELECT N'Committee',   N'grac_practice.organization_committee',              N'committee_id',   N'committee_name',   N'committee_name'
+        SELECT N'Committee',   N'grac_practice.organization_committee',              N'committee_id',   N'committee_name',   N'committee_name'   UNION ALL
+        SELECT N'Department',  N'grac_practice.organization_department',             N'department_id',  N'department_name',  N'department_name'  UNION ALL  -- added by 385
+        SELECT N'BusinessFunction', N'grac_practice.organization_business_function', N'business_function_id', N'function_name', N'function_name'  -- added by 386
     )
     MERGE grac_practice.dependency_type_source_config AS t
     USING (
@@ -1318,7 +1322,7 @@ INSERT @expected(table_name, expected_rows) VALUES
     (N'location_type_master',                       6),
     (N'criticality_master',                         4),
     (N'frequency_master',                           9),
-    (N'dependency_type_master',                     9),
+    (N'dependency_type_master',                    11),   -- 385: + Department, 386: + Business Function
     (N'dependency_hosting_type_master',             3),
     (N'dependency_license_type_master',             2),
     (N'dependency_service_category_master',         7),
@@ -1326,7 +1330,7 @@ INSERT @expected(table_name, expected_rows) VALUES
     (N'dependency_asset_category_master',          13),
     (N'dependency_asset_subcategory_master',       17),
     (N'dependency_asset_type_master',              80),
-    (N'dependency_type_source_config',              9),
+    (N'dependency_type_source_config',             11),   -- 385: + Department, 386: + Business Function
     (N'collection_method_master',                   2),
     (N'assurance_type_master',                      2),
     (N'evidence_alignment_status_master',           6),

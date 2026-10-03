@@ -38,6 +38,16 @@
   // optional-chained, so the list still fetches its first page.
   let pager = null;
 
+  // Issues & Actions dashboard drill-down (414). ?status= and
+  // ?requestType= are this screen's own filters; ?drill= (open / lapsed /
+  // noowner) and ?minAge= / ?maxAge= are sp_exception_request_list's 414
+  // ones. The dashboard counts every request type, so a drill without a
+  // requestType lists all types rather than the Gap Candidate default.
+  const EXC_DRILL = (() => {
+    const d = window.__pmDrill ? window.__pmDrill.read() : null;
+    return d && d.active ? d : null;
+  })();
+
   // Migration 328 -- the Add Custom Exception dialog's own Practice
   // Picker. One instance, attached once and reset() between opens --
   // the same singleton pattern Risk Centre's own mapPicker uses for its
@@ -61,10 +71,23 @@
     if (window.gracExceptionActions) window.gracExceptionActions.init({ onChanged: refresh });
     await populateOrgFilter();
     const sel = document.getElementById("excFilterOrganization");
+    if (EXC_DRILL) applyDrill(sel);
     if (sel.options.length > 1 && !state.organizationId) {
-      sel.selectedIndex = 1;
+      if (!(EXC_DRILL && window.__pmDrill.preselect(sel, EXC_DRILL.organizationId)))
+        sel.selectedIndex = 1;
       state.organizationId = Number(sel.value) || null;
       if (state.organizationId) await refresh();
+    }
+  }
+
+  // 414: the dashboard's filters onto this screen's own controls.
+  function applyDrill() {
+    state.requestType = EXC_DRILL.requestType ?? "";
+    if (!window.__pmDrill.preselect("excFilterType", state.requestType))
+      window.__pmDrill.preselect("excFilterType", "");
+    if (EXC_DRILL.status) {
+      state.statusCode = EXC_DRILL.status;
+      window.__pmDrill.preselect("excFilterStatus", EXC_DRILL.status);
     }
   }
 
@@ -142,7 +165,7 @@
       const btn = ev.target.closest("[data-remove-practice]");
       if (!btn) return;
       const removeId = Number(btn.dataset.removePractice);
-      addCustomPractices = addCustomPractices.filter(p => p.practiceId !== removeId);
+      addCustomPractices = addCustomPractices.filter(p => p.practiceInstanceId !== removeId);
       renderAddCustomPracticeList();
     });
   }
@@ -289,6 +312,11 @@
     const qs = new URLSearchParams({ organizationId: state.organizationId });
     if (state.statusCode)  qs.set("statusCode",  state.statusCode);
     if (state.requestType) qs.set("requestType", state.requestType);
+    // 414: dashboard drill-down.
+    if (EXC_DRILL) {
+      window.__pmDrill.appendTo(qs, EXC_DRILL);
+      window.__pmDrill.banner("excDrillBanner", EXC_DRILL);
+    }
     // The endpoint's parameter is "page", not "pageNumber".
     if (pager) {
       qs.set("page",     pager.page());
@@ -555,17 +583,19 @@
       show("newExcPracticeModal");
       return;
     }
-    const excluded = addCustomPractices.map(p => p.practiceId);
+    // 388: exclusion is by practice INSTANCE -- a second instance of an
+    // already-added practice can still be added.
+    const excluded = addCustomPractices.map(p => p.practiceInstanceId);
     if (addCustomPicker) {
       addCustomPicker.setOrganizationId(state.organizationId);
-      addCustomPicker.setExcluded(excluded);
+      addCustomPicker.setExcludedInstances(excluded);
       addCustomPicker.reset();
     } else {
       addCustomPicker = window.__practicePicker.attach({
-        host:               "newExcPracticePickerHost",
-        organizationId:     state.organizationId,
-        required:           false,
-        excludePracticeIds: excluded
+        host:                       "newExcPracticePickerHost",
+        organizationId:             state.organizationId,
+        required:                   false,
+        excludePracticeInstanceIds: excluded
       });
     }
     show("newExcPracticeModal");
@@ -583,17 +613,19 @@
     const hint = document.getElementById("newExcPracticeAddHint");
     if (!addCustomPicker) return;
     const picked = addCustomPicker.getState();
-    if (!picked || !picked.isComplete || !picked.practiceId) {
-      if (hint) hint.textContent = "Pick a Framework, Source Structure, Control and Practice first.";
+    if (!picked || !picked.isComplete || !picked.practiceId || !picked.practiceInstanceId) {
+      if (hint) hint.textContent = "Pick a Framework, Source Structure, Control, Practice and Practice Instance first.";
       return;
     }
-    const practiceId = picked.practiceId;
-    if (addCustomPractices.some(p => p.practiceId === practiceId)) {
-      if (hint) hint.textContent = "That practice is already in the list.";
+    const practiceId = Number(picked.practiceId);
+    const practiceInstanceId = Number(picked.practiceInstanceId);
+    if (addCustomPractices.some(p => p.practiceInstanceId === practiceInstanceId)) {
+      if (hint) hint.textContent = "That practice instance is already in the list.";
       return;
     }
     const practiceName = picked.practiceName || `Practice #${practiceId}`;
-    addCustomPractices.push({ practiceId, practiceName });
+    const practiceInstanceName = picked.practiceInstanceName || `Instance #${practiceInstanceId}`;
+    addCustomPractices.push({ practiceId, practiceName, practiceInstanceId, practiceInstanceName });
     renderAddCustomPracticeList();
     closeAddCustomPracticeDialog();
   }
@@ -602,13 +634,13 @@
     const ul = document.getElementById("newExcPracticeList");
     if (!ul) return;
     if (!addCustomPractices.length) {
-      ul.innerHTML = `<li class="pm-hint">No practices added yet.</li>`;
+      ul.innerHTML = `<li class="pm-hint">No practice instances added yet.</li>`;
       return;
     }
     ul.innerHTML = addCustomPractices.map(p => `
       <li>
-        <span>${escapeHtml(p.practiceName)}</span>
-        <button type="button" data-remove-practice="${p.practiceId}" title="Remove">
+        <span>${escapeHtml(p.practiceName)} - ${escapeHtml(p.practiceInstanceName)}</span>
+        <button type="button" data-remove-practice="${p.practiceInstanceId}" title="Remove">
           <i class="fa-solid fa-xmark" aria-hidden="true"></i>
         </button>
       </li>`).join("");
@@ -639,7 +671,11 @@
       // Picker's "Add to list" row, in add order. The API derives the
       // single legacy linked_practice_id from the first entry; this
       // dialog no longer sends that field itself.
-      linkedPracticeIds:      addCustomPractices.length ? addCustomPractices.map(p => p.practiceId) : null,
+      linkedPracticeIds:      addCustomPractices.length
+                                ? [...new Set(addCustomPractices.map(p => p.practiceId))] : null,
+      // 388 -- the practice instances themselves (one per list entry).
+      linkedPracticeInstanceIds: addCustomPractices.length
+                                ? addCustomPractices.map(p => p.practiceInstanceId) : null,
       // Related Obligation/Requirement and Related Gap ID removed from this
       // form (change request 2026-09-24) -- always null on creation now;
       // see the .cshtml comment where the two fields used to sit.

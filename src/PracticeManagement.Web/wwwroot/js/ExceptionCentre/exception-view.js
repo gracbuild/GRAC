@@ -65,7 +65,7 @@
 
     state.id = Number(new URLSearchParams(location.search).get("exceptionId")) || 0;
     if (!state.id) {
-      unavailable("No exception request was specified.", "Open this page from Exception Centre's row menu.");
+      unavailable("No exception request was specified.", "Open this page from the row menu in Exceptions & Waivers.");
       return;
     }
 
@@ -355,7 +355,7 @@
 
     if (!shown.length) {
       const p = document.createElement("div");
-      p.style.cssText = "padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;";
+      p.style.cssText = "padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;";
       p.textContent = "No actions available";
       actionsMenuEl.appendChild(p);
     }

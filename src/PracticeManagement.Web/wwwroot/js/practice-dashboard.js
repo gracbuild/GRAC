@@ -84,6 +84,9 @@
   }
 
   async function loadDashboard(organizationId) {
+    // Home "My work" (home-my-work.js) follows this same Organization
+    // picker rather than owning a second one (change request 2026-09-27).
+    document.dispatchEvent(new CustomEvent("pm:home-organization", { detail: { organizationId: organizationId || "" } }));
     if (!organizationId) {
       setLoading();
       if (attentionHost) attentionHost.innerHTML = `<div class="pm-empty compact">Select an organization to view dashboard.</div>`;
@@ -97,16 +100,22 @@
     renderAttention(tables[1] || []);
   }
 
+  // Home no longer renders the organization "Attention Required" list
+  // (2026-09-28), so a failure is reported on the overview cards instead.
+  function showError(error) {
+    if (attentionHost) { attentionHost.innerHTML = `<div class="pm-empty compact">${escapeHtml(error.message)}</div>`; return; }
+    document.querySelectorAll("[data-summary]").forEach(item => { item.textContent = "-"; });
+    console.error("[home] organization overview failed to load:", error);
+  }
+
   async function init() {
     try {
       const organizationId = await loadOrganizations();
       if (organizationSelect && organizationId) organizationSelect.value = organizationId;
       await loadDashboard(organizationSelect?.value || organizationId);
-      organizationSelect?.addEventListener("change", () => loadDashboard(organizationSelect.value).catch(error => {
-        if (attentionHost) attentionHost.innerHTML = `<div class="pm-empty compact">${escapeHtml(error.message)}</div>`;
-      }));
+      organizationSelect?.addEventListener("change", () => loadDashboard(organizationSelect.value).catch(showError));
     } catch (error) {
-      if (attentionHost) attentionHost.innerHTML = `<div class="pm-empty compact">${escapeHtml(error.message)}</div>`;
+      showError(error);
     }
   }
 

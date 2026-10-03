@@ -38,6 +38,10 @@ public interface IPracticePickerService
 
     Task<PracticePickerPath?> ResolveAsync(
         long organizationId, long practiceId, CancellationToken cancellationToken);
+
+    // 387 -- Level 5, the practice instances of one practice.
+    Task<IReadOnlyList<PracticePickerInstance>> ListInstancesAsync(
+        long organizationId, long practiceId, long? riskRegisterId, CancellationToken cancellationToken);
 }
 
 public sealed class PracticePickerService(
@@ -157,6 +161,32 @@ public sealed class PracticePickerService(
         return rows;
     }
 
+    public async Task<IReadOnlyList<PracticePickerInstance>> ListInstancesAsync(
+        long organizationId, long practiceId, long? riskRegisterId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = Proc(connection, "grac_practice.sp_practice_picker_instances");
+        AddParam(command, "@organization_id",  DbType.Int64, organizationId);
+        AddParam(command, "@practice_id",      DbType.Int64, practiceId);
+        AddParam(command, "@risk_register_id", DbType.Int64, (object?)riskRegisterId ?? DBNull.Value);
+
+        var rows = new List<PracticePickerInstance>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new PracticePickerInstance(
+                ReadLongOrNull(reader,   "PracticeInstanceId") ?? 0,
+                ReadStringOrNull(reader, "InstanceCode"),
+                ReadStringOrNull(reader, "InstanceName"),
+                ReadStringOrNull(reader, "Department"),
+                ReadStringOrNull(reader, "PrimaryOwner"),
+                ReadLongOrNull(reader,   "PracticeId") ?? practiceId,
+                reader["AlreadyMappedToRisk"] != DBNull.Value && Convert.ToBoolean(reader["AlreadyMappedToRisk"]),
+                ReadStringOrNull(reader, "MapSourceCode")));
+        }
+        return rows;
+    }
+
     public async Task<PracticePickerPath?> ResolveAsync(
         long organizationId, long practiceId, CancellationToken cancellationToken)
     {
@@ -201,6 +231,7 @@ public sealed class PracticePickerService(
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

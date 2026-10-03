@@ -87,8 +87,8 @@
     if (!text) { el.style.display = "none"; el.textContent = ""; return; }
     el.style.display = "block";
     el.textContent = text;
-    el.style.background = kind === "error" ? "#fee2e2" : kind === "ok" ? "#dcfce7" : "#dbeafe";
-    el.style.color      = kind === "error" ? "#7f1d1d" : kind === "ok" ? "#166534" : "#1e40af";
+    el.style.background = kind === "error" ? "var(--danger-100)" : kind === "ok" ? "var(--success-100)" : "var(--primary-100)";
+    el.style.color      = kind === "error" ? "var(--danger-700)" : kind === "ok" ? "var(--success-700)" : "var(--primary-700)";
   }
 
   function options(list, selected, blank) {

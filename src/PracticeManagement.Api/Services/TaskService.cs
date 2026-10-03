@@ -107,6 +107,8 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             AddParam(command, "@source_record_id", DbType.Int64,  (object?)query.SourceRecordId ?? DBNull.Value);
             AddParam(command, "@priority",         DbType.String, (object?)query.Priority ?? DBNull.Value, 30);
         }
+        // 414: dashboard drill-down, sent only when declared.
+        await Infrastructure.ListDrillParameters.AddAsync(connection, command, "sp_task_list", query.Drill, cancellationToken);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -837,6 +839,7 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
 
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

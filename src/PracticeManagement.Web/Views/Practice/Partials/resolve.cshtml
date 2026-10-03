@@ -20,17 +20,13 @@
 
 <style>
     #rvRoot .pm-panel + .pm-panel { margin-top: 14px; }
-    #rvRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 10px; }
-    #rvRoot .pm-badge, .pm-page-heading .pm-badge {
-        display: inline-block; padding: 1px 7px; border-radius: 10px;
-        background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a);
-        font-size: 11px; font-weight: 600;
-    }
+    #rvRoot .pm-hint { color: var(--fg-muted); font-size: 12px; margin: 0 0 10px; }
+    /* .pm-badge: see practice-management.css */
     /* Progress reads at a glance: complete is quiet, outstanding is not. */
     #rvRoot .rv-progress { font-size: 12px; white-space: nowrap; }
-    #rvRoot .rv-progress.done    { color: #166534; }
-    #rvRoot .rv-progress.pending { color: #b45309; font-weight: 600; }
-    #rvRoot .rv-progress.none    { color: var(--grac-muted, #758095); }
+    #rvRoot .rv-progress.done    { color: var(--success-700); }
+    #rvRoot .rv-progress.pending { color: var(--warning-700); font-weight: 600; }
+    #rvRoot .rv-progress.none    { color: var(--fg-muted); }
 
     /* ---- Grid layout ----
        table-layout: fixed with an explicit colgroup, so one long instance
@@ -41,23 +37,23 @@
     #rvRoot .rv-grid th,
     #rvRoot .rv-grid td {
         padding: 9px 12px; text-align: left; vertical-align: middle;
-        border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        border-bottom: 1px solid var(--border);
     }
     #rvRoot .rv-grid th {
         font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--grac-muted, #758095); font-weight: 600;
-        white-space: nowrap; background: #f8fafc;
-        border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        color: var(--fg-muted); font-weight: 600;
+        white-space: nowrap; background: var(--neutral-50);
+        border-bottom: 1px solid var(--border);
     }
-    #rvRoot .rv-grid td { font-size: 13px; color: var(--grac-ink, #25345a); }
-    #rvRoot .rv-grid tbody tr:hover { background: #f8fafc; }
+    #rvRoot .rv-grid td { font-size: 13px; color: var(--fg-default); }
+    #rvRoot .rv-grid tbody tr:hover { background: var(--neutral-50); }
     #rvRoot .rv-grid tbody tr:last-child td { border-bottom: 0; }
 
     #rvRoot .rv-truncate {
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     #rvRoot .rv-grid .rv-code { font-variant-numeric: tabular-nums; white-space: nowrap; }
-    #rvRoot .rv-grid .rv-sub  { display: block; font-size: 11px; color: var(--grac-muted, #758095); }
+    #rvRoot .rv-grid .rv-sub  { display: block; font-size: 11px; color: var(--fg-muted); }
     #rvRoot .rv-grid .rv-num  { white-space: nowrap; }
     #rvRoot .rv-actions { text-align: right; white-space: nowrap; }
 
@@ -65,10 +61,10 @@
        must not read as work waiting to be done. Muted, not hidden, and
        carrying a chip that names the state -- the row is still fully
        openable, which is the point of showing it at all. */
-    #rvRoot .rv-grid tr.rv-retired td { background: #fbfcfe; color: #8792a6; }
+    #rvRoot .rv-grid tr.rv-retired td { background: var(--neutral-50); color: var(--fg-subtle); }
     #rvRoot .rv-grid tr.rv-retired .rv-name { font-weight: 600; }
     #rvRoot .rv-retired-chip {
-        background: #edf2f7; border-radius: 999px; color: #4a5568;
+        background: var(--bg-subtle); border-radius: var(--radius-pill); color: var(--fg-secondary);
         font-size: 10px; font-weight: 700; letter-spacing: .04em;
         margin-left: 6px; padding: 1px 7px; text-transform: uppercase;
         white-space: nowrap;
@@ -76,7 +72,7 @@
     /* Sits in the toolbar next to Search, so it needs the toolbar's own
        vertical rhythm rather than a checkbox's default baseline. */
     #rvRoot .rv-toggle {
-        align-items: center; color: #536077; cursor: pointer;
+        align-items: center; color: var(--fg-secondary); cursor: pointer;
         display: inline-flex; font-size: 13px; gap: 6px; line-height: 1;
         white-space: nowrap;
     }
@@ -106,20 +102,20 @@
        this rule's own 14x14 box model applies. */
     #rvRoot .rv-toggle input[type="checkbox"] {
         -webkit-appearance: none; appearance: none;
-        background: #fff; border: 1px solid #d5dce7; border-radius: 3px;
+        background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
         cursor: pointer; flex: 0 0 auto; height: 14px; margin: 0;
         min-width: 0; padding: 0; position: relative; width: 14px;
     }
     #rvRoot .rv-toggle input[type="checkbox"]:checked {
-        background: var(--grac-blue, #2465ca); border-color: var(--grac-blue, #2465ca);
+        background: var(--primary-500); border-color: var(--primary-500);
     }
     #rvRoot .rv-toggle input[type="checkbox"]:checked::after {
-        border: solid #fff; border-width: 0 2px 2px 0; content: "";
+        border: solid var(--neutral-0); border-width: 0 2px 2px 0; content: "";
         height: 7px; left: 4px; position: absolute; top: 1px;
         transform: rotate(45deg); width: 3px;
     }
     #rvRoot .rv-toggle input[type="checkbox"]:focus-visible {
-        outline: 2px solid var(--grac-blue, #2465ca); outline-offset: 1px;
+        outline: 2px solid var(--primary-600); outline-offset: 1px;
     }
 
     /* ---- Practice group rows ----
@@ -129,37 +125,37 @@
        in practice.js), reused here for the same reason: a group header is
        a band across the table, not another data row. */
     #rvRoot .rv-grid tr.rv-group-row td {
-        background: #f3f6fb; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        background: var(--bg-subtle); border-bottom: 1px solid var(--border);
         padding: 7px 12px;
     }
     #rvRoot .rv-group-toggle {
-        background: none; border: 0; color: #536077; cursor: pointer;
+        background: none; border: 0; color: var(--fg-secondary); cursor: pointer;
         font-size: 11px; padding: 2px 4px; margin-right: 2px;
     }
-    #rvRoot .rv-group-toggle:hover { color: var(--grac-blue, #2465ca); }
+    #rvRoot .rv-group-toggle:hover { color: var(--primary-600); }
     #rvRoot .rv-group-code {
-        color: var(--grac-ink, #25345a); font-weight: 700; margin-right: 8px;
+        color: var(--fg-default); font-weight: 700; margin-right: 8px;
     }
-    #rvRoot .rv-group-name { color: #536077; margin-right: 8px; }
+    #rvRoot .rv-group-name { color: var(--fg-secondary); margin-right: 8px; }
     #rvRoot .rv-group-count {
-        color: var(--grac-muted, #758095); font-size: 11px; white-space: nowrap;
+        color: var(--fg-muted); font-size: 11px; white-space: nowrap;
     }
     /* Child rows carry the indent -- the group header supplies the
        Practice identity once, so it is never repeated per instance. */
     #rvRoot .rv-grid tr.rv-child-row td.rv-name { padding-left: 26px; position: relative; }
     #rvRoot .rv-grid tr.rv-child-row td.rv-name::before {
-        border-left: 2px solid var(--grac-line, #e2e7f0); content: "";
+        border-left: 2px solid var(--border); content: "";
         left: 12px; position: absolute; top: 0; bottom: 0;
     }
 
     /* Sits under the page subtitle, not in the toolbar: it describes what
        the whole page is showing rather than being another control. */
     .rv-scope-filter {
-        align-items: center; color: #536077; display: flex; font-size: 13px;
+        align-items: center; color: var(--fg-secondary); display: flex; font-size: 13px;
         gap: 6px; margin: 4px 0 0;
     }
-    .rv-scope-filter i { color: #a0aec0; font-size: 11px; }
-    .rv-scope-filter a { color: #2b6cb0; }
+    .rv-scope-filter i { color: var(--fg-subtle); font-size: 11px; }
+    .rv-scope-filter a { color: var(--primary-600); }
 
     /* Below this the fixed columns stop fitting; let the table scroll
        sideways rather than crush the names. */
@@ -241,6 +237,8 @@
         </button>
         <span class="pm-badge" id="rvCount"></span>
     </div>
+    @* Governance dashboard drill-down (414). *@
+    <div id="rvDrillBanner" hidden></div>
 
     <div id="rvList"><div class="pm-empty compact">Loading...</div></div>
 
@@ -255,6 +253,8 @@
 
 @* Before the screen's own script -- the pager is mounted during init. *@
 <script src="~/js/pm-grid.js" asp-append-version="true"></script>
+@* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 
 <script>
 (function () {
@@ -281,6 +281,17 @@
     const RV_PRACTICE_ID   = scopeParam('practiceId');
     const RV_REQUIREMENT_ID = scopeParam('organizationRequirementId');
     const RV_SCOPE_LABEL   = RV_PARAMS.get('scopeLabel') || '';
+    // Home "My practices" -> View all (2026-09-27): ?ownerEmployeeId=
+    // preselects the Owner filter. Applied to the first load, then handed
+    // to the Owner dropdown once its options arrive; the user can clear
+    // it like any other filter. Narrows only -- the server's ownership
+    // rule still decides what a non-admin can see.
+    let rvPendingOwner = scopeParam('ownerEmployeeId');
+    // Governance dashboard (414): ?status= preselects the Status filter
+    // (an implementation status name, the value that filter takes) the
+    // same way ?ownerEmployeeId= preselects Owner -- applied to the first
+    // load, then handed to the dropdown once its options arrive.
+    let rvPendingStatus = RV_PARAMS.get('status') || null;
 
     // 290. `pager` is the pm-grid handle (null when pm-grid.js is absent);
     // `total` is the server's count of everything the filter matched, as
@@ -373,6 +384,11 @@
             });
             box.hidden = false;
         }
+        // 414: a dashboard drill says what it is showing.
+        if (window.__pmDrill) {
+            const drill = window.__pmDrill.read();
+            if (drill.active) window.__pmDrill.banner('rvDrillBanner', drill);
+        }
         document.getElementById('rvSearch').addEventListener('input', function () {
             window.clearTimeout(timer);
             timer = window.setTimeout(function () { pager?.reset(true); load(); }, 250);
@@ -387,8 +403,8 @@
 
         host.innerHTML = '<div class="pm-empty compact">Loading...</div>';
         const search = document.getElementById('rvSearch').value || '';
-        const ownerId = document.getElementById('rvOwner')?.value || '';
-        const status  = document.getElementById('rvStatus')?.value || '';
+        const ownerId = document.getElementById('rvOwner')?.value || (rvPendingOwner ? String(rvPendingOwner) : '');
+        const status  = document.getElementById('rvStatus')?.value || (rvPendingStatus || '');
         pager?.busy(true);
         try {
             const includeRetired = document.getElementById('rvIncludeRetired')?.value === 'true';
@@ -473,6 +489,9 @@
                     return '<option value="' + esc(id) + '">' + esc(name) + '</option>';
                 }).join('');
             if (owners.some(function (o) { return String(F(o, 'ownerEmployeeId')) === current; })) ownerSel.value = current;
+            if (rvPendingOwner && owners.some(function (o) { return String(F(o, 'ownerEmployeeId')) === String(rvPendingOwner); }))
+                ownerSel.value = String(rvPendingOwner);
+            rvPendingOwner = null;
         }
         if (statusSel) {
             const current = statusSel.value;
@@ -482,6 +501,9 @@
                     return '<option value="' + esc(name) + '">' + esc(name) + '</option>';
                 }).join('');
             if (statuses.some(function (s) { return (F(s, 'implementationStatus') || '') === current; })) statusSel.value = current;
+            if (rvPendingStatus && statuses.some(function (s) { return (F(s, 'implementationStatus') || '') === rvPendingStatus; }))
+                statusSel.value = rvPendingStatus;
+            rvPendingStatus = null;
         }
     }
 
@@ -567,7 +589,7 @@
         const colCount = 6 + (isAdmin ? 1 : 0);
         const groups = groupRows(rows);
 
-        host.innerHTML = '<div class="rv-scroll"><table class="rv-grid">'
+        host.innerHTML = '<div class="rv-scroll pm-sticky-grid"><table class="rv-grid">'
             + '<colgroup>'
               + '<col style="width:110px">'          // instance code
               + '<col>'                              // instance name
@@ -617,6 +639,23 @@
                 openRvActionMenu(this);
             });
         });
+        // Row click -> View. The 3-dot trigger stops its own click above;
+        // any other control in the row keeps its behaviour too.
+        host.querySelectorAll('tr[data-rv-view-id]').forEach(function (tr) {
+            tr.addEventListener('click', function (e) {
+                if (e.target.closest('a, button, input, label, select')) return;
+                window.location.assign(workspaceUrl(this.getAttribute('data-rv-view-id'), true));
+            });
+        });
+    }
+
+    // The Operationalize workspace for one instance; view = read-only
+    // (mode=view). One builder for the row click and the row menu.
+    function workspaceUrl(instanceId, view) {
+        return U('/Practice/Index/resolve-workspace')
+            + '?instanceId=' + encodeURIComponent(instanceId)
+            + '&organizationId=' + encodeURIComponent(orgId)
+            + (view ? '&mode=view' : '');
     }
 
     // 315. One instance row. Everything render() used to build inline
@@ -634,7 +673,10 @@
         // the positive test is the only one neither spelling can defeat.
         const retired = String(F(row, 'status') || '').trim().toLowerCase() !== 'active';
 
-        return '<tr class="rv-child-row' + (retired ? ' rv-retired' : '') + '">'
+        // Row click-to-View (2026-10-03): the row opens the same read-only
+        // workspace as its menu's "View" (workspaceUrl, mode=view).
+        return '<tr class="rv-child-row pm-row-clickable' + (retired ? ' rv-retired' : '') + '" '
+                + 'data-rv-view-id="' + esc(F(row, 'practiceInstanceId')) + '">'
             + '<td class="rv-code">' + esc(F(row, 'instanceCode')) + '</td>'
             + '<td class="rv-truncate rv-name" title="' + esc(name) + '">' + esc(name)
                 + (retired ? '<span class="rv-retired-chip">Retired</span>' : '')
@@ -725,10 +767,7 @@
                     setRetirement(instanceId, instanceName, action === 'retire');
                     return;
                 }
-                const base = U('/Practice/Index/resolve-workspace')
-                    + '?instanceId=' + encodeURIComponent(instanceId)
-                    + '&organizationId=' + encodeURIComponent(orgId);
-                window.location.assign(action === 'view' ? base + '&mode=view' : base);
+                window.location.assign(workspaceUrl(instanceId, action === 'view'));
             });
         });
     }

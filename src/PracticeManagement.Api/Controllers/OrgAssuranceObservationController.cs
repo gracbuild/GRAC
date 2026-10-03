@@ -74,6 +74,10 @@ public sealed class OrgAssuranceObservationController(
         [FromQuery] string? search,
         [FromQuery] int page     = 1,
         [FromQuery] int pageSize = 25,
+        // Migration 414 -- management dashboard drill-down (?drillCode=,
+        // statusText=, severityText=, minAgeDays=, maxAgeDays=, noOwner=).
+        // Every value absent = the list exactly as before.
+        [FromQuery] ListDrillQuery? drill = null,
         CancellationToken cancellationToken = default)
     {
         if (organizationId is null or <= 0)
@@ -85,7 +89,7 @@ public sealed class OrgAssuranceObservationController(
                 new OrgAssuranceObservationListQuery(
                     organizationId.Value, executionId, entityId,
                     statusCode, severityCode, observationType, search,
-                    page, pageSize),
+                    page, pageSize, drill?.ToFilter()),
                 cancellationToken);
             return Ok(result);
         }

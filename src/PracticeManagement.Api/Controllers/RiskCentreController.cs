@@ -22,10 +22,16 @@ public sealed class RiskCentreController(
         [FromQuery] string? statusCode,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
+        // 413: dashboard drill-down. openOnly is a string for the reason
+        // TriState below gives ("1"/"0" from the screen).
+        [FromQuery] string? openOnly = null,
+        [FromQuery] int? minAgeDays = null,
+        [FromQuery] int? maxAgeDays = null,
         CancellationToken ct = default)
     {
         if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
-        return Ok(await svc.ListAsync(organizationId, statusCode, page, pageSize, ct));
+        return Ok(await svc.ListAsync(organizationId, statusCode, page, pageSize,
+            new RiskCandidateDrillFilter(TriState(openOnly), minAgeDays, maxAgeDays), ct));
     }
 
     [HttpGet("{id:long}")]
@@ -286,6 +292,14 @@ public sealed class RiskCentreController(
         [FromQuery] string? treatmentOptionCode = null,
         [FromQuery] string? workflowStageCode = null,
         [FromQuery] string? reviewDue = null,
+        // Migration 413 -- dashboard drill-down: No Owner (the owner ID,
+        // not the name), open risks only, and one heatmap cell.
+        [FromQuery] string? noOwner = null,
+        [FromQuery] string? openOnly = null,
+        [FromQuery] int? likelihoodValue = null,
+        [FromQuery] int? impactValue = null,
+        [FromQuery] int? residualLikelihoodValue = null,
+        [FromQuery] int? residualImpactValue = null,
         CancellationToken ct = default)
     {
         if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
@@ -293,7 +307,10 @@ public sealed class RiskCentreController(
         return Ok(await svc.ListRegisterAsync(organizationId, statusCode, sourceTypeCode,
             categoryCode, ratingCode, ownerEmployeeId, search, page, pageSize,
             TriState(analysisPending), residualRatingCode, TriState(residualPending),
-            treatmentOptionCode, workflowStageCode, TriState(reviewDue), ct));
+            treatmentOptionCode, workflowStageCode, TriState(reviewDue),
+            new RiskRegisterDrillFilter(TriState(noOwner), TriState(openOnly),
+                likelihoodValue, impactValue, residualLikelihoodValue, residualImpactValue),
+            ct));
     }
 
     // "1"/"0" from the screen, "true"/"false" from anything hand-rolled,
@@ -748,6 +765,48 @@ public sealed class RiskCentreController(
         return Ok(new { practices = result.Practices, tasks = result.Tasks });
     }
 
+    // 387 -- map / unmap a practice INSTANCE (unmap is by the mapping row
+    // id, since one practice can now be on a risk once per instance).
+    [HttpPost("register/{riskId:long}/practice-instances")]
+    public async Task<IActionResult> MapPracticeInstance(long riskId,
+        [FromBody] RiskPracticeInstanceMapRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest(new { success = false, error = "request body is required." });
+        var result = await svc.MapPracticeInstanceAsync(riskId, req, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpDelete("register/{riskId:long}/practice-map/{riskPracticeMapId:long}")]
+    public async Task<IActionResult> UnmapPracticeMapRow(long riskId, long riskPracticeMapId,
+        [FromQuery] long? actorEmployeeId, [FromQuery] string? caller, CancellationToken ct)
+    {
+        var result = await svc.UnmapPracticeMapRowAsync(riskId, riskPracticeMapId, actorEmployeeId, caller, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    // 387 -- "Map open task": existing open tasks as treatment work.
+    [HttpGet("register/{riskId:long}/open-tasks")]
+    public async Task<IActionResult> ListOpenTasks(long riskId,
+        [FromQuery] string? search, [FromQuery] int top = 200, CancellationToken ct = default)
+        => Ok(await svc.ListOpenTasksAsync(riskId, search, top, ct));
+
+    [HttpPost("register/{riskId:long}/treatment-links")]
+    public async Task<IActionResult> LinkTreatmentTask(long riskId,
+        [FromBody] RiskTreatmentLinkRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest(new { success = false, error = "request body is required." });
+        var result = await svc.LinkTreatmentTaskAsync(riskId, req, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpDelete("register/{riskId:long}/treatment-links/{taskId:long}")]
+    public async Task<IActionResult> UnlinkTreatmentTask(long riskId, long taskId,
+        [FromQuery] long? actorEmployeeId, [FromQuery] string? caller, CancellationToken ct)
+    {
+        var result = await svc.UnlinkTreatmentTaskAsync(riskId, taskId, actorEmployeeId, caller, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpDelete("register/{riskId:long}/practices/{practiceId:long}")]
     public async Task<IActionResult> UnmapPractice(long riskId, long practiceId,
         [FromQuery] long? actorEmployeeId, [FromQuery] string? caller, CancellationToken ct)
@@ -882,11 +941,14 @@ public sealed class RiskCentreController(
         [FromQuery] int? includeFutureDays,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
+        // 413: one review-ageing band (days overdue; negative = upcoming).
+        [FromQuery] int? daysOverdueMin = null,
+        [FromQuery] int? daysOverdueMax = null,
         CancellationToken ct = default)
     {
         if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
         return Ok(await svc.ListReviewDueAsync(organizationId, ownerEmployeeId, ratingCode,
-            search, includeFutureDays, page, pageSize, ct));
+            search, includeFutureDays, page, pageSize, daysOverdueMin, daysOverdueMax, ct));
     }
 
     // The Risk Calendar feed. One row per risk with a review date in the

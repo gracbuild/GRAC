@@ -51,31 +51,31 @@
 
 <style>
     #cssRoot { max-width: 900px; }
-    #cssRoot .css-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 16px; }
-    #cssRoot .css-msg { margin: 0 0 14px; padding: 8px 12px; border-radius: 6px; font-size: 13px; display: none; }
-    #cssRoot .css-msg.info  { display: block; background: #eef4ff; color: #25345a; border: 1px solid #cdddff; }
-    #cssRoot .css-msg.error { display: block; background: #fdecec; color: #8a1c1c; border: 1px solid #f5c2c2; }
-    #cssRoot .css-msg.success { display: block; background: #e9f8ef; color: #1f6b3b; border: 1px solid #bfe6cd; }
-    #cssRoot .css-step { border: 1px solid var(--grac-line, #e2e7f0); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; background: #fff; }
+    #cssRoot .css-hint { color: var(--fg-muted); font-size: 12px; margin: 0 0 16px; }
+    #cssRoot .css-msg { margin: 0 0 14px; padding: 8px 12px; border-radius: var(--radius-md); font-size: 13px; display: none; }
+    #cssRoot .css-msg.info  { display: block; background: var(--primary-50); color: var(--primary-800); border: 1px solid var(--primary-100); }
+    #cssRoot .css-msg.error { display: block; background: var(--danger-50); color: var(--danger-700); border: 1px solid var(--danger-200); }
+    #cssRoot .css-msg.success { display: block; background: var(--success-50); color: var(--success-700); border: 1px solid var(--success-200); }
+    #cssRoot .css-step { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 16px; background: var(--bg-surface); }
     #cssRoot .css-step.disabled { opacity: .55; pointer-events: none; }
     #cssRoot .css-step h3 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
-    #cssRoot .css-step .css-step-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a); font-size: 11px; font-weight: 700; }
-    #cssRoot .css-step-sub { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 12px; }
+    #cssRoot .css-step .css-step-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--border); color: var(--fg-default); font-size: 11px; font-weight: 700; }
+    #cssRoot .css-step-sub { color: var(--fg-muted); font-size: 12px; margin: 0 0 12px; }
     #cssRoot .css-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
     #cssRoot .css-field { display: flex; flex-direction: column; gap: 4px; min-width: 320px; flex: 1 1 320px; }
-    #cssRoot .css-field label { font-size: 12px; font-weight: 600; color: var(--grac-ink, #25345a); }
-    #cssRoot .css-field select, #cssRoot .css-field input, #cssRoot .css-field textarea { padding: 7px 10px; border: 1px solid var(--grac-line, #d7deea); border-radius: 6px; min-height: 36px; font: inherit; }
+    #cssRoot .css-field label { font-size: 12px; font-weight: 600; color: var(--fg-default); }
+    #cssRoot .css-field select, #cssRoot .css-field input, #cssRoot .css-field textarea { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); min-height: 36px; font: inherit; }
     #cssRoot .css-field textarea { min-height: 70px; resize: vertical; }
-    #cssRoot .css-inline-form { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--grac-line, #d7deea); display: none; }
+    #cssRoot .css-inline-form { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); display: none; }
     #cssRoot .css-inline-form.open { display: block; }
     #cssRoot .css-inline-form .css-row + .css-row { margin-top: 10px; }
     #cssRoot .css-actions-bar { display: flex; gap: 10px; margin-top: 12px; }
     #cssRoot table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
-    #cssRoot th, #cssRoot td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--grac-line, #eef1f6); vertical-align: middle; }
-    #cssRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--grac-muted, #758095); }
-    #cssRoot .css-empty { padding: 18px; text-align: center; color: var(--grac-muted, #758095); }
-    #cssRoot .css-context { font-size: 12px; color: var(--grac-muted, #758095); margin: 2px 0 12px; }
-    #cssRoot .css-required { color: #c0392b; }
+    #cssRoot th, #cssRoot td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    #cssRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted); }
+    #cssRoot .css-empty { padding: 18px; text-align: center; color: var(--fg-muted); }
+    #cssRoot .css-context { font-size: 12px; color: var(--fg-muted); margin: 2px 0 12px; }
+    #cssRoot .css-required { color: var(--danger-700); }
 </style>
 
 <div id="cssRoot">

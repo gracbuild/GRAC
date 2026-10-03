@@ -37,7 +37,9 @@ public sealed record OrgAssuranceObservationListQuery(
     string? ObservationType   = null,
     string? Search            = null,
     int     Page              = 1,
-    int     PageSize          = 25);
+    int     PageSize          = 25,
+    // Migration 414: management dashboard drill-down (stage / overdue / no owner / age band).
+    ListDrillFilter? Drill = null);
 
 public sealed record OrgAssuranceObservationListRow(
     long      ObservationId,

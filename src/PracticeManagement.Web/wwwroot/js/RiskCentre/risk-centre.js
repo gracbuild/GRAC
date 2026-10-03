@@ -65,6 +65,12 @@
     tab: "candidates",
     statusCode: "Pending",
     sourceTypeCode: null,
+    // Dashboard drill-down filters (413). null = the list shows what it
+    // always showed; set only by a dashboard tile / band / heatmap cell,
+    // cleared by the list's filter banner.
+    candDrill: null,
+    regDrill: null,
+    revDrill: null,
     activeCandidate: null,
     activeRisk: null,
     // Filled once per organisation from /scoring-options — the single
@@ -113,7 +119,15 @@
     bindEvents();
     // Before the first load, so page()/size() are available to it.
     initPagers();
-    showTab("candidates");
+    // Risk Management submenus (migration 383): each submenu page loads this
+    // same partial but locked to one tab. window.riskCentreInitialTab is set
+    // by Manage.cshtml for those pages; adding the risk-single-tab class hides
+    // the tab strip's buttons (CSS) so the page reads as a standalone screen
+    // rather than a tab within one common page. The legacy combined
+    // Practice/Index/risk-centre page sets no such var and keeps every tab.
+    var initialTab = window.riskCentreInitialTab || "candidates";
+    if (window.riskCentreInitialTab) document.body.classList.add("risk-single-tab");
+    showTab(initialTab);
     await populateOrgFilter();
     const sel = document.getElementById("riskFilterOrganization");
     if (sel && sel.options.length > 1 && !state.organizationId) {
@@ -281,7 +295,29 @@
     on("rdPrintBtn", "click", () => window.print());
 
     // ---- Treatment work, acceptance and review (261-264) ------------
-    on("twAddChildBtn", "click", onAddSubTask);
+    // 387: map an existing open Task Board task as treatment work.
+    on("twMapOpenTaskBtn", "click", openMapOpenTaskModal);
+    on("riskMapOpenTaskForm", "submit", onMapOpenTaskSubmit);
+    on("motSearch", "input", () => {
+      clearTimeout(motSearchTimer);
+      motSearchTimer = setTimeout(loadOpenTasksForMap, 300);
+    });
+    closers("map-open-task", "riskMapOpenTaskModal");
+    // The mapping panel (a separate IIFE) calls this after an instance is
+    // mapped or unmapped, so the gap tasks appear / leave straight away.
+    window.__riskTreatmentRefresh = rid => {
+      const page = document.getElementById("riskTreatmentPageView");
+      const cur  = Number(document.getElementById("twRiskId")?.value || 0);
+      if (page && !page.hidden && cur === Number(rid)) refreshTreatmentState(cur);
+    };
+    // Add treatment task (moved here from Risk Analysis) -- reuses the
+    // existing raise-treatment-task modal (openTreatmentModal) unchanged.
+    on("twAddTaskBtn", "click", () => {
+      const id = Number(document.getElementById("twRiskId").value || 0);
+      if (id) openTreatmentModal(id);
+    });
+    // Apply the treatment decision from the Treatment page.
+    on("twApplyTreatmentBtn", "click", onApplyTreatmentOption);
     // Risk Treatment is a PAGE now: Close returns to the tab it was
     // opened from, through the same single exit path the analysis page
     // uses.
@@ -437,12 +473,9 @@
     on("riskConfigBtn", "click", openConfigModal);
     on("riskConfigForm", "submit", onConfigSubmit);
     on("dashRefreshBtn", "click", refreshDashboard);
-    on("dashTrendMonths", "change", refreshDashboard);
     on("riskApprovalForm", "submit", ev => onApprovalDecision(ev, "Approve"));
     on("apReturnBtn", "click", () => onApprovalDecision(null, "Return"));
     on("riskTreatmentForm", "submit", onTreatmentSubmit);
-    on("notifSweepBtn", "click", onNotificationSweep);
-    on("notifFilterStatus", "change", refreshNotifications);
     closers("risk-config",    "riskConfigModal");
     closers("risk-approval",  "riskApprovalModal");
     closers("risk-treatment", "riskTreatmentModal");
@@ -582,6 +615,9 @@
   // host map -- the exact bug this one-exit rule exists to prevent.
   function backFromFullPage() {
     riskMapping.clear("raMapping");
+    // Analysis page's Impact Details (impactOnly mount, 2026-09-26).
+    riskMapping.clear("raImpactScope");
+    riskMapping.clear("twMapping");
     riskMapping.clear("rrMapping");
     riskMapping.clear("rdMapping");
     // Review's scope panel. Was cleared by the modal's close handler
@@ -721,8 +757,6 @@
       fillSelect(id, state.assess.threats, "threatId", "threatName", "-- select --"));
     ["anVulnerability", "cxVulnerability"].forEach(id =>
       fillSelect(id, state.assess.vulnerabilities, "vulnerabilityId", "vulnerabilityName", "-- select --"));
-    ["anBusinessFunction", "cxBusinessFunction"].forEach(id =>
-      fillSelect(id, state.assess.businessFunctions, "businessFunctionId", "functionName", "-- select --"));
 
     // The hidden anThreat / cxThreat selects above are still filled, and
     // deliberately: they are what carries the LEAD id into 216's
@@ -1030,12 +1064,22 @@
       return;
     }
     tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">Loading...</td></tr>`;
+    // The "Awaiting approval" queue lives on this tab (moved from the
+    // Dashboard, 2026-10-01). Independent of the grid's filters, so it is
+    // fetched alongside rather than awaited before it.
+    refreshApprovalQueue();
     const qs = new URLSearchParams({
       organizationId: state.organizationId,
       ...pageParams(pagers.cand)
     });
     if (state.statusCode)     qs.set("statusCode", state.statusCode);
     if (state.sourceTypeCode) qs.set("sourceTypeCode", state.sourceTypeCode);
+    // 413: dashboard drill-down (open candidates / one ageing band).
+    const cd = state.candDrill;
+    if (cd?.openOnly)          qs.set("openOnly", "1");
+    if (cd?.minAgeDays != null) qs.set("minAgeDays", String(cd.minAgeDays));
+    if (cd?.maxAgeDays != null) qs.set("maxAgeDays", String(cd.maxAgeDays));
+    paintDrillBanner("cand", cd);
     // Same distinction as refreshRegister below: a failed read must not
     // be reported as an empty list.
     const res = await apiGetChecked(`?${qs}`);
@@ -1193,25 +1237,22 @@
     return `<span class="risk-severity-chip ${cls}">${escapeHtml(code)}</span>`;
   }
 
-  // The Residual column (258). Three distinct states, three distinct
-  // cells, because they call for three different actions:
+  // The Residual column (258).
   //
-  //   no inherent rating yet  -> nothing to be residual TO. Says so,
-  //                              rather than inviting a click that
-  //                              error 56454 would refuse.
-  //   inherent but no residual-> outstanding work, badged the same way
-  //                              216 badges an unscored risk.
-  //   assessed                -> the chip, plus the likelihood x impact
-  //                              that produced it, same as the detail
-  //                              modal shows for the inherent rating.
+  // Change request 2026-09-30: the register grid's two rating columns
+  // show a bare dash until analysis has actually produced a rating --
+  // placeholder text ("awaiting inherent rating", "Not assessed",
+  // "Analysis pending") is no longer printed here. Only a real rating
+  // prints its chip. This mirrors the Inherent column, which reaches the
+  // same dash through severityChip(null) -> "--".
   //
-  // Deliberately reuses severityChip: the two rating columns must be
-  // read with the same eye, so they are painted by the same function.
+  // No residual rating (whether because inherent analysis is still
+  // pending, or inherent is done but residual is not) -> "--". Assessed
+  // -> the chip plus the likelihood x impact that produced it, same as
+  // the detail modal shows for the inherent rating. Deliberately reuses
+  // severityChip so the two rating columns are painted by one function.
   function residualCell(r) {
-    if (r.analysisPending)
-      return `<span class="pm-hint">awaiting inherent rating</span>`;
-    if (!r.residualRatingCode)
-      return `<span class="risk-status-chip risk-clarify">Not assessed</span>`;
+    if (!r.residualRatingCode) return "--";
     return severityChip(r.residualRatingCode)
       + (r.residualLikelihoodName && r.residualImpactName
           ? `<br><span class="pm-hint">${escapeHtml(r.residualLikelihoodName)} x ${escapeHtml(r.residualImpactName)}</span>`
@@ -1266,6 +1307,17 @@
     add("regFilterPending",   "analysisPending");
     add("regFilterStage",     "workflowStageCode");
     add("regFilterTreatment", "treatmentOptionCode");
+    // 413: dashboard drill-down -- a record status, No Owner (by owner
+    // ID), open risks only, or one heatmap cell. Keys are the API's.
+    const rd = state.regDrill;
+    if (rd) {
+      ["statusCode", "likelihoodValue", "impactValue",
+       "residualLikelihoodValue", "residualImpactValue"]
+        .forEach(k => { if (rd[k] != null && rd[k] !== "") qs.set(k, String(rd[k])); });
+      if (rd.noOwner)  qs.set("noOwner", "1");
+      if (rd.openOnly) qs.set("openOnly", "1");
+    }
+    paintDrillBanner("reg", rd);
 
     const res = await apiGetChecked(`/register?${qs}`);
     if (!res.ok) {
@@ -1323,9 +1375,7 @@
         <td>${escapeHtml(r.riskTitle)}</td>
         <td>${escapeHtml(r.riskOwnerName || "--")}</td>
         <td>${stageCell(r)}</td>
-        <td>${r.analysisPending
-              ? `<span class="risk-status-chip risk-clarify">Analysis pending</span>`
-              : severityChip(r.inherentRatingCode)}</td>
+        <td>${severityChip(r.inherentRatingCode)}</td>
         <td>${residualCell(r)}</td>
         <td>${reviewDateCell(r)}</td>
         <td>
@@ -1496,7 +1546,7 @@
       // than looking like a rendering fault.
       const p = document.createElement("div");
       p.className = "pm-action-menu-empty";
-      p.style.cssText = "padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;";
+      p.style.cssText = "padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;";
       p.textContent = "No actions available";
       openMenuEl.appendChild(p);
     }
@@ -1590,7 +1640,10 @@
       disabledReason: "Tolerate / Accept raises no treatment work, so there is nothing to be "
                     + "residual to — accept the risk instead."
     };
-    if (TREATMENT_RAISES_WORK.includes(d.option) && d.openTasks > 0) return {
+    // 389: the organisation may allow residual analysis while treatment
+    // work is still open (Risk Centre settings). sp_risk_residual_
+    // analysis_save reads the same switch.
+    if (TREATMENT_RAISES_WORK.includes(d.option) && d.openTasks > 0 && !d.allowOpenTasks) return {
       applicable: true, disabled: true,
       disabledReason: `${d.openTasks} treatment task${d.openTasks === 1 ? " is" : "s are"} still open. `
                     + "Residual risk can only be assessed once the treatment work is complete."
@@ -1612,11 +1665,13 @@
   //
   // fields: { riskRegisterId, statusCode, analysisPending, residualPending,
   //           treatmentOptionCode, openTreatmentTaskCount, treatmentTaskCount,
-  //           isReviewDue, approvalRequired } -- every one of these is a
+  //           isReviewDue, approvalRequired, allowResidualWithOpenTasks }
+  // -- every one of these is a
   // raw field already returned by GET /register/{riskId} (state.activeRisk
   // on Risk View) or already carried on the Register grid row's own
-  // data-reg-* attributes; approvalRequired alone is NOT part of the risk
-  // record (it is an organization-level setting from GET /config) -- see
+  // data-reg-* attributes; approvalRequired and allowResidualWithOpenTasks
+  // are NOT part of the risk record (organization-level settings from
+  // GET /config) -- see
   // each caller for how it supplies it.
   //
   // handlers: { onView, onAnalysis, onResidual, onReviewAnalysis,
@@ -1659,7 +1714,8 @@
         action: handlers.onResidual
       }, residualMenuGate({
         status: fields.statusCode, analysisPending: fields.analysisPending,
-        option: regOption, openTasks
+        option: regOption, openTasks,
+        allowOpenTasks: !!fields.allowResidualWithOpenTasks
       })));
     }
 
@@ -1674,7 +1730,12 @@
     }
 
     if (handlers.onChangeStatus) {
-      items.push({ icon: "fa-flag", label: "Change status", action: handlers.onChangeStatus });
+      // Change request 2026-09-30: "Change status" is now "Retire risk" --
+      // the dialog offers Retired only (fixed, disabled). Hidden once the
+      // risk is already Retired: there is nothing left for it to do.
+      items.push({ icon: "fa-box-archive", label: "Retire risk",
+                   applicable: fields.statusCode !== "Retired",
+                   action: handlers.onChangeStatus });
     }
     if (handlers.onChangeOwner) {
       items.push({ icon: "fa-user-check", label: "Change owner", action: handlers.onChangeOwner });
@@ -1693,8 +1754,13 @@
         label: openTasks > 0 ? `Risk treatment (${openTasks} open)`
              : taskCount > 0 ? "Risk treatment" : "Risk treatment (none raised)",
         applicable: !regClosed && regOption !== "Tolerate",
-        disabled: !regOption,
-        disabledReason: "Choose a treatment option in Risk analysis first.",
+        // The treatment option is CHOSEN on the Treatment page (it moved
+        // there from Risk Analysis), so "no option yet" -- stage
+        // Treatment option due -- is exactly when this page is needed.
+        // Gating it on the option left a Treatment-due risk with no way
+        // in. What it does need is a finished analysis.
+        disabled: !!fields.analysisPending,
+        disabledReason: "Complete the risk analysis first.",
         action: handlers.onTreatmentWork
       });
     }
@@ -1773,38 +1839,25 @@
         return;
       }
 
-      // A tile or bar click is a filter change on the grid the user
-      // already knows, not a new screen.
-      const drillTile = ev.target.closest("[data-drill-candidate-status]");
-      if (drillTile) {
+      // A tile, band or heatmap-cell click is a filter change on the grid
+      // the user already knows, not a new screen (413 replaced 210's two
+      // single-purpose drill attributes with this one).
+      const drillEl = ev.target.closest("[data-dash-drill]");
+      if (drillEl) {
         ev.preventDefault();
-        setVal("riskFilterStatus", drillTile.dataset.drillCandidateStatus);
-        state.statusCode = drillTile.dataset.drillCandidateStatus;
-        showTab("candidates");
-        refresh();
+        const d = dashDrills[Number(drillEl.dataset.dashDrill)];
+        if (d) applyDashDrill(d);
         return;
       }
-
-      const drillBar = ev.target.closest("[data-drill-tab]");
-      if (drillBar) {
+      const drillClear = ev.target.closest("[data-drill-clear]");
+      if (drillClear) {
         ev.preventDefault();
-        const { drillTab, drillField, drillValue } = drillBar.dataset;
-        if (drillTab === "register") {
-          const map = { sourceTypeCode: "regFilterSource",
-                        categoryCode:   "regFilterCategory",
-                        ratingCode:     "regFilterRating" };
-          const target = map[drillField];
-          if (target) setVal(target, drillValue);
-          showTab("register");
-          refreshRegister();
-        } else if (drillTab === "candidates") {
-          if (drillField === "sourceTypeCode") {
-            setVal("riskFilterSource", drillValue);
-            state.sourceTypeCode = drillValue;
-          }
-          showTab("candidates");
-          refresh();
-        }
+        clearDashDrill(drillClear.dataset.drillClear);
+        return;
+      }
+      if (ev.target.closest("[data-dash-back]")) {
+        ev.preventDefault();
+        showTab("dashboard");
         return;
       }
 
@@ -1826,8 +1879,9 @@
         // server then refuses.
         //
         // Approval is not here either: the approver's job starts on the
-        // Dashboard's "Awaiting approval" queue, which is a worklist, not
-        // a per-row afterthought.
+        // "Awaiting approval" queue under this grid (moved from the
+        // Dashboard, 2026-10-01), which is a worklist, not a per-row
+        // afterthought.
         openRowMenu(candTrigger, [
           { icon: "fa-eye", label: "View details", action: () => openDetailModal(id) },
           // A closed candidate will never be assessed again -- registered,
@@ -1864,11 +1918,12 @@
         const isChild = twTrigger.dataset.twChild === "1";
         const closed  = twTrigger.dataset.twClosed === "1";
         const mandOpen = Number(twTrigger.dataset.twMandopen || 0);
+        const source  = twTrigger.dataset.twSource || "";
         const task    = (state.treatmentTasks || []).find(t => t.taskId === taskId) || null;
         const riskId  = Number(document.getElementById("twRiskId").value || 0);
 
         openRowMenu(twTrigger, [
-          { icon: "fa-arrow-up-right-from-square", label: "Open in Task Center",
+          { icon: "fa-arrow-up-right-from-square", label: "Open in Task Board",
             action: () => window.open(U(`/Practice/Index/tasks?taskId=${taskId}`), "_blank", "noopener") },
 
           // BRD §11: a child cannot have children of its own -- structural,
@@ -1932,7 +1987,14 @@
 
           { icon: "fa-lock", label: "Close task",
             applicable: !closed,
-            action: () => closeTreatmentTask(taskId, riskId, task, mandOpen) }
+            action: () => closeTreatmentTask(taskId, riskId, task, mandOpen) },
+
+          // 387: a task mapped here through "Map open task" can be
+          // unmapped. Treatment and Gap rows are not links -- they belong
+          // to the risk / the mapped instance -- so the item is hidden.
+          { icon: "fa-link-slash", label: "Unmap from this risk",
+            applicable: !isChild && source === "Linked",
+            action: () => unlinkTreatmentTask(taskId, riskId, task) }
         ]);
         return;
       }
@@ -1959,7 +2021,8 @@
             openTreatmentTaskCount: Number(regTrigger.dataset.regOpenTasks || 0),
             treatmentTaskCount: Number(regTrigger.dataset.regTaskCount || 0),
             isReviewDue: regTrigger.dataset.regReviewDue === "1",
-            approvalRequired: !!state.config?.approvalRequired
+            approvalRequired: !!state.config?.approvalRequired,
+            allowResidualWithOpenTasks: !!state.config?.allowResidualWithOpenTasks
           },
           {
             // The read-only details PAGE, not the old summary modal. The
@@ -1990,26 +2053,29 @@
             // way a closed risk is reopened, so hiding it would leave every
             // other item on this menu permanently unreachable, and a risk
             // closed by mistake with no way back through the UI.
+            // 2026-09-30: the item is now "Retire risk" (Retired only), so
+            // it no longer reopens anything; it is hidden on a risk that
+            // is already Retired (buildRegisterMenu).
             onChangeStatus: () => openRegStatusModal(id),
             onChangeOwner:  () => openRegOwnerModal(id),
             // ---- migrations 261-264 ------------------------------------
             // Every gate below mirrors one the server enforces, and each
             // carries its OWN reason rather than a shared "not available".
             // A greyed item that cannot say why is a dead end.
-            onScope: () => openScopePage(id),
+            // onScope omitted (2026-09-30): "Practices & assets" removed from
+            // this menu; the same page is reached through Analysis.
             // Tolerate / Accept raises no treatment task AT ALL (§21) --
             // that is what choosing it means, so the item is not offered
             // rather than offered and greyed. Having no option chosen YET
-            // is the opposite: it is the next thing to go and do, so the
-            // item stays visible pointing at Risk analysis.
+            // is the opposite: it is the next thing to go and do, and it
+            // is done ON the Treatment page, so the item stays enabled.
             onTreatmentWork: () => openTreatmentWorkModal(id),
             onAccept:        () => openAcceptancePage(id),
-            onReview:        () => openReviewPage(id),
-            // BRD §22 — 215's manual, candidate-gated raise. Kept because
-            // 263 added an automatic path without closing this one: an
-            // organisation that wants a human to confirm owner, SLA and
-            // priority before work lands in a queue still has it.
-            onRaiseTask: () => openTreatmentModal(id)
+            onReview:        () => openReviewPage(id)
+            // onRaiseTask omitted (2026-09-30): "Raise additional task (via
+            // candidate)" removed from this menu. Treatment tasks are raised
+            // from the Treatment page's treatment option (263); the 215
+            // endpoint and openTreatmentModal() are left untouched.
           }
         );
         openRowMenu(regTrigger, items);
@@ -2124,13 +2190,16 @@
     // Pre-fill from the current version if there is one, so a revision
     // starts from what was last recorded rather than blank.
     const a = await apiGet(`/${id}/analysis`);
+    // 417: typed by the analyst. A first assessment starts from the
+    // candidate title (without its "Risk:" prefix) so there is something
+    // to edit rather than a blank box; after that the saved title wins.
+    setVal("anTitle",       a?.riskTitle || displayCandidateTitle(cand.candidateTitle));
     setVal("anStatement",   a?.riskStatement || cand.candidateSummary || "");
     setVal("anThreat",      a?.threatId ?? "");
     setVal("anVulnerability", a?.vulnerabilityId ?? "");
     setVal("anThreatDescription", a?.threatDescription || "");
     setVal("anVulnerabilityDescription", a?.vulnerabilityDescription || "");
     setVal("anOwner",       a?.riskOwnerEmployeeId || "");
-    setVal("anBusinessFunction", a?.businessFunctionId || "");
     // Write-only, per registration -- there is nothing to pre-fill from
     // a prior save, unlike every field above it.
     setVal("anRegistrationNote", "");
@@ -2165,6 +2234,8 @@
     const msg = document.getElementById("anMessage");
     msg.textContent = "";
     const id = Number(document.getElementById("anCandidateId").value);
+    const title = val("anTitle");
+    if (!title) { msg.textContent = "Risk title is required."; return; }
     const statement = val("anStatement");
     if (!statement) { msg.textContent = "Risk statement is required."; return; }
 
@@ -2172,7 +2243,7 @@
     const gate = await assessmentPayload("an", msg);
     if (!gate) return;
 
-    const result = await apiPost(`/${id}/analysis`, { riskStatement: statement, ...gate });
+    const result = await apiPost(`/${id}/analysis`, { riskTitle: title, riskStatement: statement, ...gate });
     if (result && result.success !== false && result.riskAnalysisId) {
       // The full set, after the analysis row exists to hang it off.
       // Deliberately not awaited into the failure path: the analysis is
@@ -2200,7 +2271,7 @@
     else dlg.alert("Assessment saved.", { title: "Assessment saved", type: "success" });
   }
 
-  // The four shared assessment fields, validated and shaped once for
+  // The shared assessment fields, validated and shaped once for
   // both forms. Returning null means "already told the user why not" —
   // §12's one-methodology rule applies to the client too: if the two
   // forms validated separately they would eventually disagree.
@@ -2208,7 +2279,6 @@
   // real master row before its id can be sent, and that is a round trip.
   async function assessmentPayload(prefix, msgEl) {
     const owner  = val(prefix + "Owner");
-    const bf     = val(prefix + "BusinessFunction");
     const threatDesc = val(prefix + "ThreatDescription");
     const vulnDesc   = val(prefix + "VulnerabilityDescription");
 
@@ -2236,7 +2306,9 @@
     if (!threatIds.length) return fail("At least one threat is required.");
     if (!vulnIds.length)   return fail("At least one vulnerability is required.");
     if (!owner)  return fail("Risk owner is required.");
-    if (!bf)     return fail("Business function is required.");
+    // No business function (417): neither form asks for it any more --
+    // it is captured per impact in Impact details. 216's
+    // sp_risk_analysis_save and sp_risk_custom_create accept NULL.
 
     // THE LEAD ID keeps 216 working untouched: risk_analysis.threat_id
     // has a foreign key and a CHECK, and sp_risk_register_list reads
@@ -2252,8 +2324,7 @@
       vulnerabilityId:          lead(vulnIds),
       vulnerabilityIds:         vulnIds,
       vulnerabilityDescription: vulnDesc || null,
-      riskOwnerEmployeeId:      Number(owner),
-      businessFunctionId:       Number(bf)
+      riskOwnerEmployeeId:      Number(owner)
     };
   }
 
@@ -2263,7 +2334,7 @@
   // after the assessment was already saved -- a second, separate ask the
   // analyst had not been told was coming. It is now a field on the
   // assessment form itself (Save & register reads it the same way it
-  // reads owner and business function), so by the time this function
+  // reads owner and risk title), so by the time this function
   // runs the note already exists; it is only threaded through to
   // doRegister, never asked for again. The one remaining interruption
   // between Save & register and the risk actually being registered is
@@ -2285,7 +2356,7 @@
     // §15 — advisory. Empty result means we go straight through.
     const matches = await apiPost("/duplicate-check", {
       organizationId:   state.organizationId,
-      riskTitle:        cand?.candidateTitle,
+      riskTitle:        analysis.riskTitle || cand?.candidateTitle,
       riskStatement:    analysis.riskStatement,
       riskCategoryCode: analysis.riskCategoryCode,
       sourceTypeCode:   cand?.sourceTypeCode,
@@ -2374,7 +2445,7 @@
     if (!state.employees.length) await loadEmployees();
     ["cxTitle","cxStatement","cxThreatDescription","cxVulnerabilityDescription"]
       .forEach(id => setVal(id, ""));
-    ["cxThreat","cxVulnerability","cxOwner","cxBusinessFunction"].forEach(id => setVal(id, ""));
+    ["cxThreat","cxVulnerability","cxOwner"].forEach(id => setVal(id, ""));
     document.getElementById("cxMessage").textContent = "";
     toggleOther("cx", "Threat");
     toggleOther("cx", "Vuln");
@@ -2505,11 +2576,13 @@
   // for the optional extras -- a wall of "--" tells nobody anything --
   // but wrong for Owner or Score, where a missing row is
   // indistinguishable from a page that failed to load.
-  function ddReq(label, value, isHtml) {
+  // cls is passed straight through to dd() (e.g. "pm-detail-span" for a
+  // full-width row); optional, so every existing call is unchanged.
+  function ddReq(label, value, isHtml, cls) {
     const empty = value == null || value === "";
     return empty
-      ? dd(label, `<span class="rd-none">Not available</span>`, true)
-      : dd(label, value, isHtml);
+      ? dd(label, `<span class="rd-none">Not available</span>`, true, cls)
+      : dd(label, value, isHtml, cls);
   }
 
   // Change request 2026-09-22: Change status / Change owner / Review
@@ -2592,78 +2665,52 @@
     ].join("");
 
     // ---- 1. Risk context ---------------------------------------------
+    // Change request 2026-09-26 (sir): exactly ten fields
+    // (#rdContext in risk-centre.cshtml, five columns):
+    //   Row 1  Risk ID | Source | Owner | Record status | Registered
+    //   Row 2  Title   | Category
+    //   Row 3  Statement      (full width)
+    //   Row 4  Threat         (full width)
+    //   Row 5  Vulnerability  (full width)
+    // The last three carry long text, so each takes a whole row via the
+    // existing pm-detail-span class (grid-column 1 / -1) rather than
+    // sharing a row in thirds.
+    // Every cell is ddReq, never dd: dd() drops an empty field entirely,
+    // which would slide the next field into its slot and break the rows.
+    // An empty value reads "Not available" and keeps its column.
+    //
+    // Removed from this section on the same request: Description,
+    // Business function, Process, Linked practice, Risk cause,
+    // Existing controls, Risk version, Next review, Last reviewed,
+    // Reviews and Closed. Display only -- /register/{id}, the procs and
+    // the columns are untouched, and the register detail modal
+    // (openRegisterDetail) still shows its own set.
     document.getElementById("rdContext").innerHTML =
+      // Row 1
       ddReq("Risk ID",        risk.riskNumber) +
-      dd("Title",             risk.riskTitle) +
-      ddReq("Statement",      risk.riskStatement) +
-      dd("Description",       risk.riskDescription) +
-      dd("Category",          risk.riskCategoryNames || risk.riskCategoryName) +
       ddReq("Source",         (risk.sourceName || risk.sourceTypeCode || "") +
                               (risk.sourceReference ? ` — ${risk.sourceReference}` : "")) +
-      // NO "Business unit". Removed from this section on request. The
-      // COLUMN is untouched -- risk_register.business_unit still stores
-      // it, sp_risk_register_get still returns it, and the register
-      // detail drawer still shows it. This page simply stops asking for
-      // it, so nothing is lost and nothing has to be migrated.
-      dd("Business function", risk.businessFunctionName) +
-      dd("Process",           risk.processName) +
       ddReq("Owner",          risk.riskOwnerName) +
-      // HOW MANY PRACTICES, not just the one the risk arrived with.
-      //
-      // risk_register.linked_practice_id is a single column -- the
-      // practice the risk was raised against. The real scope is
-      // risk_practice_map (261), which is one row per mapped practice
-      // and is what the Existing Controls panel below renders.
-      //
-      // The count needed no schema or procedure change:
-      // sp_risk_register_get has returned MappedPracticeCount as
-      // COUNT(*) over risk_practice_map since 265, and the API has
-      // carried it since. It was simply never displayed.
-      //
-      // The originating practice keeps its name beside the count, when
-      // there is one -- "3 Practices" alone would lose which practice
-      // the risk came from, and that is the one this page's trace
-      // section is built around.
-      ddReq("Linked practice", practiceScopeCell(risk), true) +
+      // NOT "Status" -- the heading badge and the rail carry the lifecycle;
+      // this is the stored record state (see the earlier note in history).
+      ddReq("Record status",  statusChip(risk.statusCode), true) +
+      ddReq("Registered",     `${window.gracFormatDisplayDate(risk.registeredOn)} by ${
+                                 escapeHtml(risk.registeredByName || "system")}`, true) +
+      // Row 2 -- rd-row-start pins Title to column 1, so row 2 always
+      // starts on a fresh line.
+      ddReq("Title",          risk.riskTitle, false, "rd-row-start") +
+      ddReq("Category",       risk.riskCategoryNames || risk.riskCategoryName) +
+      // Rows 3-5 -- the long-text fields, one full-width row each.
+      ddReq("Statement",      risk.riskStatement, false, "pm-detail-span") +
       // The whole set when 286 could supply it, otherwise the single
       // legacy value. threatId/vulnerabilityId 0 means "typed in, not
       // picked" -- the same test openRegisterDetail uses.
-      dd("Threats", tvSet?.threats
-            || (risk.threatId === 0 ? risk.threatDescription : risk.threatName)) +
-      dd("Vulnerabilities", tvSet?.vulnerabilities
-            || (risk.vulnerabilityId === 0 ? risk.vulnerabilityDescription : risk.vulnerabilityName)) +
-      dd("Risk cause",        risk.riskCause) +
-      dd("Existing controls", risk.existingControls) +
-      // NOT "Status". The heading badge and the four-step rail above
-      // already carry the lifecycle; repeating it here as a second
-      // "status" is what made the two look like rival answers to one
-      // question. What is left is the stored §17 value under a name that
-      // says what it is -- an operator-set record state that also drives
-      // closure, the register filter and the accept/duplicate gates.
-      ddReq("Record status", statusChip(risk.statusCode), true) +
-      // THE RISK VERSION. One number for the whole risk, shown once, in
-      // the section that describes the risk itself.
-      //
-      // It is NOT analysisVersion or residualVersion. Those are the
-      // per-table history sequences of risk_analysis and
-      // risk_residual_analysis, and this page used to show both as
-      // "Version" inside their own panels -- which is why one risk
-      // appeared to have two different versions at once.
-      //
-      // Only an acceptance moves this number (310). Registering is
-      // version 1; each completed acceptance is the next one.
-      ddReq("Risk version", riskVersionCell(risk), true) +
-      dd("Registered",        `${window.gracFormatDisplayDate(risk.registeredOn)} by ${
-                                 escapeHtml(risk.registeredByName || "system")}`, true) +
-      dd("Next review",       risk.nextReviewDate
-                                ? window.gracFormatDateOnly(risk.nextReviewDate) : null) +
-      dd("Last reviewed",     risk.lastReviewedOn
-                                ? window.gracFormatDateOnly(risk.lastReviewedOn) : null) +
-      dd("Reviews",           risk.reviewCount ? String(risk.reviewCount) : null) +
-      (risk.closedOn
-        ? dd("Closed", `${window.gracFormatDisplayDate(risk.closedOn)} — ${
-              escapeHtml(risk.closureReason || "")}`, true)
-        : "");
+      ddReq("Threat",         tvSet?.threats
+            || (risk.threatId === 0 ? risk.threatDescription : risk.threatName),
+            false, "pm-detail-span") +
+      ddReq("Vulnerability",  tvSet?.vulnerabilities
+            || (risk.vulnerabilityId === 0 ? risk.vulnerabilityDescription : risk.vulnerabilityName),
+            false, "pm-detail-span");
 
     document.getElementById("rdTrace").innerHTML = riskTraceSteps(risk);
 
@@ -2704,7 +2751,7 @@
     if (showWork) {
       twState = await refreshTreatmentState(riskId, {
         gateId: "rdGate", tilesId: "rdTiles", bodyId: "rdTaskBody",
-        residualBtnId: null, colspan: 7, readOnly: true, sync: false
+        residualBtnId: null, colspan: 7, readOnly: true, sync: false, showSource: false
       });
     }
 
@@ -2833,7 +2880,8 @@
         openTreatmentTaskCount: risk.openTreatmentTaskCount || 0,
         treatmentTaskCount: risk.treatmentTaskCount || 0,
         isReviewDue: risk.isReviewDue,
-        approvalRequired: !!cfg?.approvalRequired
+        approvalRequired: !!cfg?.approvalRequired,
+        allowResidualWithOpenTasks: !!cfg?.allowResidualWithOpenTasks
       },
       {
         // Same handlers as the Register row menu's regTrigger branch
@@ -2843,11 +2891,12 @@
         onReviewAnalysis: async () => { await openRegisterDetail(id); hide("regDetailModal"); openRegApprovalModal(id); },
         onChangeStatus: () => openRegStatusModal(id),
         onChangeOwner:  () => openRegOwnerModal(id),
-        onScope: () => openScopePage(id),
+        // onScope omitted (2026-09-30): "Practices & assets" removed from
+        // this menu; the same page is reached through Analysis.
         onTreatmentWork: () => openTreatmentWorkModal(id),
         onAccept:        () => openAcceptancePage(id),
-        onReview:        () => openReviewPage(id),
-        onRaiseTask: () => openTreatmentModal(id)
+        onReview:        () => openReviewPage(id)
+        // onRaiseTask omitted (2026-09-30): "Raise additional task" removed.
       }
     );
     openRowMenu(trigger, items);
@@ -2863,7 +2912,9 @@
     // risk came from; the one risk version is stated once, in Risk
     // Context, and analysis_version belongs to the Analysis history
     // table alone (310).
-    steps.push(`<span class="risk-trace-step">Assessment${
+    // Displayed as "Identify" (change request 2026-09-26, label only --
+    // the step, its data and its position in the chain are unchanged).
+    steps.push(`<span class="risk-trace-step">Identify${
       risk.analysedByName ? ` — ${escapeHtml(risk.analysedByName)}` : ""}</span>`);
     if (risk.riskCandidateId) {
       steps.push(`<span class="risk-trace-step">${escapeHtml(risk.candidateNumber || `Candidate #${risk.riskCandidateId}`)}</span>`);
@@ -2892,7 +2943,8 @@
       dd("Statement",   risk.riskStatement) +
       dd("Threat", risk.threatId === 0 ? risk.threatDescription : risk.threatName) +
       dd("Vulnerability", risk.vulnerabilityId === 0 ? risk.vulnerabilityDescription : risk.vulnerabilityName) +
-      dd("Business function", risk.businessFunctionName) +
+      // Business function removed (417, display only): it is captured
+      // per impact in Impact details, not on the risk itself any more.
       dd("Category",    risk.riskCategoryNames || risk.riskCategoryName) +
       // "Record status", consistent with every other risk surface: the
       // stored §17 value, not the derived workflow stage.
@@ -2917,6 +2969,27 @@
     // BRD §22 — treatment work, if the organisation chose to raise any.
     mountRelatedTasks("regRelatedTasks", "Risk", risk.riskCandidateId || riskId);
     show("regDetailModal");
+  }
+
+  // The compact Risk context shared by the Analysis page (#raMeta) and the
+  // Treatment page (#twMeta) -- change request 2026-09-26/27:
+  //   Row 1  Risk ID | Owner | Source | Current inherent | Current residual
+  //   Row 2  Statement      (full width)
+  //   Row 3  Threat         (full width)
+  //   Row 4  Vulnerability  (full width)
+  // Five columns come from the #raMeta / #twMeta rules in risk-centre.cshtml.
+  // ddReq keeps a slot for an empty value instead of shifting the rows.
+  function riskContextCompactHtml(risk) {
+    return ddReq("Risk ID", risk.riskNumber) +
+      ddReq("Owner", risk.riskOwnerName) +
+      ddReq("Source", risk.sourceName || risk.sourceTypeCode) +
+      dd("Current inherent", risk.inherentRatingCode ? severityChip(risk.inherentRatingCode) : "not scored", true) +
+      dd("Current residual", risk.residualRatingCode ? severityChip(risk.residualRatingCode) : "not assessed", true) +
+      ddReq("Statement", risk.riskStatement, false, "pm-detail-span") +
+      ddReq("Threat", risk.threatId === 0 ? risk.threatDescription : risk.threatName,
+            false, "pm-detail-span") +
+      ddReq("Vulnerability", risk.vulnerabilityId === 0 ? risk.vulnerabilityDescription : risk.vulnerabilityName,
+            false, "pm-detail-span");
   }
 
   // ---- Stage 2: the scored analysis on a registered risk (216) -------
@@ -2950,20 +3023,24 @@
       + (risk.analysisApprovalStatusCode === "Pending"
           ? ` <span class="risk-status-chip risk-clarify">Awaiting approval</span>` : "");
 
+    // Risk context -- change request 2026-09-26 (sir), same shape as the
+    // Risk View page's Risk context (#rdContext):
+    //   Row 1  Risk ID | Owner | Source | Current inherent | Current residual
+    //   Row 2  Statement      (full width)
+    //   Row 3  Threat         (full width)
+    //   Row 4  Vulnerability  (full width)
+    // Five columns set on #raMeta in risk-centre.cshtml; the long-text
+    // fields take a whole row each via the existing pm-detail-span class.
+    // ddReq, not dd, so an empty value keeps its slot ("Not available")
+    // instead of sliding the next field into it. Removed on the same
+    // request: Business function, Business unit, Linked practice --
+    // display only, the data and the save path are untouched. The
+    // "awaiting approval" note below still appears, as its own full row,
+    // only while a version is pending review.
     document.getElementById("raMeta").innerHTML =
-      dd("Risk ID", risk.riskNumber) +
-      dd("Statement", risk.riskStatement) +
-      dd("Threat", risk.threatId === 0 ? risk.threatDescription : risk.threatName) +
-      dd("Vulnerability", risk.vulnerabilityId === 0 ? risk.vulnerabilityDescription : risk.vulnerabilityName) +
-      dd("Owner", risk.riskOwnerName) +
-      dd("Business function", risk.businessFunctionName) +
-      dd("Business unit", risk.businessUnit) +
-      dd("Source", risk.sourceName || risk.sourceTypeCode) +
-      dd("Linked practice", risk.linkedPracticeName) +
-      dd("Current inherent", risk.inherentRatingCode ? severityChip(risk.inherentRatingCode) : "not scored", true) +
-      dd("Current residual", risk.residualRatingCode ? severityChip(risk.residualRatingCode) : "not assessed", true) +
+      riskContextCompactHtml(risk) +
       (risk.analysisApprovalStatusCode === "Pending"
-        ? dd("Note", `<span class="pm-hint">Saving again replaces the version waiting for review.</span>`, true)
+        ? dd("Note", `<span class="pm-hint">Saving again replaces the version waiting for review.</span>`, true, "pm-detail-span")
         : "");
 
     setVal("raLikelihood",  risk.likelihoodCode || "");
@@ -3006,24 +3083,22 @@
     // same option is a no-op server-side (263 is idempotent on the task),
     // so showing the current choice costs nothing and prevents the
     // analyst wondering whether a blank means "none" or "not loaded".
-    setRadio("raTreatment", risk.treatmentOptionCode || "");
-
     // Show the page BEFORE mounting the scope panel, so the form is on
     // screen while the mapping loads instead of the click appearing to
     // do nothing until the round trip finishes.
     showAnalysisPage();
 
-    // The scope panel. Mounted AFTER the risk is loaded because it needs
-    // the risk id, and awaited because mapping the risk's own practice
-    // (sp_risk_mapping_sync_primary) is what puts the inherited assets on
-    // screen -- the requirement's "should already be mapped" only looks
-    // automatic if it has finished before the panel paints.
-    //
-    // showHeading:false — the panel above supplies the section heading,
-    // and two headings for one section is what a copied component looks
-    // like.
-    await riskMapping.mount("raMapping", riskId, { readOnly: false, showHeading: false,
-                                                   impactHostId: "raImpactScope" });
+    // Impact Details (change request 2026-09-26): moved here from the
+    // Treatment page, above Inherent scoring. The same riskMapping
+    // component and save path ("Save impact details"), rendering only
+    // the by-category impact table (impactOnly) -- Existing Controls
+    // stays on the Treatment page.
+    await riskMapping.mount("raImpactScope", riskId, { readOnly: false, showHeading: false,
+                                                       impactOnly: true });
+
+// Treatment option and the practice-mapping scope panel moved to the
+    // Treatment page (Risk Analysis -> Treatment flow change). Risk Analysis
+    // is scoring/assessment only now; showAnalysisPage() above revealed it.
   }
 
   async function onRegAnalysisSubmit(ev) {
@@ -3100,51 +3175,23 @@
       return;
     }
 
-    // ---- The treatment option, AFTER the rating (migration 263) ------
-    // Order is not incidental. sp_risk_treatment_option_set refuses while
-    // analysis_pending = 1 (error 56569), and the task's priority is
-    // derived from the rating this save just produced. Sending the option
-    // first would be refused; sending it second gets the right priority.
-    //
-    // A failure here is reported but does not undo the analysis: the
-    // rating IS saved, and telling the analyst otherwise would be false.
-    const option = getRadio("raTreatment");
-    let dispatch = null;
-    if (option) {
-      dispatch = await apiPost(`/register/${riskId}/treatment-option`, {
-        treatmentOptionCode: option
-      });
-      if (!dispatch || dispatch.success === false) {
-        msg.textContent = `Analysis saved, but the treatment option was not applied: `
-                        + `${(dispatch && dispatch.error) || "unknown error"}`;
-        await refreshRegister();
-        return;
-      }
-    }
-
-    // Saving returns to the list the page was opened from. backFrom...
-    // also unmounts the mapping panel, so there is one teardown path
-    // rather than one per exit.
-    backFromAnalysisPage();
-
-    // §19 — "saved and live" and "saved and waiting for an approver" are
-    // different outcomes, so they get different messages.
+    // Risk Analysis -> Treatment flow (change): completing the analysis
+    // (rating + risk types + categories saved above) ALWAYS proceeds to the
+    // Treatment page. The treatment option is no longer chosen here -- it
+    // moved to the Treatment page (onApplyTreatmentOption) and no longer
+    // decides whether the user reaches Treatment. An approval-required
+    // rating still surfaces its warning; the analyst continues to Treatment
+    // either way.
     if (res.approvalRequired)
       dlg.alert(`Rated ${res.inherentRatingCode}. It needs approval before it becomes `
                 + `the register's rating. ${res.approvalReason || ""}`,
                 { title: "Analysis submitted", type: "warning" });
     else
-      dlg.alert(`Inherent rating: ${res.inherentRatingCode}.`
-                + treatmentOutcomeText(dispatch),
+      dlg.alert(`Inherent rating: ${res.inherentRatingCode}.`,
                 { title: "Analysis saved", type: "success" });
 
     await refreshRegister();
-
-    // Tolerate/Accept goes straight to acceptance -- that is the whole
-    // difference between the fourth option and the other three, and
-    // making the user find the row menu to continue would hide it.
-    if (dispatch && dispatch.nextStep === "Acceptance") await openAcceptancePage(riskId);
-    else if (dispatch && dispatch.taskCreated) await openTreatmentWorkModal(riskId);
+    await openTreatmentWorkModal(riskId);
   }
 
   // One sentence describing what the treatment decision did, used by the
@@ -3155,6 +3202,9 @@
       return ` Tolerate / Accept chosen — no treatment task raised; continue to Risk Acceptance.`;
     if (dispatch.taskCreated)
       return ` ${dispatch.treatmentOptionName} chosen — treatment task raised and assigned to the risk owner.`;
+    // 418: the user answered No -- applied, no task.
+    if (dispatch.raiseTask === false)
+      return ` ${dispatch.treatmentOptionName} chosen — no treatment task generated. Use "Add treatment task" when ready.`;
     if (dispatch.treatmentTaskId)
       return ` ${dispatch.treatmentOptionName} chosen — the existing treatment task was reused, not duplicated.`;
     return dispatch.treatmentOptionName ? ` ${dispatch.treatmentOptionName} chosen.` : "";
@@ -3210,7 +3260,7 @@
       dd("Statement", risk.riskStatement) +
       dd("Category", risk.riskCategoryNames || risk.riskCategoryName) +
       dd("Owner", risk.riskOwnerName) +
-      dd("Business function", risk.businessFunctionName) +
+      // Business function removed (417) -- see openRegisterDetail.
       dd("Business unit", risk.businessUnit) +
       dd("Linked practice", risk.linkedPracticeName) +
       dd("Source", risk.sourceName || risk.sourceTypeCode);
@@ -3315,7 +3365,7 @@
     // move a risk's status as a side effect of being looked at.
     const st = await refreshTreatmentState(riskId, {
       gateId: "rrGate", tilesId: "rrTiles", bodyId: "rrTaskBody",
-      residualBtnId: null, colspan: 7, readOnly: true, sync: false
+      residualBtnId: null, colspan: 7, readOnly: true, sync: false, showSource: false
     });
     // Kept so the rail can be redrawn on every score change without
     // asking the server what the treatment state was again.
@@ -3639,7 +3689,23 @@
           ? !!opts.readOnly
           : !!opts.impactReadOnly,
         showHeading: opts.showHeading !== false,
-        impactHostId: opts.impactHostId || null
+        impactHostId: opts.impactHostId || null,
+        // Change request 2026-09-26: Impact Details moved from the
+        // Treatment page to the Analysis page, WITHOUT Existing Controls.
+        //   impactOnly  -- render ONLY the Impact Details table into the
+        //                  host (Analysis: #raImpactScope).
+        //   hideImpact  -- render ONLY the practices (Treatment: #twMapping).
+        // Same component, same /mapping call, same save path; both default
+        // false, so every other mount renders exactly as before.
+        impactOnly: !!opts.impactOnly,
+        hideImpact: !!opts.hideImpact,
+        // Change request 2026-09-30 (410): the mapped practice instances
+        // as a GRID (Practice / Practice Instance, Tasks, Status, Actions)
+        // instead of one full card each -- with many controls mapped the
+        // cards made the Treatment page very long. A row click opens the
+        // same card (practiceItem) in #riskMapPracticeDetailModal. Only the
+        // Treatment mount passes it; every other mount keeps the cards.
+        practiceGrid: !!opts.practiceGrid
       });
       host.innerHTML = `<p class="pm-hint">Loading practices and assets...</p>`;
       const ih = opts.impactHostId ? document.getElementById(opts.impactHostId) : null;
@@ -3694,13 +3760,22 @@
       st.orgId = state.organizationId;
 
       // practiceId -> { context row, tasks[] }
+      //
+      // 411: tasks follow the mapped practice INSTANCE, not the practice.
+      // st.taskGroups is keyed "I<instanceId>" (a task tied to that
+      // instance) or "P<practiceId>" (a practice-level mapping row, or an
+      // API/DB still before 411 -- the old practice-wide list).
       st.practiceContext = new Map();
+      st.taskGroups = new Map();
       if (context) {
         (context.practices || []).forEach(c =>
           st.practiceContext.set(Number(c.practiceId), { ctx: c, tasks: [] }));
         (context.tasks || []).forEach(t => {
-          const entry = st.practiceContext.get(Number(t.practiceId));
-          if (entry) entry.tasks.push(t);
+          const key = t.practiceInstanceId != null
+            ? "I" + Number(t.practiceInstanceId)
+            : "P" + Number(t.practiceId);
+          if (!st.taskGroups.has(key)) st.taskGroups.set(key, []);
+          st.taskGroups.get(key).push(t);
         });
       }
 
@@ -3727,26 +3802,68 @@
       // A dependency with no SourcePractices is a direct one -- added on
       // this risk rather than inherited from a practice -- and belongs to
       // no card. It appears in Impact Details only.
+      //
+      // WHICH CARD EACH INHERITED DEPENDENCY BELONGS TO (413).
+      //
+      // A card is a mapped practice INSTANCE, so this is keyed by
+      // riskPracticeMapId -- unique per card. It used to key by practiceId
+      // and match by SourcePractices NAME: every instance of one practice
+      // shares the name, so they merged into one bucket AND the match
+      // fired once per same-named instance -- a single dependency then
+      // showed up once per instance (badge said 1, chips said three).
+      // 387 mapping is per instance, so attribution has to be too.
+      //
+      // Preferred path: sp_risk_mapping_get (413) returns, per dependency,
+      // the practice_instance_id / practice_id rows that inherited it.
+      // Match a card by INSTANCE id when it has one -- the same predicate
+      // DependencyCount uses (s.practice_instance_id = the card's) so the
+      // chips and the badge agree -- and by PRACTICE id for a
+      // practice-level card (no instance yet). Fallback path (older
+      // API/DB without the ids): the previous name match, but deduped per
+      // card so at least the repeat is gone.
       const catName = new Map(categories.map(c => [c.dependencyTypeId, c.dependencyTypeName]));
       const depsByPractice = new Map();
+      const idList = v => String(v == null ? "" : v)
+        .split(",").map(x => x.trim()).filter(Boolean);
+      const pushDep = (key, d) => {
+        if (!depsByPractice.has(key)) depsByPractice.set(key, []);
+        const bucket = depsByPractice.get(key);
+        // One chip per distinct (category, object): a dependency vouched
+        // for by more than one source must not repeat within a card.
+        if (bucket.some(x => x.typeId === d.dependencyTypeId
+                          && x.objectId === d.dependencyObjectId)) return;
+        bucket.push({
+          typeId:       d.dependencyTypeId,
+          objectId:     d.dependencyObjectId,
+          categoryName: catName.get(d.dependencyTypeId) || "Other",
+          objectName:   d.dependencyObjectName || `#${d.dependencyObjectId}`,
+          roleNames:    d.roleNames || ""
+        });
+      };
       deps.forEach(d => {
-        const src = String(d.sourcePractices || "").trim();
-        if (!src) return;
+        const instIds = idList(d.sourcePracticeInstanceIds);
+        const pracIds = idList(d.sourcePracticeIds);
+        if (instIds.length || pracIds.length) {
+          practices.forEach(p => {
+            const matched = p.practiceInstanceId != null
+              ? instIds.includes(String(p.practiceInstanceId))
+              : pracIds.includes(String(p.practiceId));
+            if (matched) pushDep(Number(p.riskPracticeMapId), d);
+          });
+          return;
+        }
+        // Fallback: no id provenance -- match by SourcePractices name.
         // The separator is ", ". A practice name may itself contain a
         // comma, so a name that matches no whole token is still accepted
         // as a substring rather than silently dropped from its own card.
-        const tokens = src.split(",").map(s => s.trim()).filter(Boolean);
+        const src = String(d.sourcePractices || "").trim();
+        if (!src) return;
+        const tokens = src.split(",").map(x => x.trim()).filter(Boolean);
         practices.forEach(p => {
           const name = String(p.practiceName || "").trim();
           if (!name) return;
           if (!tokens.includes(name) && src.indexOf(name) < 0) return;
-          const key = Number(p.practiceId);
-          if (!depsByPractice.has(key)) depsByPractice.set(key, []);
-          depsByPractice.get(key).push({
-            categoryName: catName.get(d.dependencyTypeId) || "Other",
-            objectName:   d.dependencyObjectName || `#${d.dependencyObjectId}`,
-            roleNames:    d.roleNames || ""
-          });
+          pushDep(Number(p.riskPracticeMapId), d);
         });
       });
 
@@ -3770,6 +3887,21 @@
       const objectsByCat = new Map(lists);
       const assetTaxonomy = await taxonomyPromise;
 
+      // Department (385, 2026-09-26) is its own Impact category -- saved
+      // as department ids -- but on an EDITABLE table it has no row of
+      // its own: it is the multi-select Department picker inside the
+      // Person row (see categoryRow). Read-only tables keep a normal
+      // Department row of chips. Only folded in when a Person category
+      // exists to host it.
+      const isCat = (c, re) => re.test(c.dependencyTypeName || "") || re.test(c.dependencyTypeCode || "");
+      const deptCat   = categories.find(c => isCat(c, /^department$/i));
+      const personCat = categories.find(c => isCat(c, /^person$/i));
+      st.deptInPersonRow = (!st.impactReadOnly && deptCat && personCat && deptCat.isSelectable)
+        ? { cat: deptCat,
+            mapped: byCat.get(deptCat.dependencyTypeId) || [],
+            list: objectsByCat.get(deptCat.dependencyTypeId) || [] }
+        : null;
+
       // Practice selection goes through the reusable cascading Practice
       // Picker (wwwroot/js/practice-picker.js, migration 282) instead of
       // one flat <select> holding every mappable practice. The old
@@ -3782,7 +3914,7 @@
       // The panel keeps one button and nothing else has to move.
       const practiceAdd = st.readOnly ? "" : `
         <button type="button" class="pm-button primary" data-map-practice-add="${escapeHtml(hostId)}">
-          <i class="fa-solid fa-plus" aria-hidden="true"></i> Map a practice
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Map a practice instance
         </button>`;
 
       // TWO STACKED FULL-WIDTH SECTIONS, not two columns.
@@ -3809,12 +3941,14 @@
               // practice is now its own bordered block: title + badge,
               // then labelled facts, then its tasks in an inset mini
               // table that is visibly subordinate to both.
-              ? `<div class="rmp-list">${practices.map(p =>
-                   practiceItem(hostId, p, st,
-                                depsByPractice.get(Number(p.practiceId)) || [])).join("")}</div>`
+              ? (st.practiceGrid
+                  ? practiceGrid(hostId, practices, st)
+                  : `<div class="rmp-list">${practices.map(p =>
+                      practiceItem(hostId, p, st,
+                                   depsByPractice.get(Number(p.riskPracticeMapId)) || [])).join("")}</div>`)
               : `<div class="risk-map-empty">
-                   <strong>No practices mapped yet.</strong>
-                   <span>Map a practice to record what controls this risk and to
+                   <strong>No practice instances mapped yet.</strong>
+                   <span>Map a practice instance to record what controls this risk and to
                          pull its dependencies into scope.</span>
                  </div>`}
           </section>`;
@@ -3832,7 +3966,7 @@
       // headings for one section is what a copied component looks like.
       const impactBlock = `
           <section class="risk-scope-block risk-scope-deps">
-            ${impactHost ? "" : `
+            ${impactHost || st.impactOnly ? "" : `
             <div class="risk-scope-head">
               <h4>Impact Details <span class="rmp-count">${deps.length}</span>
                   <span class="pm-hint">impacted assets, vendors, people &mdash; by Operationalize category</span></h4>
@@ -3846,8 +3980,8 @@
               // exactly this reason; table-layout:fixed keeps the columns
               // steady without a scroll container.
               ? `<table class="pm-table risk-dep-table" style="width:100%;table-layout:fixed">
-                   <thead><tr><th style="width:160px">Category</th><th style="width:auto">Impacted records</th></tr></thead>
-                   <tbody>${categories.map(c =>
+                   <thead><tr><th style="width:190px">Category</th><th style="width:auto">Impacted records</th></tr></thead>
+                   <tbody>${categories.filter(c => !st.deptInPersonRow || c !== st.deptInPersonRow.cat).map(c =>
                      categoryRow(hostId, c, byCat.get(c.dependencyTypeId) || [],
                                  objectsByCat.get(c.dependencyTypeId) || [], st, assetTaxonomy)).join("")}
                    </tbody></table>
@@ -3868,7 +4002,18 @@
       const messageLine = `
         <p class="pm-form-message" data-map-message="${escapeHtml(hostId)}" role="status" aria-live="polite"></p>`;
 
-      if (impactHost) {
+      if (st.impactOnly) {
+        // Analysis page: its own pm-panel supplies the heading.
+        host.innerHTML = `<div class="risk-scope">${impactBlock}</div>${messageLine}`;
+      } else if (st.hideImpact) {
+        // Treatment page: Existing Controls only -- Impact Details now
+        // lives on the Analysis page.
+        host.innerHTML = `
+        ${st.showHeading ? `
+        <h3 class="risk-subhead">Existing Controls</h3>
+        <p class="pm-hint">Practices that control this risk and the dependencies each one brings in.</p>` : ""}
+        <div class="risk-scope">${practicesBlock}</div>${messageLine}`;
+      } else if (impactHost) {
         host.innerHTML = `
         ${st.showHeading ? `
         <h3 class="risk-subhead">Existing Controls</h3>
@@ -3884,9 +4029,112 @@
         <div class="risk-scope">${impactBlock}${practicesBlock}</div>${messageLine}`;
       }
 
+      // Person rows with a Department picker (385): apply the department
+      // narrowing and the "All" trigger text to the freshly rendered row.
+      [host, impactHost].forEach(h => h && h.querySelectorAll(".risk-person-row").forEach(applyPersonFilters));
+
       // Remember what this panel already has mapped, so the dialog can
       // exclude them without re-reading the DOM.
       st.mappedPracticeIds = (practices || []).map(p => p.practiceId);
+      // 387: what the picker excludes now is the mapped INSTANCES.
+      st.mappedInstanceIds = (practices || []).map(p => p.practiceInstanceId).filter(Boolean);
+      // 410: what the grid's row popup and row menu read -- the rows
+      // already on screen, never a second fetch.
+      st.practiceRows = practices;
+      st.depsByPractice = depsByPractice;
+    }
+
+    // ------------------------------------------------------------------
+    // Existing Controls as a grid (410). One row per mapped practice
+    // instance: the practice with its instance under it, the task count
+    // and the instance's implementation status (the Operationalize value,
+    // sp_risk_mapping_get's PracticeInstanceStatus). Everything the card
+    // showed is one row click away, in the SAME card (practiceItem) inside
+    // #riskMapPracticeDetailModal -- nothing is reimplemented.
+    // ------------------------------------------------------------------
+    // The tasks of ONE mapped row (411): its instance's tasks; for a
+    // practice-level row -- or tasks returned without an instance, i.e.
+    // before 411 -- the practice's.
+    function practiceTasksOf(st, p) {
+      const g = st.taskGroups;
+      if (!g) return [];
+      if (p.practiceInstanceId != null && g.has("I" + Number(p.practiceInstanceId)))
+        return g.get("I" + Number(p.practiceInstanceId));
+      const anyInstanceKeys = [...g.keys()].some(k => k.startsWith("I"));
+      // Once the server groups by instance, an instance row with no
+      // "I" group simply has no tasks -- never fall back to the practice.
+      if (p.practiceInstanceId != null && anyInstanceKeys) return [];
+      return g.get("P" + Number(p.practiceId)) || [];
+    }
+
+    function practiceGrid(hostId, practices, st) {
+      const rows = practices.map(p => {
+        const tasks = practiceTasksOf(st, p);
+        const instance = p.practiceInstanceId
+          ? escapeHtml((p.practiceInstanceCode ? p.practiceInstanceCode + " - " : "")
+                       + (p.practiceInstanceName || `#${p.practiceInstanceId}`))
+          : "Practice-level (no active instance)";
+        return `
+        <tr class="pm-row-clickable" data-map-grid-row="${escapeHtml(hostId)}"
+            data-map-id="${p.riskPracticeMapId}" title="View details">
+          <td>${escapeHtml(p.practiceName || `#${p.practiceId}`)}
+              <br><span class="pm-hint">${instance}</span></td>
+          <td>${tasks.length}</td>
+          <td>${p.practiceInstanceStatus
+                 ? `<span class="pm-badge t-status">${escapeHtml(p.practiceInstanceStatus)}</span>`
+                 : `<span class="rmp-dash">--</span>`}</td>
+          <td>
+            <button type="button" class="pm-action-trigger" data-map-grid-menu="${escapeHtml(hostId)}"
+                    data-map-id="${p.riskPracticeMapId}"
+                    aria-haspopup="menu" aria-expanded="false" title="Actions">
+              <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
+            </button>
+          </td>
+        </tr>`;
+      }).join("");
+      return `
+        <div class="pm-table-wrap">
+          <table class="pm-table">
+            <thead><tr>
+              <th>Practice / Practice Instance</th>
+              <th style="width:90px">Tasks</th>
+              <th style="width:170px">Status</th>
+              <th style="width:60px"></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    // Operationalize's own read-only view of the instance -- the same URL
+    // Gap Detail's "View Practice Instance" link builds.
+    function practiceViewUrl(st, p) {
+      return window.location.origin
+        + U("/Practice/Index/resolve-workspace")
+        + "?instanceId=" + encodeURIComponent(p.practiceInstanceId)
+        + "&organizationId=" + encodeURIComponent(st.orgId || state.organizationId || 0)
+        + "&mode=view";
+    }
+
+    function openPracticeDetail(hostId, st, p) {
+      const body = document.getElementById("riskMapPracticeDetailBody");
+      const title = document.getElementById("riskMapPracticeDetailTitle");
+      if (!body) return;
+      if (title) title.textContent = p.practiceName || "Practice instance";
+      body.innerHTML = practiceItem(hostId, p, st,
+                                    (st.depsByPractice && st.depsByPractice.get(Number(p.riskPracticeMapId))) || []);
+      show("riskMapPracticeDetailModal");
+    }
+
+    function closePracticeDetail() {
+      const m = document.getElementById("riskMapPracticeDetailModal");
+      if (m && !m.hidden) hide("riskMapPracticeDetailModal");
+    }
+
+    function gridRowOf(hostId, mapId) {
+      const st = hosts.get(hostId);
+      const p = st && (st.practiceRows || []).find(x => Number(x.riskPracticeMapId) === Number(mapId));
+      return { st, p };
     }
 
     // ------------------------------------------------------------------
@@ -3942,7 +4190,12 @@
       // practice already in its own scope -- correctly -- and the picker
       // will not offer it again. That is the one case that can look like
       // a global exclusion and is not.
-      const excluded = st.mappedPracticeIds || [];
+      // 387: risks map practice INSTANCES. The exclusion moved to the
+      // instance level (already-mapped instances come back flagged from
+      // SQL and are shown disabled); practices are no longer excluded,
+      // since a practice with one instance mapped may have others.
+      const excluded = [];
+      const excludedInstances = st.mappedInstanceIds || [];
       if (mapPicker) {
         // Re-open: reset to the top and refresh the exclusions rather
         // than building a second instance (and a second set of fetches).
@@ -3968,6 +4221,7 @@
         // longer on. Awaiting it makes the order deterministic; the
         // dialog is shown either way, so nothing waits on the network.
         Promise.resolve(mapPicker.setExcluded(excluded))
+               .then(() => mapPicker.setExcludedInstances && mapPicker.setExcludedInstances(excludedInstances))
                .catch(() => {})
                .then(() => mapPicker.reset());
       } else {
@@ -3981,6 +4235,7 @@
           riskRegisterId:     st.riskId,
           required:           true,
           excludePracticeIds: excluded,
+          excludePracticeInstanceIds: excludedInstances,
           // SAY WHOSE MAPPING IT IS. "All 3 practices here are already
           // used" is what made this look global -- it does not say used
           // BY WHAT, so a practice hidden because it is already on THIS
@@ -4078,6 +4333,8 @@
              + (o.assetCategoryId    != null ? ` data-asset-category="${escapeHtml(String(o.assetCategoryId))}"` : "")
              + (o.assetSubcategoryId != null ? ` data-asset-subcategory="${escapeHtml(String(o.assetSubcategoryId))}"` : "")
              + (o.assetTypeId        != null ? ` data-asset-type="${escapeHtml(String(o.assetTypeId))}"` : "")
+             + (o.locationId         != null ? ` data-person-location="${escapeHtml(String(o.locationId))}"` : "")
+             + (o.departmentId       != null ? ` data-person-department="${escapeHtml(String(o.departmentId))}"` : "")
              + `>`
              + `<input type="checkbox" value="${o.id}"`
              // Bare name, never the role-suffixed label: this attribute
@@ -4100,10 +4357,29 @@
       const showAssetFilters = isAsset && !st.impactReadOnly && assetTaxonomy
                             && assetTaxonomy.cats.length > 0 && all.length > 0;
 
+      // Person row (change request 2026-09-26, 385): a multi-select
+      // Department picker beside the Person picker.
+      //   * Departments narrow the Person list to their employees.
+      //   * No person ticked  -> Save stores the DEPARTMENT ids (Department
+      //                          category): "every person in these
+      //                          departments", shown as "All".
+      //   * Any person ticked -> Save stores those PERSONS (Person
+      //                          category); the departments were only a
+      //                          filter and are not stored.
+      // Location is no longer a filter here -- it is its own category row.
+      const isPerson = /^person$/i.test(cat.dependencyTypeName || "")
+                    || /^person$/i.test(cat.dependencyTypeCode || "");
+      const dept = isPerson ? st.deptInPersonRow : null;
+      const showPersonFilters = !!dept && !st.impactReadOnly && all.length > 0;
+
+      // Nothing ticked: the Asset picker beside its filters reads
+      // "Select Assets", the Person picker beside Department "All Users"
+      // (2026-09-28) -- the text names the control, no label above it.
+      const emptyText = showAssetFilters ? "Select Assets" : (showPersonFilters ? "All Users" : "Select...");
       const combo = all.length
-        ? `<div class="risk-dep-object pm-field pm-checkcombo" data-checkcombo style="width:100%">
+        ? `<div class="risk-dep-object pm-field pm-checkcombo" data-checkcombo data-checkcombo-empty="${escapeHtml(emptyText)}" style="width:100%">
              <button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger>
-               <span data-checkcombo-text>${escapeHtml(selectedLabels || "Select...")}</span>
+               <span data-checkcombo-text>${escapeHtml(selectedLabels || emptyText)}</span>
                <span class="pm-checkcombo-caret" aria-hidden="true"></span>
              </button>
              <div class="pm-checkcombo-menu" data-checkcombo-menu hidden>
@@ -4121,16 +4397,28 @@
 
       const picker = showAssetFilters
         ? `<div class="risk-asset-row">${assetFilterCells(assetTaxonomy)}
-             <div class="risk-asset-picker">
-               <label class="pm-hint">Assets</label>
-               ${combo}
-             </div>
+             <div class="risk-asset-picker">${combo}</div>
+           </div>`
+        // Same row layout as Asset (.risk-asset-row); .risk-person-row is
+        // what routes its filter changes to applyPersonFilters.
+        : showPersonFilters
+        ? `<div class="risk-asset-row risk-person-row">${departmentPickerCell(dept)}
+             <div class="risk-asset-picker">${combo}</div>
            </div>`
         : combo;
 
+      // The Person row also carries the Department category (385): one
+      // label, "Department / Person" -- in the same order as the pickers
+      // (Department, then Persons) -- with a count for each when set.
+      const rowLabel = showPersonFilters
+        ? `<strong>${escapeHtml(dept.cat.dependencyTypeName)} / ${escapeHtml(cat.dependencyTypeName)}</strong>${
+            (dept.mapped.length || mapped.length)
+              ? ` <span class="pm-hint">(${dept.mapped.length} / ${mapped.length})</span>` : ""}`
+        : `<strong>${escapeHtml(cat.dependencyTypeName)}</strong>${
+            mapped.length ? ` <span class="pm-hint">(${mapped.length})</span>` : ""}`;
+
       return `<tr class="risk-dep-row" data-dep-cat="${cat.dependencyTypeId}">
-        <td><strong>${escapeHtml(cat.dependencyTypeName)}</strong>${
-          mapped.length ? ` <span class="pm-hint">(${mapped.length})</span>` : ""}</td>
+        <td>${rowLabel}</td>
         <td>${picker}</td>
       </tr>`;
     }
@@ -4149,7 +4437,8 @@
       // this optional.
       const entry = st.practiceContext ? st.practiceContext.get(Number(p.practiceId)) : null;
       const c     = entry ? entry.ctx : null;
-      const tasks = entry ? entry.tasks : [];
+      // 411: this card's own instance's tasks.
+      const tasks = practiceTasksOf(st, p);
 
       // LABELLED FACTS, not one long breadcrumb. The trail told the
       // reader the order of the levels but never named them, so
@@ -4242,14 +4531,21 @@
       return `<article class="rmp-card">
         <header class="rmp-card-head">
           <div class="rmp-title">
-            <h5>${escapeHtml(p.practiceName || `#${p.practiceId}`)}</h5>
+            <h5>${escapeHtml(p.practiceName || `#${p.practiceId}`)}${
+              // 387: the mapped INSTANCE under the practice name.
+              p.practiceInstanceId
+                ? `<br><span class="pm-hint">Instance: ${escapeHtml(
+                     (p.practiceInstanceCode ? p.practiceInstanceCode + " - " : "")
+                     + (p.practiceInstanceName || `#${p.practiceInstanceId}`))}</span>`
+                : `<br><span class="pm-hint">Practice-level (no active instance)</span>`}</h5>
             <span class="risk-src-badge" data-src="${p.isPrimary ? "Primary" : "Additional"}">${
               p.isPrimary ? "Primary" : "Additional"}</span>
           </div>
           <button type="button" class="rmp-remove"
-                  title="${canRemove ? "Unmap this practice" : "The primary practice cannot be unmapped here"}"
+                  title="${canRemove ? "Unmap this practice instance" : "The primary practice instance cannot be unmapped here"}"
                   ${canRemove ? "" : "disabled"}
-                  data-map-practice-remove="${escapeHtml(hostId)}" data-practice-id="${p.practiceId}">
+                  data-map-practice-remove="${escapeHtml(hostId)}" data-practice-id="${p.practiceId}"
+                  data-map-id="${p.riskPracticeMapId}">
             <i class="fa-solid fa-xmark"></i></button>
         </header>
         <dl class="rmp-facts">${factList}</dl>
@@ -4343,14 +4639,15 @@
     }
 
     // Three filter combos, same markup as buildAssetFilterCells().
-    // "All" on the trigger, and no selection means no restriction.
+    // No selection means no restriction. The trigger text names the
+    // filter ("All Asset Category") instead of a label above it
+    // (2026-09-28); data-checkcombo-empty is that text.
     function assetFilterCells(tax) {
       const bucket = (label, dataAttr, items) =>
           `<div class="risk-asset-filter">`
-        +   `<label class="pm-hint">${escapeHtml(label)}</label>`
-        +   `<div class="pm-field pm-checkcombo" data-checkcombo ${dataAttr}>`
-        +     `<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger>`
-        +       `<span data-checkcombo-text>All</span>`
+        +   `<div class="pm-field pm-checkcombo" data-checkcombo ${dataAttr} data-checkcombo-empty="${escapeHtml(label)}">`
+        +     `<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger title="${escapeHtml(label)}">`
+        +       `<span data-checkcombo-text>${escapeHtml(label)}</span>`
         +       `<span class="pm-checkcombo-caret" aria-hidden="true"></span>`
         +     `</button>`
         +     `<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>`
@@ -4363,9 +4660,46 @@
         +     `</div>`
         +   `</div>`
         + `</div>`;
-      return bucket("Asset category",     "data-asset-cat-filter",    tax.cats)
-           + bucket("Asset sub-category", "data-asset-subcat-filter", tax.subs)
-           + bucket("Asset type",         "data-asset-type-filter",   tax.types);
+      return bucket("All Asset Category",     "data-asset-cat-filter",    tax.cats)
+           + bucket("All Asset Sub Category", "data-asset-subcat-filter", tax.subs)
+           + bucket("All Asset Type",         "data-asset-type-filter",   tax.types);
+    }
+
+    // Department picker for the Person row (385, 2026-09-26). Same combo
+    // markup as the asset filters, but its ticks ARE data: each option is
+    // a Department-category object (value = department id), checked when
+    // the risk already has it mapped, locked when a practice brought it
+    // in. data-person-dept-filter marks it as the Person list's filter;
+    // data-dept-type carries the category id Save needs.
+    function departmentPickerCell(dept) {
+      const mappedById = new Map(dept.mapped.map(d => [d.dependencyObjectId, d]));
+      const extra = dept.mapped
+        .filter(d => !dept.list.some(o => o.id === d.dependencyObjectId))
+        .map(d => ({ id: d.dependencyObjectId, name: d.dependencyObjectName || `#${d.dependencyObjectId}` }));
+      const items = dept.list.concat(extra);
+      const selected = items.filter(o => mappedById.has(o.id)).map(o => o.name).join(", ");
+      return `<div class="risk-asset-filter">`
+        +   `<div class="pm-field pm-checkcombo risk-dep-dept" data-checkcombo data-person-dept-filter`
+        +     ` data-dept-type="${dept.cat.dependencyTypeId}" data-checkcombo-empty="All Department">`
+        +     `<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger title="Department">`
+        +       `<span data-checkcombo-text>${escapeHtml(selected || "All Department")}</span>`
+        +       `<span class="pm-checkcombo-caret" aria-hidden="true"></span>`
+        +     `</button>`
+        +     `<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>`
+        +       `<input class="pm-checkcombo-search" type="search" placeholder="Search..." data-checkcombo-search>`
+        +       `<div class="pm-checkcombo-options">`
+        +         (items.length ? items.map(o => {
+                    const d = mappedById.get(o.id);
+                    const locked = !!d && !d.isDirect;
+                    return `<label data-checkcombo-option${locked ? ' class="is-locked"' : ""}>`
+                      + `<input type="checkbox" value="${o.id}" data-object-name="${escapeHtml(o.name)}"`
+                      + `${d ? " checked" : ""}${locked ? " disabled" : ""}> `
+                      + `<span>${escapeHtml(o.name)}${locked ? " &middot; inherited" : ""}</span></label>`;
+                  }).join("") : `<p class="pm-hint" style="margin:6px">No active departments.</p>`)
+        +       `</div>`
+        +     `</div>`
+        +   `</div>`
+        + `</div>`;
     }
 
     const depObjectCache = new Map();
@@ -4406,7 +4740,13 @@
             // mapping -- the first version dropped them.
             assetCategoryId:    x.AssetCategoryId    ?? x.assetCategoryId    ?? null,
             assetSubcategoryId: x.AssetSubcategoryId ?? x.assetSubcategoryId ?? null,
-            assetTypeId:        x.AssetTypeId        ?? x.assetTypeId        ?? null
+            assetTypeId:        x.AssetTypeId        ?? x.assetTypeId        ?? null,
+            // Person options carry location + department (2026-09-26)
+            // for the Impact Details Person filters. NULL elsewhere.
+            locationId:     x.LocationId     ?? x.locationId     ?? null,
+            locationName:   x.LocationName   ?? x.locationName   ?? null,
+            departmentId:   x.DepartmentId   ?? x.departmentId   ?? null,
+            departmentName: x.DepartmentName ?? x.departmentName ?? null
           }))
           .filter(x => x.id && x.name);
         depObjectCache.set(key, list);
@@ -4423,7 +4763,7 @@
     function msg(hostId, text, isError) {
       document.querySelectorAll(`[data-map-message="${CSS.escape(hostId)}"]`).forEach(el => {
         el.textContent = text || "";
-        el.style.color = isError ? "#c53030" : "#2f855a";
+        el.style.color = isError ? "var(--danger-700)" : "var(--success-700)";
       });
     }
 
@@ -4431,6 +4771,42 @@
     // panel listeners would have to be torn down on clear(), and a
     // missed teardown is a leak that only shows up after a few opens.
     document.addEventListener("click", async ev => {
+      // ---- Existing Controls grid (410) ------------------------------
+      const gridMenu = ev.target.closest("[data-map-grid-menu]");
+      if (gridMenu) {
+        ev.preventDefault(); ev.stopPropagation();
+        if (openMenuTrigger === gridMenu) { closeRowMenu(); return; }
+        const hostId = gridMenu.dataset.mapGridMenu;
+        const { st, p } = gridRowOf(hostId, gridMenu.dataset.mapId);
+        if (!st || !p) return;
+        const canRemove = !st.readOnly && !p.isPrimary;
+        openRowMenu(gridMenu, [
+          { icon: "fa-arrow-up-right-from-square", label: "View practice",
+            disabled: !p.practiceInstanceId,
+            disabledReason: "This row is practice-level: the practice has no active instance to open.",
+            action: () => window.open(practiceViewUrl(st, p), "_blank", "noopener") },
+          // Same unmap as the card's X: one function, unmapPractice().
+          { icon: "fa-link-slash", label: "Unmap",
+            applicable: !st.readOnly,
+            disabled: !canRemove,
+            disabledReason: "The primary practice instance cannot be unmapped here.",
+            action: () => unmapPractice(hostId, Number(p.riskPracticeMapId)) }
+        ]);
+        return;
+      }
+      const gridRow = ev.target.closest("tr[data-map-grid-row]");
+      if (gridRow && !ev.target.closest("a, button")) {
+        const hostId = gridRow.dataset.mapGridRow;
+        const { st, p } = gridRowOf(hostId, gridRow.dataset.mapId);
+        if (st && p) openPracticeDetail(hostId, st, p);
+        return;
+      }
+      if (ev.target.closest("[data-close-map-practice-detail]")) {
+        ev.preventDefault();
+        closePracticeDetail();
+        return;
+      }
+
       const addP = ev.target.closest("[data-map-practice-add]");
       if (addP) {
         ev.preventDefault();
@@ -4458,21 +4834,23 @@
         if (!st) { setMsg("The scope panel is no longer open.", true); return; }
         // The picker's own validate() reports which level is missing.
         if (mapPicker && !mapPicker.validate()) return;
-        const pid = mapPicker ? mapPicker.getPracticeId() : 0;
-        if (!pid) { setMsg("Choose a practice to map.", true); return; }
+        // 387: a practice INSTANCE is what gets mapped.
+        const iid = mapPicker && mapPicker.getPracticeInstanceId ? mapPicker.getPracticeInstanceId() : 0;
+        if (!iid) { setMsg("Choose a practice instance to map.", true); return; }
 
         btn.disabled = true;
         try {
-          // Payload unchanged from the flat-select version: the picker
-          // yields the same practice.practice_id.
-          const res = await apiPost(`/register/${st.riskId}/practices`, { practiceId: pid });
+          const res = await apiPost(`/register/${st.riskId}/practice-instances`, { practiceInstanceId: iid });
           if (!res || res.success === false) {
-            setMsg((res && res.error) || "Could not map that practice.", true);
+            setMsg((res && res.error) || "Could not map that practice instance.", true);
             return;
           }
           closeMapPracticeDialog();
           await refresh(hostId);
-          msg(hostId, `${res.practiceName || "Practice"} mapped. `
+          // The Treatment page lists the tasks of the mapped instances'
+          // gaps -- refresh it so they appear straight away.
+          if (typeof window.__riskTreatmentRefresh === "function") window.__riskTreatmentRefresh(st.riskId);
+          msg(hostId, `${res.practiceInstanceName || res.practiceName || "Practice instance"} mapped. `
                     + `${res.dependenciesAdded} dependenc${res.dependenciesAdded === 1 ? "y" : "ies"} newly in scope.`);
         } finally { btn.disabled = false; }
         return;
@@ -4487,19 +4865,7 @@
       const remP = ev.target.closest("[data-map-practice-remove]");
       if (remP && !remP.disabled) {
         ev.preventDefault();
-        const hostId = remP.dataset.mapPracticeRemove;
-        const st = hosts.get(hostId); if (!st) return;
-        const pid = Number(remP.dataset.practiceId);
-        if (!await dlg.confirm(
-              "Unmap this practice? Dependencies it is the only source for will be removed from "
-            + "the risk, across every category; ones another mapped practice also reaches, or "
-            + "that were added directly, are kept.",
-              { title: "Unmap practice", confirmText: "Unmap" })) return;
-        const res = await apiPost(`/register/${st.riskId}/practices/${pid}`, null, "DELETE");
-        if (!res || res.success === false) { msg(hostId, (res && res.error) || "Could not unmap.", true); return; }
-        await refresh(hostId);
-        msg(hostId, `Practice unmapped. ${res.dependenciesRemoved} dependenc${res.dependenciesRemoved === 1 ? "y" : "ies"} removed, `
-                  + `${res.dependenciesKept} kept.`);
+        await unmapPractice(remP.dataset.mapPracticeRemove, Number(remP.dataset.mapId));
         return;
       }
 
@@ -4513,6 +4879,27 @@
       }
 
     });
+
+    // Unmap one practice instance -- the card's X and the grid's row menu
+    // (410) both come here. 387: unmap by the mapping ROW, since a
+    // practice can now be on the risk once per instance.
+    async function unmapPractice(hostId, mapId) {
+        const st = hosts.get(hostId); if (!st) return;
+        if (!await dlg.confirm(
+              "Unmap this practice instance? Dependencies it is the only source for will be removed from "
+            + "the risk, across every category; ones another mapped instance also reaches, or "
+            + "that were added directly, are kept.",
+              { title: "Unmap practice instance", confirmText: "Unmap" })) return;
+        const res = await apiPost(`/register/${st.riskId}/practice-map/${mapId}`, null, "DELETE");
+        if (!res || res.success === false) { msg(hostId, (res && res.error) || "Could not unmap.", true); return; }
+        // 410: the card may be open in the grid's popup -- it describes a
+        // row that no longer exists.
+        closePracticeDetail();
+        await refresh(hostId);
+        if (typeof window.__riskTreatmentRefresh === "function") window.__riskTreatmentRefresh(st.riskId);
+        msg(hostId, `Practice instance unmapped. ${res.dependenciesRemoved} dependenc${res.dependenciesRemoved === 1 ? "y" : "ies"} removed, `
+                  + `${res.dependenciesKept} kept.`);
+    }
 
     // ---- pm-checkcombo behaviour --------------------------------------
     //
@@ -4545,11 +4932,18 @@
       return combo && combo.closest(".risk-map-host, .risk-category-host") ? combo : null;
     }
 
+    // Text a combo shows with nothing ticked: its data-checkcombo-empty
+    // ("All Asset Category", "All Department", "All Users", ...), else the
+    // generic "Select...".
+    function comboEmptyText(combo) {
+      return (combo && combo.getAttribute("data-checkcombo-empty")) || "Select...";
+    }
+
     function comboText(combo) {
       const labels = [...combo.querySelectorAll("input[type='checkbox']:checked")]
         .map(cb => cb.dataset.objectName || cb.nextElementSibling?.textContent?.trim() || "")
         .filter(Boolean);
-      return labels.join(", ") || "Select...";
+      return labels.join(", ") || comboEmptyText(combo);
     }
 
     document.addEventListener("click", ev => {
@@ -4571,21 +4965,44 @@
       const combo = comboInHost(cb);
       if (!combo) return;
 
+      const personRow = combo.closest(".risk-person-row");
+
       const text = combo.querySelector("[data-checkcombo-text]");
-      if (text) {
-        // A filter combo with nothing ticked reads "All", not
-        // "Select..." -- an empty filter is no restriction, and
-        // "Select..." would imply the user still has to.
-        const isFilter = combo.hasAttribute("data-asset-cat-filter")
-                      || combo.hasAttribute("data-asset-subcat-filter")
-                      || combo.hasAttribute("data-asset-type-filter");
-        const t = comboText(combo);
-        text.textContent = (isFilter && t === "Select...") ? "All" : t;
-      }
+      // A filter with nothing ticked reads its own "All ..." text (it
+      // is no restriction); comboText falls back to that empty text.
+      if (text) text.textContent = comboText(combo);
 
       // Changing a filter re-narrows the asset picker in the same row.
-      if (combo.closest(".risk-asset-row")) applyAssetFilters(combo.closest(".risk-asset-row"));
+      if (personRow) applyPersonFilters(personRow);
+      else if (combo.closest(".risk-asset-row")) applyAssetFilters(combo.closest(".risk-asset-row"));
     });
+
+    // Person row (385, 2026-09-26): ticked departments narrow the Person
+    // list to their employees (no department = every person). A person
+    // already ticked stays visible even outside the departments, so a
+    // saved choice is never hidden from the reader. With departments
+    // ticked and no person ticked, the Person trigger reads "All" --
+    // Save will store the departments themselves.
+    function applyPersonFilters(row) {
+      if (!row) return;
+      const picker = row.querySelector(".risk-dep-object[data-checkcombo]");
+      if (!picker) return;
+      const deptCombo = row.querySelector("[data-person-dept-filter]");
+      const depts = deptCombo
+        ? new Set([...deptCombo.querySelectorAll("input[type='checkbox']:checked")].map(cb => cb.value))
+        : new Set();
+      picker.querySelectorAll("[data-checkcombo-option]").forEach(opt => {
+        const box = opt.querySelector("input[type='checkbox']");
+        const ok = !depts.size || depts.has(opt.dataset.personDepartment || "") || (box && box.checked);
+        opt.dataset.filteredOut = ok ? "" : "1";
+        opt.hidden = !ok;
+      });
+      const text = picker.querySelector("[data-checkcombo-text]");
+      if (text) {
+        const t = comboText(picker);
+        text.textContent = (t === comboEmptyText(picker) && depts.size) ? "All Users (selected departments)" : t;
+      }
+    }
 
     // The intersection filter, same rule as the Operationalize Asset row:
     // an option survives only if it matches EVERY non-empty filter set.
@@ -4619,7 +5036,9 @@
       const q = search.value.toLowerCase().trim();
       combo.querySelectorAll("[data-checkcombo-option]").forEach(opt => {
         const t = (opt.querySelector("span")?.textContent || "").toLowerCase();
-        opt.hidden = !!q && !t.includes(q);
+        // A person hidden by the Location / Department filter stays
+        // hidden while searching (2026-09-26).
+        opt.hidden = (!!q && !t.includes(q)) || opt.dataset.filteredOut === "1";
       });
     });
 
@@ -4653,6 +5072,25 @@
       const adds = [], removes = [];
       host.querySelectorAll("[data-dep-cat]").forEach(row => {
         const typeId = Number(row.dataset.depCat);
+        // Person row with its Department picker (385): persons ticked ->
+        // save persons, clear directly-mapped departments; no person
+        // ticked -> save the ticked departments. Either way the Person
+        // diff below runs as normal (no persons ticked = stored persons
+        // removed).
+        const personRow = row.querySelector(".risk-person-row");
+        const deptCombo = personRow ? personRow.querySelector("[data-person-dept-filter][data-dept-type]") : null;
+        if (deptCombo) {
+          const deptTypeId  = Number(deptCombo.dataset.deptType);
+          const anyPerson   = !!row.querySelector(".risk-dep-object[data-checkcombo] input[type='checkbox']:checked:not(:disabled)");
+          deptCombo.querySelectorAll("input[type='checkbox']").forEach(cb => {
+            if (cb.disabled) return;                     // inherited: not ours to change
+            const want   = anyPerson ? false : cb.checked;
+            const wasSet = cb.defaultChecked;
+            const objId  = Number(cb.value);
+            if (want && !wasSet) adds.push({ typeId: deptTypeId, objId, name: cb.dataset.objectName || null });
+            else if (!want && wasSet) removes.push({ typeId: deptTypeId, objId });
+          });
+        }
         // ONLY the object picker. The Asset row also carries three
         // taxonomy filter combos; their checkboxes are view state, and
         // treating them as dependencies would try to map an asset
@@ -4730,6 +5168,40 @@
   // proxied at practice/api/tasks/...). There is no second task
   // mechanism and no copy of task state.
   // ===================================================================
+  // Apply the treatment decision from the Treatment page (moved here from
+  // Risk Analysis). Reuses the exact dispatch API (/treatment-option) and
+  // outcome text; the decision is optional and does not gate navigation.
+  // Tolerate / Accept still routes to Risk Acceptance; Treat / Transfer /
+  // Terminate first ASK whether to generate the treatment task (418) and
+  // raise it only on Yes. No still records the decision -- the task can
+  // be added later with "Add treatment task" or "Map open task".
+  async function onApplyTreatmentOption() {
+    const riskId = Number(document.getElementById("twRiskId").value || 0);
+    if (!riskId) return;
+    const msg = document.getElementById("twMessage");
+    if (msg) msg.textContent = "";
+    const option = getRadio("twTreatment");
+    if (!option) { if (msg) msg.textContent = "Select a treatment option to apply."; return; }
+    let raiseTask = true;
+    if (option !== "Tolerate")
+      raiseTask = !!(await dlg.confirm(
+        "Generate a treatment task for this risk now? It is assigned to the risk owner. "
+        + "If you choose No, the treatment option is still applied and you can add a task later.",
+        { title: "Generate treatment task?", confirmText: "Yes, generate", cancelText: "No" }));
+    const dispatch = await apiPost(`/register/${riskId}/treatment-option`,
+                                   { treatmentOptionCode: option, raiseTask });
+    if (!dispatch || dispatch.success === false) {
+      if (msg) msg.textContent = (dispatch && dispatch.error) || "Could not apply the treatment option.";
+      return;
+    }
+    await refreshRegister();
+    if (dispatch.nextStep === "Acceptance") { await openAcceptancePage(riskId); return; }
+    // raiseTask is the answer just given, not a server field: the result
+    // carries TaskCreated, and "declined" reads differently from "reused".
+    if (msg) msg.textContent = ("Applied." + treatmentOutcomeText({ ...dispatch, raiseTask })).trim();
+    await refreshTreatmentState(riskId);
+  }
+
   async function openTreatmentWorkModal(riskId) {
     const risk = await apiGet(`/register/${riskId}`);
     if (!risk) { dlg.alert("Risk not found.", { type: "error" }); return; }
@@ -4749,17 +5221,10 @@
         : "No treatment option has been chosen for this risk yet.");
     document.getElementById("twHeadStatus").innerHTML = lifecycleChip(risk);
 
-    document.getElementById("twMeta").innerHTML =
-      dd("Risk ID", risk.riskNumber) +
-      dd("Statement", risk.riskStatement) +
-      dd("Treatment option", risk.treatmentOptionName || "not chosen") +
-      dd("Decided", risk.treatmentDecidedOn
-          ? `${window.gracFormatDateOnly(risk.treatmentDecidedOn)}${
-              risk.treatmentDecidedByName ? ` by ${risk.treatmentDecidedByName}` : ""}` : null) +
-      dd("Owner", risk.riskOwnerName) +
-      dd("Business unit", risk.businessUnit) +
-      dd("Inherent rating", risk.inherentRatingCode ? severityChip(risk.inherentRatingCode) : "not scored", true) +
-      dd("Residual rating", risk.residualRatingCode ? severityChip(risk.residualRatingCode) : "not assessed", true);
+    // Risk context -- the SAME compact layout as the Analysis page
+    // (change request 2026-09-27). The treatment option and its decision
+    // date are on the Treatment option panel and the page subtitle.
+    document.getElementById("twMeta").innerHTML = riskContextCompactHtml(risk);
       // Status is NOT repeated here: the heading bar already carries it
       // (twHeadStatus), and the same chip twice on one screen reads as a
       // rendering fault rather than emphasis.
@@ -4772,6 +5237,19 @@
     // appear to do nothing while the sweep and read complete.
     showTreatmentPage();
     await refreshTreatmentState(riskId);
+
+    // Treatment option, pre-selected from what is already recorded (moved
+    // here from Risk Analysis). Re-applying the same option is a no-op
+    // server-side, so showing the current choice is safe.
+    setRadio("twTreatment", risk.treatmentOptionCode || "");
+
+    // Existing Controls: the SAME practice-mapping component the Analysis
+    // page used, mounted here instead. sp_risk_mapping_sync_primary maps
+    // the risk's own practice, so the inherited assets appear without a
+    // manual step. hideImpact: Impact Details moved to the Analysis page
+    // (change request 2026-09-26), above Inherent scoring.
+    await riskMapping.mount("twMapping", riskId, { readOnly: false, showHeading: false,
+                                                   hideImpact: true, practiceGrid: true });
   }
 
   // ONE RENDERER, TWO HOSTS.
@@ -4798,7 +5276,11 @@
   // same answer instead of asking for it twice.
   const TW_HOSTS = {
     gateId: "twGate", tilesId: "twTiles", bodyId: "twTableBody",
-    residualBtnId: "twResidualBtn", colspan: 8, readOnly: false, sync: true
+    residualBtnId: "twResidualBtn", colspan: 9, readOnly: false, sync: true,
+    // 387: the Treatment page shows where each row came from (its own
+    // treatment task, a mapped instance's gap, or a linked open task).
+    // The read-only callers keep their narrower tables.
+    showSource: true
   };
 
   async function refreshTreatmentState(riskId, opts) {
@@ -4886,18 +5368,19 @@
     const expanded = state.twExpanded || (state.twExpanded = new Set());
 
     const ro = o.readOnly;
+    const src = !!o.showSource;
     body.innerHTML = parents.map(p => {
       const kids = children.filter(c => c.parentTaskId === p.taskId);
       const isOpen = expanded.has(p.taskId);
-      return taskRow(p, { kidCount: kids.length, expanded: isOpen, readOnly: ro })
-           + kids.map(c => taskRow(c, { parentTaskId: p.taskId, expanded: isOpen, readOnly: ro })).join("");
+      return taskRow(p, { kidCount: kids.length, expanded: isOpen, readOnly: ro, showSource: src })
+           + kids.map(c => taskRow(c, { parentTaskId: p.taskId, expanded: isOpen, readOnly: ro, showSource: src })).join("");
     }).join("")
     // Children whose parent is not in this list (raised against the
     // legacy candidate source, say) have no parent row to expand, so
     // hiding them behind a toggle that does not exist would lose them
     // entirely. They stay visible and say why they stand alone.
     + children.filter(c => !parents.some(p => p.taskId === c.parentTaskId))
-              .map(c => taskRow(c, { orphan: true, readOnly: ro })).join("");
+              .map(c => taskRow(c, { orphan: true, readOnly: ro, showSource: src })).join("");
 
     return st;
   }
@@ -4913,6 +5396,8 @@
   // a menu that opens onto nothing the reader may do is worse than no
   // menu, and the read-only table's header carries seven columns to
   // match.
+  function srcCodeOf(t) { return (t && t.linkSourceCode) || "Treatment"; }
+
   function taskRow(t, opt) {
     opt = opt || {};
     const isChild = !!opt.parentTaskId || !!opt.orphan;
@@ -4940,9 +5425,17 @@
            </button>`
         : `<span class="tw-toggle-spacer"></span>`;
 
+    // 387: origin of the row (sp_risk_treatment_state LinkSourceCode).
+    // A sub task inherits its root's source, so only the root is labelled.
+    const srcCode = t.linkSourceCode || "Treatment";
+    const srcCell = !opt.showSource ? ""
+      : `<td>${isChild ? `<span class="pm-hint">--</span>`
+          : escapeHtml(srcCode === "Gap" ? "Gap" : srcCode === "Linked" ? "Mapped" : "Treatment")}</td>`;
+
     return `<tr ${rowAttrs}>
       <td>${toggle}${escapeHtml(t.taskNumber || `#${t.taskId}`)}</td>
       <td>${escapeHtml(t.title || "")}</td>
+      ${srcCell}
       <td>${escapeHtml(t.ownerName || "--")}</td>
       <td>${escapeHtml(t.priority || "--")}</td>
       <td>${t.dueAt ? window.gracFormatDateOnly(t.dueAt) : "--"}</td>
@@ -4960,6 +5453,7 @@
                 data-tw-child="${isChild ? 1 : 0}"
                 data-tw-closed="${closed ? 1 : 0}"
                 data-tw-mandopen="${t.mandatoryChildOpenCount || 0}"
+                data-tw-source="${escapeHtml(isChild ? "" : srcCodeOf(t))}"
                 aria-haspopup="menu" aria-expanded="false" title="Actions">
           <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
         </button>
@@ -4996,54 +5490,6 @@
     const scope = btn.closest("tbody") || document;
     scope.querySelectorAll(`tr[data-tw-parent="${taskId}"]`)
          .forEach(tr => { tr.hidden = !next; });
-  }
-
-  // "Add sub task" on the Risk Treatment page.
-  //
-  // Opens THE common Task / Sub Task form with the treatment task fixed
-  // as the parent. This page used to carry its own panel -- six fields,
-  // its own validation, its own payload -- which is exactly the
-  // duplication the shared component exists to remove.
-  //
-  // The parent is chosen here rather than in the form: a risk can have
-  // several treatment tasks, so when there is more than one open the user
-  // picks which one the sub task belongs under, and the form shows that
-  // choice read-only. With a single open task there is nothing to ask.
-  async function onAddSubTask() {
-    const riskId = Number(document.getElementById("twRiskId").value);
-    if (!riskId) return;
-
-    const st = await apiGet(`/register/${riskId}/treatment-state`);
-    const parents = (st?.tasks || []).filter(t => !t.isChild && !t.closedAt && !t.isTerminal);
-
-    if (!parents.length) {
-      dlg.alert("There is no open treatment task to add a sub task under. "
-              + "Choose a treatment option on Risk Analysis first.",
-                { title: "No treatment task", type: "warning" });
-      return;
-    }
-
-    const orgName = document.getElementById("regFilterOrganization")
-                      ?.selectedOptions?.[0]?.textContent?.trim() || null;
-    const toParent = t => ({ taskId: t.taskId, taskNumber: t.taskNumber, title: t.title });
-
-    window.gracTaskForm.open({
-      mode: "subtask",
-      organizationId: state.organizationId,
-      organizationName: orgName,
-      // One open task -> fixed and read-only. Several -> the form offers
-      // the choice, which is the same dialog with its other parent row.
-      parentTask:    parents.length === 1 ? toParent(parents[0]) : null,
-      parentOptions: parents.length === 1 ? null : parents.map(toParent),
-      // The form reports which parent it went under -- read it back
-      // rather than assuming parents[0], because with several open tasks
-      // the user chose one in the dialog.
-      onSaved: res => {
-        const pid = res?.parentTaskId || (parents.length === 1 ? parents[0].taskId : null);
-        if (pid) (state.twExpanded || (state.twExpanded = new Set())).add(Number(pid));
-        return refreshTreatmentState(riskId);
-      }
-    });
   }
 
   // ===================================================================
@@ -5163,6 +5609,78 @@
       return;
     }
     await refreshTreatmentState(riskId);
+  }
+
+  // ---- Map open task (387) -------------------------------------------
+  // Links an existing open Task Board task to the risk as treatment work
+  // (risk_treatment_task_link). The list comes from sp_risk_open_task_list,
+  // which already leaves out the risk's own and already-linked tasks.
+  async function unlinkTreatmentTask(taskId, riskId, task) {
+    if (!await dlg.confirm(
+          `Unmap ${taskLabel(task, taskId)} from this risk? The task itself stays on the Task Board unchanged.`,
+          { title: "Unmap task", confirmText: "Unmap" })) return;
+    const res = await apiPost(`/register/${riskId}/treatment-links/${taskId}`, null, "DELETE");
+    if (!res.success) {
+      dlg.alert(res.error || "The task could not be unmapped.", { title: "Not unmapped", type: "error" });
+      return;
+    }
+    await refreshTreatmentState(riskId);
+  }
+
+  function openMapOpenTaskModal() {
+    const riskId = Number(document.getElementById("twRiskId").value || 0);
+    if (!riskId) return;
+    document.getElementById("motRiskId").value = riskId;
+    document.getElementById("motSearch").value = "";
+    document.getElementById("motMessage").textContent = "";
+    show("riskMapOpenTaskModal");
+    loadOpenTasksForMap();
+  }
+
+  let motSearchTimer = null;
+  async function loadOpenTasksForMap() {
+    const riskId = Number(document.getElementById("motRiskId").value || 0);
+    const body   = document.getElementById("motTableBody");
+    const q      = (document.getElementById("motSearch").value || "").trim();
+    body.innerHTML = `<tr><td colspan="6" class="pm-empty-row">Loading…</td></tr>`;
+    const rows = await apiGet(`/register/${riskId}/open-tasks?search=${encodeURIComponent(q)}&top=100`);
+    if (!rows) {
+      body.innerHTML = `<tr><td colspan="6" class="pm-empty-row">Open tasks could not be loaded.</td></tr>`;
+      return;
+    }
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="6" class="pm-empty-row">No open tasks to map.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(t => `<tr>
+      <td><input type="checkbox" class="mot-pick" value="${t.taskId}"
+                 aria-label="Map ${escapeHtml(t.taskNumber || `#${t.taskId}`)}" /></td>
+      <td>${escapeHtml(t.taskNumber || `#${t.taskId}`)}</td>
+      <td>${escapeHtml(t.title || "")}${t.sourceTypeCode
+            ? ` <span class="pm-hint">(${escapeHtml(t.sourceTypeCode)}${t.sourceReference ? ": " + escapeHtml(t.sourceReference) : ""})</span>` : ""}</td>
+      <td>${escapeHtml(t.ownerName || "--")}</td>
+      <td>${t.dueAt ? window.gracFormatDateOnly(t.dueAt) : "--"}</td>
+      <td>${escapeHtml(t.statusName || "--")}</td>
+    </tr>`).join("");
+  }
+
+  async function onMapOpenTaskSubmit(ev) {
+    ev.preventDefault();
+    const riskId = Number(document.getElementById("motRiskId").value || 0);
+    const msg    = document.getElementById("motMessage");
+    const ids    = Array.from(document.querySelectorAll("#motTableBody .mot-pick:checked"))
+                        .map(c => Number(c.value)).filter(Boolean);
+    if (!ids.length) { msg.textContent = "Select at least one task."; return; }
+
+    msg.textContent = "Mapping…";
+    const failed = [];
+    for (const taskId of ids) {
+      const res = await apiPost(`/register/${riskId}/treatment-links`, { taskId });
+      if (!res.success) failed.push(res.error || `Task #${taskId} could not be mapped.`);
+    }
+    await refreshTreatmentState(riskId);
+    if (failed.length) { msg.textContent = failed.join(" "); await loadOpenTasksForMap(); return; }
+    hide("riskMapOpenTaskModal");
   }
 
   // ---- Reassign ------------------------------------------------------
@@ -5363,7 +5881,7 @@
       dd("Statement", risk.riskStatement) +
       dd("Category", risk.riskCategoryNames || risk.riskCategoryName) +
       dd("Owner", risk.riskOwnerName) +
-      dd("Business function", risk.businessFunctionName) +
+      // Business function removed (417) -- see openRegisterDetail.
       dd("Business unit", risk.businessUnit) +
       dd("Linked practice", risk.linkedPracticeName) +
       dd("Source", risk.sourceName || risk.sourceTypeCode);
@@ -5462,7 +5980,7 @@
     // move a risk's status as a side effect of being looked at.
     const st = await refreshTreatmentState(riskId, {
       gateId: "acTreatmentGate", tilesId: "acTiles", bodyId: "acTaskBody",
-      residualBtnId: null, colspan: 7, readOnly: true, sync: false
+      residualBtnId: null, colspan: 7, readOnly: true, sync: false, showSource: false
     });
     // Not stashed on state, unlike the residual page's: nothing on this
     // page re-renders the rail after load, because nothing above the
@@ -5820,7 +6338,7 @@
 
     // A rejected BATCH -- nothing selected, no or past date, bad cadence.
     if (!res || res.success === false) {
-      msg.style.color = "#b91c1c";
+      msg.style.color = "var(--danger-700)";
       msg.textContent = res?.error || "The risks could not be accepted.";
       return;
     }
@@ -5902,6 +6420,11 @@
     if (rating)  qs.set("ratingCode", rating);
     if (search)  qs.set("search", search);
     if (horizon) qs.set("includeFutureDays", horizon);
+    // 413: one review-ageing band from the dashboard.
+    const vd = state.revDrill;
+    if (vd?.daysOverdueMin != null) qs.set("daysOverdueMin", String(vd.daysOverdueMin));
+    if (vd?.daysOverdueMax != null) qs.set("daysOverdueMax", String(vd.daysOverdueMax));
+    paintDrillBanner("rev", vd);
 
     const res = await apiGetChecked(`/review-due?${qs}`);
     if (!res.ok) {
@@ -6076,7 +6599,7 @@
 
     // A rejected BATCH -- nothing selected, past date, bulk close.
     if (!res || res.success === false) {
-      msg.style.color = "#b91c1c";
+      msg.style.color = "var(--danger-700)";
       msg.textContent = res?.error || "The bulk review could not be applied.";
       return;
     }
@@ -6141,7 +6664,7 @@
     const same    = res.unchangedCount ?? rows.filter(r => r.outcome === "Unchanged").length;
 
     const msg = document.getElementById("brMessage");
-    msg.style.color = skipped ? "#92400e" : "#166534";
+    msg.style.color = skipped ? "var(--warning-700)" : "var(--success-700)";
     msg.textContent = skipped
       ? `${applied} applied, ${skipped} skipped${same ? `, ${same} unchanged` : ""}. `
         + `The skipped risks are listed below with the reason.`
@@ -6175,7 +6698,7 @@
 
     document.getElementById("brOutcome").innerHTML =
       `<ul style="list-style:none; margin:0; padding:0; max-height:220px; overflow:auto;
-                  border:1px solid #e2e8f0; border-radius:6px; padding:8px;">`
+                  border:1px solid var(--border); border-radius:6px; padding:8px;">`
       + ordered.map(line).join("") + `</ul>`;
   }
 
@@ -6596,6 +7119,8 @@
   function openRegStatusModal(riskId) {
     const r = state.activeRisk && state.activeRisk.riskRegisterId === riskId ? state.activeRisk : null;
     document.getElementById("rsRiskId").value = riskId;
+    // Retire risk (2026-09-30): the status is fixed to Retired.
+    document.getElementById("rsStatus").value = "Retired";
     document.getElementById("rsRemark").value = "";
     document.getElementById("rsMessage").textContent = "";
     document.getElementById("rsMeta").innerHTML = r
@@ -6612,7 +7137,7 @@
     const status = val("rsStatus");
     const remark = val("rsRemark");
     if ((status === "Closed" || status === "Retired") && !remark) {
-      msg.textContent = "A reason is required to close or retire a risk.";
+      msg.textContent = "A reason is required to retire a risk.";
       return;
     }
     const res = await apiPost(`/register/${riskId}/status`, { statusCode: status, remark: remark || null });
@@ -6826,6 +7351,7 @@
     check("cfgDefaultTreatment",   c.defaultRaiseTreatmentTask);
     check("cfgNotifications",      c.notificationsEnabled);
     check("cfgAllowLegacyAccept",  c.allowLegacyAccept);
+    check("cfgAllowOpenResidual",  c.allowResidualWithOpenTasks);
     setVal("cfgNotes", c.notes || "");
     document.getElementById("cfgMessage").textContent = "";
 
@@ -6881,6 +7407,7 @@
       approverRoleId:           roleId ? Number(roleId) : null,
       defaultRaiseTreatmentTask: isChecked("cfgDefaultTreatment"),
       allowLegacyAccept:        isChecked("cfgAllowLegacyAccept"),
+      allowResidualWithOpenTasks: isChecked("cfgAllowOpenResidual"),
       notificationsEnabled:     isChecked("cfgNotifications"),
       notes:                    val("cfgNotes") || null,
       // Empty select = "un-set it", which is a different instruction from
@@ -6950,107 +7477,267 @@
     if (state.tab === "dashboard") await refreshDashboard();
   }
 
-  // ---- 210: dashboard (§23) -----------------------------------------
-  async function refreshDashboard() {
-    if (!state.organizationId) return;
-    const months = Number(val("dashTrendMonths")) || 12;
-    const d = await apiGet(`/dashboard?organizationId=${state.organizationId}&trendMonths=${months}`);
-    if (!d) return;
-
-    const c = d.candidates || {};
-    document.getElementById("dashCandidateTiles").innerHTML =
-      tile(c.totalCandidates, "Total candidates") +
-      tile(c.openCandidates, "Open", null, "Pending") +
-      tile(c.newCandidates, "New", null, "Pending") +
-      tile(c.underAnalysisCount, "Under assessment", null, "UnderAnalysis") +
-      tile(c.awaitingClarificationCount, "Awaiting clarification", null, "ClarificationRequired") +
-      tile(c.awaitingApprovalCount, "Awaiting approval", c.awaitingApprovalCount > 0) +
-      tile(c.convertedToRiskCount, "Converted to risks", null, "Registered") +
-      tile(c.rejectedCount, "Rejected", null, "Rejected") +
-      tile(c.closedAsDuplicateCount, "Closed as duplicate", null, "ClosedAsDuplicate") +
-      tile(fmtDays(c.avgOpenAgeDays), "Avg open age") +
-      tile(fmtDays(c.maxOpenAgeDays), "Oldest open", (c.maxOpenAgeDays || 0) > 90) +
-      (c.legacyAcceptedCount ? tile(c.legacyAcceptedCount, "Legacy accepted", true, "Accepted") : "");
-
-    const r = d.register || {};
-    document.getElementById("dashRegisterTiles").innerHTML =
-      tile(r.totalRisks, "Total risks") +
-      tile(r.activeCount, "Active") +
-      tile(r.underTreatmentCount, "Under treatment") +
-      tile(r.acceptedCount, "Accepted") +
-      tile(r.monitoringCount, "Monitoring") +
-      tile(r.closedCount, "Closed") +
-      tile(r.retiredCount, "Retired") +
-      tile(r.elevatedRatingCount, "Elevated rating", (r.elevatedRatingCount || 0) > 0) +
-      tile(r.customRiskCount, "Custom risks") +
-      tile(r.unownedCount, "No owner", (r.unownedCount || 0) > 0) +
-      tile(r.avgInherentScore != null ? r.avgInherentScore.toFixed(1) : "—", "Avg inherent score");
-
-    bars("dashByRating",     d.risksByRating,        "register", "ratingCode");
-    bars("dashByCategory",   d.risksByCategory,      "register", "categoryCode");
-    bars("dashBySource",     d.risksBySource,        "register", "sourceTypeCode");
-    bars("dashByUnit",       d.risksByBusinessUnit,  null, null);
-    bars("dashByOwner",      d.risksByOwner,         null, null);
-    bars("dashCandBySource", d.candidatesBySource,   "candidates", "sourceTypeCode");
-
-    const maxBand = Math.max(1, ...(d.candidateAgeing || []).map(b => b.candidateCount));
-    document.getElementById("dashAgeing").innerHTML = (d.candidateAgeing || []).map(b =>
-      `<div class="risk-bar-row"><span class="lbl">${escapeHtml(b.bandName)}</span>
-         <span class="trk"><span class="fil" style="width:${Math.round(b.candidateCount / maxBand * 100)}%"></span></span>
-         <span class="num">${b.candidateCount}</span></div>`).join("");
-
-    document.getElementById("trendTableBody").innerHTML = (d.trend || []).map(t => {
-      const net = (t.registeredCount || 0) - (t.closedCount || 0);
-      return `<tr>
-        <td>${new Date(t.monthStart).toLocaleDateString(undefined, { year: "numeric", month: "short" })}</td>
-        <td>${t.candidatesRaisedCount || 0}</td>
-        <td>${t.registeredCount || 0}</td>
-        <td>${t.closedCount || 0}</td>
-        <td style="color:${net > 0 ? "#c53030" : net < 0 ? "#2f855a" : "#4a5568"}">${net > 0 ? "+" : ""}${net}</td>
-      </tr>`;
-    }).join("") || `<tr><td colspan="5" class="pm-empty-row">No activity.</td></tr>`;
-
-    const overdue = d.overdueActions || [];
-    document.getElementById("overdueTableBody").innerHTML = overdue.length
-      ? overdue.map(t => `<tr>
-          <td>${escapeHtml(t.taskNumber || `#${t.taskId}`)}</td>
-          <td>${escapeHtml(t.taskTitle || "")}</td>
-          <td>${escapeHtml(t.ownerName || "—")}</td>
-          <td>${escapeHtml(t.priority || "—")}</td>
-          <td>${t.dueAt ? window.gracFormatDateOnly(t.dueAt) : "—"}</td>
-          <td>${statusChip(t.slaStatusCode)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="6" class="pm-empty-row">No overdue risk actions.</td></tr>`;
-
-    await Promise.all([refreshApprovalQueue(), refreshAgeing(), refreshNotifications()]);
+  // ---- 210 / 413: Risk Management dashboard --------------------------
+  // One call to /dashboard (sp_risk_dashboard_counts) paints every block.
+  // Structure (413, laid out 2026-10-01 as two 25|25|50 rows):
+  //   row 1 -- candidate summary | register summary | inherent + residual heatmaps
+  //   row 2 -- candidate ageing  | review ageing    | Top 5 risks by rating
+  // Nothing below that. The approval queue moved to the Candidates tab
+  // (refreshApprovalQueue, called from refresh()); the overdue risk
+  // actions and notification outbox blocks were removed from the screen.
+  //
+  // Every clickable element carries an index into dashDrills; the drill
+  // itself (which list, which filter) lives here, so a status is never
+  // re-derived in the browser -- the counts come from SQL and the list is
+  // filtered by the same rule server-side.
+  let dashDrills = [];
+  function drillAttr(d) {
+    if (!d) return "";
+    dashDrills.push(d);
+    return ` data-dash-drill="${dashDrills.length - 1}"`;
   }
 
-  function tile(value, label, alert, drillStatus) {
-    const cls = `risk-tile${alert ? " is-alert" : ""}${drillStatus ? " is-clickable" : ""}`;
-    const attr = drillStatus ? ` data-drill-candidate-status="${escapeHtml(drillStatus)}"` : "";
-    return `<div class="${cls}"${attr}>
+  async function refreshDashboard() {
+    if (!state.organizationId) return;
+    const d = await apiGet(`/dashboard?organizationId=${state.organizationId}`);
+    if (!d) return;
+    dashDrills = [];
+
+    // ---- A. Risk candidate summary ------------------------------------
+    const c = d.candidates || {};
+    document.getElementById("dashCandidateTiles").innerHTML =
+      dashTile(c.totalCandidates, "Total",
+               { tab: "candidates", statusCode: "", label: "All risk candidates" }) +
+      dashTile(c.analysisCompletedCount, "Assessed",
+               { tab: "candidates", statusCode: "AnalysisCompleted", label: "Assessed candidates (assessment completed)" }) +
+      dashTile(c.convertedToRiskCount, "Converted to risk",
+               { tab: "candidates", statusCode: "Registered", label: "Candidates converted to risks" }) +
+      dashTile(c.openCandidates, "Open",
+               { tab: "candidates", statusCode: "", openOnly: true, label: "Open candidates" });
+
+    // ---- B. Candidate ageing (open only) ------------------------------
+    dashBars("dashAgeing", (d.candidateAgeing || []).map(b => ({
+      label: b.bandName, count: b.candidateCount,
+      drill: b.minAgeDays == null ? null : {
+        tab: "candidates", statusCode: "", openOnly: true,
+        minAgeDays: b.minAgeDays, maxAgeDays: b.maxAgeDays >= 100000 ? null : b.maxAgeDays,
+        label: `Open candidates aged ${b.bandName}`
+      }
+    })));
+
+    // ---- Risk register summary ----------------------------------------
+    const r = d.register || {};
+    document.getElementById("dashRegisterTiles").innerHTML =
+      dashTile(r.totalRisks, "Total",
+               { tab: "register", label: "All registered risks" }) +
+      dashTile(r.underTreatmentCount, "Under treatment",
+               { tab: "register", statusCode: "UnderTreatment", label: "Risks under treatment" }) +
+      dashTile(r.acceptedCount, "Accepted",
+               { tab: "register", statusCode: "Accepted", label: "Accepted risks" }) +
+      dashTile(r.retiredCount, "Retired",
+               { tab: "register", statusCode: "Retired", label: "Retired risks" }) +
+      dashTile(r.unownedCount, "No owner",
+               { tab: "register", noOwner: true, label: "Risks with no owner" },
+               (r.unownedCount || 0) > 0);
+
+    // ---- Heatmaps: inherent and residual, never combined ---------------
+    const levels = d.matrixLevels || [];
+    const cov = d.heatmapCoverage || {};
+    heatmap("dashHeatInherent", levels, d.inherentHeatmap || [], false);
+    heatmap("dashHeatResidual", levels, d.residualHeatmap || [], true);
+    setHint("dashHeatInherentNote",
+      `${cov.inherentRated || 0} of ${cov.openRisks || 0} open risks plotted.`);
+    setHint("dashHeatResidualNote",
+      `${cov.residualRated || 0} of ${cov.openRisks || 0} open risks plotted`
+      + ((cov.residualPending || 0) > 0 ? `; ${cov.residualPending} awaiting residual assessment.` : "."));
+
+    // ---- Review ageing: pending and overdue only -----------------------
+    const bands = d.reviewAgeing || [];
+    const rows = [];
+    ["Pending", "Overdue"].forEach(group => {
+      const inGroup = bands.filter(b => b.bandGroup === group);
+      if (!inGroup.length) return;
+      rows.push({ heading: group === "Pending" ? "Pending review" : "Overdue review" });
+      inGroup.forEach(b => rows.push({
+        label: b.bandName, count: b.riskCount,
+        drill: {
+          tab: "review",
+          daysOverdueMin: b.minDaysOverdue,
+          daysOverdueMax: b.maxDaysOverdue >= 100000 ? null : b.maxDaysOverdue,
+          label: group === "Pending" ? `Reviews due in ${b.bandName.replace(/^Due in /, "")}`
+                                     : `Reviews overdue ${b.bandName}`
+        }
+      }));
+    });
+    dashBars("dashReviewAgeing", rows);
+
+    // ---- Top 5 risks by rating ----------------------------------------
+    const top = d.topRisks || [];
+    document.getElementById("topRiskTableBody").innerHTML = top.length
+      ? top.map(t => `<tr class="pm-row-clickable" data-open-risk="${t.riskRegisterId}">
+          <td><a href="#" data-open-risk="${t.riskRegisterId}">${escapeHtml(t.riskNumber)}</a><br>
+              <span class="pm-hint">${escapeHtml(t.riskTitle || "")}</span></td>
+          <td>${escapeHtml(t.riskOwnerName || "—")}</td>
+          <td>${t.inherentRatingCode ? severityChip(t.inherentRatingCode) : "—"}</td>
+          <td>${t.residualRatingCode ? severityChip(t.residualRatingCode) : `<span class="pm-hint">Not assessed</span>`}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="4" class="pm-empty-row">No open risks.</td></tr>`;
+  }
+
+  // A KPI tile. Same .risk-tile the treatment pages use (tile() below);
+  // this one adds the drill-down.
+  function dashTile(value, label, drill, alert) {
+    const cls = `risk-tile${alert ? " is-alert" : ""}${drill ? " is-clickable" : ""}`;
+    return `<div class="${cls}"${drillAttr(drill)} title="${escapeHtml(drill?.label || label)}">
       <div class="v">${escapeHtml(String(value ?? 0))}</div>
       <div class="k">${escapeHtml(label)}</div></div>`;
   }
-  function fmtDays(n) { return n == null ? "—" : `${Math.round(n)}d`; }
 
-  // Drill-down is a filter change on a grid the user already understands,
-  // not a second screen — see 210's header note.
-  function bars(hostId, rows, drillTab, drillField) {
+  function tile(value, label, alert) {
+    const cls = `risk-tile${alert ? " is-alert" : ""}`;
+    return `<div class="${cls}">
+      <div class="v">${escapeHtml(String(value ?? 0))}</div>
+      <div class="k">${escapeHtml(label)}</div></div>`;
+  }
+
+  function setHint(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  // Proportional bars (.risk-bars). rows: {label, count, drill} or
+  // {heading} for a group caption. A bar is clickable only when it has
+  // something behind it.
+  function dashBars(hostId, rows) {
     const host = document.getElementById(hostId);
     if (!host) return;
     const list = rows || [];
-    if (!list.length) { host.innerHTML = `<p class="pm-hint">No data.</p>`; return; }
-    const max = Math.max(1, ...list.map(x => x.totalCount));
-    host.innerHTML = list.slice(0, 10).map(x => {
-      const clickable = drillTab && drillField && x.key;
-      return `<div class="risk-bar-row${clickable ? " is-clickable" : ""}"${
-        clickable ? ` data-drill-tab="${drillTab}" data-drill-field="${escapeHtml(drillField)}" data-drill-value="${escapeHtml(x.key)}"` : ""}>
+    if (!list.some(x => !x.heading)) { host.innerHTML = `<p class="pm-hint">No data.</p>`; return; }
+    const max = Math.max(1, ...list.filter(x => !x.heading).map(x => x.count || 0));
+    host.innerHTML = list.map(x => {
+      if (x.heading) return `<div class="pm-hint">${escapeHtml(x.heading)}</div>`;
+      const clickable = x.drill && (x.count || 0) > 0;
+      return `<div class="risk-bar-row${clickable ? " is-clickable" : ""}"${clickable ? drillAttr(x.drill) : ""}>
         <span class="lbl" title="${escapeHtml(x.label)}">${escapeHtml(x.label)}</span>
-        <span class="trk"><span class="fil" style="width:${Math.round(x.totalCount / max * 100)}%${
-          x.colourHex ? `;background:${escapeHtml(x.colourHex)}` : ""}"></span></span>
-        <span class="num">${x.totalCount}</span></div>`;
+        <span class="trk"><span class="fil" style="width:${Math.round((x.count || 0) / max * 100)}%"></span></span>
+        <span class="num">${x.count || 0}</span></div>`;
     }).join("");
+  }
+
+  // One heatmap: rows = likelihood, highest first; columns = impact.
+  // Cells, ratings and colours are the organisation's own matrix
+  // (risk_matrix_cell); counts are open risks. residual picks which pair
+  // of register columns a click filters on.
+  function heatmap(hostId, levels, cells, residual) {
+    const host = document.getElementById(hostId);
+    if (!host) return;
+    const lik = levels.filter(l => l.axis === "L").sort((a, b) => b.levelValue - a.levelValue);
+    const imp = levels.filter(l => l.axis === "I").sort((a, b) => a.levelValue - b.levelValue);
+    if (!lik.length || !imp.length || !cells.length) {
+      host.style.gridTemplateColumns = "";
+      host.innerHTML = `<p class="pm-hint">No risk matrix configured for this organization.</p>`;
+      return;
+    }
+    const byKey = new Map(cells.map(c => [`${c.likelihoodValue}|${c.impactValue}`, c]));
+    // Narrower floors (2026-10-01) so both heatmaps fit side by side in
+    // the dashboard's 50% column; long axis names ellipsise and keep
+    // their full text as a tooltip.
+    host.style.gridTemplateColumns = `minmax(64px, 110px) repeat(${imp.length}, minmax(28px, 1fr))`;
+    const kind = residual ? "residual" : "inherent";
+    let html = "";
+    lik.forEach(l => {
+      html += `<div class="hm-axis" title="${escapeHtml(l.levelName)}">${escapeHtml(l.levelName)}</div>`;
+      imp.forEach(i => {
+        const c = byKey.get(`${l.levelValue}|${i.levelValue}`);
+        if (!c) { html += `<div class="hm-cell is-empty"></div>`; return; }
+        const n = c.riskCount || 0;
+        const tip = `Likelihood ${l.levelName} x Impact ${i.levelName} = ${c.ratingName} (${n} open risk${n === 1 ? "" : "s"})`;
+        const drill = n > 0 ? {
+          tab: "register", openOnly: true,
+          [residual ? "residualLikelihoodValue" : "likelihoodValue"]: l.levelValue,
+          [residual ? "residualImpactValue" : "impactValue"]: i.levelValue,
+          label: `Open risks, ${kind} likelihood ${l.levelName} x impact ${i.levelName} (${c.ratingName})`
+        } : null;
+        const bg = c.colourHex || "";
+        const fg = bg ? readableOn(bg) : "";
+        html += `<div class="hm-cell${n ? "" : " is-empty"}${drill ? " is-clickable" : ""}"${drillAttr(drill)}
+                      title="${escapeHtml(tip)}"
+                      style="${bg ? `background:${escapeHtml(bg)};color:${fg};` : ""}">${n || ""}</div>`;
+      });
+    });
+    html += `<div class="hm-corner">Likelihood / Impact</div>`;
+    imp.forEach(i => { html += `<div class="hm-axis col" title="${escapeHtml(i.levelName)}">${escapeHtml(i.levelName)}</div>`; });
+    host.innerHTML = html;
+  }
+
+  // Dark text on a light matrix colour, light text on a dark one.
+  function readableOn(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (!m) return "var(--neutral-700)";
+    const n = parseInt(m[1], 16);
+    const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return lum < 0.55 ? "var(--fg-on-dark)" : "var(--neutral-700)";
+  }
+
+  // Apply a dashboard drill: reset the target list's own filters (so its
+  // count matches the tile), set the drill, and show the list. The list
+  // request sends the drill as query parameters -- the filtering is SQL's.
+  function applyDashDrill(d) {
+    if (d.tab === "candidates") {
+      state.candDrill = (d.openOnly || d.minAgeDays != null || d.maxAgeDays != null)
+        ? { openOnly: !!d.openOnly, minAgeDays: d.minAgeDays ?? null, maxAgeDays: d.maxAgeDays ?? null, label: d.label }
+        : { label: d.label };
+      state.statusCode = d.statusCode || null;
+      state.sourceTypeCode = null;
+      setVal("riskFilterStatus", d.statusCode || "");
+      setVal("riskFilterSource", "");
+      pagers.cand?.reset(true);
+      showTab("candidates");
+      refresh();
+    } else if (d.tab === "register") {
+      state.regDrill = { ...d };
+      ["regFilterSource", "regFilterCategory", "regFilterRating", "regFilterSearch",
+       "regFilterPending", "regFilterStage", "regFilterTreatment"].forEach(id => setVal(id, ""));
+      pagers.reg?.reset(true);
+      showTab("register");
+    } else if (d.tab === "review") {
+      state.revDrill = { ...d };
+      ["revFilterOwner", "revFilterRating", "revFilterSearch", "revFilterHorizon"].forEach(id => setVal(id, ""));
+      pagers.rev?.reset(true);
+      showTab("review");
+    }
+  }
+
+  // The banner's "Clear filter": back to the list as the user left it --
+  // the Candidates status returns to its default option.
+  function clearDashDrill(key) {
+    if (key === "cand") {
+      state.candDrill = null;
+      const sel = document.getElementById("riskFilterStatus");
+      const def = sel ? [...sel.options].find(o => o.defaultSelected) : null;
+      state.statusCode = def ? (def.value || null) : null;
+      if (sel) sel.value = def ? def.value : "";
+      pagers.cand?.reset(true);
+      refresh();
+    } else if (key === "reg") {
+      state.regDrill = null;
+      pagers.reg?.reset(true);
+      refreshRegister();
+    } else if (key === "rev") {
+      state.revDrill = null;
+      pagers.rev?.reset(true);
+      refreshReviewDue();
+    }
+  }
+
+  function paintDrillBanner(key, drill) {
+    const el = document.getElementById(`${key}DrillBanner`);
+    if (!el) return;
+    el.hidden = !drill;
+    const txt = el.querySelector("[data-drill-text]");
+    if (txt) txt.innerHTML = drill
+      ? `Showing <strong>${escapeHtml(drill.label || "")}</strong> from the dashboard.`
+      : "";
   }
 
   async function refreshApprovalQueue() {
@@ -7080,76 +7767,6 @@
     </tr>`).join("");
   }
 
-  async function refreshAgeing() {
-    const tbody = document.getElementById("ageingTableBody");
-    const data = await apiGet(`/ageing?organizationId=${state.organizationId}&pageSize=10`);
-    const rows = data?.rows || [];
-    tbody.innerHTML = rows.length
-      ? rows.map(a => `<tr>
-          <td><a href="#" data-open-candidate="${a.riskCandidateId}">${escapeHtml(a.candidateNumber || a.candidateTitle)}</a><br>
-              <span class="pm-hint">${escapeHtml(a.candidateTitle)}</span></td>
-          <td><span class="risk-source-chip">${escapeHtml(a.sourceTypeCode || "—")}</span></td>
-          <td>${statusChip(a.statusCode)}</td>
-          <td>${escapeHtml(a.assignedAnalystName || "—")}</td>
-          <td${a.ageDays > 90 ? ' style="color:#c53030;font-weight:600"' : ""}>${a.ageDays}d</td>
-        </tr>`).join("")
-      : `<tr><td colspan="5" class="pm-empty-row">No open candidates.</td></tr>`;
-  }
-
-  // ---- 209: notifications (§21) -------------------------------------
-  async function refreshNotifications() {
-    if (!state.organizationId) return;
-    const counts = await apiGet(`/notifications/counts?organizationId=${state.organizationId}`);
-    document.getElementById("notifCounts").textContent = counts
-      ? `${counts.pendingCount} pending · ${counts.sentCount} sent · ${counts.failedCount} failed · ${counts.suppressedCount} suppressed`
-      : "";
-
-    const status = val("notifFilterStatus");
-    const qs = new URLSearchParams({ organizationId: state.organizationId, pageSize: 25 });
-    if (status) qs.set("statusCode", status);
-    const data = await apiGet(`/notifications?${qs}`);
-    const rows = data?.rows || [];
-    document.getElementById("notifTableBody").innerHTML = rows.length
-      ? rows.map(n => `<tr>
-          <td>${escapeHtml(eventLabel(n.notifyEventCode))}</td>
-          <td>${escapeHtml(n.subjectNumber || `#${n.subjectRecordId}`)}<br>
-              <span class="pm-hint">${escapeHtml(n.subjectTitle || "")}</span></td>
-          <td>${escapeHtml(n.recipientName || "—")}<br>
-              <span class="pm-hint">${escapeHtml(n.recipientEmail || "no email on file")}</span></td>
-          <td>${escapeHtml(n.roleName || n.recipientReasonCode)}</td>
-          <td>${statusChip(n.statusCode)}${
-            n.failureReason ? `<br><span class="pm-hint">${escapeHtml(n.failureReason)}</span>` : ""}</td>
-          <td>${window.gracFormatDisplayDate(n.eventOn)}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="6" class="pm-empty-row">No notifications recorded.</td></tr>`;
-  }
-
-  function eventLabel(code) {
-    return ({
-      CANDIDATE_ASSIGNED:      "Candidate assigned",
-      CLARIFICATION_REQUESTED: "Clarification requested",
-      ANALYSIS_COMPLETED:      "Assessment completed",
-      APPROVAL_REQUIRED:       "Approval required",
-      RISK_APPROVED:           "Risk approved",
-      CANDIDATE_REJECTED:      "Candidate rejected",
-      RISK_OWNER_ASSIGNED:     "Risk owner assigned",
-      RISK_REGISTERED:         "Risk registered"
-    })[code] || code;
-  }
-
-  async function onNotificationSweep() {
-    const btn = document.getElementById("notifSweepBtn");
-    btn.disabled = true;
-    try {
-      const res = await apiPost(`/notifications/sweep?organizationId=${state.organizationId}`, {});
-      if (!res || res.success === false) {
-        dlg.alert((res && res.error) || "Sweep failed.", { title: "Sweep failed", type: "error" });
-        return;
-      }
-      await refreshNotifications();
-    } finally { btn.disabled = false; }
-  }
-
   // ---- 211: treatment task (§22) ------------------------------------
   async function openTreatmentModal(riskId) {
     const risk = await apiGet(`/register/${riskId}`);
@@ -7170,7 +7787,7 @@
     document.getElementById("trMessage").textContent = "";
 
     const owner = document.getElementById("trOwner");
-    owner.innerHTML = `<option value="">Task Centre's owner ladder</option>`;
+    owner.innerHTML = `<option value="">Task Board's owner ladder</option>`;
     state.employees.forEach(e => {
       const o = document.createElement("option");
       o.value = e.employeeId;
@@ -7220,6 +7837,10 @@
       ? `Task candidate raised at priority ${res.proposedPriority}.`
       : "A treatment task candidate already exists for this risk — tick “additional action” to raise another.";
     await refreshTreatmentWork(riskId);
+    // If the Treatment page is open on this risk, refresh its task table so
+    // a newly raised treatment task appears there without a reload.
+    if (Number(document.getElementById("twRiskId")?.value || 0) === riskId)
+      await refreshTreatmentState(riskId);
   }
 
   // ---- dialogs -------------------------------------------------------

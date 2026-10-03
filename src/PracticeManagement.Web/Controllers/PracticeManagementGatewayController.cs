@@ -268,7 +268,7 @@ public sealed class PracticeManagementGatewayController(
             return PermissionDenied(PermissionArea(entityType), "VIEW");
         if (string.IsNullOrWhiteSpace(code) && (id.HasValue || organizationId.HasValue || practiceId.HasValue || practiceInstanceId.HasValue || organizationControlId.HasValue || organizationRequirementId.HasValue))
             return BadRequest(new { success = false, message = "Use encrypted navigation context for internal identifiers." });
-        try { ApplyNavigationContext(Token(), entityType, code, ref organizationId, ref practiceId, ref practiceInstanceId, ref organizationControlId, ref organizationRequirementId); }
+        try { ApplyNavigationContext(NavigationKey(), entityType, code, ref organizationId, ref practiceId, ref practiceInstanceId, ref organizationControlId, ref organizationRequirementId); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
         var data = AddOrganizationAccessContext(JsonSerializer.SerializeToElement(new
         {
@@ -309,7 +309,7 @@ public sealed class PracticeManagementGatewayController(
         if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW"))
             return PermissionDenied(PermissionArea(entityType), "VIEW");
         JsonElement data;
-        try { data = NormalizeQueryPayload(Token(), entityType, command); }
+        try { data = NormalizeQueryPayload(NavigationKey(), entityType, command); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
         data = AddOrganizationAccessContext(data);
         if (!ValidateRequestedOrganization(entityType, data, out var accessMessage))
@@ -336,7 +336,7 @@ public sealed class PracticeManagementGatewayController(
         if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(entityType), "VIEW"))
             return PermissionDenied(PermissionArea(entityType), "VIEW");
         JsonElement data;
-        try { data = NormalizeQueryPayload(Token(), entityType, command); }
+        try { data = NormalizeQueryPayload(NavigationKey(), entityType, command); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
         return Ok(new
         {
@@ -355,7 +355,7 @@ public sealed class PracticeManagementGatewayController(
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
         if (!IsAllowedNavigation(request, Roles())) return PermissionDenied("the requested screen", "VIEW");
-        var code = navigationContextProtector.Protect(Token(), new NavigationContext
+        var code = navigationContextProtector.Protect(NavigationKey(), new NavigationContext
         {
             SourceArea = request.SourceArea,
             TargetArea = request.TargetArea,
@@ -377,11 +377,11 @@ public sealed class PracticeManagementGatewayController(
     {
         if (!IsSignedIn()) return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
         NavigationContext? context;
-        try { context = ResolveNavigationContext(Token(), code, targetArea); }
+        try { context = ResolveNavigationContext(NavigationKey(), code, targetArea); }
         catch (CryptographicException) { return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." }); }
         if (context is null) return BadRequest(new { success = false, message = "The navigation context is invalid or has expired." });
-        if (!permissionPolicy.IsAllowed(Roles(), context.TargetArea, "VIEW"))
-            return PermissionDenied(context.TargetArea, "VIEW");
+        if (!permissionPolicy.IsAllowed(Roles(), PermissionArea(context.TargetArea), "VIEW"))
+            return PermissionDenied(PermissionArea(context.TargetArea), "VIEW");
         return Ok(new { success = true, filterType = context.FilterType, filterId = context.FilterId, organizationId = context.OrganizationId, releaseId = context.ReleaseId, organizationControlId = context.OrganizationControlId, organizationRequirementId = context.OrganizationRequirementId, displayCode = context.DisplayCode, displayName = context.DisplayName, displayStatus = context.DisplayStatus });
     }
 
@@ -398,7 +398,7 @@ public sealed class PracticeManagementGatewayController(
             data = command.Data.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
                 ? JsonSerializer.SerializeToElement(new { })
                 : command.Data;
-            data = ApplyNavigationContext(Token(), entityType, command.ContextCode, data);
+            data = ApplyNavigationContext(NavigationKey(), entityType, command.ContextCode, data);
             data = HashSensitivePayloadFields(entityType, data, isCreate: action == "ADD");
             data = AddOrganizationAccessContext(data);
             if (!ValidateRequestedOrganization(entityType, data, out var accessMessage))
@@ -463,6 +463,14 @@ public sealed class PracticeManagementGatewayController(
     private async Task<IActionResult> InvokeAsync(Func<Task<string>> action)
     {
         try { return Content(await action(), "application/json"); }
+        // Token() throws this when the session holds no token. It is a
+        // signed-out caller, not a gateway fault: answer 401 like the
+        // IsSignedIn() guards do, so the browser goes to the login page
+        // instead of showing a 502.
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { success = false, message = "Session expired. Please sign in again." });
+        }
         catch (PracticeApiException ex)
         {
             logger.LogError(ex, "PracticeManagement gateway API call failed {CorrelationId}", HttpContext.TraceIdentifier);
@@ -483,6 +491,28 @@ public sealed class PracticeManagementGatewayController(
         if (!string.IsNullOrWhiteSpace(token)) return token;
 
         throw new UnauthorizedAccessException("Practice Management session has expired.");
+    }
+
+    // Stable per-session key for navigation codes. The access token from
+    // Token() is re-issued on every foreground request by the idle-timeout
+    // middleware in Program.cs, so a navigation code minted on the POST that
+    // creates it could no longer be decrypted on the GET that resolves it --
+    // the two requests see different tokens. It happened to work on localhost
+    // because the mint/resolve round trip finished inside a single token
+    // instant; once deployed, the extra latency crossed a re-issue boundary
+    // and every drill-in failed with "The navigation context is invalid or
+    // has expired." This secret is minted once per session and never rotates.
+    // NavigationContextProtector/EnvelopeCrypto treat it purely as opaque key
+    // material (the access token is validated separately, server side), so a
+    // random per-session passphrase is a safe, stable key for these
+    // short-lived (30-minute) codes.
+    private string NavigationKey()
+    {
+        var key = HttpContext.Session.GetString(PracticeSessionIdentity.NavigationKeyKey);
+        if (!string.IsNullOrWhiteSpace(key)) return key;
+        key = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        HttpContext.Session.SetString(PracticeSessionIdentity.NavigationKeyKey, key);
+        return key;
     }
 
     private bool IsSignedIn() => HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is not null
@@ -577,7 +607,7 @@ public sealed class PracticeManagementGatewayController(
 
     private static readonly HashSet<string> OrganizationScopedEntityTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "repository-subscriptions", "subscription-owner", "locations", "departments", "business-functions", "teams", "committees",
+        "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "repository-subscriptions", "repository-subscription-requests", "subscription-owner", "locations", "departments", "business-functions", "teams", "committees",
         "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets",
         "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability",
         "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", "dependencies", "evidence-configurations",
@@ -785,8 +815,12 @@ public sealed class PracticeManagementGatewayController(
 
     private bool IsAllowedNavigation(NavigationCodeRequest request, string[] roles) =>
         request.FilterId > 0
-        && permissionPolicy.IsAllowed(roles, request.SourceArea, "VIEW")
-        && permissionPolicy.IsAllowed(roles, request.TargetArea, "VIEW")
+        // Areas go through PermissionAreaMap, like every entity check on
+        // this controller: a screen with no menu row of its own
+        // (practice-view, practice-instances) is governed by the screen
+        // that reaches it, not by a grant no role can hold.
+        && permissionPolicy.IsAllowed(roles, PermissionArea(request.SourceArea), "VIEW")
+        && permissionPolicy.IsAllowed(roles, PermissionArea(request.TargetArea), "VIEW")
         && request switch
         {
             { FilterType: "Organization", TargetArea: "organization-controls" or "control-applicability" or "organization-requirements" or "practices" or "practice-instances" or "repository-subscriptions" } => true,

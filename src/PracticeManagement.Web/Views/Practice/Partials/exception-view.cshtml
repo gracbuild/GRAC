@@ -85,7 +85,7 @@
            "Analysis" now has exactly one entry point, under Actions,
            gated exactly the way Exception Centre's row menu gates it. *@
         <a class="pm-button" href="~/Practice/Index/exception-centre">
-            <i class="fa-solid fa-arrow-left"></i> Back to Exception Centre
+            <i class="fa-solid fa-arrow-left"></i> Back to Exceptions &amp; Waivers
         </a>
     </div>
 </div>
@@ -96,7 +96,7 @@
     <div class="pm-empty">
         <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
         <h2 id="evUnavailableTitle">Exception request not found.</h2>
-        <p id="evUnavailableBody">Open this page from Exception Centre's row menu.</p>
+        <p id="evUnavailableBody">Open this page from the row menu in Exceptions &amp; Waivers.</p>
     </div>
 </section>
 
@@ -169,24 +169,24 @@
 <style>
     #evRoot .ev-section {
         margin: 18px 0 8px; font-size: 13px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: .04em; color: #4a5568;
+        text-transform: uppercase; letter-spacing: .04em; color: var(--fg-secondary);
     }
     #evRoot .ev-facts {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
         gap: 8px 20px; margin: 0 0 4px;
-        padding: 12px 14px; background: #f7fafc; border-radius: 6px;
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md);
     }
     #evRoot .ev-facts-wide { grid-template-columns: 1fr; }
     #evRoot .ev-facts dt {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #718096;
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted);
     }
     #evRoot .ev-facts dd {
-        margin: 0 0 6px; font-size: 13px; color: #2d3748; overflow-wrap: anywhere;
+        margin: 0 0 6px; font-size: 13px; color: var(--neutral-700); overflow-wrap: anywhere;
         white-space: pre-wrap;
     }
-    #evRoot .ev-facts dd.ev-empty { color: #a0aec0; font-style: italic; }
+    #evRoot .ev-facts dd.ev-empty { color: var(--fg-subtle); font-style: italic; }
     #evRoot .ev-facts dd.ev-block { white-space: pre-wrap; }
-    .ev-hint { font-size: 11px; color: #94a3b8; }
+    .ev-hint { font-size: 11px; color: var(--fg-subtle); }
 </style>
 
 <script src="~/js/ExceptionCentre/exception-view.js" asp-append-version="true"></script>

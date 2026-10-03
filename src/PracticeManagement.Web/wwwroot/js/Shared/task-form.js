@@ -86,8 +86,8 @@
     if (!text) { el.style.display = "none"; el.textContent = ""; return; }
     el.style.display = "block";
     el.textContent = text;
-    el.style.background = kind === "error" ? "#fef2f2" : kind === "ok" ? "#ecfdf5" : "#eff6ff";
-    el.style.color      = kind === "error" ? "#b91c1c" : kind === "ok" ? "#065f46" : "#1e40af";
+    el.style.background = kind === "error" ? "var(--danger-50)" : kind === "ok" ? "var(--success-50)" : "var(--primary-50)";
+    el.style.color      = kind === "error" ? "var(--danger-700)" : kind === "ok" ? "var(--success-700)" : "var(--primary-700)";
   }
 
   // Two endpoints exist for the same list -- Task Center uses
@@ -133,7 +133,7 @@
     const el = $(id);
     if (el) {
       el.disabled = on;
-      el.style.background = on ? "#f1f5f9" : "";
+      el.style.background = on ? "var(--bg-subtle)" : "";
     }
     const note = noteId ? $(noteId) : null;
     if (note) {

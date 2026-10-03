@@ -31,6 +31,13 @@
     apart from __wfCommon.
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
+@{
+    // practice-view shares organization-requirements' permission area
+    // (PracticeController.ScreenPermissionArea), so these are the caller's
+    // rights on Organization Practices -- the same set its row menu gates on.
+    var pvPermissions = ViewBag.Permissions as string[] ?? [];
+    var pvCanEditApplicability = pvPermissions.Contains("EDIT") || pvPermissions.Contains("ADD");
+}
 
 @*
     Local styles only for classes practice-management.css does not define.
@@ -42,7 +49,7 @@
     #pvRoot .pm-panel + .pm-panel { margin-top: 14px; }
     #pvRoot .pm-panel-title {
         font-size: 14px; font-weight: 600; margin: 0 0 4px;
-        color: var(--grac-ink, #25345a);
+        color: var(--fg-default);
     }
     #pvRoot .pm-panel-header { display: flex; align-items: baseline; gap: 8px; }
     /* A panel header that carries an action: the button is pushed to the
@@ -60,10 +67,10 @@
        bottom margin is nudged up slightly too so the line below (the
        instances/obligations table, or the empty-state message) isn't
        cramped either. */
-    #pvRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 8px 0 12px; }
+    #pvRoot .pm-hint { color: var(--fg-muted); font-size: 12px; margin: 8px 0 12px; }
     #pvRoot .pm-subheading {
         font-size: 13px; font-weight: 600; margin: 14px 0 6px;
-        color: var(--grac-ink, #25345a);
+        color: var(--fg-default);
     }
     #pvRoot .pm-detail-grid {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -71,15 +78,15 @@
     }
     #pvRoot .pm-detail-grid dt {
         font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--grac-muted, #758095); margin-bottom: 2px;
+        color: var(--fg-muted); margin-bottom: 2px;
     }
-    #pvRoot .pm-detail-grid dd { margin: 0; font-size: 13px; color: var(--grac-ink, #25345a); }
+    #pvRoot .pm-detail-grid dd { margin: 0; font-size: 13px; color: var(--fg-default); }
     #pvRoot .pm-detail-grid.compact { gap: 6px 14px; }
     #pvRoot .pm-card {
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 6px;
-        padding: 10px 12px; margin-bottom: 8px; background: #fbfcfe;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        padding: 10px 12px; margin-bottom: 8px; background: var(--neutral-50);
     }
-    #pvRoot .pm-card h4 { margin: 0 0 6px; font-size: 13px; color: var(--grac-ink, #25345a); }
+    #pvRoot .pm-card h4 { margin: 0 0 6px; font-size: 13px; color: var(--fg-default); }
     /* Migration 307. Edit / Remove on a practice-level obligation card.
        Separated from the card body by a rule rather than whitespace, so
        the two buttons read as actions on the card above them and not as
@@ -87,11 +94,11 @@
     #pvRoot .pm-card-actions {
         display: flex; gap: 8px; align-items: center;
         margin-top: 10px; padding-top: 8px;
-        border-top: 1px dashed var(--grac-line, #e2e7f0);
+        border-top: 1px dashed var(--border);
     }
     /* The published-feed failure line above the obligation groups. */
     #pvRoot .pm-message.pv-warning {
-        background: #fffbeb; color: #92400e; border: 1px solid #fde68a;
+        background: var(--warning-50); color: var(--warning-700); border: 1px solid var(--warning-200);
         margin-bottom: 10px;
     }
     /* The obligation's authored text, directly under its name. Muted and a
@@ -101,7 +108,7 @@
        meta grid, so adding it does not change the card's rhythm. */
     #pvRoot .pm-card .pm-obligation-text {
         margin: -2px 0 8px; font-size: 12px; line-height: 1.5;
-        color: var(--grac-muted, #758095); white-space: pre-wrap;
+        color: var(--fg-muted); white-space: pre-wrap;
     }
     /* Frameworks chips in the details grid. The badges are pm-badge from the
        site stylesheet; this only lets a long list wrap inside its <dd>
@@ -125,7 +132,7 @@
     #pvRoot .pm-typed-detail { margin-top: 8px; }
     #pvRoot .pm-typed-detail-row {
         font-size: 12px; padding: 3px 0;
-        border-top: 1px dashed var(--grac-line, #e2e7f0);
+        border-top: 1px dashed var(--border);
     }
     /* Each entry is its type badge with the remark on the line beneath.
        "Evidence:" takes a row to itself rather than sitting inline, which is
@@ -149,7 +156,7 @@
        lines look like one block. */
     #pvRoot .pm-evidence-remark {
         margin: 3px 0 0; line-height: 1.45;
-        color: var(--grac-muted, #758095); white-space: pre-wrap;
+        color: var(--fg-muted); white-space: pre-wrap;
     }
     /* practice-management.css reserves the last column of a .pm-table-wrap for
        Actions -- 58px wide and centred. This grid is read-only and has no
@@ -162,16 +169,9 @@
         text-align: left;
     }
     #pvRoot .pm-form-actions { display: flex; gap: 8px; margin-top: 12px; }
-    #pvRoot .pm-text-warning { color: #b45309; }
-    /* pm-badge is used across the workflow partials but has never had a rule;
-       give it one here rather than leave the counts as bare text.
-       #pvConfigureDialog is listed too because a <dialog> is rendered in the
-       top layer, outside #pvRoot -- descendant selectors do not reach it. */
-    #pvRoot .pm-badge, .pm-page-heading .pm-badge, #pvConfigureDialog .pm-badge {
-        display: inline-block; padding: 1px 7px; border-radius: 10px;
-        background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a);
-        font-size: 11px; font-weight: 600;
-    }
+    #pvRoot .pm-text-warning { color: var(--warning-700); }
+    /* .pm-badge is defined globally in practice-management.css (hoisted
+       from this view, resolve and resolve-workspace, 2026-09-25). */
 
     /* ---- Configure dialog. Sized like .pm-obligation-dialog so the two
        modals in this module feel like the same object. ---- */
@@ -181,30 +181,30 @@
     }
     #pvConfigureDialog::backdrop { background: rgba(23, 32, 51, .45); }
     #pvConfigureDialog .pm-configure-modal {
-        background: #f5f7fb; border: 1px solid var(--grac-line, #e2e7f0);
-        border-radius: 10px; box-shadow: 0 18px 50px rgba(23, 32, 51, .25);
+        background: var(--bg-subtle); border: 1px solid var(--border);
+        border-radius: var(--radius-md); box-shadow: 0 18px 50px rgba(23, 32, 51, .25);
         display: flex; flex-direction: column; height: 100%; overflow: hidden;
     }
     #pvConfigureDialog .pm-configure-header {
         display: flex; gap: 14px; align-items: flex-start;
-        background: #fff; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        background: var(--bg-surface); border-bottom: 1px solid var(--border);
         padding: 14px 18px;
     }
     #pvConfigureDialog .pm-configure-header > div { flex: 1 1 auto; }
     #pvConfigureDialog .pm-configure-header h2 {
-        margin: 0 0 4px; font-size: 15px; color: var(--grac-ink, #25345a);
+        margin: 0 0 4px; font-size: 15px; color: var(--fg-default);
     }
-    #pvConfigureDialog .pm-hint { margin: 0; font-size: 12px; color: var(--grac-muted, #758095); }
+    #pvConfigureDialog .pm-hint { margin: 0; font-size: 12px; color: var(--fg-muted); }
     #pvConfigureDialog .pm-toolbar { padding: 10px 18px 0; }
     /* The team list is the only thing that scrolls, so the toolbar and the
        action buttons stay put however many teams there are. */
     #pvConfigureDialog .pm-configure-body { flex: 1 1 auto; overflow-y: auto; padding: 12px 18px; }
     #pvConfigureDialog .pm-form-actions {
-        display: flex; gap: 8px; background: #fff;
-        border-top: 1px solid var(--grac-line, #e2e7f0); padding: 12px 18px;
+        display: flex; gap: 8px; background: var(--bg-surface);
+        border-top: 1px solid var(--border); padding: 12px 18px;
     }
-    #pvConfigureDialog .pm-message { margin: 10px 18px 0; border-radius: 6px; padding: 8px 10px; font-size: 12px; }
-    #pvConfigureDialog .pm-text-warning { color: #b45309; }
+    #pvConfigureDialog .pm-message { margin: 10px 18px 0; border-radius: var(--radius-md); padding: 8px 10px; font-size: 12px; }
+    #pvConfigureDialog .pm-text-warning { color: var(--warning-700); }
     #pvConfigureDialog table { width: 100%; }
 </style>
 
@@ -220,7 +220,20 @@
         heading, where it read as an action on the practice as a whole.
         Back to Practices stays here -- that IS a page-level action.
     *@
-    <div>
+    @*
+        Actions (2026-10-03) -- same button and menu as Gap / Task /
+        Exception View: a .pm-button "Actions" opening a .pm-action-menu
+        portalled to <body>. It offers what the Organization Practices row
+        3-dot menu offers for this practice, minus "View" (this page IS the
+        view): Mark Applicability, or Update Applicability once marked --
+        same label rule and same EDIT/ADD gate as practice.js
+        allowedActions. Configure and Add Obligation stay on their panels.
+    *@
+    <div style="display:flex; gap:8px;">
+        <button type="button" class="pm-button" id="pvActionsBtn" aria-haspopup="true" aria-expanded="false" hidden>
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
         <a class="pm-button ghost" id="pvBackBtn" href="#"><i class="fa-solid fa-arrow-left"></i> Back to Practices</a>
     </div>
 </div>
@@ -386,6 +399,7 @@
 *@
 <partial name="Partials/_obligation-form-dialog" />
 <script src="~/js/Shared/obligation-form.js" asp-append-version="true"></script>
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
 
 <script>
 (function () {
@@ -400,6 +414,7 @@
                                            ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
 
     let practiceId = null, organizationId = null, requirementId = null, practice = null;
+    const canEditApplicability = @(pvCanEditApplicability ? "true" : "false");
     let teams = [];
     const selected = new Set();
 
@@ -427,6 +442,8 @@
     const pvLookups = {
         frequencies:   [],
         roles:         [],
+        // Migration 412: the obligation Owner is a Functional User.
+        owners:        [],
         evidenceTypes: [],
         // Fixed vocabulary, not master data -- the CHECK constraint on
         // practice_obligation.assurance_type says so.
@@ -514,6 +531,25 @@
                 acc.push({ value: name, label: name });
                 return acc;
             }, []);
+
+            // Migration 412: Owner = an EMPLOYEE who is a Functional User of
+            // this organization -- the same `owners` feed (342) the
+            // Operationalize Owner pickers use, scoped to the organization.
+            const ownersRes = await fetch(U('/practice-management-gateway/owners/query'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ data: { pageNumber: 1, pageSize: 5000 } })
+            });
+            if (ownersRes.ok) {
+                pvLookups.owners = rowsOf(await ownersRes.json())
+                    .map(x => ({
+                        value: String(x.Value ?? x.value),
+                        label: String(x.Label ?? x.label ?? ''),
+                        organizationId: String(x.OrganizationId ?? x.organizationId ?? '')
+                    }))
+                    .filter(x => organizationId && x.organizationId === String(organizationId));
+            }
         } catch (_) { /* the form's dropdowns degrade to their placeholders */ }
     }
 
@@ -644,6 +680,7 @@
     }
 
     function wire() {
+        wireActions();
         const dlg = document.getElementById('pvConfigureDialog');
         document.getElementById('pvConfigureBtn').addEventListener('click', openConfigure);
         // Migration 307. Every other control of the form -- Cancel, Close,
@@ -694,6 +731,7 @@
 
             renderPractice();
             document.getElementById('pvRoot').hidden = false;
+            document.getElementById('pvActionsBtn').hidden = false;
             // Migration 218: a requirement that has never been marked
             // Applicable has no grac_practice.practice row, and the detail
             // endpoint answers from organization_requirement with
@@ -708,6 +746,40 @@
     }
 
     const P = k => practice[k] ?? practice[k.charAt(0).toUpperCase() + k.slice(1)] ?? null;
+
+    // ---------- Actions menu (2026-10-03) -----------------------------
+    // Drawn and dismissed by the shared Shared/page-actions-menu.js (same
+    // behaviour as Gap / Task / Exception View); this page only says which
+    // items apply.
+    function wireActions() {
+        window.gracPageActions.attach('pvActionsBtn', actionItems);
+    }
+
+    // The Organization Practices row menu, less "View": Mark Applicability
+    // while the practice is Not Updated, Update Applicability after. Needs
+    // the requirement the applicability belongs to, and EDIT/ADD.
+    function actionItems() {
+        const items = [];
+        if (canEditApplicability && requirementId) {
+            const status = String(P('applicabilityStatus') || 'Not Updated').trim().toLowerCase();
+            items.push({
+                icon: 'fa-clipboard-check',
+                label: status === 'not updated' ? 'Mark Applicability' : 'Update Applicability',
+                run: openApplicability
+            });
+        }
+        return items;
+    }
+
+    // The form lives in practice.js on Organization Practices (it is not
+    // loaded here). That page opens it for this requirement and, when the
+    // dialog closes, comes back to this practice's View page.
+    function openApplicability() {
+        const q = ['applicabilityFor=' + encodeURIComponent(requirementId)];
+        if (organizationId) q.push('organizationId=' + encodeURIComponent(organizationId));
+        window.location.assign(U('/Practice/Index/organization-requirements?') + q.join('&'));
+    }
+
 
     function renderPractice() {
         const code = P('practiceCode'), name = P('practiceName');
@@ -809,8 +881,14 @@
     // procedure and the column is absent. All three hit the same filter in
     // renderPractice and the row is simply not drawn.
     function sourceStatementChips() {
+        // Migration 396: a statement whose repository retirement was
+        // approved is still listed (flag only), marked as such.
         const list = jsonArray(practice, 'MappedSourceStatementsJson')
-            .map(s => String(s.SourceStatement ?? s.sourceStatement ?? '').trim())
+            .map(s => {
+                const name = String(s.SourceStatement ?? s.sourceStatement ?? '').trim();
+                const retired = String(s.RepositoryLifecycleStatus ?? s.repositoryLifecycleStatus ?? '').toLowerCase() === 'retired';
+                return name ? name + (retired ? ' (Retired in repository)' : '') : '';
+            })
             .filter(Boolean);
         if (!list.length) return '';
         return list.map(name => '<span class="pm-badge">' + esc(name) + '</span>').join('');

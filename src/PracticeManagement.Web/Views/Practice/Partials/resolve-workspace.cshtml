@@ -22,13 +22,9 @@
 @model PracticeManagement.Web.Models.PracticeScreen
 
 <style>
-    #rwRoot .pm-hint { color: var(--grac-muted, #758095); font-size: 12px; margin: 0 0 10px; }
-    #rwRoot .pm-panel-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--grac-ink, #25345a); }
-    #rwRoot .pm-badge, .pm-page-heading .pm-badge {
-        display: inline-block; padding: 1px 7px; border-radius: 10px;
-        background: var(--grac-line, #e2e7f0); color: var(--grac-ink, #25345a);
-        font-size: 11px; font-weight: 600;
-    }
+    #rwRoot .pm-hint { color: var(--fg-muted); font-size: 12px; margin: 0 0 10px; }
+    #rwRoot .pm-panel-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--fg-default); }
+    /* .pm-badge: see practice-management.css */
 
     /* Read-only view (URL ?mode=view). Every action button vanishes AND
        every field is disabled (see the MutationObserver in init() -- this
@@ -49,8 +45,8 @@
     #rwRoot.rw-view-only .rw-sticky { display: none !important; }
     #rwRoot.rw-view-only .rw-view-only-banner {
         display: block; margin: 0 0 10px; padding: 6px 10px;
-        background: #f8fafc; border: 1px dashed var(--grac-line, #e2e7f0);
-        border-radius: 6px; color: var(--grac-muted, #758095); font-size: 12px;
+        background: var(--neutral-50); border: 1px dashed var(--border);
+        border-radius: var(--radius-md); color: var(--fg-muted); font-size: 12px;
     }
     /* A disabled field here is one waiting to be looked at, not a broken
        one -- keep its value legible instead of greying it into the
@@ -60,7 +56,7 @@
     #rwRoot.rw-view-only input:disabled,
     #rwRoot.rw-view-only select:disabled,
     #rwRoot.rw-view-only textarea:disabled {
-        background: #f6f8fc; color: var(--grac-muted, #758095); cursor: default;
+        background: var(--neutral-50); color: var(--fg-muted); cursor: default;
         opacity: 1;
     }
 
@@ -73,9 +69,9 @@
     #rwRoot .rw-facts div { min-width: 150px; }
     #rwRoot .rw-facts dt {
         font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--grac-muted, #758095);
+        color: var(--fg-muted);
     }
-    #rwRoot .rw-facts dd { margin: 0; font-size: 13px; color: var(--grac-ink, #25345a); }
+    #rwRoot .rw-facts dd { margin: 0; font-size: 13px; color: var(--fg-default); }
 
     /* Stacked, not side by side.
        Obligations first, dependencies underneath.
@@ -96,17 +92,17 @@
        .rw-published strip it replaces, because the field NAMES differ
        per type and have to be visible. */
     #rwRoot .rw-typed {
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 6px;
-        background: #f8fafc; padding: 10px 12px; margin: 10px 0;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        background: var(--neutral-50); padding: 10px 12px; margin: 10px 0;
     }
     #rwRoot .rw-typed h4 {
         margin: 0 0 8px; font-size: 12px; font-weight: 600;
-        color: var(--grac-ink, #25345a);
+        color: var(--fg-default);
     }
     #rwRoot .rw-typed h4 .pm-badge { margin-left: 6px; }
     #rwRoot .rw-typed-item + .rw-typed-item {
         margin-top: 10px; padding-top: 10px;
-        border-top: 1px dashed var(--grac-line, #e2e7f0);
+        border-top: 1px dashed var(--border);
     }
     /* auto-FILL, not auto-fit, and a capped track.
        auto-fit collapses the tracks nothing landed in and stretches the
@@ -122,10 +118,10 @@
     }
     #rwRoot .rw-typed dt {
         font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--grac-muted, #758095);
+        color: var(--fg-muted);
     }
     #rwRoot .rw-typed dd {
-        margin: 0 0 4px; font-size: 13px; color: var(--grac-ink, #25345a);
+        margin: 0 0 4px; font-size: 13px; color: var(--fg-default);
         overflow-wrap: anywhere;
     }
     /* A rule reads as a sentence -- attribute, operator, value -- so it
@@ -136,7 +132,7 @@
         font-size: 13px;
     }
     #rwRoot .rw-description {
-        margin: 10px 0; font-size: 13px; color: var(--grac-ink, #25345a);
+        margin: 10px 0; font-size: 13px; color: var(--fg-default);
         white-space: pre-wrap;
     }
 
@@ -157,12 +153,12 @@
        than a titled box next to a loose form. Margin matches .rw-typed's
        so the two columns start on the same line. */
     #rwRoot .rw-answers {
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 6px;
-        background: #fff; padding: 10px 12px; margin: 10px 0;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        background: var(--bg-surface); padding: 10px 12px; margin: 10px 0;
     }
     #rwRoot .rw-answers h4 {
         margin: 0 0 8px; font-size: 12px; font-weight: 600;
-        color: var(--grac-ink, #25345a);
+        color: var(--fg-default);
     }
     /* Scoped to this column, not to .rw-fields generally -- the profile
        box and the dialog use the same class and are not in a split.
@@ -184,17 +180,17 @@
 
     #rwRoot .rw-description-label {
         font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--grac-muted, #758095); display: block; margin-bottom: 2px;
+        color: var(--fg-muted); display: block; margin-bottom: 2px;
     }
 
     #rwRoot .rw-card {
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 8px;
-        background: #fff; margin-bottom: 8px; overflow: hidden;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        background: var(--bg-surface); margin-bottom: 8px; overflow: hidden;
     }
-    #rwRoot .rw-card.adopted  { border-left: 3px solid #16a34a; }
-    #rwRoot .rw-card.modified { border-left: 3px solid #2563eb; }
-    #rwRoot .rw-card.resolved { border-left: 3px solid #16a34a; }
-    #rwRoot .rw-card.pending  { border-left: 3px solid #d97706; }
+    #rwRoot .rw-card.adopted  { border-left: 3px solid var(--success-600); }
+    #rwRoot .rw-card.modified { border-left: 3px solid var(--primary-500); }
+    #rwRoot .rw-card.resolved { border-left: 3px solid var(--success-600); }
+    #rwRoot .rw-card.pending  { border-left: 3px solid var(--warning-600); }
 
     /* The whole summary row is the toggle, so a card opens without hunting
        for a chevron. */
@@ -203,10 +199,10 @@
         padding: 9px 12px; cursor: pointer; width: 100%;
         background: none; border: 0; text-align: left; font: inherit;
     }
-    #rwRoot .rw-card-head:hover { background: #f8fafc; }
-    #rwRoot .rw-card-title { flex: 1 1 auto; font-size: 13px; color: var(--grac-ink, #25345a); }
-    #rwRoot .rw-card-title small { display: block; color: var(--grac-muted, #758095); font-size: 11px; }
-    #rwRoot .rw-card-body { padding: 0 12px 12px; border-top: 1px solid var(--grac-line, #e2e7f0); }
+    #rwRoot .rw-card-head:hover { background: var(--neutral-50); }
+    #rwRoot .rw-card-title { flex: 1 1 auto; font-size: 13px; color: var(--fg-default); }
+    #rwRoot .rw-card-title small { display: block; color: var(--fg-muted); font-size: 11px; }
+    #rwRoot .rw-card-body { padding: 0 12px 12px; border-top: 1px solid var(--border); }
     #rwRoot .rw-card-body[hidden] { display: none; }
 
     /* .rw-published removed with migration 224 -- the fixed four-fact
@@ -217,16 +213,16 @@
         display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
         gap: 10px 16px; align-items: end;
     }
-    #rwRoot .rw-fields label { display: block; font-size: 11px; color: var(--grac-muted, #758095); }
+    #rwRoot .rw-fields label { display: block; font-size: 11px; color: var(--fg-muted); }
     #rwRoot .rw-fields input, #rwRoot .rw-fields select, #rwRoot .rw-fields textarea {
         width: 100%; font-size: 12px; padding: 4px 6px;
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 5px;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
     }
     #rwRoot .rw-fields .full { grid-column: 1 / -1; }
     #rwRoot .rw-card-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
     #rwRoot .rw-resolve-form {
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 8px;
-        background: #f8fafc; padding: 12px; margin-bottom: 12px;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        background: var(--neutral-50); padding: 12px; margin-bottom: 12px;
     }
 
     /* Instance Profile is its own .pm-panel now, sibling to the Facts
@@ -249,16 +245,16 @@
        the nesting is obvious without another level of card chrome. */
     #rwRoot .rw-evidence {
         margin-top: 12px; padding-top: 10px;
-        border-top: 1px dashed var(--grac-line, #e2e7f0);
+        border-top: 1px dashed var(--border);
     }
     #rwRoot .rw-evidence h4 {
         margin: 0 0 4px; font-size: 12px; text-transform: uppercase;
-        letter-spacing: .04em; color: var(--grac-muted, #758095);
+        letter-spacing: .04em; color: var(--fg-muted);
     }
     #rwRoot .rw-evidence-row {
-        border-left: 2px solid #d97706; padding: 8px 0 8px 10px; margin-top: 8px;
+        border-left: 2px solid var(--warning-600); padding: 8px 0 8px 10px; margin-top: 8px;
     }
-    #rwRoot .rw-evidence-row.done { border-left-color: #16a34a; }
+    #rwRoot .rw-evidence-row.done { border-left-color: var(--success-600); }
     /* Migration 334. An evidence row the operator can fill in BEFORE the
        obligation is adopted. Its practice_instance_evidence row does not
        exist yet -- it is created by the same Save that adopts the
@@ -278,7 +274,13 @@
     #rwRoot .rw-evidence .rw-fields {
         grid-template-columns: repeat(auto-fill, minmax(220px, 360px));
     }
-    #rwRoot .rw-note { font-size: 11px; color: var(--grac-muted, #758095); }
+    #rwRoot .rw-note { font-size: 11px; color: var(--fg-muted); }
+    /* Dependencies table (2026-09-28): the Applicability select uses the
+       shared .pm-input control at the 40px height of the .pm-checkcombo
+       pickers beside it, and every cell centres on that one line, so a
+       row reads as one form row. */
+    #rwRoot .rw-dep-table td { vertical-align: middle; }
+    #rwRoot .rw-dep-table select[data-dep-tick].pm-input { height: 40px; margin-top: 0; }
     /* Migration 306. The published remark sits between the evidence head
        and its input grid, so it needs its own margins -- .rw-note carries
        none, and against the head the sentence read as part of the title.
@@ -287,11 +289,11 @@
     #rwRoot .rw-evidence-remark {
         margin: 0 0 8px; line-height: 1.45; white-space: pre-wrap;
     }
-    #rwRoot .rw-warn { color: #b45309; }
-    #rwRoot .rw-ok   { color: #166534; }
+    #rwRoot .rw-warn { color: var(--warning-700); }
+    #rwRoot .rw-ok   { color: var(--success-700); }
     #rwRoot .rw-sticky {
-        position: sticky; bottom: 0; background: #fff; padding: 10px 0;
-        border-top: 1px solid var(--grac-line, #e2e7f0); display: flex; gap: 8px; align-items: center;
+        position: sticky; bottom: 0; background: var(--bg-surface); padding: 10px 0;
+        border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center;
     }
 </style>
 
@@ -301,23 +303,24 @@
         <h1 id="rwHeading">Operationalize</h1>
         <p id="rwSubheading">Loading...</p>
     </div>
-    <div>
-        @* Migration 222. Migration 139 reserved retirement for the Practice
-           Instances screen -- "Retiring an instance stays an explicit act" --
-           which is the last thing that screen was needed for. It is an act,
-           not a field, so it sits with the page actions rather than in the
-           profile box, and it confirms before it fires. *@
-        <button class="pm-button ghost" id="rwRetireBtn" type="button" hidden>
-            <i class="fa-solid fa-box-archive"></i> Retire instance
+    @*
+        Actions (2026-10-03) -- the separate Retire instance / Restore
+        instance buttons (migrations 222 / 287) are folded into one
+        "Actions" menu, the same button and menu as Gap / Task / Exception
+        / Practice View (Shared/page-actions-menu.js). It offers the
+        Operationalize grid row menu's items for this instance, less the
+        mode already open: Operationalize on the read-only view, View on
+        the editable workspace, and Retire instance or Restore instance --
+        exactly one, by status, on the same profileEditable gate the two
+        buttons had. Retire / Restore still confirm and ask for a reason
+        before they fire (retireInstance / restoreInstance, unchanged).
+    *@
+    <div style="display:flex; gap:8px;">
+        <button type="button" class="pm-button" id="rwActionsBtn" aria-haspopup="true" aria-expanded="false" hidden>
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
         </button>
-        @* 287. The other half of the door. Retire was one-way until now:
-           a retired instance dropped out of every list and nothing could
-           bring it back. Exactly one of these two is ever visible, so
-           the action area does not grow. *@
-        <button class="pm-button ghost" id="rwRestoreBtn" type="button" hidden>
-            <i class="fa-solid fa-box-open"></i> Restore instance
-        </button>
-        <a class="pm-button ghost" id="rwBackBtn" href="#"><i class="fa-solid fa-arrow-left"></i> Back to Resolve</a>
+        <a class="pm-button ghost" id="rwBackBtn" href="#"><i class="fa-solid fa-arrow-left"></i> Back to Operationalize</a>
     </div>
 </div>
 
@@ -338,7 +341,7 @@
     <div class="pm-empty">
         <i class="fa-solid fa-link pm-empty-icon" aria-hidden="true"></i>
         <h2 id="rwUnavailableTitle">This practice instance could not be opened.</h2>
-        <p id="rwUnavailableBody">Open it from the Resolve list.</p>
+        <p id="rwUnavailableBody">Open it from the Operationalize list.</p>
     </div>
 </section>
 
@@ -399,9 +402,6 @@
                     <option value="Medium">Medium</option>
                     <option value="Low">Low</option>
                 </select>
-            </label></div>
-            <div><label>Business function
-                <select id="rwBusinessFunction"><option value="">Not set</option></select>
             </label></div>
             <div id="rwOwnerField" hidden><label>Owner
                 <select id="rwOwner"><option value="">Not set</option></select>
@@ -534,6 +534,7 @@
 *@
 <partial name="Partials/_obligation-form-dialog" />
 <script src="~/js/Shared/obligation-form.js" asp-append-version="true"></script>
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
 
 <script>
 (function () {
@@ -558,10 +559,11 @@
     let functionalEmployees = [], functionalOwnerIds = null;
     let functionalOwnersFetch = null;
     // Migration 222. isAdmin decides whether the Owner control appears;
-    // businessFunctions and dependencyTypes back the profile and category
-    // editors. All three default to "nothing", so a database that has not
-    // run 222 simply leaves those editors hidden.
-    let isAdmin = false, businessFunctions = [], dependencyTypes = [];
+    // dependencyTypes backs the category editor. Both default to
+    // "nothing", so a database that has not run 222 simply leaves those
+    // editors hidden. (Business function left the profile on 2026-10-03:
+    // it is recorded as a Business Function dependency instead.)
+    let isAdmin = false, dependencyTypes = [];
     // Migration 226. Responsibility and Approval authority are chosen from
     // the organisation's own Role Master rather than typed, so the same
     // role is not recorded under five spellings.
@@ -624,7 +626,7 @@
         document.getElementById('rwBackBtn').href = U('/Practice/Index/resolve');
         if (!instanceId) {
             return unavailable('No practice instance was identified in the link.',
-                               'Open it from the Resolve list.');
+                               'Open it from the Operationalize list.');
         }
 
         // Read-only mode: mark rwRoot so a stylesheet hides every action
@@ -697,8 +699,7 @@
         // in one action, so a separate "Save categories" button no longer
         // has anything to save.
         document.getElementById('rwDepSaveAll').addEventListener('click', saveAllDependencies);
-        document.getElementById('rwRetireBtn').addEventListener('click', retireInstance);
-        document.getElementById('rwRestoreBtn').addEventListener('click', restoreInstance);
+        window.gracPageActions.attach('rwActionsBtn', actionItems);
         document.getElementById('rwAddObligation').addEventListener('click', function () { openLocalForm(null); });
         // Every other control of the add/edit obligation modal -- Cancel,
         // Close, Esc, Save, the Type cascade, the Assurance type cascade,
@@ -852,14 +853,6 @@
             deriveFunctionalEmployees();
             ensureFunctionalOwners();
 
-            // Business functions are organization-scoped master data, so
-            // the same filter applies for the same reason -- offering
-            // another organization's function would be refused by the
-            // procedure (52676) after the user had already picked it.
-            businessFunctions = orgId
-                ? pick('business-functions').filter(b => !b.organizationId || b.organizationId === String(orgId))
-                : [];
-
             // Role Master, organisation-scoped for the same reason as the
             // two above. The option VALUE is the role name, not the id:
             // practice_instance_obligation is an adoption snapshot -- it
@@ -996,8 +989,10 @@
     }
 
     // ---------- instance profile  (migration 222) ---------------------
-    // Practice type, criticality, business function and -- for an admin
-    // only -- the owner. The four the Practice Instance form was the sole
+    // Practice type, criticality and -- for an admin only -- the owner.
+    // Business function is no longer edited here (2026-10-03): the
+    // Dependencies panel's 'Business Function' category (386) already
+    // records it, and two inputs for one fact drift apart. The four the Practice Instance form was the sole
     // home for; see docs/practice-instance-form-slimming.md.
     //
     // The whole box stays hidden until the API says migration 222 is
@@ -1017,10 +1012,6 @@
 
         document.getElementById('rwPracticeType').value = F(instance, 'assuranceMode') || '';
         document.getElementById('rwCriticality').value  = F(instance, 'criticality')   || '';
-
-        const bfId = F(instance, 'businessFunctionId');
-        document.getElementById('rwBusinessFunction').innerHTML =
-            options(businessFunctions, bfId ? String(bfId) : '', 'Not set');
 
         // Owner is admin-only: every Resolve procedure scopes a non-admin
         // to the instances they own, so reassigning your own instance
@@ -1064,7 +1055,9 @@
                     practiceInstanceId: instanceId,
                     assuranceMode:      read('rwPracticeType'),
                     criticality:        read('rwCriticality'),
-                    businessFunctionId: read('rwBusinessFunction') ? Number(read('rwBusinessFunction')) : null,
+                    // businessFunctionId not sent: NULL is COALESCEd by
+                    // sp_resolve_instance_profile_save (222), so a value
+                    // stored before the field was removed is kept.
                     primaryOwnerId:     ownerId ? Number(ownerId) : null
                 })
             });
@@ -1090,21 +1083,38 @@
     // not a delete: practice_instance_id is a foreign key in roughly
     // twenty tables, so the row stays and its status changes.
     function renderRetire() {
-        const btn     = document.getElementById('rwRetireBtn');
-        const restore = document.getElementById('rwRestoreBtn');
         const isActive = String(F(instance, 'status') || '') === 'Active';
-        const may      = profileAvailable();
-        // Same availability test as the profile box, plus: an instance
-        // that is already retired has nothing to retire -- and one that
-        // is active has nothing to restore. Exactly one shows. (287)
-        btn.hidden     = !may || !isActive;
-        restore.hidden = !may ||  isActive;
+        document.getElementById('rwActionsBtn').hidden = false;
 
         // A retired instance is still fully browsable -- that is the
         // point of 287 -- so the banner explains the state rather than
         // the page pretending nothing is different.
         const banner = document.getElementById('rwRetiredBanner');
         if (banner) banner.hidden = isActive;
+    }
+
+    // Actions menu items (2026-10-03). Same items as the Operationalize
+    // grid's row menu, less the mode already open. Retire / Restore keep
+    // the availability rule the two heading buttons had: the profile box's
+    // test (profileEditable), plus an active instance can only be retired
+    // and a retired one only restored -- exactly one is offered. (287)
+    function actionItems() {
+        if (!instance) return [];
+        const items = [];
+        const base = U('/Practice/Index/resolve-workspace')
+            + '?instanceId=' + encodeURIComponent(instanceId)
+            + (orgId ? '&organizationId=' + encodeURIComponent(orgId) : '');
+        if (readOnlyView) items.push({ icon: 'fa-link', label: 'Operationalize',
+                                       run: function () { window.location.assign(base); } });
+        else              items.push({ icon: 'fa-eye',  label: 'View',
+                                       run: function () { window.location.assign(base + '&mode=view'); } });
+        if (profileAvailable()) {
+            const isActive = String(F(instance, 'status') || '') === 'Active';
+            items.push(isActive
+                ? { icon: 'fa-box-archive', label: 'Retire instance',  run: retireInstance }
+                : { icon: 'fa-box-open',    label: 'Restore instance', run: restoreInstance });
+        }
+        return items;
     }
 
     // Reason is asked for in the same dialog that confirms the act
@@ -1122,7 +1132,7 @@
                   requiredNote: 'A reason for retiring is required.' });
         if (remark === null) return;
 
-        const btn = document.getElementById('rwRetireBtn');
+        const btn = document.getElementById('rwActionsBtn');
         btn.disabled = true;
         try {
             const r = await fetch(U('/practice/api/workflow/resolve/retire'), {
@@ -1162,7 +1172,7 @@
                   requiredNote: 'A reason for restoring is required.' });
         if (remark === null) return;
 
-        const btn = document.getElementById('rwRestoreBtn');
+        const btn = document.getElementById('rwActionsBtn');
         btn.disabled = true;
         try {
             const r = await fetch(U('/practice/api/workflow/resolve/restore'), {
@@ -1201,8 +1211,13 @@
             dependencyTypes = rowsOf(await r.json());
             // The catalogue arrived after the table's first paint --
             // re-render so any row that only knew the category by name
-            // (a legacy resolution) picks up its id.
-            if (Array.isArray(dependencyCategories) && dependencyCategories.length) renderDependencyTable();
+            // (a legacy resolution) picks up its id. Keyed on the
+            // dependencies load having finished, NOT on it returning rows:
+            // an instance with no declared categories yet (nothing in
+            // practice_instance_dependency) returns an empty list, and
+            // gating on .length left every row stuck on "not in the
+            // catalogue" for exactly those instances.
+            if (dependenciesLoaded) renderDependencyTable();
         } catch (_) { /* the table quietly falls back to the resolutions endpoint */ }
     }
 
@@ -1854,6 +1869,9 @@
                     ? '<i class="fa-solid fa-building-columns" title="Added by this organisation"></i>'
                     : '<input type="checkbox" data-adopt="' + esc(id) + '"' + (adoptedF ? ' checked' : '') + '>')
                 + '<span class="rw-card-title">' + esc(F(o, 'obligationName'))
+                  // Migration 396: approved repository retirement -- flag only.
+                  + (String(F(o, 'repositoryLifecycleStatus') || '').toLowerCase() === 'retired'
+                      ? ' <span class="pm-badge" title="Control Management retired this obligation; it stays adopted here.">Retired in repository</span>' : '')
                   + '<small>' + esc(F(o, 'typeName') || F(o, 'typeCode') || '')
                   + (F(o, 'frameworkRelease') ? '  |  ' + esc(F(o, 'frameworkRelease')) : '')
                   + (local ? '  |  Added by this organisation' : '  |  ' + evNote) + '</small></span>'
@@ -1938,8 +1956,12 @@
                   // this is published, it is always an organisation-side
                   // answer, and offering "As published" as a fallback was
                   // pointing at data that does not exist.
-                  + field(id, 'responsibility', 'Owner',
-                          options(roles, val(o, 'responsibility'), 'Not set'), true)
+                  // Migration 412: the Owner is an EMPLOYEE -- a Functional
+                  // User, the same list the Instance Owner picker offers --
+                  // no longer a Role Master name. Stored as
+                  // owner_employee_id; the procedure writes the display
+                  // name (responsibility) from the employee.
+                  + field(id, 'ownerEmployeeId', 'Owner', obligationOwnerOptions(o), true)
                   // Approval authority is hidden for now (temporary). The
                   // field, its save-path plumbing and its store remain
                   // untouched -- the control just does not render.
@@ -2505,10 +2527,34 @@
     // Gathered at open time, not captured once: loadLookups fills these
     // arrays asynchronously, and a snapshot taken at page load would hand
     // the form an empty Owner list.
+    // Migration 412: the obligation Owner picker -- this organization's
+    // Functional Users (functionalEmployees, the Instance Owner list). A
+    // current owner who is no longer a Functional User stays listed so the
+    // stored value is not silently dropped; a legacy ROLE name (stored
+    // before 412, no owner id) is shown as a disabled placeholder until an
+    // employee is picked.
+    function obligationOwnerOptions(o) {
+        const current = val(o, 'ownerEmployeeId');
+        const currentText = current === null || current === undefined ? '' : String(current);
+        let list = functionalEmployees;
+        if (currentText && !list.some(e => String(e.value) === currentText)) {
+            const hit = employees.find(e => String(e.value) === currentText);
+            if (hit) list = list.concat([hit]);
+        }
+        const legacy = !currentText ? String(F(o, 'responsibility') || '').trim() : '';
+        const legacyOption = legacy
+            ? '<option value="" selected disabled>' + esc(legacy) + ' (role - pick an employee)</option>'
+            : '';
+        return legacyOption + options(list, currentText, 'Not set');
+    }
+
     function obligationFormLookups() {
         return {
             frequencies:            frequencies,
             roles:                  roles,
+            // Migration 412: the organisation-defined obligation form's
+            // Owner picker (Functional Users of this organization).
+            owners:                 functionalEmployees,
             assuranceTypes:         assuranceTypes,
             implementationStatuses: implementationStatuses,
             evidenceTypes:          evidenceTypes,
@@ -2595,6 +2641,15 @@
     // (used by nothing on screen after 245, kept for reference) and the
     // new saveOneObligation share exactly one place where the payload
     // shape lives.
+    // Migration 412: ownerEmployeeId for a save payload. Only an EDITED
+    // Owner is sent -- an id sets it, "Not set" sends 0 (clear) -- so a
+    // save that did not touch the Owner never rewrites it.
+    function ownerPayload(o) {
+        if (!o._edit || !('ownerEmployeeId' in o._edit)) return null;
+        const v = o._edit.ownerEmployeeId;
+        return (v === null || v === undefined || v === '') ? 0 : Number(v);
+    }
+
     function buildObligationPayloadRow(o) {
         const num = v => (v === null || v === undefined || v === '') ? null : Number(v);
         return {
@@ -2605,6 +2660,10 @@
             assuranceFrequencyId: num(val(o, 'assuranceFrequencyId')),
             assuranceFrequency:   labelOf(frequencies, val(o, 'assuranceFrequencyId')),
             responsibility:       val(o, 'responsibility') || null,
+            // Migration 412: owner employee. Sent only when the Owner
+            // dropdown was changed: an id sets it, "Not set" (0) clears it,
+            // untouched (null) leaves the stored owner alone.
+            ownerEmployeeId:      ownerPayload(o),
             approvalAuthority:    val(o, 'approvalAuthority') || null,
             assuranceType:        val(o, 'assuranceType') || null,
             // Migration 336-338: first occurrence of the calendar schedule
@@ -2654,6 +2713,7 @@
             executionFrequencyId:  num(val(o, 'executionFrequencyId')),
             executionFrequency:    labelOf(frequencies, val(o, 'executionFrequencyId')),
             responsibility:        val(o, 'responsibility') || null,
+            ownerEmployeeId:       ownerPayload(o),   // 412
             approvalAuthority:     val(o, 'approvalAuthority') || null,
             assuranceType:         val(o, 'assuranceType') || null,
             implementationStatusId: num(val(o, 'implementationStatusId')),
@@ -2858,6 +2918,12 @@
 
     // ---------- 3. Dependencies --------------------------------------
     let dependencyCategories = [], dependencyResolutions = [];
+    // True once loadDependencies has answered; lets the catalogue load
+    // (loadDependencyTypes) know the table has painted and must repaint.
+    let dependenciesLoaded = false;
+    // Bumped per renderDependencyTable call; an older render that is
+    // still awaiting its object lists yields to the newer one.
+    let depRenderSeq = 0;
 
     async function loadDependencies() {
         const bodyEl = document.getElementById('rwDepTableBody');
@@ -2874,6 +2940,7 @@
             const body = await r.json();
             dependencyCategories  = body.data || body.Data || [];
             dependencyResolutions = body.resolutions || body.Resolutions || [];
+            dependenciesLoaded = true;
             renderDependencyTable();
         } catch (err) {
             console.error('resolve-workspace: dependencies failed', err);
@@ -2892,7 +2959,19 @@
     // Names match dependency_type_master.dependency_type_name exactly.
     // Person maps to the organization_employee register through
     // dependency_type_source_config, so no on-screen rename is needed.
-    const DEP_TABLE_CATEGORIES = ['Asset', 'Vendor', 'Person', 'Team', 'Committee'];
+    // 'Location' (type from migration 385) and 'Business Function' (386)
+    // added per sir, 2026-09-27 -- the same categories Risk -> Impact
+    // Details offers. Department (385) has no row of its own: exactly as
+    // in Impact Details, it is the multi-select Department picker INSIDE
+    // the Person row (see PERSON_DEPT_CATEGORY below). The rest of this
+    // table is generic by category id; save goes through
+    // sp_resolve_dependency_category_sync, which accepts any active type.
+    const DEP_TABLE_CATEGORIES = ['Asset', 'Vendor', 'Person', 'Team', 'Committee', 'Location', 'Business Function'];
+    // Person row + Department picker (2026-09-27, same rule as Risk ->
+    // Impact Details): departments narrow the Person list; with NO person
+    // ticked Save stores the DEPARTMENTS (Department category), with any
+    // person ticked it stores the PERSONS and clears the departments.
+    const PERSON_DEPT_CATEGORY = 'Department';
 
     // Cache of loaded object lists per category id -- keeps re-renders
     // and re-ticks from re-hitting dependency-options, which is a
@@ -2918,12 +2997,15 @@
     // the same line -- keeping the row's vertical footprint at one line
     // was the reason the filters were factored out.
     function buildAssetFilterCells(tax) {
+        // The control's own text names it ("All Asset Category"), so no
+        // separate label sits above it (2026-09-28). data-checkcombo-empty
+        // is the text shown whenever nothing is ticked.
         const bucket = (label, dataAttr, items) =>
               '<div class="rw-asset-filter" style="flex:1 1 0;min-width:0">'
-            + '<label class="rw-note" style="display:block;margin-bottom:2px">' + esc(label) + '</label>'
-            + '<div class="pm-field pm-checkcombo" data-checkcombo ' + dataAttr + ' style="width:100%">'
-            + '<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger>'
-            +   '<span data-checkcombo-text>All</span>'
+            + '<div class="pm-field pm-checkcombo" data-checkcombo ' + dataAttr
+            +   ' data-checkcombo-empty="' + esc(label) + '" style="width:100%">'
+            + '<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger title="' + esc(label) + '">'
+            +   '<span data-checkcombo-text>' + esc(label) + '</span>'
             +   '<span class="pm-checkcombo-caret" aria-hidden="true"></span>'
             + '</button>'
             + '<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>'
@@ -2938,9 +3020,9 @@
             + '</div>'
             + '</div>';
 
-        return bucket('Asset category',     'data-asset-cat-filter',    tax.cats)
-             + bucket('Asset sub-category', 'data-asset-subcat-filter', tax.subs)
-             + bucket('Asset type',         'data-asset-type-filter',   tax.types);
+        return bucket('All Asset Category',     'data-asset-cat-filter',    tax.cats)
+             + bucket('All Asset Sub Category', 'data-asset-subcat-filter', tax.subs)
+             + bucket('All Asset Type',         'data-asset-type-filter',   tax.types);
     }
 
     async function loadAssetTaxonomy() {
@@ -3005,7 +3087,10 @@
                     roleNames:         x.RoleNames ?? x.roleNames ?? null,
                     assetCategoryId:   x.AssetCategoryId ?? x.assetCategoryId ?? null,
                     assetSubcategoryId:x.AssetSubcategoryId ?? x.assetSubcategoryId ?? null,
-                    assetTypeId:       x.AssetTypeId ?? x.assetTypeId ?? null
+                    assetTypeId:       x.AssetTypeId ?? x.assetTypeId ?? null,
+                    // Person options carry the employee's department so the
+                    // Person row's Department picker can narrow the list.
+                    departmentId:      x.DepartmentId ?? x.departmentId ?? null
                 }))
                 .filter(x => x.id && x.name);
             dependencyObjectCache.set(key, list);
@@ -3032,10 +3117,44 @@
     // trigger/menu/search/options/chip styling). Only the delegated
     // trigger/change handlers are ours -- practice.js binds its own to
     // fieldsHost, which this partial does not live inside.
+    // Department picker cell for the Person row (2026-09-27). Its ticks
+    // ARE saved (Department category) -- see saveAllDependencies -- and
+    // they also narrow the Persons picker beside it (wireCheckcombo).
+    function buildDepartmentPickerCell(dept, enabled) {
+        const selected = new Set(dept.mine.map(x => Number(F(x, 'resolvedDependencyId'))));
+        const labels   = dept.list.filter(o => selected.has(o.id)).map(o => o.name).join(', ');
+        return '<div class="rw-dep-dept" style="flex:1 1 0;min-width:0">'
+            +   '<div class="pm-field pm-checkcombo" data-checkcombo data-person-dept-filter'
+            +     ' data-checkcombo-empty="All Department" style="width:100%">'
+            +     '<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger title="Department"' + (enabled ? '' : ' disabled') + '>'
+            +       '<span data-checkcombo-text>' + esc(labels || 'All Department') + '</span>'
+            +       '<span class="pm-checkcombo-caret" aria-hidden="true"></span>'
+            +     '</button>'
+            +     '<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>'
+            +       '<input class="pm-checkcombo-search" type="search" placeholder="Search..." data-checkcombo-search>'
+            +       '<div class="pm-checkcombo-options">'
+            +         (dept.list.length ? dept.list.map(o =>
+                        '<label data-checkcombo-option><input type="checkbox" value="' + esc(String(o.id)) + '"'
+                        + ' data-object-name="' + esc(o.name) + '"' + (selected.has(o.id) ? ' checked' : '') + '> '
+                        + '<span>' + esc(o.name) + '</span></label>').join('')
+                          : '<p class="rw-note" style="margin:6px">No active departments.</p>')
+            +       '</div>'
+            +     '</div>'
+            +   '</div>'
+            + '</div>';
+    }
+
+    // Text a combo shows with nothing ticked: its data-checkcombo-empty
+    // ("All Asset Category", "All Department", "All Users", ...), else the
+    // generic "Select...".
+    function comboEmptyText(combo) {
+        return (combo && combo.getAttribute('data-checkcombo-empty')) || 'Select...';
+    }
+
     function comboMenuText(combo) {
         const labels = [...combo.querySelectorAll('input[type="checkbox"]:checked')]
             .map(cb => cb.closest('label').querySelector('span').textContent.trim());
-        return labels.join(', ') || 'Select...';
+        return labels.join(', ') || comboEmptyText(combo);
     }
 
     // Wires every checkcombo in the row -- the object picker AND, on the
@@ -3062,6 +3181,7 @@
             combo.addEventListener('change', function (ev) {
                 const cb = ev.target.closest('input[type="checkbox"]');
                 if (!cb) return;
+                // Nothing ticked -> the combo's own empty text.
                 combo.querySelector('[data-checkcombo-text]').textContent = comboMenuText(combo);
             });
             if (search) search.addEventListener('input', function () {
@@ -3075,6 +3195,30 @@
                 if (!combo.contains(ev.target)) menu.hidden = true;
             });
         });
+
+        // Person row (2026-09-27): ticked departments narrow the Persons
+        // picker (a person already ticked stays visible); with departments
+        // ticked and no person ticked the Persons trigger reads "All" --
+        // Save will store the departments themselves.
+        const deptFilter = row.querySelector('[data-person-dept-filter]');
+        if (deptFilter) {
+            const personPicker = row.querySelector('.rw-dep-object [data-checkcombo]');
+            const applyDept = () => {
+                if (!personPicker) return;
+                const depts = new Set([...deptFilter.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value));
+                personPicker.querySelectorAll('[data-checkcombo-option]').forEach(function (opt) {
+                    const box = opt.querySelector('input[type="checkbox"]');
+                    opt.hidden = !(!depts.size || depts.has(opt.dataset.personDepartment || '') || (box && box.checked));
+                });
+                const t = comboMenuText(personPicker);
+                personPicker.querySelector('[data-checkcombo-text]').textContent =
+                    (t === comboEmptyText(personPicker) && depts.size) ? 'All Users (selected departments)' : t;
+            };
+            deptFilter.addEventListener('change', applyDept);
+            if (personPicker) personPicker.addEventListener('change', applyDept);
+            applyDept();
+            return;
+        }
 
         // Asset row: the three filter checkcombos narrow the asset
         // picker. Selecting nothing on a filter means "no restriction".
@@ -3123,10 +3267,19 @@
             // Filter combos are left alone (their state is not part of
             // what gets saved, and losing filters after a toggle would
             // be pointless annoyance).
+            // The Person row's Department picker is data too (2026-09-27):
+            // No clears it as well, and it reads "All" again.
+            const deptPick = row.querySelector('[data-person-dept-filter]');
+            if (!on && deptPick) {
+                deptPick.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
+                const dt = deptPick.querySelector('[data-checkcombo-text]');
+                if (dt) dt.textContent = comboEmptyText(deptPick);
+                deptPick.dispatchEvent(new Event('change', { bubbles: false }));
+            }
             if (!on && picker) {
                 picker.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => cb.checked = false);
                 const txt = picker.querySelector('[data-checkcombo-text]');
-                if (txt) txt.textContent = 'Select...';
+                if (txt) txt.textContent = comboEmptyText(picker);
                 const menu = picker.querySelector('[data-checkcombo-menu]');
                 if (menu) menu.hidden = true;
             }
@@ -3144,6 +3297,7 @@
     async function renderDependencyTable() {
         const bodyEl = document.getElementById('rwDepTableBody');
         if (!bodyEl) return;
+        const renderSeq = ++depRenderSeq;
 
         // Load the object lists for every visible category up front so
         // each row can present a fully populated picker. The caches
@@ -3156,14 +3310,31 @@
                 (typeId !== null && Number(F(r, 'dependencyTypeId')) === typeId)
                 || String(F(r, 'dependencyCategory')).trim().toLowerCase() === categoryName.toLowerCase());
             const list   = typeId ? await loadDependencyObjectsFor(typeId) : [];
-            return { categoryName, typeId, mine, list };
+            // Person row hosts the Department picker when the Department
+            // type exists on this database (migration 385).
+            let dept = null;
+            if (categoryName === 'Person') {
+                const deptTypeId = findCategoryId(PERSON_DEPT_CATEGORY);
+                if (deptTypeId !== null) {
+                    dept = {
+                        typeId: deptTypeId,
+                        mine:   dependencyResolutions.filter(x => Number(F(x, 'dependencyTypeId')) === deptTypeId),
+                        list:   await loadDependencyObjectsFor(deptTypeId)
+                    };
+                }
+            }
+            return { categoryName, typeId, mine, list, dept };
         }));
         const assetTaxonomy = await taxonomyPromise;
+        // A newer render started while this one awaited -- let it paint.
+        if (renderSeq !== depRenderSeq) return;
 
         let ticked = 0;
         bodyEl.innerHTML = rowData.map(function (r) {
-            const { categoryName, typeId, mine, list } = r;
-            const isTicked    = mine.length > 0;
+            const { categoryName, typeId, mine, list, dept } = r;
+            // A Person row counts as answered-Yes when it stores persons
+            // OR departments.
+            const isTicked    = mine.length > 0 || !!(dept && dept.mine.length);
             if (isTicked) ticked++;
             const selectedIds = new Set(mine.map(x => Number(F(x, 'resolvedDependencyId'))));
             const isAsset     = categoryName === 'Asset';
@@ -3186,6 +3357,7 @@
                 + (o.assetCategoryId != null ? ' data-asset-category="' + esc(String(o.assetCategoryId)) + '"' : '')
                 + (o.assetSubcategoryId != null ? ' data-asset-subcategory="' + esc(String(o.assetSubcategoryId)) + '"' : '')
                 + (o.assetTypeId != null ? ' data-asset-type="' + esc(String(o.assetTypeId)) + '"' : '')
+                + (o.departmentId != null ? ' data-person-department="' + esc(String(o.departmentId)) + '"' : '')
                 + '><input type="checkbox" value="' + esc(String(o.id)) + '"'
                 // Bare name: saveAllDependencies persists this attribute.
                 + ' data-object-name="' + esc(o.name) + '"'
@@ -3195,18 +3367,20 @@
             // The main picker checkcombo (wrapped in .rw-dep-object cell
             // so wireApplyTick / saveAllDependencies can select it apart
             // from the filter combos on the Asset row).
+            // Nothing ticked: the Asset picker beside the three filters
+            // reads "Select Assets" and the Person picker "All Users"
+            // (2026-09-28) -- the text names the control, so no label
+            // sits above it. Other rows keep "Select..." under the
+            // "Objects" column header.
+            const objectEmptyText = isAsset ? 'Select Assets'
+                                  : (categoryName === 'Person' ? 'All Users' : 'Select...');
             const objectComboHtml =
                   '<div class="rw-dep-object" style="flex:2 1 0;min-width:0">'
-                // The "Objects" column header already names this cell, so the
-                // per-picker label is redundant on a plain row (Person / Team /
-                // Committee / Vendor). It is kept ONLY on the Asset row, where
-                // the picker shares one flex row with the Category / Subcategory
-                // / Type filter combos and the label is what tells them apart.
-                +   (isAsset ? '<label class="rw-note" style="display:block;margin-bottom:2px">Objects</label>' : '')
-                +   '<div class="pm-field pm-checkcombo" data-checkcombo style="width:100%">'
+                +   '<div class="pm-field pm-checkcombo" data-checkcombo'
+                +     ' data-checkcombo-empty="' + esc(objectEmptyText) + '" style="width:100%">'
                 +     '<button class="pm-checkcombo-trigger" type="button"'
                 +       ' data-checkcombo-trigger' + (isTicked ? '' : ' disabled') + '>'
-                +       '<span data-checkcombo-text>' + esc(selectedLabels || 'Select...') + '</span>'
+                +       '<span data-checkcombo-text>' + esc(selectedLabels || objectEmptyText) + '</span>'
                 +       '<span class="pm-checkcombo-caret" aria-hidden="true"></span>'
                 +     '</button>'
                 +     '<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>'
@@ -3234,11 +3408,18 @@
                         // never breaks into two lines; each cell has
                         // flex:1/2 with min-width:0 so long labels do not
                         // push the row past its container.
-                        ? '<div class="rw-asset-row" style="display:flex;gap:8px;align-items:flex-end;width:100%">'
+                        ? '<div class="rw-asset-row" style="display:flex;gap:8px;align-items:center;width:100%">'
                               + assetFilterCells
                               + objectComboHtml
                           + '</div>'
-                        : objectComboHtml)
+                        : (dept
+                            // Person: Department picker + Persons picker on
+                            // ONE flex row, the same layout as the Asset row.
+                            ? '<div class="rw-asset-row rw-person-row" style="display:flex;gap:8px;align-items:center;width:100%">'
+                                  + buildDepartmentPickerCell(dept, isTicked)
+                                  + objectComboHtml
+                              + '</div>'
+                            : objectComboHtml))
                     : '<div class="pm-field-empty">No active ' + esc(categoryName.toLowerCase())
                       + ' records for this organization yet.</div>');
 
@@ -3264,12 +3445,17 @@
             const applyValue = isTicked ? 'Yes' : '';
             return '<tr class="rw-dep-row"'
                  + ' data-category-name="' + esc(categoryName) + '"'
-                 + ' data-category-id="' + esc(typeId ?? '') + '">'
-                 + '<td><strong>' + esc(categoryName) + '</strong>'
-                 +   (mine.length ? ' <span class="rw-note">(' + mine.length + ')</span>' : '')
+                 + ' data-category-id="' + esc(typeId ?? '') + '"'
+                 + (dept ? ' data-dept-type-id="' + esc(String(dept.typeId)) + '"' : '') + '>'
+                 + '<td>' + (dept
+                        ? '<strong>' + esc(PERSON_DEPT_CATEGORY) + ' / ' + esc(categoryName) + '</strong>'
+                          + ((dept.mine.length || mine.length)
+                              ? ' <span class="rw-note">(' + dept.mine.length + ' / ' + mine.length + ')</span>' : '')
+                        : '<strong>' + esc(categoryName) + '</strong>'
+                          + (mine.length ? ' <span class="rw-note">(' + mine.length + ')</span>' : ''))
                  + '</td>'
                  + '<td>'
-                 +   '<select data-dep-tick' + applyDisabledAttr + ' style="width:100%">'
+                 +   '<select class="pm-input" data-dep-tick' + applyDisabledAttr + ' style="width:100%">'
                  +     '<option value=""' + (applyValue === ''    ? ' selected' : '') + '>Select</option>'
                  +     '<option value="Yes"' + (applyValue === 'Yes' ? ' selected' : '') + '>Yes</option>'
                  +     '<option value="No"' + (applyValue === 'No'  ? ' selected' : '') + '>No</option>'
@@ -3351,29 +3537,45 @@
             // as "retire whatever is stored for this category on this
             // instance".
             const isYes = tick && tick.value === 'Yes';
-            const objects = (isYes && combo)
-                ? [...combo.querySelectorAll('input[type="checkbox"]:checked')].map(cb => ({
+            const picked = c => c
+                ? [...c.querySelectorAll('input[type="checkbox"]:checked')].map(cb => ({
                     id:   Number(cb.value),
                     name: cb.getAttribute('data-object-name') || cb.closest('label').querySelector('span').textContent.trim()
                 }))
                 : [];
-            try {
-                const r = await fetch(U('/practice/api/workflow/resolve/dependency-category'), {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                    body: JSON.stringify({
-                        practiceInstanceId: instanceId,
-                        dependencyTypeId:   categoryId,
-                        objects:            objects
-                    })
-                });
-                if (!r.ok) {
-                    const b = await r.json().catch(() => ({}));
-                    failed.push(row.getAttribute('data-category-name') + ': ' + (b.error || ('HTTP ' + r.status)));
-                } else { ok++; }
-            } catch (err) {
-                failed.push(row.getAttribute('data-category-name') + ': network error');
+            let objects = isYes ? picked(combo) : [];
+
+            // One POST per category. The Person row also posts its
+            // Department category (2026-09-27): persons ticked -> persons
+            // saved, departments cleared; no person ticked -> departments
+            // saved, persons cleared (objects is already empty then).
+            const posts = [{ typeId: categoryId, objects: objects, label: row.getAttribute('data-category-name') }];
+            const deptTypeId = Number(row.getAttribute('data-dept-type-id')) || null;
+            if (deptTypeId) {
+                const deptObjects = (isYes && !objects.length)
+                    ? picked(row.querySelector('[data-person-dept-filter]')) : [];
+                posts.push({ typeId: deptTypeId, objects: deptObjects, label: PERSON_DEPT_CATEGORY });
+            }
+
+            for (const p of posts) {
+                try {
+                    const r = await fetch(U('/practice/api/workflow/resolve/dependency-category'), {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                        body: JSON.stringify({
+                            practiceInstanceId: instanceId,
+                            dependencyTypeId:   p.typeId,
+                            objects:            p.objects
+                        })
+                    });
+                    if (!r.ok) {
+                        const b = await r.json().catch(() => ({}));
+                        failed.push(p.label + ': ' + (b.error || ('HTTP ' + r.status)));
+                    } else { ok++; }
+                } catch (err) {
+                    failed.push(p.label + ': network error');
+                }
             }
         }
 
@@ -3386,7 +3588,7 @@
         syncDepSaveState();
         if (failed.length) {
             window.__wfCommon.setMessage('rwDependencyMessage',
-                'Saved ' + ok + ' of ' + rows.length + '. ' + failed.join('; '), 'error');
+                'Saved ' + ok + ' of ' + (ok + failed.length) + '. ' + failed.join('; '), 'error');
         } else {
             window.__wfCommon.setMessage('rwDependencyMessage',
                 'Saved ' + ok + ' categor' + (ok === 1 ? 'y' : 'ies') + '.', 'ok');

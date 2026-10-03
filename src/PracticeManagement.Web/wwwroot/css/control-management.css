@@ -1,21 +1,16 @@
-:root {
-  --grac-ink: #172033;
-  --grac-muted: #758095;
-  --grac-line: #e2e7f0;
-  --grac-blue: #2465ca;
-  --grac-soft: #f7f9fc;
-  --grac-hover: var(--grac-row-hover-bg, #eaf4ff);
-  --grac-danger: #b42318;
-}
+/* Palette (--grac-ink, --grac-muted, --grac-line, --grac-blue, --grac-soft,
+   --grac-hover, --grac-danger) now lives in grac-tokens.css as aliases of
+   the design-system tokens. Do not re-declare it here: this file loads
+   after grac-tokens.css and would override it. */
 
 body {
-  color: var(--grac-ink);
-  font-family: "Lato", "Segoe UI", Arial, sans-serif !important;
+  color: var(--fg-default);
+  font-family: var(--font-ui) !important;
   font-size: 13px;
 }
 
 .content-wrapper {
-  background: #f8f9fc;
+  background: var(--neutral-50);
 }
 
 .content {
@@ -24,17 +19,17 @@ body {
 
 .breadcrumb {
   background: transparent;
-  color: var(--grac-muted);
+  color: var(--fg-muted);
   font-size: 13px;
   padding: 0 0 0 10px;
 }
 
 .breadcrumb a {
-  color: var(--grac-blue);
+  color: var(--primary-600);
 }
 
 .user-panel .info {
-  color: #000;
+  color: var(--fg-strong);
   font-size: 14px;
   font-weight: 600;
   padding-top: 5px;
@@ -42,10 +37,10 @@ body {
 
 .page-heading {
   align-items: center;
-  background: #fff;
-  border: 1px solid var(--grac-line);
-  border-radius: 8px;
-  box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   display: flex;
   gap: 16px;
   justify-content: space-between;
@@ -54,7 +49,7 @@ body {
 }
 
 .eyebrow {
-  color: var(--grac-blue);
+  color: var(--primary-600);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 1.2px;
@@ -63,7 +58,7 @@ body {
 }
 
 .page-heading h1 {
-  color: var(--grac-ink);
+  color: var(--fg-default);
   font-size: 22px;
   font-weight: 750;
   line-height: 1.18;
@@ -72,7 +67,7 @@ body {
 
 .page-heading p,
 .panel p {
-  color: var(--grac-muted);
+  color: var(--fg-muted);
   font-size: 12px;
   margin: 0;
 }
@@ -95,10 +90,10 @@ body {
 
 .kpis article,
 .panel {
-  background: #fff;
-  border: 1px solid var(--grac-line);
-  border-radius: 8px;
-  box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
 }
 
 .kpis article {
@@ -107,12 +102,12 @@ body {
 
 .kpis span,
 .kpis small {
-  color: var(--grac-muted);
+  color: var(--fg-muted);
   display: block;
 }
 
 .kpis strong {
-  color: #183b72;
+  color: var(--primary-800);
   display: block;
   font-size: 26px;
   padding: 6px 0;
@@ -130,7 +125,7 @@ body {
 }
 
 .panel-heading h2 {
-  color: var(--grac-ink);
+  color: var(--fg-default);
   font-size: 16px;
   font-weight: 750;
   margin: 0 0 4px;
@@ -144,9 +139,9 @@ body {
 
 .area-card {
   align-items: center;
-  border: 1px solid var(--grac-line);
-  border-radius: 8px;
-  color: #25344e;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg-default);
   display: flex;
   gap: 12px;
   padding: 13px;
@@ -155,18 +150,18 @@ body {
 
 .area-card:hover {
   background: var(--grac-hover);
-  border-color: #8bb4f0;
-  color: #25344e;
+  border-color: var(--primary-300);
+  color: var(--fg-default);
   text-decoration: none;
 }
 
 .area-card i {
-  color: var(--grac-blue);
+  color: var(--primary-600);
   width: 20px;
 }
 
 .area-card span {
-  color: var(--grac-muted);
+  color: var(--fg-muted);
   display: block;
   font-size: 12px;
   margin-top: 3px;
@@ -174,10 +169,10 @@ body {
 
 .button {
   align-items: center;
-  background: #fff;
-  border: 1px solid #d3dae7;
-  border-radius: 7px;
-  color: #27344e;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--neutral-700);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
@@ -192,25 +187,25 @@ body {
 }
 
 .button:hover {
-  background: #f2f6ff;
-  color: var(--grac-blue);
+  background: var(--primary-50);
+  color: var(--primary-600);
   text-decoration: none;
 }
 
 .button.primary {
-  background: var(--grac-blue);
-  border-color: var(--grac-blue);
-  color: #fff;
+  background: var(--primary-500);
+  border-color: var(--primary-500);
+  color: var(--fg-on-dark);
 }
 
 .button.primary:hover {
-  background: #1f58b2;
-  color: #fff;
+  background: var(--primary-600);
+  color: var(--fg-on-dark);
 }
 
 .button.danger {
-  border-color: #f1c4c4;
-  color: var(--grac-danger);
+  border-color: var(--danger-200);
+  color: var(--danger-700);
 }
 
 .button:disabled {
@@ -230,10 +225,10 @@ body {
 input,
 select,
 textarea {
-  border: 1px solid #d5dce7;
-  border-radius: 7px;
-  color: var(--grac-ink);
-  font-family: "Lato", "Segoe UI", Arial, sans-serif;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--fg-default);
+  font-family: var(--font-ui);
   font-size: 13px;
 }
 
@@ -258,22 +253,22 @@ textarea {
 }
 
 .table-wrap {
-  border: 1px solid var(--grac-line);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   overflow: auto;
 }
 
 .table-wrap table {
   border-collapse: collapse;
-  color: #25344e;
+  color: var(--fg-default);
   font-size: 13px;
   width: 100%;
 }
 
 .table-wrap th {
-  background: var(--grac-soft);
-  border-bottom: 1px solid #e5e9f0;
-  color: #6a778d;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
   font-size: 12px;
   font-weight: 750;
   padding: 10px 11px;
@@ -282,7 +277,7 @@ textarea {
 }
 
 .table-wrap td {
-  border-bottom: 1px solid #edf0f5;
+  border-bottom: 1px solid var(--neutral-100);
   line-height: 1.25;
   padding: 10px 11px;
   vertical-align: middle;
@@ -298,7 +293,7 @@ textarea {
 }
 
 .table-wrap tbody tr:nth-child(even) td {
-  background: #fbfcff;
+  background: var(--neutral-50);
 }
 
 .table-wrap tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td {
@@ -313,15 +308,15 @@ textarea {
 }
 
 .empty {
-  color: var(--grac-muted);
+  color: var(--fg-muted);
   padding: 20px 10px;
   text-align: center;
 }
 
 .badge {
-  background: #e6f4ed;
+  background: var(--success-100);
   border-radius: 14px;
-  color: #187747;
+  color: var(--success-700);
   display: inline-block;
   font-size: 11px;
   font-weight: 700;
@@ -331,14 +326,14 @@ textarea {
 
 dialog {
   border: 0;
-  border-radius: 10px;
-  box-shadow: 0 20px 80px rgba(23, 32, 51, 0.27);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
   padding: 0;
   width: min(920px, 94vw);
 }
 
 dialog::backdrop {
-  background: rgba(15, 23, 42, 0.34);
+  background: var(--overlay);
 }
 
 dialog form {
@@ -354,14 +349,14 @@ dialog form {
 }
 
 .dialog-heading h2 {
-  color: var(--grac-ink);
+  color: var(--fg-default);
   font-size: 20px;
   font-weight: 750;
   margin: 0;
 }
 
 .dialog-heading p {
-  color: var(--grac-muted);
+  color: var(--fg-muted);
   font-size: 13px;
   margin: 4px 0 0;
 }
@@ -370,8 +365,8 @@ dialog form {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
-  color: #25344e;
+  border-radius: var(--radius-md);
+  color: var(--fg-default);
   cursor: pointer;
   display: inline-flex;
   font-size: 18px;
@@ -381,8 +376,8 @@ dialog form {
 }
 
 .icon-button:hover {
-  background: #eef4ff;
-  color: var(--grac-blue);
+  background: var(--primary-50);
+  color: var(--primary-600);
 }
 
 .form-grid {
@@ -392,7 +387,7 @@ dialog form {
 }
 
 .form-field {
-  color: #536077;
+  color: var(--fg-secondary);
   display: block;
   font-size: 13px;
   font-weight: 650;
@@ -417,20 +412,20 @@ dialog form {
 
 .required,
 .form-message {
-  color: var(--grac-danger);
+  color: var(--danger-700);
 }
 
 .form-message {
-  background: #fff2f0;
-  border-radius: 7px;
+  background: var(--danger-50);
+  border-radius: var(--radius-md);
   font-weight: 700;
   margin-bottom: 12px;
   padding: 10px;
 }
 
 .field-error {
-  border-color: #d92d20 !important;
-  box-shadow: 0 0 0 2px rgba(217, 45, 32, 0.12);
+  border-color: var(--danger-600) !important;
+  box-shadow: 0 0 0 3px var(--focus-ring-danger);
 }
 
 .dialog-actions {

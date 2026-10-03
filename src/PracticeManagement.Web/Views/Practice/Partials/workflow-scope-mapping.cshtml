@@ -44,7 +44,7 @@
         </select>
         <select id="smScopeValue"><option value="">Select scope...</option></select>
         <select id="smEvent"><option value="">All events</option></select>
-        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;"
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--fg-secondary);"
                title="Show obligations from releases this organization does not subscribe to. Diagnosis only.">
             <input type="checkbox" id="smIncludeUnsub" /> Include unsubscribed
         </label>
@@ -52,7 +52,7 @@
     </div>
 
     <div id="smCoverage" style="display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 14px 0;"></div>
-    <div id="smMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+    <div class="pm-message" id="smMessage" style="display:none;"></div>
 
     <div class="pm-table-wrap">
         <table>
@@ -72,7 +72,7 @@
             </tbody>
         </table>
     </div>
-    <p style="font-size:12px; color:#64748b; margin-top:10px;">
+    <p style="font-size:12px; color:var(--fg-muted); margin-top:10px;">
         Unticking an obligation records it as <strong>not applicable</strong> for this scope and asks
         for a reason &mdash; it is a decision on the record, not a deletion. Rows shown greyed with
         <em>not subscribed</em> come from a release this organization has not subscribed to and will
@@ -81,15 +81,15 @@
 </section>
 
 @* ---------------- Not-applicable reason dialog ---------------- *@
-<dialog id="smNaDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="smNaForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Why is this not applicable?</h2>
-            <button type="button" id="smNaClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="smNaDialog" style="max-width:520px; width:92%;">
+    <form id="smNaForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2>Why is this not applicable?</h2>
+            <button class="pm-icon-button" type="button" id="smNaClose" aria-label="Close">&times;</button>
         </div>
-        <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;" id="smNaObligation"></p>
+        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 10px 0;" id="smNaObligation"></p>
         <textarea id="smNaReason" rows="4" maxlength="1000" required
-                  style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;"
+                  style="width:100%; padding:8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); font-size:13px;"
                   placeholder="An auditor will read this. Be specific."></textarea>
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
             <button type="button" id="smNaCancel" class="pm-button">Cancel</button>
@@ -218,10 +218,10 @@
             // state, and it must not look identical to "fully applicable" --
             // that is exactly the reading that hid the problem before.
             let bg, fg;
-            if (pct === 0)              { bg = '#fee2e2'; fg = '#7f1d1d'; }   // nothing decided
-            else if (pct < 100)         { bg = '#fef3c7'; fg = '#78350f'; }   // partly decided
-            else if (apply === 0)       { bg = '#e2e8f0'; fg = '#334155'; }   // all decided, none apply
-            else                        { bg = '#dcfce7'; fg = '#166534'; }   // all decided, some apply
+            if (pct === 0)              { bg = 'var(--danger-100)'; fg = 'var(--danger-700)'; }   // nothing decided
+            else if (pct < 100)         { bg = 'var(--warning-100)'; fg = 'var(--warning-700)'; }   // partly decided
+            else if (apply === 0)       { bg = 'var(--neutral-200)'; fg = 'var(--neutral-700)'; }   // all decided, none apply
+            else                        { bg = 'var(--success-100)'; fg = 'var(--success-700)'; }   // all decided, some apply
 
             const chip = document.createElement('span');
             chip.style.cssText = 'padding:4px 10px; border-radius:12px; font-size:12px; cursor:pointer; background:'
@@ -322,24 +322,24 @@
             tr.insertAdjacentHTML('beforeend',
                   '<td>' + window.__wfCommon.escape(m.eventTypeName || m.eventTypeCode || '') + '</td>'
                 + '<td>' + window.__wfCommon.escape(m.obligationLabel || ('Obligation #' + m.obligationId))
-                    + (m.isSubscribed ? '' : ' <span style="color:#b91c1c; font-size:11px;">not subscribed</span>')
-                    + (m.rationale ? '<br><span style="font-size:11px; color:#94a3b8;">'
+                    + (m.isSubscribed ? '' : ' <span style="color:var(--danger-700); font-size:11px;">not subscribed</span>')
+                    + (m.rationale ? '<br><span style="font-size:11px; color:var(--fg-subtle);">'
                         + window.__wfCommon.escape(m.rationale) + '</span>' : '')
                   + '</td>'
                 + '<td>' + window.__wfCommon.escape(m.practiceCode || m.requirementCode || '')
                     + (m.practiceApplicability && m.practiceApplicability !== 'Applicable'
-                        ? '<br><span style="font-size:11px; color:#b45309;">'
+                        ? '<br><span style="font-size:11px; color:var(--warning-700);">'
                           + window.__wfCommon.escape(m.practiceApplicability) + '</span>' : '')
                   + '</td>');
 
             const tdOwner = document.createElement('td');
-            tdOwner.innerHTML = '<select data-owner="' + idx + '" style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;"><option value="">(none)</option></select>';
+            tdOwner.innerHTML = '<select data-owner="' + idx + '" style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:4px;"><option value="">(none)</option></select>';
             tr.appendChild(tdOwner);
 
             const tdDue = document.createElement('td');
             tdDue.innerHTML = '<input data-due="' + idx + '" type="number" min="0" value="'
                 + (m.dueDays != null ? m.dueDays : '')
-                + '" style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;" />';
+                + '" style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:4px;" />';
             tr.appendChild(tdDue);
 
             const tdState = document.createElement('td');
@@ -356,10 +356,10 @@
 
     function stateBadge(state) {
         const map = {
-            'Mapped':        ['#dcfce7', '#166534', 'Applicable'],
-            'NotApplicable': ['#fef3c7', '#78350f', 'Not applicable'],
-            'Inactive':      ['#f1f5f9', '#475569', 'Inactive'],
-            'Unmapped':      ['#fee2e2', '#7f1d1d', 'Not decided']
+            'Mapped':        ['var(--success-100)', 'var(--success-700)', 'Applicable'],
+            'NotApplicable': ['var(--warning-100)', 'var(--warning-700)', 'Not applicable'],
+            'Inactive':      ['var(--bg-subtle)', 'var(--fg-secondary)', 'Inactive'],
+            'Unmapped':      ['var(--danger-100)', 'var(--danger-700)', 'Not decided']
         };
         const v = map[state] || map['Unmapped'];
         return '<span style="padding:3px 9px; border-radius:10px; font-size:11px; background:'

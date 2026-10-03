@@ -32,14 +32,14 @@
 <section class="pm-panel" id="taskCenterUnavailable" hidden>
     <div class="pm-empty">
         <i class="fa-solid fa-flag-checkered pm-empty-icon" aria-hidden="true"></i>
-        <h2 id="taskCenterUnavailableTitle">Task Center is not yet enabled for this organization.</h2>
+        <h2 id="taskCenterUnavailableTitle">Task Board is not yet enabled for this organization.</h2>
         <p id="taskCenterUnavailableBody">Ask a GRAC Admin to turn on the <code>screen.tasks</code> feature flag in your organization settings.</p>
     </div>
 </section>
 
 <section class="pm-panel" id="taskCenterRoot" hidden>
 
-    <div class="pm-tabs" role="tablist" aria-label="Task Center tabs">
+    <div class="pm-tabs" role="tablist" aria-label="Task Board tabs">
         @*
             The note that used to sit here explained why the Assurance
             tab kept the data-tab key "assurance" for deep links. Migration
@@ -113,6 +113,8 @@
             <i class="fa-solid fa-plus" aria-hidden="true"></i> New Task
         </button>
     </div>
+    @* Issues & Actions dashboard drill-down (414). *@
+    <div id="taskDrillBanner" hidden></div>
 
     @* Gaps tab was moved out into its own Gap Center module (see gaps.cshtml + migration 050). *@
 
@@ -204,6 +206,9 @@
    host page has already pulled it in for another partial. *@
 <partial name="Partials/_workflow-common" />
 
+@* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+
 <script>
 (function () {
     'use strict';
@@ -227,6 +232,15 @@
 
 
     let selectedOrgId = null;
+    // Issues & Actions dashboard drill-down (414). ?status= (OpenSet or a
+    // status code), ?overdue=1 and ?priority= are sp_task_list's own
+    // filters; ?noOwner=1 and ?minAge=/?maxAge= are its 414 ones. All are
+    // sent with the merged list's request while the banner is showing.
+    const TASK_DRILL = (function () {
+        if (!window.__pmDrill) return null;
+        const d = window.__pmDrill.read();
+        return d.active ? d : null;
+    })();
     // Migration 255: 'all' is the merged practice_task list.
     let activeTab     = 'all';
     // 'event-driven' has no pager: sp_event_checklist_inbox_list returns the
@@ -380,6 +394,8 @@
             sel.appendChild(opt);
         }
         if (orgs.length > 0) sel.value = orgs[0].value;
+        // 414: the dashboard's organization wins when it is one of these.
+        if (TASK_DRILL && TASK_DRILL.organizationId) window.__pmDrill.preselect(sel, TASK_DRILL.organizationId);
         sel.disabled = orgs.length <= 1;
     }
     async function onOrgChange() {
@@ -558,9 +574,9 @@
     // called out rather than left blank (BRD §6 rung 7 — manual).
     function candidateOwnerCell(c) {
         if (!c.proposedOwnerEmployeeId)
-            return '<span style="color:#b45309;">Needs an owner</span>';
+            return '<span style="color:var(--warning-700);">Needs an owner</span>';
         const src = c.ownerSourceCode && c.ownerSourceCode !== 'MANUAL' && c.ownerSourceCode !== 'EXPLICIT_SOURCE'
-            ? '<div style="font-size:11px; color:#64748b;">' + escape(ownerSourceLabel(c.ownerSourceCode)) + '</div>'
+            ? '<div style="font-size:11px; color:var(--fg-muted);">' + escape(ownerSourceLabel(c.ownerSourceCode)) + '</div>'
             : '';
         return escape(c.proposedOwnerName || c.proposedOwnerEmployeeId) + src;
     }
@@ -568,9 +584,9 @@
     function candidateDueCell(c) {
         if (!c.proposedDueAt) return '';
         const note = c.slaSourceCode === 'TYPE_DEFAULT'
-            ? '<div style="font-size:11px; color:#64748b;">task-type default</div>' : '';
+            ? '<div style="font-size:11px; color:var(--fg-muted);">task-type default</div>' : '';
         return escape(fmtDate(c.proposedDueAt))
-             + (c.proposedSlaDays != null ? ' <span style="font-size:11px; color:#64748b;">('
+             + (c.proposedSlaDays != null ? ' <span style="font-size:11px; color:var(--fg-muted);">('
                  + escape(c.proposedSlaDays) + 'd)</span>' : '')
              + note;
     }
@@ -584,6 +600,18 @@
     // <script> even within a JS comment, so a single one in front of a
     // SQL parameter name compiles as a C# expression and fails with
     // CS0103. Double it to emit one literally.)
+    // 414: the dashboard drill as query-string text for sp_task_list.
+    function taskDrillQuery() {
+        if (!TASK_DRILL) return '';
+        window.__pmDrill.banner('taskDrillBanner', TASK_DRILL);
+        const qs = window.__pmDrill.appendTo(new URLSearchParams(), TASK_DRILL);
+        if (TASK_DRILL.status)   qs.set('statusCode', TASK_DRILL.status);
+        if (TASK_DRILL.overdue)  qs.set('overdueOnly', 'true');
+        if (TASK_DRILL.priority) qs.set('priority', TASK_DRILL.priority);
+        const text = qs.toString();
+        return text ? '&' + text : '';
+    }
+
     async function loadTasks() {
         const q      = document.getElementById('taskCenterSearch').value.trim();
         const srcEl  = document.getElementById('taskFilterSource');
@@ -592,7 +620,8 @@
         const url = U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId)
                   + '&page=' + p + '&pageSize=' + PAGE_SIZE
                   + (q ? '&search=' + encodeURIComponent(q) : '')
-                  + (source ? '&sourceTypeCode=' + encodeURIComponent(source) : '');
+                  + (source ? '&sourceTypeCode=' + encodeURIComponent(source) : '')
+                  + taskDrillQuery();
         const body = document.getElementById('taskBody-all');
         if (body) body.innerHTML = '<tr><td colspan="11" class="pm-empty">Loading...</td></tr>';
         try {
@@ -905,13 +934,13 @@
     // database where migrations 192-195 have not been applied yet.
     // -----------------------------------------------------------------
     const SLA_BADGE_STYLE = {
-        OnTrack:   { bg: '#dcfce7', fg: '#166534', label: 'On Track'  },
-        DueSoon:   { bg: '#fef9c3', fg: '#854d0e', label: 'Due Soon'  },
-        DueToday:  { bg: '#ffedd5', fg: '#9a3412', label: 'Due Today' },
-        Breached:  { bg: '#fee2e2', fg: '#991b1b', label: 'Breached'  },
-        Extended:  { bg: '#e0e7ff', fg: '#3730a3', label: 'Extended'  },
-        Completed: { bg: '#f1f5f9', fg: '#475569', label: 'Completed' },
-        NotSet:    { bg: '#f1f5f9', fg: '#64748b', label: 'No SLA'    }
+        OnTrack:   { bg: 'var(--success-100)', fg: 'var(--success-700)', label: 'On Track'  },
+        DueSoon:   { bg: 'var(--warning-50)', fg: 'var(--warning-700)', label: 'Due Soon'  },
+        DueToday:  { bg: 'var(--warning-100)', fg: 'var(--danger-700)', label: 'Due Today' },
+        Breached:  { bg: 'var(--danger-100)', fg: 'var(--danger-700)', label: 'Breached'  },
+        Extended:  { bg: 'var(--primary-100)', fg: 'var(--primary-800)', label: 'Extended'  },
+        Completed: { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: 'Completed' },
+        NotSet:    { bg: 'var(--bg-subtle)', fg: 'var(--fg-muted)', label: 'No SLA'    }
     };
 
     function fmtDate(v) {
@@ -930,7 +959,7 @@
     function slaStatusBadge(r) {
         const code = r.slaStatusCode;
         if (!code) return r.isOverdue ? '<span class="pm-badge">Breached</span>' : '';
-        const s = SLA_BADGE_STYLE[code] || { bg: '#f1f5f9', fg: '#475569', label: code };
+        const s = SLA_BADGE_STYLE[code] || { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: code };
         return '<span class="pm-badge" style="background:' + s.bg + '; color:' + s.fg + ';">'
              + escape(s.label) + '</span>';
     }
@@ -942,7 +971,7 @@
         const effective = fmtDate(r.slaDueAt);
         if (!r.isExtended || !r.standardDueAt) return escape(effective);
         return escape(effective)
-             + '<div style="font-size:11px; color:#64748b;">std ' + escape(fmtDate(r.standardDueAt)) + '</div>';
+             + '<div style="font-size:11px; color:var(--fg-muted);">std ' + escape(fmtDate(r.standardDueAt)) + '</div>';
     }
 
     // BRD §12: "Completion of a Child Task does not complete the Parent
@@ -965,18 +994,18 @@
         const open = r.mandatoryChildOpenCount || 0;
         const done = (r.mandatoryChildCount || 0) - open;
         return escape(done + '/' + (r.mandatoryChildCount || 0))
-             + (open === 0 ? ' <span class="pm-badge" style="background:#dcfce7; color:#166534;">Ready</span>' : '');
+             + (open === 0 ? ' <span class="pm-badge" style="background:var(--success-100); color:var(--success-700);">Ready</span>' : '');
     }
 
     function ownerCell(r) {
         if (r.assignedToEmployeeName) {
             const src = r.ownerSourceCode && r.ownerSourceCode !== 'EXPLICIT_SOURCE' && r.ownerSourceCode !== 'REASSIGNED'
-                ? '<div style="font-size:11px; color:#64748b;">' + escape(ownerSourceLabel(r.ownerSourceCode)) + '</div>'
+                ? '<div style="font-size:11px; color:var(--fg-muted);">' + escape(ownerSourceLabel(r.ownerSourceCode)) + '</div>'
                 : '';
             return escape(r.assignedToEmployeeName) + src;
         }
         if (r.assignedToEmployeeId) return escape(r.assignedToEmployeeId);
-        return '<span style="color:#b45309;">Unassigned</span>';
+        return '<span style="color:var(--warning-700);">Unassigned</span>';
     }
 
     function ownerSourceLabel(code) {
@@ -1057,15 +1086,15 @@
         const label = TASK_SOURCE_LABELS[code] || code;
         const type  = r.taskTypeName || r.taskTypeCode || '';
         return (label ? '<span class="pm-badge">' + escape(label) + '</span>' : '')
-             + (type  ? '<div style="font-size:11px; color:#64748b;">' + escape(type) + '</div>' : '');
+             + (type  ? '<div style="font-size:11px; color:var(--fg-muted);">' + escape(type) + '</div>' : '');
     }
 
     function pendingBadges(r) {
         let out = '';
         if (r.extensionStatusCode === 'Pending')
-            out += ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">Extension pending</span>';
+            out += ' <span class="pm-badge" style="background:var(--warning-50); color:var(--warning-700);">Extension pending</span>';
         if (r.priorityChangeStatusCode === 'Pending')
-            out += ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">Priority '
+            out += ' <span class="pm-badge" style="background:var(--warning-50); color:var(--warning-700);">Priority '
                  + escape(r.requestedPriority || '') + ' pending</span>';
         return out;
     }
@@ -1175,7 +1204,7 @@
             // rather than looking like a rendering fault.
             const p = document.createElement('div');
             p.className = 'pm-action-menu-empty';
-            p.style.cssText = 'padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;';
+            p.style.cssText = 'padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;';
             p.textContent = 'No actions available';
             openMenuEl.appendChild(p);
         }

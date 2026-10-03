@@ -1,7 +1,13 @@
 /* =====================================================================
    practice-picker.js -- reusable cascading Practice Picker
    ---------------------------------------------------------------------
-   Framework -> Source Structure -> Control -> Practice.
+   Framework -> Source Structure -> Control -> Practice -> Practice Instance.
+
+   387 (sir, 2026-09-27): every consumer maps a PRACTICE INSTANCE, so the
+   picker ends at the Instance level. getPracticeId() still returns the
+   instance's practice, so a caller that stores practices keeps working;
+   getPracticeInstanceId() / getState().practiceInstanceId give the
+   instance. isComplete means an instance is chosen.
 
    WHY IT EXISTS
      Practice selection appears on many forms and each one used to load
@@ -14,7 +20,7 @@
    BACKED BY
      /practice/api/practice-picker/*  (Web proxy)
        -> /api/practice/practice-picker/*  (API, migration 282)
-     frameworks | structures | controls | practices | resolve
+     frameworks | structures | controls | practices | instances | resolve
 
    CONTRACT -- deliberately the same shape as window.__roleHolderPicker
    in _workflow-common.cshtml, so this reads like the picker the project
@@ -26,6 +32,7 @@
        required        : false,   // parent form can mark the field required
        labels          : {},      // optional label overrides
        excludePracticeIds: [],    // ids to hide (e.g. already mapped)
+       excludePracticeInstanceIds: [], // 387 -- instance ids to hide
        excludedAllText:  fn(n),   // wording when every practice under the
                                   // control is excluded -- the host knows
                                   // WHOSE exclusion it is, this file does not
@@ -36,7 +43,8 @@
 
      instance.getState()  -> { frameworkId, releaseId, structureNodeId,
                                organizationControlId, practiceId,
-                               practiceName, isComplete }
+                               practiceName, practiceInstanceId,
+                               practiceInstanceName, isComplete }
      instance.getPracticeId()          -> number | null
      instance.setExcluded(ids)         -> re-filters the practice level
      instance.reset()                  -> back to "pick a framework"
@@ -107,10 +115,12 @@
             framework: "Framework",
             structure: "Source Structure",
             control:   "Control / Statement",
-            practice:  "Practice"
+            practice:  "Practice",
+            instance:  "Practice Instance"
         }, opts.labels || {});
 
         var excluded = (opts.excludePracticeIds || []).map(String);
+        var excludedInstances = (opts.excludePracticeInstanceIds || []).map(String);
 
         // 312. THE EXCLUSION IS DECIDED IN SQL, on organization_id AND
         // this risk id. The client list above still applies on top --
@@ -122,7 +132,8 @@
         var state = {
             frameworkId: "", releaseId: "",
             structureNodeId: "", organizationControlId: "",
-            practiceId: "", practiceName: ""
+            practiceId: "", practiceName: "",
+            practiceInstanceId: "", practiceInstanceName: ""
         };
 
         var uid = "pp" + Math.random().toString(36).slice(2, 9);
@@ -133,6 +144,7 @@
               level("structure", labels.structure, required) +
               level("control",   labels.control,   required) +
               level("practice",  labels.practice,  required) +
+              level("instance",  labels.instance,  required) +
               '<p class="pp-message" data-pp-message role="status" aria-live="polite"></p>' +
             '</div>';
 
@@ -153,7 +165,8 @@
             framework: root.querySelector('[data-pp-select="framework"]'),
             structure: root.querySelector('[data-pp-select="structure"]'),
             control:   root.querySelector('[data-pp-select="control"]'),
-            practice:  root.querySelector('[data-pp-select="practice"]')
+            practice:  root.querySelector('[data-pp-select="practice"]'),
+            instance:  root.querySelector('[data-pp-select="instance"]')
         };
         var msgEl = root.querySelector("[data-pp-message]");
 
@@ -196,13 +209,14 @@
         // behaviour, and it also prevents a stale child id being read
         // by getState() between the change and the fetch completing.
         function clearFrom(key) {
-            var order = ["framework", "structure", "control", "practice"];
+            var order = ["framework", "structure", "control", "practice", "instance"];
             var from  = order.indexOf(key);
             for (var i = from; i < order.length; i++) {
                 var k = order[i];
                 setPlaceholder(k, k === "structure" ? "Select a framework first"
                                 : k === "control"   ? "Select a source structure first"
                                 : k === "practice"  ? "Select a control or statement first"
+                                : k === "instance"  ? "Select a practice first"
                                 : "-- select --", true);
                 hint(k, "");
             }
@@ -210,6 +224,7 @@
             if (from <= 1) state.structureNodeId = "";
             if (from <= 2) state.organizationControlId = "";
             if (from <= 3) { state.practiceId = ""; state.practiceName = ""; }
+            if (from <= 4) { state.practiceInstanceId = ""; state.practiceInstanceName = ""; }
         }
 
         async function loadLevel(key, cacheKey, path, opts2) {
@@ -368,22 +383,16 @@
                     // because those are meant to be SHOWN, disabled,
                     // with the reason.
                     filter:  function (r) {
-                        if (r.alreadyMappedToRisk) return true;
                         return excluded.indexOf(String(r.practiceId)) < 0;
                     },
                     valueOf: function (r) { return r.practiceId; },
-                    // Disabled, not hidden. An empty dropdown reading "1
-                    // already used" is what made this look like a global
-                    // lock; the practice is now visible with the reason
-                    // attached, and 'Primary' says the risk was RAISED
-                    // from that practice rather than anyone mapping it.
-                    disabledOf: function (r) { return !!r.alreadyMappedToRisk; },
+                    // 387: a practice is never disabled here any more --
+                    // what a risk maps is an INSTANCE, and a practice with
+                    // one instance on the risk may still have others. The
+                    // "already mapped" flag and reason moved to the
+                    // Instance level (loadInstances below).
                     labelOf: function (r) {
-                        var base = (r.practiceCode ? r.practiceCode + " - " : "") + (r.practiceName || "");
-                        if (!r.alreadyMappedToRisk) return base;
-                        return base + (r.mapSourceCode === "Primary"
-                            ? "  (already in this risk's scope - raised from this practice)"
-                            : "  (already mapped to this risk)");
+                        return (r.practiceCode ? r.practiceCode + " - " : "") + (r.practiceName || "");
                     },
                     placeholder: "-- select a practice --",
                     // Genuinely nothing under this control -- the control
@@ -407,6 +416,42 @@
                     blockedHintText: function (n) {
                         if (typeof opts.excludedHintText === "function") return opts.excludedHintText(n);
                         return n + " already mapped to this risk";
+                    }
+                });
+        }
+
+        // 387 -- Level 5: the active instances of the chosen practice. With
+        // a risk the instances already on it come back flagged and are
+        // shown disabled with the reason, like the practice level used to.
+        function loadInstances(practiceId) {
+            return loadLevel("instance",
+                "in/" + orgId + "/" + practiceId + "/" + (riskId || "-"),
+                API + "/instances?organizationId=" + encodeURIComponent(orgId)
+                    + "&practiceId=" + encodeURIComponent(practiceId)
+                    + (riskId ? "&riskRegisterId=" + encodeURIComponent(riskId) : ""),
+                {
+                    filter:  function (r) {
+                        if (r.alreadyMappedToRisk) return true;
+                        return excludedInstances.indexOf(String(r.practiceInstanceId)) < 0;
+                    },
+                    valueOf: function (r) { return r.practiceInstanceId; },
+                    disabledOf: function (r) { return !!r.alreadyMappedToRisk; },
+                    labelOf: function (r) {
+                        var base = (r.instanceCode ? r.instanceCode + " - " : "") + (r.instanceName || "")
+                                 + (r.department ? "  [" + r.department + "]" : "");
+                        if (!r.alreadyMappedToRisk) return base;
+                        return base + (r.mapSourceCode === "Primary"
+                            ? "  (already in this risk's scope - raised from this instance)"
+                            : "  (already mapped to this risk)");
+                    },
+                    placeholder: "-- select a practice instance --",
+                    emptyText:   "No active instances of this practice",
+                    emptyFilteredText: function (n) {
+                        return n === 1 ? "Its only instance is already added"
+                                       : "All " + n + " instances are already added";
+                    },
+                    blockedHintText: function (n) {
+                        return n + " already mapped / added";
                     }
                 });
         }
@@ -441,11 +486,21 @@
             if (state.organizationControlId) await loadPractices(state.organizationControlId);
         });
 
-        sel.practice.addEventListener("change", function () {
+        sel.practice.addEventListener("change", async function () {
             message("");
+            clearFrom("instance");
             state.practiceId = sel.practice.value;
             var opt = sel.practice.options[sel.practice.selectedIndex];
             state.practiceName = state.practiceId && opt ? opt.textContent : "";
+            emitChange();
+            if (state.practiceId) await loadInstances(state.practiceId);
+        });
+
+        sel.instance.addEventListener("change", function () {
+            message("");
+            state.practiceInstanceId = sel.instance.value;
+            var opt = sel.instance.options[sel.instance.selectedIndex];
+            state.practiceInstanceName = state.practiceInstanceId && opt ? opt.textContent : "";
             emitChange();
         });
 
@@ -457,7 +512,10 @@
                 organizationControlId: state.organizationControlId || null,
                 practiceId:            state.practiceId ? Number(state.practiceId) : null,
                 practiceName:          state.practiceName || null,
-                isComplete:            !!state.practiceId
+                practiceInstanceId:    state.practiceInstanceId ? Number(state.practiceInstanceId) : null,
+                practiceInstanceName:  state.practiceInstanceName || null,
+                // 387: complete means an INSTANCE is chosen.
+                isComplete:            !!state.practiceInstanceId
             };
         }
 
@@ -506,6 +564,16 @@
                 sel.practice.disabled = false;
                 state.practiceId   = String(practiceId);
                 state.practiceName = path.practiceName || "";
+                // 387: load the instances under the saved practice and
+                // preselect the saved instance when the caller gave one.
+                await loadInstances(practiceId);
+                if (opts.initialPracticeInstanceId
+                    && sel.instance.querySelector('option[value="' + String(opts.initialPracticeInstanceId) + '"]')) {
+                    sel.instance.value = String(opts.initialPracticeInstanceId);
+                    state.practiceInstanceId = String(opts.initialPracticeInstanceId);
+                    var io = sel.instance.options[sel.instance.selectedIndex];
+                    state.practiceInstanceName = io ? io.textContent : "";
+                }
                 message("");
                 emitChange();
             } catch (err) {
@@ -516,6 +584,18 @@
         var instance = {
             getState: getState,
             getPracticeId: function () { return state.practiceId ? Number(state.practiceId) : null; },
+            // 387
+            getPracticeInstanceId: function () { return state.practiceInstanceId ? Number(state.practiceInstanceId) : null; },
+            setExcludedInstances: function (ids) {
+                excludedInstances = (ids || []).map(String);
+                if (!state.practiceId) return Promise.resolve([]);
+                return loadInstances(state.practiceId);
+            },
+            refreshInstances: function () {
+                if (!state.practiceId) return Promise.resolve([]);
+                delete cache["in/" + orgId + "/" + state.practiceId + "/" + (riskId || "-")];
+                return loadInstances(state.practiceId);
+            },
             // Returns a promise ONLY when it actually reloads, and the
             // caller decides whether to wait. It used to fire
             // loadPractices() without the caller being able to await it,
@@ -583,11 +663,12 @@
                 return loadFrameworks();
             },
             validate: function () {
-                if (!required || state.practiceId) { message(""); return true; }
+                if (!required || state.practiceInstanceId) { message(""); return true; }
                 message(!state.releaseId            ? "Select a framework."
                       : !state.structureNodeId      ? "Select a source structure."
                       : !state.organizationControlId ? "Select a control or statement."
-                      : "Select a practice.", "error");
+                      : !state.practiceId           ? "Select a practice."
+                      : "Select a practice instance.", "error");
                 return false;
             },
             setOrganization: function (newOrgId) {

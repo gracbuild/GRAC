@@ -106,6 +106,10 @@ public sealed class TaskController(
         [FromQuery] string? sourceTypeCode = null,
         [FromQuery] long? sourceRecordId = null,
         [FromQuery] string? priority = null,
+        // Migration 414 -- management dashboard drill-down (?drillCode=,
+        // statusText=, severityText=, minAgeDays=, maxAgeDays=, noOwner=).
+        // Every value absent = the list exactly as before.
+        [FromQuery] ListDrillQuery? drill = null,
         CancellationToken cancellationToken = default)
     {
         var query = new TaskListQuery(
@@ -122,7 +126,8 @@ public sealed class TaskController(
             SlaStatusCode:        slaStatusCode,
             SourceTypeCode:       sourceTypeCode,
             SourceRecordId:       sourceRecordId,
-            Priority:             priority);
+            Priority:             priority,
+            Drill:                drill?.ToFilter());
 
         var result = await taskService.ListAsync(query, cancellationToken);
         return Ok(result);

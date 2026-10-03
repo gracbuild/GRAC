@@ -504,6 +504,35 @@ public sealed class RiskCentreController(
         => ForwardDeleteWithCallerStampAsync(
             $"api/practice/risk-centre/register/{riskId}/practices/{practiceId}", ct);
 
+    // ---- 387: practice INSTANCE mapping + "Map open task" -------------
+    [HttpPost("register/{riskId:long}/practice-instances")]
+    public Task<IActionResult> MapPracticeInstance(long riskId, CancellationToken ct)
+        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+            $"api/practice/risk-centre/register/{riskId}/practice-instances", "actorEmployeeId", ct);
+
+    [HttpDelete("register/{riskId:long}/practice-map/{riskPracticeMapId:long}")]
+    public Task<IActionResult> UnmapPracticeMapRow(long riskId, long riskPracticeMapId, CancellationToken ct)
+        => ForwardDeleteWithCallerStampAsync(
+            $"api/practice/risk-centre/register/{riskId}/practice-map/{riskPracticeMapId}", ct);
+
+    [HttpGet("register/{riskId:long}/open-tasks")]
+    public Task<IActionResult> ListOpenTasks(long riskId, CancellationToken ct)
+    {
+        if (!TryGuardSession(out var err)) return Task.FromResult(err!);
+        var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        return ForwardGetAsync($"api/practice/risk-centre/register/{riskId}/open-tasks{qs}", ct);
+    }
+
+    [HttpPost("register/{riskId:long}/treatment-links")]
+    public Task<IActionResult> LinkTreatmentTask(long riskId, CancellationToken ct)
+        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+            $"api/practice/risk-centre/register/{riskId}/treatment-links", "actorEmployeeId", ct);
+
+    [HttpDelete("register/{riskId:long}/treatment-links/{taskId:long}")]
+    public Task<IActionResult> UnlinkTreatmentTask(long riskId, long taskId, CancellationToken ct)
+        => ForwardDeleteWithCallerStampAsync(
+            $"api/practice/risk-centre/register/{riskId}/treatment-links/{taskId}", ct);
+
     [HttpPost("register/{riskId:long}/dependencies")]
     public Task<IActionResult> MapDependency(long riskId, CancellationToken ct)
         => ForwardJsonWithCallerStampAsync(HttpMethod.Post,

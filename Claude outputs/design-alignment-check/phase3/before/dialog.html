@@ -1,0 +1,56 @@
+<dialog open id="oaPlPlanDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+    <form id="oaPlPlanForm" method="dialog" style="margin:0; padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 id="oaPlPlanDialogTitle" style="margin:0; font-size:18px;">Add Plan</h2>
+            <button type="button" id="oaPlPlanClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="oaPlPlanMessage" style=" margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <input type="hidden" id="oaPlPlanEditId" />
+
+        
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Code <span style="color:#b91c1c;">*</span></span>
+                <input id="oaPlPlanCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+                <span>Type <span style="color:#b91c1c;">*</span></span>
+                <select id="oaPlPlanType" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; width:100%; box-sizing:border-box;"></select>
+            </label>
+        </div>
+        
+        <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0; margin-top:10px;">
+            <span>Owner</span>
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                <select id="oaPlPlanOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                    <option value="">Loading roles...</option>
+                </select>
+                <select id="oaPlPlanOwner" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                    <option value="">-- pick a role first --</option>
+                </select>
+            </div>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Name <span style="color:#b91c1c;">*</span></span>
+            <input id="oaPlPlanName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Period From</span>
+                <input id="oaPlPlanFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+                <span>Period To</span>
+                <input id="oaPlPlanTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            </label>
+        </div>
+        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+            <span>Description</span>
+            <textarea id="oaPlPlanDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" id="oaPlPlanCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaPlPlanSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>

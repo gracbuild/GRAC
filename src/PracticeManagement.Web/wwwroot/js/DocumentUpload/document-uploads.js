@@ -438,10 +438,10 @@
       if (!resp.ok || body.success === false) {
         const errText = body.error || `Save failed (HTTP ${resp.status}).`;
         msg.textContent   = errText;
-        msg.style.color   = "#c53030";
+        msg.style.color   = "var(--danger-700)";
         msg.style.padding = "8px";
-        msg.style.border  = "1px solid #feb2b2";
-        msg.style.background = "#fff5f5";
+        msg.style.border  = "1px solid var(--danger-200)";
+        msg.style.background = "var(--danger-50)";
         msg.style.borderRadius = "4px";
         // Pop so the message cannot be missed. window.gracAlert
         // (grac-dialog.js, loaded by _Layout) is the app's dialog -- same
@@ -458,7 +458,7 @@
     } catch (err) {
       console.error("[docs-save] network error", err);
       msg.textContent = "Network error: " + err.message;
-      msg.style.color = "#c53030";
+      msg.style.color = "var(--danger-700)";
       saveAlert("Network error", err.message);
     }
   }

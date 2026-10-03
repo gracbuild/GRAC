@@ -117,3 +117,43 @@ owner/status parameters). Rolling back the database without also reverting
 "too many arguments specified" against the older procedure shape -- the same
 failure any parameter drift between tiers already produces elsewhere in this
 schema.
+
+## Row click and the workspace Actions menu (2026-10-03)
+
+This change is UI only. No migration was needed and no API changed.
+
+### Row click
+
+Clicking an instance row on Operationalize (`/Practice/Index/resolve`)
+opens the read-only workspace (`resolve-workspace?...&mode=view`). This is
+the same URL as the row menu's **View**, built by one helper,
+`workspaceUrl()`.
+
+- The row is marked `.pm-row-clickable`. Its cursor rule now also covers
+  `.pm-sticky-grid` grids.
+- These keep their own behaviour and do not open the page:
+  - the 3-dot trigger;
+  - the group expand/collapse rows;
+  - any `a`, `button`, `input`, `label` or `select`.
+
+The 3-dot row menu is unchanged: View, Operationalize, and Retire instance
+or Restore instance by status.
+
+### Workspace Actions menu
+
+The separate **Retire instance** and **Restore instance** heading buttons
+on the workspace are gone. They are replaced by an **Actions** button
+(`Shared/page-actions-menu.js`, the same component as Practice View).
+
+| Workspace mode | Menu items |
+| --- | --- |
+| Read-only view | Operationalize; Retire instance *or* Restore instance |
+| Editable | View; Retire instance *or* Restore instance |
+
+- **Retire instance** and **Restore instance** appear on the same gate as
+  the old buttons: `profileEditable`, plus the instance's status. Exactly
+  one of the two is offered.
+- They run the unchanged `retireInstance` and `restoreInstance`, with the
+  same confirmation dialog, the same required reason and the same API.
+- Actions shows in view mode too. It sits in the page heading, outside
+  the `#rwRoot.rw-view-only` hide rule.

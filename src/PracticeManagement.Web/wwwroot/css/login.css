@@ -1,9 +1,5 @@
-:root {
-  --brand-navy: #0b1228;
-  --brand-blue: #4e78f5;
-  --text-muted: #6b7280;
-  --border-color: #e5e7eb;
-}
+/* --brand-navy, --brand-blue, --text-muted and --border-color are
+   declared in grac-tokens.css (aliases of the design-system tokens). */
 
 * {
   box-sizing: border-box;
@@ -12,9 +8,9 @@
 body.login-split {
   margin: 0;
   overflow-x: hidden;
-  background: #fff;
-  color: #1f2937;
-  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-family: var(--font-ui);
 }
 
 .login-wrapper {
@@ -36,8 +32,8 @@ body.login-split {
   align-items: center;
   justify-content: center;
   padding: 36px;
-  border-radius: 24px;
-  background: var(--brand-navy);
+  border-radius: 20px;
+  background: var(--grac-navy-deep);
   animation: slide-in-left 1s cubic-bezier(.4, 0, .2, 1) .4s both;
 }
 
@@ -88,14 +84,14 @@ body.login-split {
 
 .greeting h1 {
   margin: 0 0 24px;
-  color: var(--text-muted);
+  color: var(--fg-muted);
   font-size: 32px;
   font-weight: 600;
 }
 
 .greeting p {
   margin: 0 0 24px;
-  color: var(--text-muted);
+  color: var(--fg-muted);
   line-height: 1.6;
 }
 
@@ -106,7 +102,7 @@ body.login-split {
 .form-label {
   display: block;
   margin-bottom: 5px;
-  color: var(--text-muted);
+  color: var(--fg-muted);
   font-size: 12px;
 }
 
@@ -120,28 +116,28 @@ body.login-split {
   width: 100%;
   height: 44px;
   padding: 12px 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   outline: none;
-  background: #fff;
-  color: #1f2937;
+  background: var(--bg-surface);
+  color: var(--fg-default);
   font: inherit;
   font-size: 14px;
   transition: all .25s ease;
 }
 
 .form-control:focus {
-  border-color: #b8c7fb;
-  box-shadow: 0 0 0 3px #4e78f526;
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .btn-signin {
   width: 100%;
   height: 46px;
-  border: 1px solid var(--brand-blue);
-  border-radius: 8px;
-  background: var(--brand-blue);
-  color: #fff;
+  border: 1px solid var(--primary-500);
+  border-radius: var(--radius-md);
+  background: var(--primary-500);
+  color: var(--fg-on-dark);
   cursor: pointer;
   font: inherit;
   font-size: 15px;
@@ -150,13 +146,13 @@ body.login-split {
 }
 
 .btn-signin:hover {
-  box-shadow: 0 4px 12px #4e78f54d;
-  transform: translateY(-2px);
+  background: var(--primary-600);
+  border-color: var(--primary-600);
 }
 
 .forgot-link {
   display: inline-flex;
-  color: var(--brand-blue);
+  color: var(--primary-600);
   font-size: 12px;
   text-decoration: none;
 }
@@ -168,7 +164,7 @@ body.login-split {
 .validation-message {
   display: block;
   margin: 0 0 10px;
-  color: #b42318;
+  color: var(--danger-700);
   font-size: 12px;
 }
 

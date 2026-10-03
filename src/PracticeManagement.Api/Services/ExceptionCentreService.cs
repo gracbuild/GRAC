@@ -15,7 +15,7 @@ namespace PracticeManagement.Api.Services;
 public interface IExceptionCentreService
 {
     // requestType filter (post-184): NULL = both tabs, "GAP_CANDIDATE" or "SLA_CANDIDATE".
-    Task<ExceptionRequestListResult> ListAsync(long organizationId, string? statusCode, string? requestType, int page, int pageSize, CancellationToken ct);
+    Task<ExceptionRequestListResult> ListAsync(long organizationId, string? statusCode, string? requestType, int page, int pageSize, ListDrillFilter? drill, CancellationToken ct);
     Task<ExceptionRequestDetail?>    GetAsync(long exceptionRequestId, CancellationToken ct);
     Task<ExceptionActionResult>      ApproveAsync(long id, ExceptionApproveRequest req, CancellationToken ct);
     Task<ExceptionActionResult>      RejectAsync(long id, ExceptionRejectRequest req, CancellationToken ct);
@@ -55,7 +55,7 @@ public interface IExceptionCentreService
 
 public sealed class ExceptionCentreService(IConfiguration configuration, ILogger<ExceptionCentreService> logger) : IExceptionCentreService
 {
-    public async Task<ExceptionRequestListResult> ListAsync(long organizationId, string? statusCode, string? requestType, int page, int pageSize, CancellationToken ct)
+    public async Task<ExceptionRequestListResult> ListAsync(long organizationId, string? statusCode, string? requestType, int page, int pageSize, ListDrillFilter? drill, CancellationToken ct)
     {
         await using var conn = await OpenAsync(ct);
         await using var cmd  = Proc(conn, "grac_practice.sp_exception_request_list");
@@ -64,6 +64,8 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
         AddParam(cmd, "@request_type_code", DbType.String, (object?)requestType ?? DBNull.Value, 30);
         AddParam(cmd, "@page_number",       DbType.Int32,  Math.Max(1, page));
         AddParam(cmd, "@page_size",         DbType.Int32,  Math.Clamp(pageSize <= 0 ? 25 : pageSize, 1, 200));
+        // 414: dashboard drill-down, sent only when declared.
+        await Infrastructure.ListDrillParameters.AddAsync(conn, cmd, "sp_exception_request_list", drill, ct);
 
         var rows = new List<ExceptionRequestRow>();
         long total = 0;
@@ -688,9 +690,25 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
             AddParam(cmd, "@caller_display_name",         DbType.String,
                      string.IsNullOrWhiteSpace(req.CallerDisplayName) ? "system" : req.CallerDisplayName, 100);
 
-            await using var r = await cmd.ExecuteReaderAsync(ct);
             long newId = 0;
-            if (await r.ReadAsync(ct)) newId = Convert.ToInt64(r["ExceptionRequestId"]);
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (await r.ReadAsync(ct)) newId = Convert.ToInt64(r["ExceptionRequestId"]);
+            }
+
+            // 388. The picked practice instances -- claims the
+            // practice-level rows the create just wrote.
+            if (newId > 0 && req.LinkedPracticeInstanceIds is { Count: > 0 })
+            {
+                await using var inst = Proc(conn, "grac_practice.sp_exception_request_practice_instance_set");
+                AddParam(inst, "@exception_request_id",       DbType.Int64,  newId);
+                AddParam(inst, "@practice_instance_ids_json", DbType.String,
+                         System.Text.Json.JsonSerializer.Serialize(req.LinkedPracticeInstanceIds), -1);
+                AddParam(inst, "@actor_employee_id",          DbType.Int64,  (object?)req.RequestedByEmployeeId ?? DBNull.Value);
+                AddParam(inst, "@caller_display_name",        DbType.String,
+                         string.IsNullOrWhiteSpace(req.CallerDisplayName) ? "system" : req.CallerDisplayName, 100);
+                await inst.ExecuteNonQueryAsync(ct);
+            }
             return new ExceptionActionResult(true, newId, "Pending", null);
         }
         catch (SqlException ex)
@@ -707,6 +725,7 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var c = new SqlConnection(cs);
         await c.OpenAsync(ct);
+        await Infrastructure.ViewScopeSession.ApplyAsync(c, ct);   // 415: View Data Scope
         return c;
     }
     private static DbCommand Proc(DbConnection connection, string name)

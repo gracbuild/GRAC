@@ -624,3 +624,153 @@ Run order: 335 is independent of 329–333 and can be applied before or
 after them. Rollback: `335_..._rollback.sql` restores 128's wrapper bodies
 and drops the helper; the event rows it created are deliberately kept,
 since they are what the restored wrappers resolve against.
+
+## Profile Type — People Profile and Asset Profile (migration 407)
+
+### What changed, in one line
+
+A profile is now either a **People Profile** or an **Asset Profile**:
+
+| Profile Type | Stored value | Criteria | Matched against | Events |
+| --- | --- | --- | --- | --- |
+| People | `EMPLOYEE` | Location, Department, Role (unchanged) | active employees | Onboarding / Offboarding |
+| Asset | `ASSET` | Location, Asset Category, Asset Sub Category, Asset Type | active assets | Commissioning / Decommissioning |
+
+The type is `event_profile.subject_entity`, the discriminator 329 added for exactly this. Every existing profile is already `EMPLOYEE`, so existing profiles read as People with **no data change**.
+
+### Data model (407)
+
+**`event_profile.profile_type`**
+- A computed column: `EMPLOYEE` → `People`, `ASSET` → `Asset`.
+- It is the list's Profile Type. There is one source of truth, so the two values can never disagree.
+
+**`event_profile_dimension_master`** gains two columns:
+- `source_parent_column` — the parent id column on the source table.
+- `parent_dimension_code` — the dimension that parent belongs to.
+
+Together they drive the cascade **Asset Category → Asset Sub Category → Asset Type** from data, not from code.
+
+**Four ASSET dimensions** are seeded into the existing master. They reuse the existing masters; there are no new master tables and nothing is hard-coded.
+
+| Code | Values from | Matched on `organization_dependency_asset.` | Parent |
+| --- | --- | --- | --- |
+| `ASSET_LOCATION` | `organization_location` (org-scoped) | `location_id` | — |
+| `ASSET_CATEGORY` | `dependency_asset_category_master` | `asset_category_id` | — |
+| `ASSET_SUBCATEGORY` | `dependency_asset_subcategory_master` | `asset_subcategory_id` | `ASSET_CATEGORY` |
+| `ASSET_TYPE` | `dependency_asset_type_master` | `asset_type_id` | `ASSET_SUBCATEGORY` |
+
+**`vw_pm_event_profile_subject_attribute`** gains one ASSET arm per dimension. `fn_pm_event_profile_matches` is generic over the view and is unchanged.
+
+### Backend enforcement of the type
+
+- **Save** (`sp_event_profile_save`):
+  - Criteria must belong to dimensions of the profile's own type. This check dates from 330: an Asset criterion on a People profile is refused.
+  - The type of a saved profile cannot change. The save throws **67438**.
+  - An update that omits `subjectEntity` keeps the saved type.
+- **Matcher:** it only evaluates a profile against its own subject kind. A People profile never fires for an asset, and an Asset profile never fires for a person.
+- **Raise** (`sp_event_obligation_raise`):
+  - For an asset, it now resolves every active Asset profile the asset matches.
+  - These profile decisions sit beside the existing Asset Category decisions, and the same ranked window settles any disagreement between them.
+  - An asset with no category is still raised when it matches an Asset profile.
+- **Coverage** (`sp_event_obligation_coverage_list`): the PROFILE branch counts both kinds. It was EMPLOYEE only.
+
+### API (407)
+
+| Endpoint | Change |
+| --- | --- |
+| `GET /scope/profiles?subjectEntity=` | Accepts `EMPLOYEE`, `ASSET` or **`ALL`** (Profile Type filter). Rows carry `profileType`. |
+| `GET /scope/profiles/{id}` | Carries `profileType`. |
+| `GET /scope/profiles/dimensions?subjectEntity=ASSET` | Returns the four asset dimensions. Rows carry `parentDimensionCode`. |
+| `GET /scope/profiles/dimension-values` | Rows carry `parentId`. The asset taxonomy is filtered on `is_active = 1`. |
+| `GET /scope/profiles/preview` | New optional `subjectEntity`, used for an unsaved form. The response is generic across both types: `matchedCount`, `totalActive`, `totalActiveEmployees` (kept, same value), `subjectEntity`, and `sample[]` of `{memberId, memberCode, memberName, memberDetail}`. For assets, detail is the asset category. |
+| `POST /scope/profiles` | `subjectEntity` is `EMPLOYEE` or `ASSET`. Changing it on an update returns 400 with 67438. |
+
+Permissions are unchanged. The endpoints and the Web proxy are the same as before.
+
+### UI (407)
+
+- **List:**
+  - New **Profile Type** column (People / Asset) after Profile Name.
+  - New **Profile Type** filter: All profile types / People / Asset, default All.
+  - There are no tabs on the list.
+- **Add / Edit dialog:**
+  - `.pm-tabs` with **People Profile** and **Asset Profile**.
+  - Add starts on People.
+  - Edit opens the saved type; the other tab is disabled with a tooltip.
+  - Each tab's criteria rows come from the dimension master for that type.
+  - Asset Sub Category and Asset Type only offer values under the chosen parent. A pick that falls outside the parent is cleared.
+- **View:** shows the type ("People Profile" / "Asset Profile"). The match count reads "employees" or "assets".
+- **Configure Checklists:**
+  - People profiles keep Onboarding / Offboarding.
+  - Asset profiles get Commissioning / Decommissioning, through a new `opts.events` override in `scope-checklist-editor.js`. The event list is taken from the editor's own `ASSET_CATEGORY` list, not repeated.
+- **Checklists tab and View Mapped Profiles:** unchanged. Asset profiles mapped to a checklist appear there too.
+
+**Files:**
+- `database/407_event_profile_asset_profiles.sql` (+ `_rollback`)
+- `Api/Controllers/EventProfileController.cs`
+- `Api/Services/EventProfileService.cs`
+- `Api/Models/EventProfileModels.cs`
+- `Api/Models/EventScopeModels.cs` (`EventSubjectEntities.All`, `IsValidListFilter`)
+- `Web/Views/Practice/Partials/event-profiles.cshtml`
+- `Web/wwwroot/js/EventProfiles/event-profiles.js`
+- `Web/wwwroot/js/scope-checklist-editor.js`
+
+### Checklists tab — Profile Type column (migration 408)
+
+The Checklists tab now shows a **Profile Type** column (People / Asset) after Event, so a people checklist is told apart from an asset one at a glance.
+
+**Source**
+- `grac_practice.event_definition.entity_category` for the organisation and event code: `People` → People, `Assets` → Asset. This is the per-organisation event row the raise already resolves against (seeded by 126, re-ensured by 335).
+- Nothing is inferred from the event code.
+- The words match the Profiles tab's Profile Type (`event_profile.profile_type`, 407).
+- If the organisation has no event definition for that event, the cell is blank. The raise would refuse that event too.
+
+**Change**
+- `sp_event_driven_checklist_list` is re-issued from its 344 body. The only additions are a LEFT JOIN on `event_definition` (unique on org + event code, so no extra rows) and two columns:
+  - `SubjectEntity` (EMPLOYEE / ASSET)
+  - `ChecklistType` (People / Asset)
+- API: `EventDrivenChecklistRow` gains `SubjectEntity` and `ChecklistType`, so `GET /scope/checklists` rows carry `subjectEntity` and `checklistType`.
+- UI: new `<th>Profile Type</th>` in the Checklists table. The empty and loading rows now use colspan 5.
+
+**Files**
+- `database/408_checklist_list_subject_type.sql` (+ `_rollback`, which restores the 344 body)
+- `Api/Models/EventScopeModels.cs`
+- `Api/Services/EventScopeService.cs`
+- `Web/Views/Practice/Partials/event-profiles.cshtml`
+- `Web/wwwroot/js/EventProfiles/event-profiles.js`
+
+**Run:** run 408 after 344 (any order relative to 407), then restart the API.
+
+### Asset Category Assurance retired (migration 409)
+
+Asset checklists are now configured only on **Event Profiles → Asset Profile → Configure Checklists** (Commissioning / Decommissioning). Obligations ticked there reach the asset raise automatically. The **Asset Category Assurance** menu (`Practice/Index/asset-category-assurance`) is therefore set **Inactive**.
+
+- **Migration 409:** sets `menu_master.status = 'Inactive'` for `asset-category-assurance`. It changes nothing else: key, URL, parent, order and role permissions stay as they are, so the rollback is a single status flip. `274_menu_master_seed.sql` carries the same status, so re-running the snapshot keeps the menu hidden.
+- **"Your own checklists" (custom questions) are not carried over.** This was confirmed: obligations are the only checklist source going forward. Custom questions stay hidden for PROFILE scope (`SUPPORTS_CUSTOM_QUESTIONS`).
+- **Existing Asset Category decisions still fire.** Active `ASSET_CATEGORY` rows in `event_obligation_applicability` still take part in the asset raise, alongside Asset Profile decisions (union, Included wins).
+  - 409's report lists them per organization.
+  - To manage everything in one place, re-create them on an Asset Profile (Asset Category = the same category), then deactivate the category rows.
+  - Until then, un-ticking an obligation on the Asset Profile does not stop it if the category row still includes it.
+- **The page files are kept:** `asset-category-assurance.cshtml`, the `ASSET_CATEGORY` branch of `scope-checklist-editor.js`, and the API scope. They are kept because the Asset Profile's Configure Checklists reuses the `ASSET_CATEGORY` event list, and so rollback 409 brings the screen back unchanged.
+- **UI:** the Checklists tab's empty-state text no longer points to the Asset Category screen.
+
+**Run:** run 409 after 407. Users must log in again to refresh the sidebar.
+
+### Run order and verification
+
+1. Run `407_event_profile_asset_profiles.sql` after 330, 343 and 239. Every row in its verification block (407-a … 407-i) should read PASS.
+2. Restart the API.
+3. Test:
+   1. The list shows the existing profiles as **People**. The filter All / People / Asset narrows the list.
+   2. Add → Asset Profile. The criteria are Location, Asset Category, Asset Sub Category and Asset Type. Choosing a category narrows Sub Category, and choosing a sub category narrows Type.
+   3. Save the asset profile. The list shows **Asset**. Edit opens on the Asset tab, and the People tab is disabled.
+   4. Configure Checklists on the asset profile shows Commissioning / Decommissioning. Tick an obligation and save.
+   5. Commission an asset that matches the profile. The obligation is raised, and `event_mapping_resolution.profile_id` names the asset profile.
+   6. People profiles still work: Onboarding raises exactly as before.
+
+**Rollback:** `407_..._rollback.sql`.
+- It restores the 330 / 343 bodies verbatim.
+- It removes the ASSET dimensions and the new columns.
+- It refuses while any Asset profile exists.
+
+**Known boundary:** the checklist mapping API does not check that an event matches the profile type. Event types carry no subject in `GRAC_New.event_type_master`. The screen only offers the matching events, and a mismatched decision can never fire, because the raise only evaluates profiles of the subject being raised.

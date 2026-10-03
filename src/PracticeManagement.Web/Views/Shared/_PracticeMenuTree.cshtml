@@ -53,19 +53,24 @@
         if (item.Children.Count > 0) return NormalizeMenuUrl(item.MenuUrl!);
         if (!string.IsNullOrWhiteSpace(item.MenuUrl)) return NormalizeMenuUrl(item.MenuUrl);
         if (item.Screen is null) return "#";
-        if (item.Screen.Key == "dashboard") return Url.Action("Index", "Practice") ?? "#";
+        if (item.Screen.Key == "dashboard") return Url.Action("Index", "Practice", new { areaKey = "" }) ?? "#";
         if (item.Screen.Group == PracticeScreen.OrganizationOnboardingGroup) return Url.Action("OrganizationSetup", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
         if (item.Screen.Group == PracticeScreen.OrganizationAdministrationGroup) return Url.Action("OrganizationAdministration", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
         if (item.Screen.Group == PracticeScreen.OrganizationDependenciesGroup) return Url.Action("OrganizationDependencies", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
         return Url.Action("PracticeManagement", "Practice", new { areaKey = item.Screen.Key }) ?? "#";
     }
 
+    // Home links pass areaKey = "" on purpose. Url.Action reuses the
+    // current request's route values (ambient values): on
+    // /Practice/Index/tasks the Home link inherited areaKey = "tasks" and
+    // pointed back at the page already open. An explicit empty areaKey
+    // stops that, and generates the canonical /Practice.
     private string NormalizeMenuUrl(string menuUrl)
     {
         var value = menuUrl.Trim();
         if (string.IsNullOrWhiteSpace(value) || value == "#") return "#";
         if (Uri.TryCreate(value, UriKind.Absolute, out _)) return value;
-        if (value.Equals("dashboard", StringComparison.OrdinalIgnoreCase)) return Url.Action("Index", "Practice") ?? "#";
+        if (value.Equals("dashboard", StringComparison.OrdinalIgnoreCase)) return Url.Action("Index", "Practice", new { areaKey = "" }) ?? "#";
         if (value.Equals("resolve", StringComparison.OrdinalIgnoreCase)) return Url.Action("Resolve", "Practice") ?? "#";
 
         if (value.StartsWith("~/", StringComparison.Ordinal)) return Url.Content(value);

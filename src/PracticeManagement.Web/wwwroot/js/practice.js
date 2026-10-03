@@ -296,6 +296,8 @@
   const setupPanels = document.querySelectorAll("[data-setup-panel]");
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const query = new URLSearchParams(window.location.search);
+  // 414: the URL's ?status= is applied once (populateFilters).
+  let urlStatusApplied = false;
 
   // WHICH ENTITY THE OPEN FORM IS FOR, which is not always the screen
   // behind it. openForm can be handed another entity -- "New Practice
@@ -435,7 +437,11 @@
   // so the Source Statements menu opens directly on the RS3 grid.
   const isSourceStatementDetail = screen.Key === "source-statements";
   const isSourceStatements = screen.Key === "organization-controls" || isSourceStatementDetail;
-  const sourceStatementState = { level: "releases", release: null, releases: [], rows: [], collapsedNodes: new Set(), isCustomRelease: false };
+  const sourceStatementState = { level: "releases", release: null, releases: [], rows: [], collapsedNodes: new Set(), isCustomRelease: false,
+    // 2026-09-28: Standards & Frameworks opens Control Statements for a
+    // specific release via ?organizationId=&releaseId= (see
+    // openControlStatementsPage / openControlStatementsRelease).
+    requestedReleaseId: isSourceStatementDetail ? (Number(query.get("releaseId")) || null) : null };
   // Authority / Artifact / Version are deliberately absent: FrameworkRelease
   // already reads as "<artifact_code> <version_no>" (see
   // PracticeRepositoryService.QuerySubscribedFrameworksAsync), so three more
@@ -666,7 +672,7 @@
   const fallbackEvidenceTypes = [{ value: "1", label: "Policy Document" }, { value: "2", label: "Procedure Document" }, { value: "3", label: "System Screenshot" }, { value: "4", label: "System Report" }, { value: "5", label: "Audit Log" }];
 
   const schemas = {
-    "organizations": [text("code", "Organization Short Name", true), text("name", "Organization Name", true), text("industry", "Industry"), text("entityType", "Entity Type"), text("country", "Country"), select("status", "Status", "status-active", true)],
+    "organizations": [text("code", "Organization Short Name", true), text("name", "Organization Name", true), text("industry", "Industry"), text("entityType", "Entity Type"), select("timeZoneId", "Time Zone", "time-zones"), text("addressLine1", "Address Line 1"), text("addressLine2", "Address Line 2"), text("city", "City"), text("stateProvince", "State / Province"), select("country", "Country", "countries"), text("postalCode", "Pin Code"), date("subscriptionStartDate", "Subscription Start Date"), date("subscriptionEndDate", "Subscription End Date"), select("status", "Status", "status-active", true)],
     "organization-metadata": [select("organizationId", "Organization", "organizations", true), text("metadataKey", "Metadata Key", true), text("metadataName", "Metadata Name", true), select("dataType", "Data Type", "data-types", true), area("valueText", "Value"), select("status", "Status", "status-active", true)],
     "repository-subscriptions": [select("organizationId", "Organization", "organizations", true), number("authorityId", "Repository Authority ID"), number("artifactId", "Repository Artifact ID"), number("releaseId", "Repository Release ID"), select("subscriptionType", "Subscription Type", "subscription-types", true), select("subscriptionStatus", "Subscription Status", "subscription-status", true), date("effectiveDate", "Effective Date"), date("endDate", "End Date"), select("status", "Status", "status-active", true)],
     // Time Zone + address (change request 2026-09-20, migration 361):
@@ -796,6 +802,14 @@
     select("industry", "Industry", "industries", true),
     select("entityType", "Entity Type", "entity-types", true),
     select("country", "Country", "countries", true),
+    select("timeZoneId", "Time Zone", "time-zones"),
+    text("addressLine1", "Address Line 1"),
+    text("addressLine2", "Address Line 2"),
+    text("city", "City"),
+    text("stateProvince", "State / Province"),
+    text("postalCode", "Pin Code"),
+    date("subscriptionStartDate", "Subscription Start Date"),
+    date("subscriptionEndDate", "Subscription End Date"),
     select("status", "Status", "status-active", true),
     // Rule 1 + Rule 6 — every new org gets an auto-provisioned
     // Organisation GRAC Admin. Operator must supply the admin email at
@@ -906,6 +920,8 @@
     releaseEdit: "Edit Release",
     releaseRetire: "Retire Release",
     releaseUpdateOwner: "Update Owner",
+    // Migration 395 -- Control Management changes waiting for approval.
+    releaseUpdates: "Repository Updates",
     // Rule 6 — best-effort "Resend credentials" action on the Users tab.
     resendCredentials: "Resend Credentials",
     markApplicability: "Mark Applicability",
@@ -939,6 +955,7 @@
     releaseEdit: "fa-pen",
     releaseRetire: "fa-ban",
     releaseUpdateOwner: "fa-user-gear",
+    releaseUpdates: "fa-code-compare",
     resendCredentials: "fa-envelope",
     markApplicability: "fa-clipboard-check",
     updateApplicability: "fa-clipboard-check",
@@ -1510,7 +1527,13 @@
       // stub. Other org-scoped screens honour the last-selected org from
       // localStorage first.
       const skipSavedForFirstPick = ["organization-controls", "control-applicability", "source-statements"].includes(screen.Key);
-      const savedOrganizationId = skipSavedForFirstPick ? "" : getSavedOrganizationId();
+      // Control Statements opened from a Standards & Frameworks row carries
+      // the release's organization in the URL (2026-09-28); it wins.
+      // Management dashboards (414) open Standards & Frameworks and
+      // Organization Practices the same way, for the dashboard's organization.
+      const urlOrganizationId = ["source-statements", "organization-controls", "organization-requirements"].includes(screen.Key)
+        ? String(query.get("organizationId") || "") : "";
+      const savedOrganizationId = urlOrganizationId || (skipSavedForFirstPick ? "" : getSavedOrganizationId());
       if (organizationScopedScreens.has(screen.Key) && !state.navigationCode) {
         const selected = organizations.find(item => String(item.value) === savedOrganizationId) || organizations[0];
         if (selected) {
@@ -1532,6 +1555,16 @@
       const statusKey = screen.Key === "organization-requirements" || isSourceStatements ? "applicability-status" : "status-active";
       const emptyStatus = screen.Key === "organization-requirements" || isSourceStatements ? "All applicability statuses" : "All statuses";
       status.innerHTML = `<option value="">${emptyStatus}</option>${(state.lookups[statusKey] || []).map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
+      // Management dashboard drill-down (414): ?status= preselects the
+      // applicability filter once, on the first fill -- the Governance
+      // dashboard's per-release "Not updated" / "Applicable" counts open
+      // Control Statements this way. The user can change it like any
+      // other filter afterwards.
+      if (!urlStatusApplied) {
+        urlStatusApplied = true;
+        const urlStatus = query.get("status") || "";
+        if (urlStatus && [...status.options].some(o => o.value === urlStatus)) status.value = urlStatus;
+      }
     }
     if (originTypeFilter) originTypeFilter.innerHTML = `<option value="">All origins</option>${(state.lookups["origin-types"] || []).map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
     if (criticalityFilter) criticalityFilter.innerHTML = `<option value="">All criticalities</option>${(state.lookups.criticality || []).map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
@@ -1815,7 +1848,15 @@
       industry: org.Industry || "",
       entityType: org.EntityType || "",
       country: org.Country || "",
-      status: org.Status || "Active"
+      status: org.Status || "Active",
+      timeZoneId: org.TimeZoneId || "",
+      addressLine1: org.AddressLine1 || "",
+      addressLine2: org.AddressLine2 || "",
+      city: org.City || "",
+      stateProvince: org.StateProvince || "",
+      postalCode: org.PostalCode || "",
+      subscriptionStartDate: String(org.SubscriptionStartDate || "").slice(0, 10),
+      subscriptionEndDate: String(org.SubscriptionEndDate || "").slice(0, 10)
     };
     // Organization Administration's Organization tab is read-only by design
     // (change request 2026-09-20) -- render plain label/value pairs there
@@ -2333,12 +2374,12 @@
     // section missing depending on how the user navigated -- the sort of
     // inconsistency that reads as a bug.
     if (entity === "roles") {
-      renderScopeChecklistSection(fieldsHost, {
+      // Menu Permissions section (replaces the former Event Checklists, which
+      // moved to Profile). Same append pattern; keyed on the role id.
+      renderRoleMenuPermissionSection(fieldsHost, {
         organizationId: valueOf(selectedRecord, "organizationId") || setupState.organizationId,
-        scopeDimension: "ORG_ROLE",
-        scopeValueId:   state.id,
-        title:          "Event Checklists for this Role",
-        subtitle:       "What has to be done when somebody joins this role, and when they leave it."
+        roleId:         state.id,
+        readonly:       readonly
       });
     }
     // Committee Members section (migration 370) -- same append pattern as
@@ -2640,6 +2681,114 @@
     }
   }
 
+  // -------------------------------------------------------------------
+  // Control Statements page (change request 2026-09-28)
+  //
+  // Standards & Frameworks lists releases; its rows no longer drill in
+  // place (which kept the Standards heading, URL and menu selection).
+  // They open the Control Statements page for that release, which is the
+  // same page the Governance menu opens -- one statement tree, one release
+  // at a time, switched with the Framework filter.
+  //
+  // A release is READY for Control Statements when its release owner is
+  // assigned and at least one of its statements has its applicability
+  // marked (Total - Not Updated > 0). Only ready releases are offered.
+  // Exception: a release opened explicitly from Standards & Frameworks
+  // that has an owner but nothing marked yet is offered as well --
+  // otherwise its first statement could never be marked.
+  // -------------------------------------------------------------------
+  function releaseReadyForStatements(release) {
+    const ownerId = Number(valueOf(release, "OwnerId") || 0);
+    const total = Number(valueOf(release, "TotalStatementsCount") ?? 0) || 0;
+    const notUpdated = Number(valueOf(release, "NotUpdatedStatementsCount") ?? 0) || 0;
+    return ownerId > 0 && total - notUpdated > 0;
+  }
+
+  // Migration 396: an approved Control Management retirement only flags the
+  // organization's copy -- the row stays, marked.
+  function retiredInRepositoryBadge(row) {
+    return String(valueOf(row, "LifecycleStatus") || "").toLowerCase() === "retired"
+      ? ` <span class="pm-badge" title="Control Management retired this item; the organization's practices and instances are kept.">Retired in repository</span>`
+      : "";
+  }
+
+  // Migration 395: pending Control Management changes for the release.
+  function pendingUpdatesBadge(release) {
+    const pending = Number(valueOf(release, "PendingUpdatesCount") || 0) || 0;
+    return pending > 0
+      ? ` <span class="pm-badge" title="Repository updates waiting for approval">${escapeHtml(pending)} update${pending === 1 ? "" : "s"}</span>`
+      : "";
+  }
+
+  function openRepositoryUpdatesPage(release) {
+    const organizationId = valueOf(release, "OrganizationId") || organizationFilter?.value || "";
+    window.location.assign(`${window.location.origin}${buildAppUrl("Practice/Index/repository-updates")}`
+      + `?organizationId=${encodeURIComponent(organizationId)}&releaseId=${encodeURIComponent(valueOf(release, "ReleaseId"))}`);
+  }
+
+  function openControlStatementsPage(release, replace) {
+    const organizationId = valueOf(release, "OrganizationId") || organizationFilter?.value || "";
+    const url = `${window.location.origin}${buildAppUrl("Practice/Index/source-statements")}`
+      + `?organizationId=${encodeURIComponent(organizationId)}&releaseId=${encodeURIComponent(valueOf(release, "ReleaseId"))}`;
+    if (replace) window.location.replace(url);
+    else window.location.assign(url);
+  }
+
+  function controlStatementsMessage(text) {
+    renderStatementTreeHeader();
+    rows.innerHTML = `<tr><td colspan="${statementTreeColumns.length + bulkColumnCount()}" class="pm-empty">${escapeHtml(text)}</td></tr>`;
+    state.records = [];
+    renderPager();
+  }
+
+  async function openControlStatementsRelease(allReleases) {
+    let releases = allReleases;
+    // Employee scope: same narrowing the release summary applies.
+    if (isEmployeeScope) {
+      const empId = sessionEmployeeId ? Number(sessionEmployeeId) : 0;
+      releases = releases.filter(release =>
+        Number(valueOf(release, "OwnerId") || 0) === empId
+        || String(valueOf(release, "IsAssignedToCurrentUser") || "").toLowerCase() === "true");
+    }
+    const organizationId = String(organizationFilter?.value || "");
+    // The URL's release only applies to the URL's organization.
+    const requestedId = sourceStatementState.requestedReleaseId
+      && String(query.get("organizationId") || organizationId) === organizationId
+      ? String(sourceStatementState.requestedReleaseId) : "";
+    const requested = requestedId ? releases.find(release => String(valueOf(release, "ReleaseId")) === requestedId) : null;
+
+    if (requested && !(Number(valueOf(requested, "OwnerId") || 0) > 0)) {
+      if (subscribedFrameworkFilter) { subscribedFrameworkFilter.innerHTML = ""; subscribedFrameworkFilter.disabled = true; }
+      controlStatementsMessage(`${valueOf(requested, "FrameworkRelease") || "This release"} has no release owner. Assign the owner in Governance - Standards & Frameworks before working on its control statements.`);
+      return;
+    }
+
+    const ready = releases.filter(release => releaseReadyForStatements(release) || release === requested);
+    sourceStatementState.releases = ready;
+    const current = String(subscribedFrameworkFilter?.value || "");
+    if (subscribedFrameworkFilter) {
+      subscribedFrameworkFilter.innerHTML = ready.map(release => {
+        const value = valueOf(release, "ReleaseId");
+        const label = valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion") || `Release ${value}`;
+        return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+      }).join("");
+      subscribedFrameworkFilter.disabled = !ready.length;
+    }
+    if (!ready.length) {
+      controlStatementsMessage("No framework is ready yet. A framework appears here once its release owner is assigned and at least one of its statements has its applicability marked. Open it from Governance - Standards & Frameworks to start.");
+      return;
+    }
+
+    const pick = ready.find(release => String(valueOf(release, "ReleaseId")) === current) || requested || ready[0];
+    if (subscribedFrameworkFilter) subscribedFrameworkFilter.value = String(valueOf(pick, "ReleaseId"));
+    sourceStatementState.release = mapReleaseSelection(pick);
+    sourceStatementState.isCustomRelease = Number(valueOf(pick, "ReleaseId") || 0) < 0
+      || String(valueOf(pick, "SubscriptionType") || "").toLowerCase() === "custom";
+    sourceStatementState.level = "statements";
+    sourceStatementState.hasAutoDrilled = true;
+    await loadSourceStatements();
+  }
+
   async function loadReleaseSummary() {
     renderReleaseSummaryHeader();
     const colspan = releaseSummaryColumns.length;
@@ -2652,6 +2801,12 @@
         body: JSON.stringify({ data: { organizationId: Number(organizationFilter.value), pageNumber: 1, pageSize: 500 } })
       });
       let releases = apiData(result);
+      // Control Statements (menu or drill-down) never shows the release
+      // summary: it opens the statement tree of one ready release.
+      if (isSourceStatementDetail) {
+        await openControlStatementsRelease(releases);
+        return;
+      }
       const term = (search?.value || "").trim().toLowerCase();
       if (term) {
         releases = releases.filter(release =>
@@ -2700,16 +2855,13 @@
       // or employee-scope + 1 release), skip painting the release
       // summary grid entirely -- rendering then instantly replacing it
       // makes the RS2 grid flash on organization change.
-      const willAutoDrill =
-        (isEmployeeScope && releases.length === 1) ||
-        (isSourceStatementDetail && !sourceStatementState.hasAutoDrilled && releases.length >= 1);
-      if (willAutoDrill) {
-        const only = releases[0];
-        sourceStatementState.release = mapReleaseSelection(only);
-        sourceStatementState.isCustomRelease = Number(valueOf(only, "ReleaseId") || 0) < 0;
-        sourceStatementState.level = "statements";
-        sourceStatementState.hasAutoDrilled = true;
-        await loadSourceStatements();
+      // Rule 4 (employee scope, one release) now lands on the Control
+      // Statements PAGE for that release instead of drilling in place under
+      // the Standards & Frameworks heading (2026-09-28). ?list=1 is how the
+      // Back link from that page says "show me the list", so it cannot
+      // bounce straight back.
+      if (isEmployeeScope && releases.length === 1 && query.get("list") !== "1") {
+        openControlStatementsPage(releases[0], true);
         return;
       }
 
@@ -2723,7 +2875,7 @@
           // so the placeholder uses the inline muted-cell style instead.
           : `<span class="pm-cell-muted">Unassigned</span>`;
         return `<tr class="pm-release-source-row" data-release-index="${index}" style="cursor:pointer" title="View Control Statements for this release">
-        <td><i class="fa-solid fa-chevron-right" aria-hidden="true"></i> ${escapeHtml(valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion"))}</td>
+        <td><i class="fa-solid fa-chevron-right" aria-hidden="true"></i> ${escapeHtml(valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion"))}${pendingUpdatesBadge(release)}</td>
         <td>${ownerCell}</td>
         <td>${escapeHtml(valueOf(release, "TotalStatementsCount") ?? valueOf(release, "TotalRequirementsCount") ?? 0)}</td>
         <td>${escapeHtml(valueOf(release, "NotApplicableStatementsCount") ?? valueOf(release, "NotApplicableDeferredRequirementsCount") ?? 0)}</td>
@@ -2742,19 +2894,6 @@
       // (migration 056) so the Source Statements menu opens directly on
       // the Level 2 statement grid. Gated by hasAutoDrilled so the Back
       // button on that screen doesn't re-drill in a loop.
-      const shouldAutoDrillEmployee = isEmployeeScope && releases.length === 1;
-      const shouldAutoDrillDetail   = isSourceStatementDetail
-                                     && !sourceStatementState.hasAutoDrilled
-                                     && releases.length >= 1;
-      if (shouldAutoDrillEmployee || shouldAutoDrillDetail) {
-        const only = releases[0];
-        sourceStatementState.release = mapReleaseSelection(only);
-        sourceStatementState.isCustomRelease = Number(valueOf(only, "ReleaseId") || 0) < 0;
-        sourceStatementState.level = "statements";
-        sourceStatementState.hasAutoDrilled = true;
-        await loadSourceStatements();
-        return;
-      }
     } catch (error) {
       rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">${escapeHtml(error.message || "Unable to load subscribed framework releases.")}</td></tr>`;
       logListTrace("error", { level: "releases", message: error.message || String(error) });
@@ -2869,7 +3008,7 @@
       return `<tr${rowAttrs}>
         ${bulkCell(s)}
         <td class="pm-cell-ref" title="${escapeHtml(reference)}">${escapeHtml(reference)}</td>
-        <td class="pm-cell-title">${escapeHtml(valueOf(s, "StatementTitle"))}</td>
+        <td class="pm-cell-title">${escapeHtml(valueOf(s, "StatementTitle"))}${retiredInRepositoryBadge(s)}</td>
         <td>${formatCell(valueOf(s, "ApplicabilityStatus") || "Not Updated")}</td>
         <td>${formatCell(valueOf(s, "ImplementationStatus") || "Not Implemented")}</td>
         <td>${escapeHtml(valueOf(s, "PracticeCount") || 0)}</td>
@@ -3209,7 +3348,7 @@
     // select an employee..." save failure that fix exists to avoid.
     const ownerOptions = optionsFor("owners-id", isEdit ? valueOf(release, "OwnerId") : "");
 
-    fieldsHost.innerHTML = `
+    const customReleaseFields = `
       <input name="organizationId" type="hidden" value="${escapeHtml(orgId)}">
       ${isEdit ? `<input name="subscriptionId" type="hidden" value="${escapeHtml(subscriptionId)}">` : ""}
       <label class="pm-field"><span>Authority</span><input value="Organization" disabled></label>
@@ -3219,8 +3358,165 @@
       <label class="pm-field"><span>Effective Date</span><input name="effectiveDate" type="date" value="${escapeHtml(effectiveVal)}"></label>
       <label class="pm-field"><span>End Date</span><input name="endDate" type="date" value="${escapeHtml(endVal)}"></label>
       <label class="pm-field full"><span>Release Notes</span><textarea name="releaseNotes" rows="4" placeholder="Optional notes about this release">${escapeHtml(notesVal)}</textarea></label>`;
+    // Edit stays exactly as it was. Add offers the two Add Release options
+    // (migration 406): the existing custom release form, unchanged, and
+    // Subscribe from Repository.
+    fieldsHost.innerHTML = isEdit ? customReleaseFields : addReleaseTabsMarkup(customReleaseFields);
+    // Add Release only: a wider, taller dialog so the Repository list fits
+    // without scrolling (pm-dialog-add-release, practice-management.css).
+    // Removed again on close, so every other form keeps the default size.
+    dialog.classList.toggle("pm-dialog-add-release", !isEdit);
+    if (!dialog.__addReleaseCloseBound) {
+      dialog.__addReleaseCloseBound = true;
+      dialog.addEventListener("close", () => dialog.classList.remove("pm-dialog-add-release"));
+    }
     saveButton.hidden = false;
     dialog.showModal();
+    if (!isEdit) wireAddReleaseTabs(orgId);
+  }
+
+  // --- Add Release > Subscribe from Repository (migration 406) ---
+  // Lists the central Repository releases (the same eligibility rule
+  // Organization Setup's subscription tree uses) with THIS organization's
+  // state for each: Subscribed / Request Pending / Rejected / Request for
+  // Subscription. "Request" files a Pending request that Control Management
+  // approves or rejects (Subscription Requests); approval is what
+  // subscribes the organization, never this button. The organization is
+  // the one the dialog was opened for (toolbar filter), read again on every
+  // open, so switching organization always shows that organization's state.
+  const addReleaseRepositoryState = { organizationId: "", rows: [] };
+
+  function addReleaseTabsMarkup(customReleaseFields) {
+    // grid-column spans the dialog's two-column .pm-form-grid; panels use
+    // the setup tab-panel show/hide (.pm-setup-tab-panel / .active).
+    return `
+      <div class="pm-tabs" role="tablist" aria-label="Add Release options" style="grid-column: 1 / -1;">
+        <button type="button" role="tab" class="active" aria-selected="true" data-add-release-tab="custom">Custom Release</button>
+        <button type="button" role="tab" aria-selected="false" data-add-release-tab="repository">Subscribe from Repository</button>
+      </div>
+      <div class="pm-setup-tab-panel active" data-add-release-panel="custom" style="grid-column: 1 / -1;">
+        <div class="pm-form-grid">${customReleaseFields}</div>
+      </div>
+      <div class="pm-setup-tab-panel" data-add-release-panel="repository" style="grid-column: 1 / -1;">
+        <div class="pm-toolbar">
+          <input type="search" data-add-release-search placeholder="Search framework, code, version or publisher..." aria-label="Search repository releases">
+        </div>
+        <div class="pm-table-wrap compact">
+          <table>
+            <thead><tr><th>Release / Framework</th><th>Release Code</th><th>Version</th><th>Source / Publisher</th><th>Release Status</th><th>Subscription</th></tr></thead>
+            <tbody data-add-release-rows><tr><td colspan="6" class="pm-empty compact">Open this tab to load the Repository releases.</td></tr></tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function wireAddReleaseTabs(orgId) {
+    addReleaseRepositoryState.organizationId = String(orgId || "");
+    addReleaseRepositoryState.rows = [];
+    let loaded = false;
+    fieldsHost.querySelectorAll("[data-add-release-tab]").forEach(tab => {
+      tab.addEventListener("click", async () => {
+        const target = tab.dataset.addReleaseTab;
+        fieldsHost.querySelectorAll("[data-add-release-tab]").forEach(other => {
+          const active = other === tab;
+          other.classList.toggle("active", active);
+          other.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        fieldsHost.querySelectorAll("[data-add-release-panel]").forEach(panel =>
+          panel.classList.toggle("active", panel.dataset.addReleasePanel === target));
+        // Save belongs to the custom release form only; a subscription
+        // request is sent from its own row button.
+        saveButton.hidden = target !== "custom";
+        formMessage.hidden = true;
+        if (target === "repository" && !loaded) {
+          loaded = true;
+          await loadAddReleaseRepository();
+        }
+      });
+    });
+    const searchInput = fieldsHost.querySelector("[data-add-release-search]");
+    searchInput?.addEventListener("input", renderAddReleaseRepository);
+    searchInput?.addEventListener("keydown", event => { if (event.key === "Enter") event.preventDefault(); });
+    fieldsHost.querySelector("[data-add-release-rows]")?.addEventListener("click", event => {
+      const button = event.target.closest("[data-request-release]");
+      if (button) requestRepositorySubscription(button.dataset.requestRelease);
+    });
+  }
+
+  async function loadAddReleaseRepository() {
+    const body = fieldsHost.querySelector("[data-add-release-rows]");
+    if (!body) return;
+    body.innerHTML = `<tr><td colspan="6" class="pm-empty compact">Loading Repository releases...</td></tr>`;
+    try {
+      const result = await fetchJson(`${api}/repository-subscription-requests/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({ data: { organizationId: Number(addReleaseRepositoryState.organizationId) } })
+      });
+      addReleaseRepositoryState.rows = apiData(result);
+      renderAddReleaseRepository();
+    } catch (error) {
+      addReleaseRepositoryState.rows = [];
+      body.innerHTML = `<tr><td colspan="6" class="pm-empty compact">${escapeHtml(error.message || "Unable to load Repository releases.")}</td></tr>`;
+    }
+  }
+
+  function renderAddReleaseRepository() {
+    const body = fieldsHost.querySelector("[data-add-release-rows]");
+    if (!body) return;
+    const term = (fieldsHost.querySelector("[data-add-release-search]")?.value || "").trim().toLowerCase();
+    const list = addReleaseRepositoryState.rows.filter(row => !term || [
+      valueOf(row, "ArtifactName"), valueOf(row, "ArtifactCode"), valueOf(row, "ReleaseVersion"),
+      valueOf(row, "AuthorityCode"), valueOf(row, "AuthorityName")
+    ].join(" ").toLowerCase().includes(term));
+    if (!list.length) {
+      body.innerHTML = `<tr><td colspan="6" class="pm-empty compact">${term ? "No Repository releases match the search." : "No Repository releases are available for subscription."}</td></tr>`;
+      return;
+    }
+    body.innerHTML = list.map(row => {
+      const subscriptionState = String(valueOf(row, "SubscriptionState") || "");
+      const canRequest = valueOf(row, "CanRequest") === true || String(valueOf(row, "CanRequest")) === "1" || String(valueOf(row, "CanRequest")).toLowerCase() === "true";
+      const remark = valueOf(row, "DecisionRemark");
+      const stateTitle = subscriptionState === "Rejected" && remark ? ` title="${escapeHtml(`Rejected: ${remark}`)}"` : "";
+      const publisher = [valueOf(row, "AuthorityCode"), valueOf(row, "AuthorityName")].filter(Boolean).join(" - ");
+      // One Subscription column: Subscribed / Request Pending as a badge;
+      // not subscribed shows the Request button in the same cell (a
+      // rejected release keeps its Rejected badge beside the button).
+      const requestButton = `<button type="button" class="pm-button primary small" data-request-release="${escapeHtml(valueOf(row, "ReleaseId"))}"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Request</button>`;
+      const subscriptionCell = canRequest
+        ? `${subscriptionState === "Rejected" ? `<span class="pm-badge"${stateTitle}>Rejected</span> ` : ""}${requestButton}`
+        : `<span class="pm-badge"${stateTitle}>${escapeHtml(subscriptionState)}</span>`;
+      return `<tr>
+        <td>${escapeHtml(valueOf(row, "ArtifactName"))}</td>
+        <td>${escapeHtml(valueOf(row, "ArtifactCode"))}</td>
+        <td>${escapeHtml(valueOf(row, "ReleaseVersion"))}</td>
+        <td>${escapeHtml(publisher)}</td>
+        <td>${formatCell(valueOf(row, "ReleaseStatus"))}</td>
+        <td>${subscriptionCell}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function requestRepositorySubscription(releaseId) {
+    const row = addReleaseRepositoryState.rows.find(item => String(valueOf(item, "ReleaseId")) === String(releaseId));
+    if (!row) return;
+    const label = [valueOf(row, "ArtifactCode") || valueOf(row, "ArtifactName"), valueOf(row, "ReleaseVersion")].filter(Boolean).join(" ");
+    if (!await window.gracUi.confirm(`Request a subscription to ${label}? Control Management will review the request; the release is added to this organization once it is approved.`,
+          { title: "Request for Subscription", confirmText: "Request" })) return;
+    try {
+      await fetchJson(`${api}/repository-subscription-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({ id: 0, data: { organizationId: Number(addReleaseRepositoryState.organizationId), releaseId: Number(releaseId) } })
+      });
+      await loadAddReleaseRepository();
+      window.alert("Subscription request submitted. It is now pending Control Management approval.");
+    } catch (error) {
+      // A stale row (already subscribed / already pending) is refused by
+      // the server; reload so the row shows the state that refused it.
+      await loadAddReleaseRepository();
+      window.alert(error.message || "Unable to submit the subscription request.");
+    }
   }
 
   // --- Custom Release Statements (flat grid) ---
@@ -4223,7 +4519,7 @@
         const existing = rolePermissionFor(menuId);
         const check = (field) => `<td style="text-align:center"><input type="checkbox" data-perm-field="${field}"${existing && boolOf(existing, field) ? " checked" : ""}${disabled}></td>`;
         return `<tr data-permission-menu="${escapeHtml(menuId)}" data-permission-id="${escapeHtml(existing ? valueOf(existing, "Id") : "")}">
-          <td>${escapeHtml(valueOf(menu, "MenuName"))} <small style="color:#64748b">${escapeHtml(valueOf(menu, "MenuKey"))}</small></td>
+          <td>${escapeHtml(valueOf(menu, "MenuName"))} <small style="color:var(--fg-muted)">${escapeHtml(valueOf(menu, "MenuKey"))}</small></td>
           ${check("CanView")}${check("CanAdd")}${check("CanEdit")}${check("CanDelete")}${check("CanApprove")}
         </tr>`;
       }).join("")}`).join("");
@@ -4370,7 +4666,7 @@
       <th>Actions</th>
     </tr>`;
     pruneBulkSelection(state.records);
-    rows.innerHTML = state.records.map((record, index) => `<tr>
+    rows.innerHTML = state.records.map((record, index) => `<tr${practiceRowViewAttrs(index)}>
       ${bulkCell(record)}
       <td>${formatCell(valueOf(record, "Code"))}</td>
       <td>${formatCell(valueOf(record, "Name"))}</td>
@@ -4380,6 +4676,19 @@
       <td>${formatCell(valueOf(record, "OriginType"))}</td>
       <td>${actions(index)}</td>
     </tr>`).join("");
+  }
+
+  // Row click-to-View on Organization Practices (2026-10-03): the same
+  // affordance Gap / Task / Exception / Risk grids carry (.pm-row-clickable,
+  // see practice-management.css) and the same destination as the row's own
+  // "View" menu item -- the rows click handler calls handleAction("view"),
+  // so the identifiers and organization context passed to Practice View are
+  // exactly the ones View already sends. Only when the caller may VIEW,
+  // which is also what puts "View" in the menu.
+  function practiceRowViewAttrs(index) {
+    return permissions.has("VIEW")
+      ? ` class="pm-row-clickable" data-practice-view-index="${escapeHtml(index)}"`
+      : "";
   }
 
   // Implementation Status for a Practice row. Derived server-side from the
@@ -4412,7 +4721,7 @@
     });
     rows.innerHTML = [...groups.values()].map(group => {
       const title = `${group.code}${group.name ? ` - ${group.name}` : ""}`;
-      const detailRows = group.rows.map(({ record, index }) => `<tr>
+      const detailRows = group.rows.map(({ record, index }) => `<tr${practiceRowViewAttrs(index)}>
         ${bulkCell(record)}
         <td>${formatCell(valueOf(record, "Code"))}</td>
         <td>${formatCell(valueOf(record, "Name"))}</td>
@@ -4515,7 +4824,14 @@
   }
 
   function allowedReleaseActions(release) {
-    if (!release || isEmployeeScope) return [];
+    if (!release) return [];
+    const isRepositoryRelease = Number(valueOf(release, "ReleaseId") || 0) > 0
+      && String(valueOf(release, "SubscriptionType") || "").toLowerCase() !== "custom";
+    // Repository Updates (migration 395): the release owner reviews the
+    // Control Management changes to the release -- an employee-scope owner
+    // included, since the rows reaching them are already their own releases.
+    // Who may approve is decided server-side (owner or organization admin).
+    if (isEmployeeScope) return isRepositoryRelease && permissions.has("VIEW") ? ["releaseUpdates"] : [];
     const isCustom = Number(valueOf(release, "ReleaseId") || 0) < 0
       || String(valueOf(release, "SubscriptionType") || "").toLowerCase() === "custom";
     // Custom releases assign Owner through Edit Release now (it's one of
@@ -4524,9 +4840,9 @@
     // releaseUpdateOwner is offered only for Subscribed (non-Custom) rows.
     // Subscribed releases are untouched: they keep their own dedicated
     // Update Owner flow exactly as before.
-    const list = isCustom ? ["releaseView", "releaseEdit", "releaseRetire"] : ["releaseView", "releaseUpdateOwner"];
+    const list = isCustom ? ["releaseView", "releaseEdit", "releaseRetire"] : ["releaseView", "releaseUpdateOwner", "releaseUpdates"];
     return list.filter(action => {
-      if (action === "releaseView") return permissions.has("VIEW");
+      if (action === "releaseView" || action === "releaseUpdates") return permissions.has("VIEW");
       if (action === "releaseUpdateOwner") return permissions.has("EDIT") || permissions.has("ADD");
       if (action === "releaseEdit") return permissions.has("EDIT") || permissions.has("ADD");
       if (action === "releaseRetire") return permissions.has("DELETE");
@@ -4869,7 +5185,15 @@
       const shown = typeof window.gracFormatDisplayDate === "function" ? window.gracFormatDisplayDate(value) : value;
       control = `<input name="${field.name}" type="text" value="${escapeHtml(shown)}" disabled>`;
     }
-    else control = `<input name="${field.name}" type="${field.type}" value="${escapeHtml(value)}"${disabled}${field.required ? " required" : ""}>`;
+    else {
+      // Native date/datetime inputs need yyyy-mm-dd(THH:mm); SQL dates arrive
+      // with a time part, so trim it for the edit picker (same slice the
+      // release date fields already do).
+      const inputValue = (field.type === "date" || field.type === "datetime-local")
+        ? String(value ?? "").slice(0, field.type === "date" ? 10 : 16)
+        : value;
+      control = `<input name="${field.name}" type="${field.type}" value="${escapeHtml(inputValue)}"${disabled}${field.required ? " required" : ""}>`;
+    }
     return `<label class="pm-field${field.full ? " full" : ""}" data-field-name="${escapeHtml(field.name)}"><span>${escapeHtml(field.label)}${required}</span>${control}</label>`;
   }
 
@@ -5705,13 +6029,13 @@
     // below: the section makes two HTTP calls per event, and the dialog must
     // not sit blank waiting for them. It fills in once loaded.
     if (screen.Key === "roles") {
-      renderScopeChecklistSection(fieldsHost, {
+      // Menu Permissions section (replaces the former Event Checklists, now on
+      // Profile). Role details + permissions are managed together here.
+      renderRoleMenuPermissionSection(fieldsHost, {
         organizationId: valueOf(record, "organizationId")
                         || fieldsHost.querySelector("[name='organizationId']")?.value,
-        scopeDimension: "ORG_ROLE",
-        scopeValueId:   valueOf(record, "id") || valueOf(record, "roleId"),
-        title:          "Event Checklists for this Role",
-        subtitle:       "What has to be done when somebody joins this role, and when they leave it."
+        roleId:         valueOf(record, "id") || valueOf(record, "roleId"),
+        readonly:       readonly
       });
     }
 
@@ -5756,7 +6080,12 @@
     // than changing dialog's own default sizing (control-management.css).
     // Cleared for every other screen/mode so the dialog snaps back to its
     // normal size the next time it opens for anything else.
-    const isFullpage = screen.Key === "organization-requirements" && (mode === "add" || mode === "edit");
+    // Role Master (change request 2026-09-29) joins Organization Requirements
+    // in the full-page treatment: it now hosts the Role Menu Permission matrix
+    // as well as the role details, so it needs the full content width the
+    // pm-dialog-fullpage modifier gives (same .show() / escape handling below).
+    const isFullpage = (screen.Key === "organization-requirements" || screen.Key === "roles")
+      && (mode === "add" || mode === "edit");
     dialog.classList.toggle("pm-dialog-fullpage", isFullpage);
 
     // Location Add/Edit/View (layout compaction, 2026-09-20) -- 3-column
@@ -6548,14 +6877,33 @@
     return window.__scopeChecklistEditor.flushPending(scopeValueId);
   }
 
+  // Role Menu Permission editor (wwwroot/js/role-menu-permission-editor.js).
+  // Same wrapper pattern and reasons as the checklist wrappers above: it lives
+  // in its own file loaded after the workflow partials return, so these thin
+  // wrappers keep the Role dialog call sites simple and fail quietly if the
+  // module is missing. The matrix replaces the (now Profile-owned) event
+  // checklist section on Role Master.
+  async function renderRoleMenuPermissionSection(host, opts) {
+    if (!window.__roleMenuPermissionEditor) {
+      console.warn("role-menu-permission-editor.js is not loaded; the menu permission section is unavailable.");
+      return;
+    }
+    return window.__roleMenuPermissionEditor.render(host, opts);
+  }
+
+  async function flushPendingRolePermissions(roleId) {
+    if (!window.__roleMenuPermissionEditor) return { saved: 0, failed: 0 };
+    return window.__roleMenuPermissionEditor.flushPending(roleId);
+  }
+
   function scopeMsg(container, text, kind) {
     const el = container?.querySelector("[data-scope-message]");
     if (!el) return;
     if (!text) { el.style.display = "none"; el.textContent = ""; return; }
     el.style.display = "block"; el.textContent = text;
-    if (kind === "error")   { el.style.background = "#fee2e2"; el.style.color = "#7f1d1d"; }
-    else if (kind === "ok") { el.style.background = "#dcfce7"; el.style.color = "#166534"; }
-    else                    { el.style.background = "#dbeafe"; el.style.color = "#1e40af"; }
+    if (kind === "error")   { el.style.background = "var(--danger-100)"; el.style.color = "var(--danger-700)"; }
+    else if (kind === "ok") { el.style.background = "var(--success-100)"; el.style.color = "var(--success-700)"; }
+    else                    { el.style.background = "var(--primary-100)"; el.style.color = "var(--primary-700)"; }
   }
 
   async function renderInlineObligationsSection(record) {
@@ -6903,7 +7251,9 @@
           });
         });
       rows
-        .filter(row => String(valueOf(row, "RowType")).toLowerCase() === "statement" && valueOf(row, "OrgStatementId"))
+        // 396: a statement retired in the repository is not offered for new mappings.
+        .filter(row => String(valueOf(row, "RowType")).toLowerCase() === "statement" && valueOf(row, "OrgStatementId")
+          && String(valueOf(row, "LifecycleStatus") || "").toLowerCase() !== "retired")
         .forEach(row => {
           records.push({
             Id: `fs-${valueOf(row, "OrgStatementId")}`,
@@ -7653,30 +8003,42 @@
             await loadRows();
           }
 
-          // Write whatever was ticked or typed while the role had no id.
-          const flushed = await flushPendingScopeChecklists(newRoleId);
+          // Write whatever menu permissions were ticked while the role had
+          // no id, then re-render the section against the saved state.
+          const flushed = await flushPendingRolePermissions(newRoleId);
 
-          await renderScopeChecklistSection(fieldsHost, {
+          await renderRoleMenuPermissionSection(fieldsHost, {
             organizationId: data.organizationId,
-            scopeDimension: "ORG_ROLE",
-            scopeValueId:   newRoleId,
-            title:          "Event Checklists for this Role",
-            subtitle:       "What has to be done when somebody joins this role, and when they leave it."
+            roleId:         newRoleId,
+            readonly:       false
           });
-          const section = fieldsHost.querySelector("[data-scope-checklist]");
+          const section = fieldsHost.querySelector("[data-role-menu-perms]");
           if (section) {
-            // A partial flush must not read as success -- the user would
-            // leave believing checklists were configured that were not.
-            scopeMsg(section,
-              flushed.failed
-                ? `Role saved, but ${flushed.failed} checklist setting(s) could not be written. Set them again below.`
+            const heading = section.querySelector(".pm-section-heading");
+            if (heading) {
+              const note = document.createElement("p");
+              note.className = flushed.failed ? "pm-inline-error" : "pm-inline-note";
+              // A partial flush must not read as success.
+              note.textContent = flushed.failed
+                ? `Role saved, but ${flushed.failed} menu permission(s) could not be written. Set them again below.`
                 : flushed.saved
-                  ? `Role saved with ${flushed.saved} checklist setting(s).`
-                  : "Role saved. You can now set its onboarding and offboarding checklists.",
-              flushed.failed ? "error" : "ok");
+                  ? `Role saved with ${flushed.saved} menu permission(s).`
+                  : "Role saved. You can now set its menu permissions below.";
+              heading.appendChild(note);
+            }
             section.scrollIntoView({ behavior: "smooth", block: "nearest" });
           }
           return;
+        }
+      }
+
+      // Role Master, Edit: persist the menu-permission matrix edited beside
+      // the role details, so one Save writes both. (Add is handled above,
+      // where the new role id first becomes known, then returns early.)
+      if (targetEntity === "roles" && state.id) {
+        const permFlush = await flushPendingRolePermissions(state.id);
+        if (permFlush.failed) {
+          window.alert(`Role saved, but ${permFlush.failed} menu permission(s) could not be written. Reopen the role and set them again.`);
         }
       }
 
@@ -7787,6 +8149,39 @@
     });
   }
 
+  // Practice View -> Actions -> Mark / Update Applicability (2026-10-03).
+  // Practice View does not load this script, so its Actions menu sends the
+  // user here with ?applicabilityFor=<organization_requirement_id>
+  // &organizationId=<org> and this opens the SAME form the row's 3-dot
+  // "Mark / Update Applicability" opens -- openForm("applicability", id),
+  // which reads the record by id, so the row need not be on this page of
+  // the grid. Same permission gate as the menu item (allowedActions).
+  // When the dialog closes (saved or cancelled) the user goes back to that
+  // practice's View page with a FRESH navigation code -- navigation codes
+  // expire after 30 minutes, so the old URL is not reused.
+  async function openRequestedApplicability() {
+    if (screen.Key !== "organization-requirements") return;
+    const requirementId = Number(query.get("applicabilityFor") || 0);
+    if (!requirementId) return;
+    if (!(permissions.has("EDIT") || permissions.has("ADD"))) {
+      alert("You do not have permission to update applicability for this practice.");
+      return;
+    }
+    const organizationId = Number(query.get("organizationId") || 0) || null;
+    dialog.addEventListener("close", () => {
+      navigateWithContext("practice-view", "OrganizationRequirement", requirementId, "", "",
+        organizationId, null, "", requirementId)
+        .catch(error => alert(error.message));
+    }, { once: true });
+    // A failure here must not blank the grid (the init chain's catch
+    // replaces the rows with its message), so it is reported on its own.
+    try {
+      await openForm("applicability", requirementId);
+    } catch (error) {
+      alert(error.message || "The applicability form could not be opened.");
+    }
+  }
+
   async function navigateWithContext(targetArea, filterType, filterId, displayCode, displayName) {
     const code = await createNavigationCode({
       sourceArea: screen.Key,
@@ -7808,17 +8203,13 @@
     // Rule 3 — release-level actions on the Source Statements Level 1 grid.
     if (isSourceStatements && sourceStatementState.level === "releases"
         && (action === "releaseView" || action === "releaseUpdateOwner"
-            || action === "releaseEdit" || action === "releaseRetire")) {
+            || action === "releaseEdit" || action === "releaseRetire" || action === "releaseUpdates")) {
       const release = sourceStatementState.releases[Number(index)];
       if (!release) return placeholderAction(action);
-      if (action === "releaseView") {
-        sourceStatementState.release = mapReleaseSelection(release);
-        sourceStatementState.isCustomRelease = Number(valueOf(release, "ReleaseId") || 0) < 0
-          || String(valueOf(release, "SubscriptionType") || "").toLowerCase() === "custom";
-        sourceStatementState.level = "statements";
-        return loadSourceStatements();
-      }
+      // Opens the Control Statements page for this release (2026-09-28).
+      if (action === "releaseView") return openControlStatementsPage(release);
       if (action === "releaseUpdateOwner") return openReleaseOwnerForm(release);
+      if (action === "releaseUpdates") return openRepositoryUpdatesPage(release);
       if (action === "releaseEdit") return openCustomReleaseForm(release);
       if (action === "releaseRetire") return retireCustomRelease(release);
     }
@@ -7970,7 +8361,7 @@
         // owned by the sibling Repository Subscriptions menu -- redirect
         // there rather than showing the list under the wrong URL/heading.
         if (isSourceStatementDetail) {
-          window.location.href = "/Practice/Index/organization-controls";
+          window.location.href = `${buildAppUrl("Practice/Index/organization-controls")}?list=1`;
           return;
         }
         sourceStatementState.level = "releases";
@@ -7992,34 +8383,13 @@
         renderStatementTree();
         return;
       }
+      // Framework row -> the Control Statements PAGE for that release, so
+      // the heading, URL and menu selection follow (2026-09-28). It used to
+      // drill in place and keep the Standards & Frameworks heading.
       const releaseRow = event.target.closest("[data-release-index]");
       if (releaseRow && !event.target.closest(".pm-action-trigger")) {
         const release = sourceStatementState.releases[Number(releaseRow.dataset.releaseIndex)] || {};
-        const releaseId = Number(valueOf(release, "ReleaseId") || 0);
-        const isCustom = releaseId < 0;
-        sourceStatementState.isCustomRelease = isCustom;
-        sourceStatementState.release = {
-          releaseId: valueOf(release, "ReleaseId"),
-          subscriptionId: isCustom ? Math.abs(releaseId) : null,
-          organizationId: organizationFilter?.value || "",
-          organizationName: (organizationFilter?.selectedOptions?.[0]?.textContent || "").trim(),
-          authority: valueOf(release, "Authority") || valueOf(release, "AuthorityCode") || "",
-          artifactName: valueOf(release, "ArtifactName") || valueOf(release, "ArtifactCode") || "",
-          releaseVersion: valueOf(release, "ReleaseVersion") || "",
-          title: valueOf(release, "FrameworkRelease") || `${valueOf(release, "ArtifactName")} ${valueOf(release, "ReleaseVersion")}`.trim()
-        };
-        // Drill-down context rule: parent context auto-populates the filters so the
-        // user never re-selects them (organization stays as-is, framework release is
-        // selected to match the clicked row instead of resetting to "All").
-        if (subscribedFrameworkFilter) {
-          const releaseValue = String(valueOf(release, "ReleaseId") ?? "");
-          if ([...subscribedFrameworkFilter.options].some(option => String(option.value) === releaseValue)) {
-            subscribedFrameworkFilter.value = releaseValue;
-          }
-        }
-        sourceStatementState.level = "statements";
-        sourceStatementState.collapsedNodes.clear();
-        loadRows();
+        openControlStatementsPage(release);
         return;
       }
       // Statement row-click -> Organization Practices (mapped to this statement
@@ -8037,6 +8407,19 @@
         handleAction("practices", Number(statementRow.dataset.statementIndex));
         return;
       }
+    }
+    // Organization Practices row -> Practice View (2026-10-03), through the
+    // row's own "View" action. The 3-dot trigger, the bulk-select cell and
+    // any inner control keep their own behaviour -- same exclusions as the
+    // statement row-click above.
+    const practiceRow = screen.Key === "organization-requirements"
+      ? event.target.closest("[data-practice-view-index]") : null;
+    if (practiceRow
+        && !event.target.closest(".pm-action-trigger")
+        && !event.target.closest(".pm-select-cell")
+        && !event.target.closest("a, button, input, label, select")) {
+      handleAction("view", Number(practiceRow.dataset.practiceViewIndex));
+      return;
     }
     const trigger = event.target.closest(".pm-action-trigger");
     if (!trigger) return;
@@ -8274,6 +8657,13 @@
   sourceFilter?.addEventListener("change", resetToFirstPage);
   if (isSourceStatements && pageBackBtn) {
     pageBackBtn.addEventListener("click", (e) => {
+      // Control Statements is its own page now (2026-09-28): Back returns
+      // to the Standards & Frameworks list it is opened from.
+      if (isSourceStatementDetail) {
+        e.preventDefault();
+        window.location.href = `${buildAppUrl("Practice/Index/organization-controls")}?list=1`;
+        return;
+      }
       if (sourceStatementState.level === "statements") {
         e.preventDefault();
         sourceStatementState.level = "releases";
@@ -8330,6 +8720,7 @@
     });
   } else {
     loadLookups().then(loadNavigationContext).then(loadSubscribedFrameworks).then(loadRows)
+      .then(openRequestedApplicability)
       .catch(error => {
         if (rows) {
           rows.innerHTML = `<tr><td colspan="${(screen.Columns?.length || 0) + 1}" class="pm-empty">${escapeHtml(error.message || "Unable to load Practice Management data.")}</td></tr>`;

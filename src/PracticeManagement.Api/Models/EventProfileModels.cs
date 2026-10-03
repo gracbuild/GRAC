@@ -39,7 +39,11 @@ public sealed record EventProfileDimensionRow(
     /// <summary>False when the attribute has no master to pick from, so the
     /// screen offers the values already in use rather than a lookup.</summary>
     bool    HasValueSource,
-    int     DisplayOrder);
+    int     DisplayOrder,
+    /// <summary>407: the dimension this one cascades under (Asset Category
+    /// -> Sub Category -> Type); null for an independent criterion. The
+    /// screen filters this dimension's values by the parent's picks.</summary>
+    string? ParentDimensionCode = null);
 
 public sealed record EventProfileDimensionResult(
     IReadOnlyList<EventProfileDimensionRow> Rows);
@@ -47,7 +51,9 @@ public sealed record EventProfileDimensionResult(
 public sealed record EventProfileDimensionValueRow(
     long?   Id,
     string? TextValue,
-    string? Name);
+    string? Name,
+    /// <summary>407: the parent value id for a cascading dimension.</summary>
+    long?   ParentId = null);
 
 public sealed record EventProfileDimensionValueResult(
     IReadOnlyList<EventProfileDimensionValueRow> Rows);
@@ -70,6 +76,9 @@ public sealed record EventProfileRow(
     string    ProfileName,
     string?   Description,
     string    SubjectEntity,
+    /// <summary>407: People / Asset -- event_profile.profile_type, computed
+    /// from SubjectEntity in the database.</summary>
+    string?   ProfileType,
     string    Status,
     /// <summary>"Location: India, Kerala | Department: IT Operations | Role: All",
     /// built in the procedure so the grid does not have to fetch every
@@ -122,6 +131,7 @@ public sealed record EventProfileDetail(
     string    ProfileName,
     string?   Description,
     string    SubjectEntity,
+    string?   ProfileType,
     string    Status,
     string?   EnteredBy,
     DateTime? EnteredDate,
@@ -161,16 +171,23 @@ public sealed record EventProfileCommandResult(
 //
 // Without this an admin builds a population blind and finds out it was
 // empty weeks later, when nobody's onboarding produced a checklist.
+//
+// 407: one member shape for both profile types. People: code = employee
+// code, detail = designation. Asset: code = null, detail = asset category.
 // ---------------------------------------------------------------------
 public sealed record EventProfileMemberRow(
-    long    EmployeeId,
-    string? EmployeeCode,
-    string? EmployeeName,
-    string? Designation);
+    long    MemberId,
+    string? MemberCode,
+    string? MemberName,
+    string? MemberDetail);
 
 public sealed record EventProfilePreviewResult(
     int     MatchedCount,
+    /// <summary>407: active people or active assets, per SubjectEntity.</summary>
+    int     TotalActive,
+    /// <summary>Kept under its 330 name; equals TotalActive.</summary>
     int     TotalActiveEmployees,
+    string  SubjectEntity,
     IReadOnlyList<EventProfileMemberRow> Sample)
 {
     /// <summary>A saved profile that matches nobody is configurable but inert;

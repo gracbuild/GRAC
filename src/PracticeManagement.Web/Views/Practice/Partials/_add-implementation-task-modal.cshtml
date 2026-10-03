@@ -16,46 +16,46 @@
 *@
 
 @* ---------- Dialog 1: Add Implementation Task ---------- *@
-<dialog id="implTaskDialog" style="border:none; border-radius:8px; padding:0; max-width:600px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="implTaskForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Add Implementation Task</h2>
-            <button type="button" id="implTaskClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="implTaskDialog" style="max-width:600px; width:92%;">
+    <form id="implTaskForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2>Add Implementation Task</h2>
+            <button class="pm-icon-button" type="button" id="implTaskClose" aria-label="Close">&times;</button>
         </div>
-        <div id="implTaskMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 16px;">
-            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Practice Instance</div><div id="implTaskCtxInstance" style="font-weight:600; color:#0f172a;">—</div></div>
-            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Practice</div><div id="implTaskCtxPractice" style="font-weight:600; color:#0f172a;">—</div></div>
-            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div><div id="implTaskCtxOrg" style="font-weight:600; color:#0f172a;">—</div></div>
-            <div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Implementation Status</div><div id="implTaskCtxImplStatus" style="font-weight:600; color:#b45309;">—</div></div>
+        <div class="pm-message" id="implTaskMessage" style="display:none;"></div>
+        <div style="background:var(--neutral-50); border:1px solid var(--border); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 16px;">
+            <div><div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Practice Instance</div><div id="implTaskCtxInstance" style="font-weight:600; color:var(--fg-strong);">—</div></div>
+            <div><div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Practice</div><div id="implTaskCtxPractice" style="font-weight:600; color:var(--fg-strong);">—</div></div>
+            <div><div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Organization</div><div id="implTaskCtxOrg" style="font-weight:600; color:var(--fg-strong);">—</div></div>
+            <div><div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Implementation Status</div><div id="implTaskCtxImplStatus" style="font-weight:600; color:var(--warning-700);">—</div></div>
             <input type="hidden" id="implTaskInstanceId" />
         </div>
         <div style="display:grid; grid-template-columns:1fr; gap:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Task Name <span style="color:#b91c1c;">*</span>
-                <input id="implTaskName" type="text" maxlength="250" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" /></label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
-                <textarea id="implTaskDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; resize:vertical;"></textarea></label>
+            <label class="pm-field">Task Name <span class="required">*</span>
+                <input class="pm-input" id="implTaskName" type="text" maxlength="250" required /></label>
+            <label class="pm-field">Description
+                <textarea class="pm-input" id="implTaskDescription" rows="3" maxlength="4000"></textarea></label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Assigned To <span style="color:#b91c1c;">*</span>
-                    <select id="implTaskAssignee" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;">
+                <label class="pm-field">Assigned To <span class="required">*</span>
+                    <select class="pm-input" id="implTaskAssignee" required>
                         <option value="">Loading employees…</option>
                     </select>
-                    <small style="color:#94a3b8; margin-top:2px;">Active employees of this instance's organization only.</small>
+                    <small style="color:var(--fg-subtle); margin-top:2px;">Active employees of this instance's organization only.</small>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Target Date
-                    <input id="implTaskTargetDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" /></label>
+                <label class="pm-field">Target Date
+                    <input class="pm-input" id="implTaskTargetDate" type="date" /></label>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
-                    <select id="implTaskPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;">
+                <label class="pm-field">Priority
+                    <select class="pm-input" id="implTaskPriority">
                         <option value="Low">Low</option><option value="Medium" selected>Medium</option><option value="High">High</option><option value="Critical">Critical</option></select></label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
-                    <input id="implTaskStatus" type="text" value="Open" readonly style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; background:#f1f5f9;" /></label>
+                <label class="pm-field">Status
+                    <input class="pm-input" id="implTaskStatus" type="text" value="Open" readonly style="background:var(--bg-subtle);" /></label>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
-                <textarea id="implTaskRemarks" rows="2" maxlength="1000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; resize:vertical;"></textarea></label>
+            <label class="pm-field">Remarks
+                <textarea class="pm-input" id="implTaskRemarks" rows="2" maxlength="1000"></textarea></label>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="implTaskCancel" class="pm-button">Cancel</button>
             <button type="submit" id="implTaskSubmit" class="pm-button primary">Create Task</button>
         </div>
@@ -63,31 +63,31 @@
 </dialog>
 
 @* ---------- Dialog 2: Update Implementation Status ---------- *@
-<dialog id="implStatusDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="implStatusForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Update Implementation Status</h2>
-            <button type="button" id="implStatusClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="implStatusDialog" style="max-width:520px; width:92%;">
+    <form id="implStatusForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2>Update Implementation Status</h2>
+            <button class="pm-icon-button" type="button" id="implStatusClose" aria-label="Close">&times;</button>
         </div>
-        <div id="implStatusMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px;">
-            <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Practice Instance</div>
-            <div id="implStatusCtxInstance" style="font-weight:600; color:#0f172a;">—</div>
+        <div class="pm-message" id="implStatusMessage" style="display:none;"></div>
+        <div style="background:var(--neutral-50); border:1px solid var(--border); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:14px;">
+            <div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Practice Instance</div>
+            <div id="implStatusCtxInstance" style="font-weight:600; color:var(--fg-strong);">—</div>
             <input type="hidden" id="implStatusInstanceId" />
         </div>
         <div style="display:grid; grid-template-columns:1fr; gap:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Current Status
-                <input id="implStatusCurrent" type="text" readonly style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; background:#f1f5f9;" /></label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">New Status <span style="color:#b91c1c;">*</span>
-                <select id="implStatusNew" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;">
+            <label class="pm-field">Current Status
+                <input class="pm-input" id="implStatusCurrent" type="text" readonly style="background:var(--bg-subtle);" /></label>
+            <label class="pm-field">New Status <span class="required">*</span>
+                <select class="pm-input" id="implStatusNew" required>
                     <option value="">— select —</option>
                 </select></label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Effective Date
-                <input id="implStatusEffective" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" /></label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
-                <textarea id="implStatusRemarks" rows="3" maxlength="2000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px; resize:vertical;"></textarea></label>
+            <label class="pm-field">Effective Date
+                <input class="pm-input" id="implStatusEffective" type="date" /></label>
+            <label class="pm-field">Remarks
+                <textarea class="pm-input" id="implStatusRemarks" rows="3" maxlength="2000"></textarea></label>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="implStatusCancel" class="pm-button">Cancel</button>
             <button type="submit" id="implStatusSubmit" class="pm-button primary">Update Status</button>
         </div>
@@ -155,9 +155,9 @@
         if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
         el.style.display = 'block';
         el.textContent = text;
-        if (kind === 'error')   { el.style.background = '#fee2e2'; el.style.color = '#7f1d1d'; }
-        else if (kind === 'ok') { el.style.background = '#dcfce7'; el.style.color = '#166534'; }
-        else                    { el.style.background = '#dbeafe'; el.style.color = '#1e40af'; }
+        if (kind === 'error')   { el.style.background = 'var(--danger-100)'; el.style.color = 'var(--danger-700)'; }
+        else if (kind === 'ok') { el.style.background = 'var(--success-100)'; el.style.color = 'var(--success-700)'; }
+        else                    { el.style.background = 'var(--primary-100)'; el.style.color = 'var(--primary-700)'; }
     }
     function showDlg(d)  { if (typeof d.showModal === 'function') d.showModal(); else { d.setAttribute('open','open'); d.style.display='block'; } }
     function closeDlg(d) { if (typeof d.close === 'function') d.close();   else { d.removeAttribute('open'); d.style.display='none'; } }

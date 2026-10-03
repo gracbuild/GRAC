@@ -147,8 +147,8 @@
     .gid {
         width: min(760px, calc(100vw - 32px));
         max-height: calc(100vh - 64px);
-        padding: 0; border: 0; border-radius: 10px;
-        background: #fff; color: var(--grac-ink, #25345a);
+        padding: 0; border: 0; border-radius: var(--radius-md);
+        background: var(--bg-surface); color: var(--fg-default);
         box-shadow: 0 10px 40px rgba(15, 23, 42, .25);
     }
     .gid::backdrop { background: rgba(15, 23, 42, .45); }
@@ -157,7 +157,7 @@
 
     .gid-head {
         display: flex; align-items: flex-start; gap: 12px;
-        padding: 12px 16px; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        padding: 12px 16px; border-bottom: 1px solid var(--border);
     }
     .gid-head > div { flex: 1 1 auto; min-width: 0; }
     .gid-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
@@ -168,13 +168,13 @@
 
     .gid-foot {
         display: flex; align-items: center; gap: 8px;
-        padding: 12px 16px; border-top: 1px solid var(--grac-line, #e2e7f0);
-        background: #f8fafc;
+        padding: 12px 16px; border-top: 1px solid var(--border);
+        background: var(--neutral-50);
     }
 
     .gid-msg {
         display: none; margin: 10px 16px 0;
-        padding: 7px 11px; border-radius: 5px; font-size: 12px;
+        padding: 7px 11px; border-radius: var(--radius-md); font-size: 12px;
     }
 
     /* Two columns; the long-form fields take the whole row. */
@@ -187,19 +187,19 @@
     .gid-field { display: block; min-width: 0; }
     .gid-label {
         display: block; font-size: 12px; font-weight: 600;
-        color: var(--grac-muted, #758095); margin-bottom: 3px;
+        color: var(--fg-muted); margin-bottom: 3px;
     }
-    .gid-req { color: #dc2626; font-style: normal; margin-left: 2px; }
-    .gid-note { margin: 2px 0 0; font-size: 11px; color: var(--grac-muted, #758095); }
-    .gid-hint { display: block; margin-top: 3px; font-size: 11px; color: var(--grac-muted, #758095); }
+    .gid-req { color: var(--danger-700); font-style: normal; margin-left: 2px; }
+    .gid-note { margin: 2px 0 0; font-size: 11px; color: var(--fg-muted); }
+    .gid-hint { display: block; margin-top: 3px; font-size: 11px; color: var(--fg-muted); }
 
     .gid-field input[type="text"],
     .gid-field select,
     .gid-field textarea {
         width: 100%; padding: 6px 8px;
-        border: 1px solid var(--grac-line, #cbd5e1); border-radius: 4px;
-        font: inherit; font-size: 13px; color: var(--grac-ink, #0f172a);
-        background: #fff;
+        border: 1px solid var(--border); border-radius: var(--radius-sm);
+        font: inherit; font-size: 13px; color: var(--fg-default);
+        background: var(--bg-surface);
     }
     .gid-field textarea { resize: vertical; }
 

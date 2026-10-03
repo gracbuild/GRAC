@@ -92,7 +92,9 @@ public sealed class PracticeObligationService(
                     Status:                OptionalString(reader, "Status_") ?? OptionalString(reader, "Status"),
                     EnteredBy:             OptionalString(reader, "EnteredBy"),
                     EnteredDt:             OptionalDateTime(reader, "EnteredDt"),
-                    InstanceCount:         ToInt(reader["InstanceCount"])));
+                    InstanceCount:         ToInt(reader["InstanceCount"]),
+                    // Migration 412. Optional: absent before 412.
+                    OwnerEmployeeId:       OptionalInt64(reader, "OwnerEmployeeId")));
 
             return new PracticeObligationListResult(true, rows);
         }
@@ -148,6 +150,9 @@ public sealed class PracticeObligationService(
                      (object?)request.ExecutionFrequencyId ?? DBNull.Value);
             AddParam(command, "@execution_frequency",    DbType.String, Text(request.ExecutionFrequency), 120);
             AddParam(command, "@responsibility",         DbType.String, Text(request.Responsibility), 300);
+            // Migration 412: owner employee (null keep / 0 clear / > 0 set).
+            AddParam(command, "@owner_employee_id",      DbType.Int64,
+                     (object?)request.OwnerEmployeeId ?? DBNull.Value);
             AddParam(command, "@approval_authority",     DbType.String, Text(request.ApprovalAuthority), 300);
             AddParam(command, "@assurance_type",         DbType.String, Text(request.AssuranceType), 40);
             AddParam(command, "@remarks",                DbType.String, Text(request.Remarks));
@@ -266,6 +271,7 @@ public sealed class PracticeObligationService(
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

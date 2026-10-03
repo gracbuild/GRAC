@@ -149,13 +149,13 @@
     }
     const html = state.rows.map(r => {
       const name       = escapeHtml(r.slaMasterName || r.slaMasterCode || `SLA #${r.slaMasterId}`);
-      const codeMarkup = r.slaMasterCode ? `<div style="color:#64748b; font-size:11px;">${escapeHtml(r.slaMasterCode)}</div>` : "";
+      const codeMarkup = r.slaMasterCode ? `<div style="color:var(--fg-muted); font-size:11px;">${escapeHtml(r.slaMasterCode)}</div>` : "";
       const duration   = (r.durationValue != null && r.durationUnit)
                            ? `${Number(r.durationValue)} ${escapeHtml(r.durationUnit)}`
                            : (r.totalSlaDays != null ? `${Number(r.totalSlaDays)} Days` : "-");
       const timeBasis  = escapeHtml(r.timeBasis || r.masterTimeBasis || "-");
       const overridden = (r.timeBasis && r.masterTimeBasis && r.timeBasis !== r.masterTimeBasis)
-                           ? ' <span style="font-size:10px; color:#78350f;">(override)</span>' : "";
+                           ? ' <span style="font-size:10px; color:var(--warning-700);">(override)</span>' : "";
       const warnPct    = r.warningPct    != null ? `${Number(r.warningPct)}%`    : "-";
       const escPct     = r.escalationPct != null ? `${Number(r.escalationPct)}%` : "-";
       const badge      = statusBadge(r.configStatusCode, r.configStatusLabel);
@@ -182,9 +182,9 @@
 
   function statusBadge(code, label) {
     const map = {
-      NotConfigured: { bg: "#f1f5f9", fg: "#475569", text: label || "Not Configured" },
-      Active:        { bg: "#dcfce7", fg: "#166534", text: label || "Active" },
-      Inactive:      { bg: "#fef3c7", fg: "#78350f", text: label || "Inactive" }
+      NotConfigured: { bg: "var(--bg-subtle)", fg: "var(--fg-secondary)", text: label || "Not Configured" },
+      Active:        { bg: "var(--success-100)", fg: "var(--success-700)", text: label || "Active" },
+      Inactive:      { bg: "var(--warning-100)", fg: "var(--warning-700)", text: label || "Inactive" }
     };
     const s = map[code] || map.NotConfigured;
     return `<span class="pm-badge"
@@ -560,16 +560,16 @@
     trigger.type = "button";
     trigger.className = "pm-multi-trigger";
     trigger.style.cssText =
-      "padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; " +
+      "padding:6px 8px; border:1px solid var(--border-strong); border-radius:4px; background:var(--bg-surface); " +
       "width:100%; text-align:left; cursor:pointer; display:flex; " +
-      "justify-content:space-between; align-items:center; font-size:13px; color:#0f172a;";
+      "justify-content:space-between; align-items:center; font-size:13px; color:var(--fg-strong);";
 
     const popover = document.createElement("div");
     popover.className = "pm-multi-popover";
     popover.hidden = true;
     popover.style.cssText =
-      "position:absolute; top:calc(100% + 2px); left:0; right:0; background:#fff; " +
-      "border:1px solid #cbd5e1; border-radius:4px; " +
+      "position:absolute; top:calc(100% + 2px); left:0; right:0; background:var(--bg-surface); " +
+      "border:1px solid var(--border-strong); border-radius:4px; " +
       "box-shadow:0 4px 12px rgba(15,23,42,.15); max-height:220px; overflow:auto; " +
       "z-index:20; padding:2px 0;";
 
@@ -577,8 +577,8 @@
       const lbl = document.createElement("label");
       lbl.style.cssText =
         "display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer; " +
-        "font-size:13px; color:#0f172a;";
-      lbl.addEventListener("mouseover", () => { lbl.style.background = "#f1f5f9"; });
+        "font-size:13px; color:var(--fg-strong);";
+      lbl.addEventListener("mouseover", () => { lbl.style.background = "var(--bg-subtle)"; });
       lbl.addEventListener("mouseout",  () => { lbl.style.background = ""; });
       const cb = document.createElement("input");
       cb.type    = "checkbox";
@@ -604,11 +604,11 @@
       const label = document.createElement("span");
       label.textContent = summary;
       label.style.cssText = "flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;";
-      label.style.color   = selected.length === 0 ? "#94a3b8" : "#0f172a";
+      label.style.color   = selected.length === 0 ? "var(--fg-subtle)" : "var(--fg-strong)";
       const chev = document.createElement("span");
       chev.textContent = "▾";
       chev.style.marginLeft = "6px";
-      chev.style.color      = "#64748b";
+      chev.style.color      = "var(--fg-muted)";
       trigger.appendChild(label);
       trigger.appendChild(chev);
     }
@@ -682,16 +682,16 @@
   function showBanner(msg, isError) {
     const el = document.getElementById("oaSlaMessage");
     el.hidden = false;
-    el.style.background = isError ? "#fee2e2" : "#dcfce7";
-    el.style.color      = isError ? "#991b1b" : "#166534";
+    el.style.background = isError ? "var(--danger-100)" : "var(--success-100)";
+    el.style.color      = isError ? "var(--danger-700)" : "var(--success-700)";
     el.textContent      = msg;
     setTimeout(() => { el.hidden = true; }, 4500);
   }
   function showDialogMessage(elId, msg, isError) {
     const el = document.getElementById(elId);
     el.style.display    = "block";
-    el.style.background = isError ? "#fee2e2" : "#dcfce7";
-    el.style.color      = isError ? "#991b1b" : "#166534";
+    el.style.background = isError ? "var(--danger-100)" : "var(--success-100)";
+    el.style.color      = isError ? "var(--danger-700)" : "var(--success-700)";
     el.textContent      = msg;
   }
 })();

@@ -16,6 +16,19 @@
     window.setTimeout(() => { overlay.remove(); resolve(value); }, 140);
   }
 
+  // A modal <dialog> opened with showModal() lives in the browser's top
+  // layer, ABOVE everything in <body> whatever its z-index -- so an overlay
+  // appended to <body> while such a dialog is open renders underneath it
+  // and cannot be seen or clicked (e.g. Request / Save confirmations inside
+  // Add Release). Mount the overlay inside the topmost open modal dialog
+  // instead; with no modal open it goes to <body> exactly as before.
+  function overlayHost() {
+    const modals = [...document.querySelectorAll("dialog[open]")].filter(dialog => {
+      try { return dialog.matches(":modal"); } catch { return false; }
+    });
+    return modals.length ? modals[modals.length - 1] : document.body;
+  }
+
   function show(options = {}) {
     const type = options.type || (options.confirm ? "confirm" : "info");
     const needsCancel = options.confirm || options.prompt;
@@ -36,7 +49,7 @@
           <button type="button" class="grac-dialog-button primary" data-grac-dialog-ok>${escapeHtml(options.confirmText || "OK")}</button>
         </div>
       </section>`;
-    document.body.appendChild(overlay);
+    overlayHost().appendChild(overlay);
     return new Promise(resolve => {
       const ok = overlay.querySelector("[data-grac-dialog-ok]");
       const cancel = overlay.querySelector("[data-grac-dialog-cancel]");

@@ -49,15 +49,15 @@
 
 <section class="pm-panel" id="oaEvRoot" hidden>
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaEvPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaEvPickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+        <label class="pm-field" style="flex:1; min-width:320px;">
             <span>Audit</span>
-            <select id="oaEvPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaEvPickDef">
                 <option value="">Select an organization first</option>
             </select>
         </label>
@@ -67,7 +67,7 @@
         <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
             <span style="font-weight:600;" id="oaEvDefName">Definition</span>
             <span class="pm-badge" id="oaEvDefStatus">Status</span>
-            <span style="color:#64748b;" id="oaEvDefVersion">Version</span>
+            <span style="color:var(--fg-muted);" id="oaEvDefVersion">Version</span>
         </div>
         <div style="display:flex; gap:6px;">
             <button class="pm-button" id="oaEvReloadBtn" type="button">Reload</button>
@@ -76,12 +76,12 @@
     </div>
 
     <div id="oaEvReadonlyBanner" hidden
-         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+         style="margin:8px 0; padding:10px 12px; border-radius:var(--radius-md); background:var(--warning-100); color:var(--warning-700); font-size:13px;">
         This version is not a Draft, so the evidence config is shown read-only.
     </div>
 
     <div id="oaEvMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
     <div class="pm-table-wrap" style="margin-top:12px;">
         <table>
@@ -111,28 +111,28 @@
 </section>
 
 @* ---------- Add / Edit Evidence Item dialog ---------- *@
-<dialog id="oaEvItemDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="oaEvItemForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaEvItemDialogTitle" style="margin:0; font-size:18px;">Add Evidence Item</h2>
-            <button type="button" id="oaEvItemClose" aria-label="Close"
-                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="oaEvItemDialog" style="max-width:820px; width:96%;">
+    <form id="oaEvItemForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaEvItemDialogTitle">Add Evidence Item</h2>
+            <button class="pm-icon-button" type="button" id="oaEvItemClose" aria-label="Close"
+                   >&times;</button>
         </div>
-        <div id="oaEvItemMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="oaEvItemMessage" style="display:none;"></div>
 
         @* Basic identity *@
         <div style="display:grid; grid-template-columns:1fr 100px 130px; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Label <span style="color:#b91c1c;">*</span></span>
-                <input id="oaEvItemLabel" type="text" maxlength="240" required
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Label <span class="required">*</span></span>
+                <input class="pm-input" id="oaEvItemLabel" type="text" maxlength="240" required
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Order</span>
-                <input id="oaEvItemOrder" type="number" min="0" step="1"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaEvItemOrder" type="number" min="0" step="1"
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; padding-top:16px;">
+            <label class="pm-field" style="padding-top:16px;">
                 <span style="display:flex; align-items:center; gap:6px;">
                     <input id="oaEvItemMandatory" type="checkbox" />
                     Mandatory
@@ -142,17 +142,17 @@
 
         @* Classification *@
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Evidence Type</span>
-                <select id="oaEvItemType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                <select class="pm-input" id="oaEvItemType"></select>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Collection Method</span>
-                <select id="oaEvItemMethod" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                <select class="pm-input" id="oaEvItemMethod"></select>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Collection Frequency</span>
-                <select id="oaEvItemFrequency" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+                <select class="pm-input" id="oaEvItemFrequency"></select>
             </label>
         </div>
 
@@ -161,73 +161,73 @@
            push a column wider than its slot and add a scrollbar. *@
         <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start; margin-top:10px;">
             <div style="min-width:0;">
-                <div style="font-size:12px; color:#475569; margin-bottom:2px;">Owner Role</div>
-                <select id="oaEvItemOwnerRole"
-                        style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                <div style="font-size:12px; color:var(--fg-secondary); margin-bottom:2px;">Owner Role</div>
+                <select class="pm-input" id="oaEvItemOwnerRole"
+                        style="min-width:0;">
                     <option value="">Loading roles...</option>
                 </select>
-                <div style="font-size:11px; color:#64748b; margin-top:6px; margin-bottom:2px;">
+                <div style="font-size:11px; color:var(--fg-muted); margin-top:6px; margin-bottom:2px;">
                     Owner (current holder)
                 </div>
-                <select id="oaEvItemOwnerEmp"
-                        style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                <select class="pm-input" id="oaEvItemOwnerEmp"
+                        style="min-width:0;">
                     <option value="">Pick role first</option>
                 </select>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <label class="pm-field" style="min-width:0;">
                 <span>Retention Period</span>
-                <input id="oaEvItemRetention" type="text" maxlength="120"
+                <input class="pm-input" id="oaEvItemRetention" type="text" maxlength="120"
                        placeholder="e.g. 7 years, 24 months"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+                       />
             </label>
         </div>
 
         @* Validity + Expiry *@
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Validity (days)</span>
-                <input id="oaEvItemValidity" type="number" min="0" step="1"
+                <input class="pm-input" id="oaEvItemValidity" type="number" min="0" step="1"
                        placeholder="How many days the evidence remains valid"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Expiry Warn (days)</span>
-                <input id="oaEvItemExpiryWarn" type="number" min="0" step="1"
+                <input class="pm-input" id="oaEvItemExpiryWarn" type="number" min="0" step="1"
                        placeholder="How many days before expiry to warn"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                       />
             </label>
         </div>
 
         @* Auto-engine details -- location + locator *@
         <div id="oaEvItemAutoBanner"
-             style="margin-top:12px; padding:8px 12px; border-radius:6px; background:#eff6ff; color:#1e40af; font-size:12px; display:none;">
+             style="margin-top:12px; padding:8px 12px; border-radius:var(--radius-md); background:var(--primary-50); color:var(--primary-700); font-size:12px; display:none;">
             <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
             The automated engine will use <strong>Evidence Location</strong> and
             <strong>Evidence Locator</strong> to fetch this evidence.
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Evidence Location</span>
-                <input id="oaEvItemLocation" type="text" maxlength="500"
+                <input class="pm-input" id="oaEvItemLocation" type="text" maxlength="500"
                        placeholder="Where the evidence lives (repository, folder, system)"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Evidence Locator</span>
-                <input id="oaEvItemLocator" type="text" maxlength="500"
+                <input class="pm-input" id="oaEvItemLocator" type="text" maxlength="500"
                        placeholder="Path / URL / query / API endpoint to reach it"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                       />
             </label>
         </div>
 
         @* Description *@
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Description</span>
-            <textarea id="oaEvItemDescription" rows="3" maxlength="4000"
-                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="oaEvItemDescription" rows="3" maxlength="4000"
+                     ></textarea>
         </label>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="oaEvItemCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaEvItemSubmit" class="pm-button primary">Save Item</button>
         </div>
@@ -551,7 +551,7 @@
                 return item.evidenceOwner || '';
             })();
             const mand  = item.isMandatory
-                ? '<i class="fa-solid fa-check" style="color:#166534;" aria-hidden="true"></i>'
+                ? '<i class="fa-solid fa-check" style="color:var(--success-700);" aria-hidden="true"></i>'
                 : '';
             return '<tr data-idx="' + index + '">'
                 + '<td>' + wf.escape(String(order)) + '</td>'
@@ -563,7 +563,7 @@
                 + '<td style="text-align:center;">' + mand + '</td>'
                 + '<td style="white-space:nowrap;">'
                 +   '<button type="button" class="pm-button" data-role="edit"   data-idx="' + index + '" title="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button> '
-                +   '<button type="button" class="pm-button" data-role="remove" data-idx="' + index + '" title="Remove" style="color:#b91c1c;"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>'
+                +   '<button type="button" class="pm-button" data-role="remove" data-idx="' + index + '" title="Remove" style="color:var(--danger-700);"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>'
                 + '</td>'
                 + '</tr>';
         }).join('');
@@ -761,8 +761,8 @@
     function showItemMessage(kind, text) {
         const el = document.getElementById('oaEvItemMessage');
         el.style.display    = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent      = text;
     }
     function clearItemMessage() {
@@ -872,8 +872,8 @@
         const el = document.getElementById('oaEvMessage');
         el.hidden = false;
         el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
 })();

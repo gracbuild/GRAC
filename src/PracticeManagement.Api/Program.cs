@@ -80,6 +80,20 @@ builder.Services.AddOrgAssuranceObservationService();
 // that adopts Control Management SLA masters into per-org configs with
 // warning/escalation thresholds, notify roles, and process bindings.
 builder.Services.AddOrgSlaConfigService();
+// Repository change approval (statement subscription copy model, migration
+// 395): organizations get Control Management changes only after the
+// release owner / an organization admin approves them. Detection is
+// scheduled (sir's decision, 2026-09-28) -- the worker runs it daily;
+// set RepositoryChangeDetect:Enabled=false to drive it from SQL Agent.
+builder.Services.AddPracticeRepositoryChangeService();
+builder.Services.AddPracticeRepositoryChangeDetectWorker();
+// Parent-menu landing dashboards (migrations 413 / 414): Governance,
+// Issues & Actions, Audit & Assurance. Read-only.
+builder.Services.AddPracticeManagementDashboardService();
+// Role View Data Scope (migration 415): the Advanced Settings of the Role
+// Menu Permission section. Enforcement is the row-level security policy,
+// applied per connection by Infrastructure.ViewScopeSession.
+builder.Services.AddPracticeRoleViewDataScopeService();
 // Gap Center is served by the pre-existing CustomGapService -- the
 // parallel OrgAssuranceGapService was retired in migration 113 in
 // favour of the unified custom_gap table. See
@@ -107,6 +121,17 @@ app.Use(async (context, next) =>
     context.Response.Headers.XFrameOptions = "DENY";
     context.Response.Headers.CacheControl = "no-store";
     await next();
+});
+
+// View Data Scope (415): a GET is a read; its reader is the employee the
+// Web tier stamped from the session (X-PM-Caller-Employee-Id). Every
+// connection opened while serving it applies that reader's role View
+// Data Scope (Infrastructure.ViewScopeSession). Cleared after the request.
+app.Use(async (context, next) =>
+{
+    PracticeManagement.Api.Infrastructure.CallerViewScope.BeginForRequest(context.Request);
+    try { await next(); }
+    finally { PracticeManagement.Api.Infrastructure.CallerViewScope.Clear(); }
 });
 
 app.MapControllers();

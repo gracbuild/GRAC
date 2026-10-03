@@ -222,7 +222,11 @@ public sealed record RiskAnalysisSaveRequest(
     string? ThreatDescription = null,
     int? VulnerabilityId = null,
     string? VulnerabilityDescription = null,
-    long? BusinessFunctionId = null);
+    long? BusinessFunctionId = null,
+    // ---- migration 417 -------------------------------------------------
+    // Typed on the candidate assessment form; registration falls back to
+    // it as the risk title. Null/blank leaves the stored title untouched.
+    string? RiskTitle = null);
 
 // ---- Assessment picklists (migration 216) ---------------------------
 public sealed record RiskThreatOption(int ThreatId, string ThreatName);
@@ -426,7 +430,9 @@ public sealed record RiskAnalysisDetail(
     string? VulnerabilityName,
     string? VulnerabilityDescription,
     long? BusinessFunctionId,
-    string? BusinessFunctionName);
+    string? BusinessFunctionName,
+    // ---- migration 417 -------------------------------------------------
+    string? RiskTitle);
 
 public sealed record RiskAnalysisVersionRow(
     long RiskAnalysisId,
@@ -900,7 +906,10 @@ public sealed record RiskConfigDetail(
     bool AllowLegacyAccept,
     bool NotificationsEnabled,
     string? Notes,
-    IReadOnlyList<RiskConfigNotifyRole> NotifyRoles);
+    IReadOnlyList<RiskConfigNotifyRole> NotifyRoles,
+    // 389: residual risk analysis may start while treatment tasks are
+    // still open (organisation's choice; default false).
+    bool AllowResidualWithOpenTasks = false);
 
 public sealed record RiskConfigSaveRequest(
     bool? ApprovalRequired,
@@ -914,7 +923,9 @@ public sealed record RiskConfigSaveRequest(
     // are how a caller un-sets the two fields where NULL is also a value.
     bool? ClearApproverRole,
     bool? ClearMinRating,
-    string? CallerDisplayName);
+    string? CallerDisplayName,
+    // 389. NULL = leave alone.
+    bool? AllowResidualWithOpenTasks = null);
 
 // ---- 208: approval workflow (§19) -----------------------------------
 public sealed record RiskApprovalRequest(
@@ -1016,8 +1027,12 @@ public sealed record RiskGroupCount(
     string Key, string Label, int TotalCount, int OpenCount,
     double? AvgInherentScore, int? SortValue, string? ColourHex);
 
+// MinAgeDays / MaxAgeDays since 413: the band's own day range, so a
+// click filters the Candidates list by exactly these days. Null on a
+// database without 413.
 public sealed record RiskAgeingBand(
-    string BandCode, string BandName, int SortOrder, int CandidateCount);
+    string BandCode, string BandName, int SortOrder, int CandidateCount,
+    int? MinAgeDays = null, int? MaxAgeDays = null);
 
 public sealed record RiskTrendPoint(
     DateTime MonthStart, int RegisteredCount, int ClosedCount, int CandidatesRaisedCount);
@@ -1038,7 +1053,52 @@ public sealed record RiskDashboard(
     IReadOnlyList<RiskGroupCount> RisksByOwner,
     IReadOnlyList<RiskAgeingBand> CandidateAgeing,
     IReadOnlyList<RiskTrendPoint> Trend,
-    IReadOnlyList<RiskOverdueAction> OverdueActions);
+    IReadOnlyList<RiskOverdueAction> OverdueActions,
+    // ---- 413: Risk Management dashboard (result sets 11-16) --------
+    // Empty on a database without 413 -- the reader stops at set 10.
+    IReadOnlyList<RiskMatrixLevel> MatrixLevels,
+    IReadOnlyList<RiskHeatmapCell> InherentHeatmap,
+    IReadOnlyList<RiskHeatmapCell> ResidualHeatmap,
+    RiskHeatmapCoverage HeatmapCoverage,
+    IReadOnlyList<RiskReviewAgeingBand> ReviewAgeing,
+    IReadOnlyList<RiskTopRisk> TopRisks);
+
+// ---- 413: Risk Management dashboard ---------------------------------
+// Axis "L" = likelihood, "I" = impact: the values the organisation's
+// own risk_matrix_cell grid uses, named from the scoring masters.
+public sealed record RiskMatrixLevel(string Axis, int LevelValue, string? LevelCode, string LevelName);
+
+// One matrix cell: its rating (the matrix's own) and how many OPEN
+// risks sit on it. Used for both the inherent and the residual map.
+public sealed record RiskHeatmapCell(
+    int LikelihoodValue, int ImpactValue, string RatingCode, string RatingName,
+    int? RatingScore, string? ColourHex, int RiskCount);
+
+public sealed record RiskHeatmapCoverage(
+    int OpenRisks, int InherentRated, int ResidualRated, int ResidualPending);
+
+// Pending (upcoming) and overdue reviews. DaysOverdue = today -
+// next_review_date; the band's min/max are what the Review Risk list is
+// filtered by when the band is clicked.
+public sealed record RiskReviewAgeingBand(
+    string BandCode, string BandName, string BandGroup, int SortOrder,
+    int MinDaysOverdue, int MaxDaysOverdue, int RiskCount);
+
+public sealed record RiskTopRisk(
+    long RiskRegisterId, string RiskNumber, string RiskTitle,
+    long? RiskOwnerEmployeeId, string? RiskOwnerName,
+    string? InherentRatingCode, string? InherentRatingName, int? InherentRatingScore,
+    string? ResidualRatingCode, string? ResidualRatingName, int? ResidualRatingScore,
+    string StatusCode);
+
+// Dashboard drill-down filters (413). Every member null = no opinion, so
+// the grids' own requests are unchanged.
+public sealed record RiskRegisterDrillFilter(
+    bool? NoOwner, bool? OpenOnly,
+    int? LikelihoodValue, int? ImpactValue,
+    int? ResidualLikelihoodValue, int? ResidualImpactValue);
+
+public sealed record RiskCandidateDrillFilter(bool? OpenOnly, int? MinAgeDays, int? MaxAgeDays);
 
 public sealed record RiskAgeingRow(
     long RiskCandidateId,
@@ -1132,7 +1192,16 @@ public sealed record RiskMappedPracticeRow(
     // every category — not the number the practice depends on. The
     // difference is what tells the user what unmapping would actually
     // drop.
-    int DependencyCount);
+    int DependencyCount,
+    // 387 -- the mapped practice INSTANCE. Null on a row that is still
+    // practice-level (its practice has no active instance).
+    long? PracticeInstanceId = null,
+    string? PracticeInstanceName = null,
+    string? PracticeInstanceCode = null,
+    // 410 -- the mapped instance's implementation status, the same value
+    // the Operationalize grid shows. Null on a practice-level row, or
+    // before 410 is applied.
+    string? PracticeInstanceStatus = null);
 
 public sealed record RiskMappedDependencyRow(
     long RiskDependencyMapId,
@@ -1153,7 +1222,14 @@ public sealed record RiskMappedDependencyRow(
     string SourceLabel,
     int SourceCount,
     // "Why is this dependency here?", already joined and comma-separated.
-    string? SourcePractices);
+    string? SourcePractices,
+    // 413 -- instance-level provenance for the Existing Controls card.
+    // Comma-separated DISTINCT practice_id / practice_instance_id of the
+    // inherited-source rows, so the browser attributes each dependency to
+    // the exact mapped INSTANCE instead of every same-named one. Null when
+    // the proc predates 413 (the browser then falls back to SourcePractices).
+    string? SourcePracticeIds = null,
+    string? SourcePracticeInstanceIds = null);
 
 // One row per ACTIVE dependency_type_master category, including the ones
 // with nothing mapped yet. Deriving the list from the mapped rows would
@@ -1207,6 +1283,48 @@ public sealed record RiskPracticeMapResult(
     bool Created,
     int DependenciesAdded,
     int ContributionsAdded,
+    string? Error);
+
+// ---- 387: practice-instance mapping + "Map open task" ---------------
+public sealed record RiskPracticeInstanceMapRequest(
+    long PracticeInstanceId,
+    string? Remarks,
+    long? ActorEmployeeId,
+    string? CallerDisplayName);
+
+public sealed record RiskPracticeInstanceMapResult(
+    bool Success,
+    long RiskRegisterId,
+    long? RiskPracticeMapId,
+    long PracticeInstanceId,
+    string? PracticeInstanceName,
+    long? PracticeId,
+    string? PracticeName,
+    bool Created,
+    int DependenciesAdded,
+    string? Error);
+
+public sealed record RiskOpenTaskRow(
+    long TaskId,
+    string? TaskNumber,
+    string? Title,
+    string? StatusName,
+    string? OwnerName,
+    string? Priority,
+    DateTime? DueAt,
+    string? SourceTypeCode,
+    string? SourceReference);
+
+public sealed record RiskTreatmentLinkRequest(
+    long TaskId,
+    string? Remarks,
+    long? ActorEmployeeId,
+    string? CallerDisplayName);
+
+public sealed record RiskTreatmentLinkResult(
+    bool Success,
+    long RiskRegisterId,
+    long TaskId,
     string? Error);
 
 public sealed record RiskPracticeUnmapResult(
@@ -1276,7 +1394,11 @@ public sealed record RiskTreatmentOptionRequest(
     DateTime? TargetDate,
     string? Remark,
     long? ActorEmployeeId,
-    string? CallerDisplayName);
+    string? CallerDisplayName,
+    // 418: false = record the decision without raising the treatment
+    // task (the user answered No to "Generate a treatment task?").
+    // Null/true = 263's behaviour, the task is raised.
+    bool? RaiseTask = null);
 
 public sealed record RiskTreatmentOptionResult(
     bool Success,
@@ -1309,7 +1431,11 @@ public sealed record RiskTreatmentTaskRow(
     long? ParentTaskId,
     int ChildCount,
     int MandatoryChildOpenCount,
-    DateTime? RaisedDt);
+    DateTime? RaisedDt,
+    // 387 -- where the task comes from: Treatment (raised for this risk),
+    // Gap (raised from a gap on a mapped practice instance) or Linked
+    // (an open task mapped with "Map open task").
+    string? LinkSourceCode = null);
 
 public sealed record RiskTreatmentState(
     long RiskRegisterId,
@@ -1805,7 +1931,11 @@ public sealed record RiskScopePracticeTask(
     string?   StatusName,
     string?   Priority,
     DateTime? DueAt,
-    string?   AssignedTo);
+    string?   AssignedTo,
+    // 411 -- the mapped practice INSTANCE this task belongs to (linked to
+    // it, or raised from a gap on it). Null for a practice-level mapping
+    // row, or before 411 is applied (tasks then group by practice).
+    long?     PracticeInstanceId = null);
 
 /// <summary>Both result sets of sp_risk_scope_practice_context.</summary>
 public sealed record RiskScopePracticeContextResult(

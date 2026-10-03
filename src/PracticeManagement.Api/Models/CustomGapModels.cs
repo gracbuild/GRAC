@@ -41,7 +41,11 @@ public sealed record CustomGapOpenRequest(
     string? DetectionMethodName  = null,
     // Migration 382: practice ids to map to the new Custom Gap. Optional
     // and last so an older payload still binds; the UI/API require >= 1.
-    IReadOnlyList<long>? PracticeIds = null);
+    IReadOnlyList<long>? PracticeIds = null,
+    // Migration 388: the practice INSTANCES chosen in the picker (one per
+    // mapped chip). Saved by sp_custom_gap_practice_instance_set straight
+    // after the create; PracticeIds still carries their practices.
+    IReadOnlyList<long>? PracticeInstanceIds = null);
 
 // Migration 382: one practice mapped to a Custom Gap (read model for the
 // read-only display on the Gap view / detail).
@@ -51,7 +55,11 @@ public sealed record CustomGapPracticeRow(
     long   PracticeId,
     string? PracticeName,
     string? PracticeCode,
-    DateTime? MappedDt);
+    DateTime? MappedDt,
+    // Migration 388: the mapped instance (null on a practice-level row).
+    long?   PracticeInstanceId   = null,
+    string? PracticeInstanceName = null,
+    string? PracticeInstanceCode = null);
 
 public sealed record CustomGapCloseRequest(
     long   CustomGapId,
@@ -208,7 +216,9 @@ public sealed record GapCentreListQuery(
     /// arm rather than returning unrelated instance gaps.</summary>
     long?   ObservationId = null,
     int     Page     = 1,
-    int     PageSize = 25);
+    int     PageSize = 25,
+    /// <summary>Migration 414: management dashboard drill-down.</summary>
+    ListDrillFilter? Drill = null);
 
 public sealed record GapCentreListResult(
     long TotalCount,

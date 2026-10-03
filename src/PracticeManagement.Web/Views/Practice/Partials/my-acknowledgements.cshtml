@@ -137,19 +137,19 @@
        document-acknowledgements.cshtml when both partials are on the same
        Manage.cshtml render. Duplicating minimal styles here so this
        partial renders correctly even when opened directly. */
-    .ack-progress { display: inline-block; width: 160px; height: 8px; background: #edf2f7; border-radius: 4px; overflow: hidden; vertical-align: middle; }
-    .ack-progress > span { display: block; height: 100%; background: #48bb78; }
-    .ack-progress-label { display: inline-block; margin-left: 8px; font-size: 12px; color: #4a5568; vertical-align: middle; }
+    .ack-progress { display: inline-block; width: 160px; height: 8px; background: var(--bg-subtle); border-radius: var(--radius-sm); overflow: hidden; vertical-align: middle; }
+    .ack-progress > span { display: block; height: 100%; background: var(--success-500); }
+    .ack-progress-label { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--fg-secondary); vertical-align: middle; }
 
     .ack-status-chip {
-        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
         font-size: 11px; font-weight: 600; text-transform: uppercase;
     }
-    .ack-status-open { background: #fefcbf; color: #744210; }
-    .ack-status-progress { background: #bee3f8; color: #2c5282; }
-    .ack-status-completed { background: #c6f6d5; color: #22543d; }
-    .ack-status-pending { background: #fed7d7; color: #742a2a; }
-    .ack-status-ack { background: #c6f6d5; color: #22543d; }
+    .ack-status-open { background: var(--warning-50); color: var(--warning-700); }
+    .ack-status-progress { background: var(--primary-100); color: var(--primary-700); }
+    .ack-status-completed { background: var(--success-100); color: var(--success-700); }
+    .ack-status-pending { background: var(--danger-200); color: var(--danger-700); }
+    .ack-status-ack { background: var(--success-100); color: var(--success-700); }
 
     /* Reuse the same split-pane rules as the review/approve view. */
     .doc-workflow-split {
@@ -159,46 +159,46 @@
     @@media (max-width: 900px) { .doc-workflow-split { grid-template-columns: 1fr; height: auto; } }
     .doc-workflow-form {
         display: flex; flex-direction: column;
-        padding: 16px; background: #fff;
-        border: 1px solid #e2e8f0; border-radius: 6px; overflow-y: auto;
+        padding: 16px; background: var(--bg-surface);
+        border: 1px solid var(--border); border-radius: var(--radius-md); overflow-y: auto;
     }
     .doc-workflow-form form { display: flex; flex-direction: column; gap: 14px; }
     .doc-workflow-form label { display: flex; flex-direction: column; gap: 6px;
-        font-size: 13px; font-weight: 600; color: #4a5568; }
+        font-size: 13px; font-weight: 600; color: var(--fg-secondary); }
     .doc-workflow-form textarea {
-        font-weight: normal; color: #2d3748;
-        border: 1px solid #cbd5e0; border-radius: 4px; padding: 8px 10px;
+        font-weight: normal; color: var(--neutral-700);
+        border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px;
         font-family: inherit; font-size: 13px; width: 100%; box-sizing: border-box;
         resize: vertical;
     }
     .doc-workflow-meta {
         margin: 0 0 16px 0; padding: 12px 14px;
-        background: #f7fafc; border-radius: 6px; font-size: 13px;
+        background: var(--neutral-50); border-radius: var(--radius-md); font-size: 13px;
         display: grid; grid-template-columns: 100px 1fr; row-gap: 6px; column-gap: 12px;
     }
-    .doc-workflow-meta dt { color: #718096; font-weight: 600; margin: 0;
+    .doc-workflow-meta dt { color: var(--fg-muted); font-weight: 600; margin: 0;
         text-transform: uppercase; font-size: 11px; align-self: center; }
-    .doc-workflow-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+    .doc-workflow-meta dd { margin: 0; color: var(--neutral-700); word-break: break-word; }
     .doc-workflow-viewer {
-        position: relative; border: 1px solid #e2e8f0; border-radius: 6px;
-        overflow: hidden; background: #fafafa; min-height: 400px;
+        position: relative; border: 1px solid var(--border); border-radius: var(--radius-md);
+        overflow: hidden; background: var(--neutral-50); min-height: 400px;
     }
     .doc-workflow-viewer iframe { position: absolute; inset: 0;
-        width: 100%; height: 100%; border: 0; background: #fff; }
+        width: 100%; height: 100%; border: 0; background: var(--bg-surface); }
     .doc-workflow-pdf-fallback {
         position: absolute; inset: 0;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 12px; padding: 24px; text-align: center; color: #718096; background: #fafafa;
+        gap: 12px; padding: 24px; text-align: center; color: var(--fg-muted); background: var(--neutral-50);
     }
 
     .ack-detail-meta {
         display: grid; grid-template-columns: 120px 1fr 120px 1fr;
         gap: 6px 12px; margin: 0 0 16px 0;
-        padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md); font-size: 13px;
     }
-    .ack-detail-meta dt { color: #718096; font-weight: 600; margin: 0;
+    .ack-detail-meta dt { color: var(--fg-muted); font-weight: 600; margin: 0;
         text-transform: uppercase; font-size: 11px; }
-    .ack-detail-meta dd { margin: 0; color: #2d3748; }
+    .ack-detail-meta dd { margin: 0; color: var(--neutral-700); }
 </style>
 
 <script src="~/js/DocumentAcknowledgement/my-acknowledgements.js" asp-append-version="true"></script>

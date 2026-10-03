@@ -82,7 +82,7 @@
             </label>
         </div>
 
-        <h3 style="margin-top: 20px; font-size: 14px; color: #4a5568;">
+        <h3 style="margin-top: 20px; font-size: 14px; color: var(--fg-secondary);">
             Pending documents
             <span class="pm-hint" style="font-weight: normal;">Tick the documents to include in this batch.</span>
         </h3>
@@ -168,30 +168,30 @@
 
 <style>
     /* Progress bar reused across list + detail. */
-    .ack-progress { display: inline-block; width: 160px; height: 8px; background: #edf2f7; border-radius: 4px; overflow: hidden; vertical-align: middle; }
-    .ack-progress > span { display: block; height: 100%; background: #48bb78; }
-    .ack-progress-label { display: inline-block; margin-left: 8px; font-size: 12px; color: #4a5568; vertical-align: middle; }
+    .ack-progress { display: inline-block; width: 160px; height: 8px; background: var(--bg-subtle); border-radius: var(--radius-sm); overflow: hidden; vertical-align: middle; }
+    .ack-progress > span { display: block; height: 100%; background: var(--success-500); }
+    .ack-progress-label { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--fg-secondary); vertical-align: middle; }
 
     .ack-status-chip {
-        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
         font-size: 11px; font-weight: 600; text-transform: uppercase;
     }
-    .ack-status-open      { background: #fefcbf; color: #744210; }
-    .ack-status-progress  { background: #bee3f8; color: #2c5282; }
-    .ack-status-completed { background: #c6f6d5; color: #22543d; }
-    .ack-status-pending   { background: #fed7d7; color: #742a2a; }
-    .ack-status-ack       { background: #c6f6d5; color: #22543d; }
+    .ack-status-open      { background: var(--warning-50); color: var(--warning-700); }
+    .ack-status-progress  { background: var(--primary-100); color: var(--primary-700); }
+    .ack-status-completed { background: var(--success-100); color: var(--success-700); }
+    .ack-status-pending   { background: var(--danger-200); color: var(--danger-700); }
+    .ack-status-ack       { background: var(--success-100); color: var(--success-700); }
 
     .ack-pending-wrap { max-height: 300px; overflow-y: auto; }
 
     .ack-detail-meta {
         display: grid; grid-template-columns: 120px 1fr 120px 1fr;
         gap: 6px 12px; margin: 0 0 16px 0;
-        padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md); font-size: 13px;
     }
-    .ack-detail-meta dt { color: #718096; font-weight: 600; margin: 0;
+    .ack-detail-meta dt { color: var(--fg-muted); font-weight: 600; margin: 0;
                           text-transform: uppercase; font-size: 11px; }
-    .ack-detail-meta dd { margin: 0; color: #2d3748; }
+    .ack-detail-meta dd { margin: 0; color: var(--neutral-700); }
 
     .ack-detail-split {
         display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px;
@@ -199,13 +199,13 @@
     }
     @@media (max-width: 900px) { .ack-detail-split { grid-template-columns: 1fr; } }
     .ack-detail-docs, .ack-detail-users {
-        padding: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
+        padding: 12px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);
     }
     .ack-detail-docs h3, .ack-detail-users h3 {
-        margin: 0 0 10px 0; font-size: 14px; color: #2d3748;
+        margin: 0 0 10px 0; font-size: 14px; color: var(--neutral-700);
     }
     #ackDetailDocs tbody tr { cursor: pointer; }
-    #ackDetailDocs tbody tr.ack-doc-selected { background: #ebf8ff; }
+    #ackDetailDocs tbody tr.ack-doc-selected { background: var(--primary-50); }
 </style>
 
 @* Before the screen's own script -- the pager is mounted during init. *@

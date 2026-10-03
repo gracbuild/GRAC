@@ -191,7 +191,7 @@
             });
             var body = await resp.json().catch(function () { return {}; });
             if (resp.ok) {
-                setMessage('Task #' + (body.taskId || '?') + ' created. Visible under Task Center.', 'ok');
+                setMessage('Task #' + (body.taskId || '?') + ' created. Visible under Task Board.', 'ok');
                 setTimeout(closeModal, 1200);
             } else {
                 setMessage((body.error || 'Failed') + (body.reasonCode ? ' [' + body.reasonCode + ']' : ''), 'error');

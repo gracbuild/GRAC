@@ -59,6 +59,8 @@
             <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Plan
         </button>
     </div>
+    @* Audit & Assurance dashboard drill-down (414). *@
+    <div id="oaPlDrillBanner" hidden></div>
 
     <div style="display:grid; grid-template-columns:minmax(400px, 480px) 1fr; gap:12px; margin-top:12px;">
         <div>
@@ -123,58 +125,58 @@
 </section>
 
 @* ---------- Plan dialog ---------- *@
-<dialog id="oaPlPlanDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="oaPlPlanForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaPlPlanDialogTitle" style="margin:0; font-size:18px;">Add Plan</h2>
-            <button type="button" id="oaPlPlanClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="oaPlPlanDialog" style="max-width:720px; width:96%;">
+    <form id="oaPlPlanForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaPlPlanDialogTitle">Add Plan</h2>
+            <button class="pm-icon-button" type="button" id="oaPlPlanClose" aria-label="Close">&times;</button>
         </div>
-        <div id="oaPlPlanMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="oaPlPlanMessage" style="display:none;"></div>
         <input type="hidden" id="oaPlPlanEditId" />
 
         @* 121 -- Owner moved to its own 2-col picker row below.
            minmax(0,1fr) so long option text can't force a horizontal scrollbar. *@
         <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
-                <span>Code <span style="color:#b91c1c;">*</span></span>
-                <input id="oaPlPlanCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+            <label class="pm-field" style="min-width:0;">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="oaPlPlanCode" type="text" maxlength="80" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
-                <span>Type <span style="color:#b91c1c;">*</span></span>
-                <select id="oaPlPlanType" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; width:100%; box-sizing:border-box;"></select>
+            <label class="pm-field" style="min-width:0;">
+                <span>Type <span class="required">*</span></span>
+                <select class="pm-input" id="oaPlPlanType" required></select>
             </label>
         </div>
         @* 121 hybrid role+employee Owner picker. *@
-        <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0; margin-top:10px;">
+        <div class="pm-field" style="min-width:0; margin-top:10px;">
             <span>Owner</span>
             <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                <select id="oaPlPlanOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                <select class="pm-input" id="oaPlPlanOwnerRole" style="min-width:0;" aria-label="Owner Role">
                     <option value="">Loading roles...</option>
                 </select>
-                <select id="oaPlPlanOwner" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                <select class="pm-input" id="oaPlPlanOwner" style="min-width:0;" aria-label="Owner Employee (current holder)">
                     <option value="">-- pick a role first --</option>
                 </select>
             </div>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
-            <span>Name <span style="color:#b91c1c;">*</span></span>
-            <input id="oaPlPlanName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Name <span class="required">*</span></span>
+            <input class="pm-input" id="oaPlPlanName" type="text" maxlength="240" required />
         </label>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Period From</span>
-                <input id="oaPlPlanFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlPlanFrom" type="date" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Period To</span>
-                <input id="oaPlPlanTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlPlanTo" type="date" />
             </label>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Description</span>
-            <textarea id="oaPlPlanDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="oaPlPlanDescription" rows="3" maxlength="4000"></textarea>
         </label>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="oaPlPlanCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaPlPlanSubmit" class="pm-button primary">Save</button>
         </div>
@@ -182,75 +184,77 @@
 </dialog>
 
 @* ---------- Item dialog ---------- *@
-<dialog id="oaPlItemDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="oaPlItemForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaPlItemDialogTitle" style="margin:0; font-size:18px;">Add Plan Item</h2>
-            <button type="button" id="oaPlItemClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="oaPlItemDialog" style="max-width:820px; width:96%;">
+    <form id="oaPlItemForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaPlItemDialogTitle">Add Plan Item</h2>
+            <button class="pm-icon-button" type="button" id="oaPlItemClose" aria-label="Close">&times;</button>
         </div>
-        <div id="oaPlItemMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="oaPlItemMessage" style="display:none;"></div>
         <input type="hidden" id="oaPlItemEditId" />
 
         <div style="display:grid; grid-template-columns:1fr 100px; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Audit <span style="color:#b91c1c;">*</span></span>
-                <select id="oaPlItemDefinition" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            <label class="pm-field">
+                <span>Audit <span class="required">*</span></span>
+                <select class="pm-input" id="oaPlItemDefinition" required></select>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Order</span>
-                <input id="oaPlItemOrder" type="number" min="1" step="1" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlItemOrder" type="number" min="1" step="1" />
             </label>
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Scheduled From</span>
-                <input id="oaPlItemFrom" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlItemFrom" type="date" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Scheduled To</span>
-                <input id="oaPlItemTo" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlItemTo" type="date" />
             </label>
         </div>
         @* 121 hybrid role+employee Auditor picker.
            minmax(0,1fr) + min-width:0 so long role/holder names can't overflow. *@
         <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start; margin-top:10px;">
-            <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <div class="pm-field" style="min-width:0;">
                 <span>Assigned Auditor</span>
                 <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                    <select id="oaPlItemAuditorRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Role">
+                    <select class="pm-input" id="oaPlItemAuditorRole" style="min-width:0;" aria-label="Auditor Role">
                         <option value="">Loading roles...</option>
                     </select>
-                    <select id="oaPlItemAuditor" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Auditor Employee (current holder)">
+                    <select class="pm-input" id="oaPlItemAuditor" style="min-width:0;" aria-label="Auditor Employee (current holder)">
                         <option value="">-- pick a role first --</option>
                     </select>
                 </div>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <label class="pm-field" style="min-width:0;">
                 <span>Assigned Team</span>
-                <input id="oaPlItemTeam" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; box-sizing:border-box;" />
+                <input class="pm-input" id="oaPlItemTeam" type="text" maxlength="200" />
             </label>
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Assigned Department</span>
-                <input id="oaPlItemDept" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlItemDept" type="text" maxlength="200" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Assigned Branch</span>
-                <input id="oaPlItemBranch" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaPlItemBranch" type="text" maxlength="200" />
             </label>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Notes</span>
-            <textarea id="oaPlItemNotes" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="oaPlItemNotes" rows="2" maxlength="4000"></textarea>
         </label>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="oaPlItemCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaPlItemSubmit" class="pm-button primary">Save Item</button>
         </div>
     </form>
 </dialog>
 
+@* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -259,6 +263,12 @@
 
     const API      = '/practice/api/org-assurance';
     const FEATURE  = 'screen.org-assurance-plans';
+    // Audit & Assurance dashboard drill-down (414): ?status= is this
+    // screen's own Status filter -- plans need nothing more.
+    const PL_DRILL = (function () {
+        const d = window.__pmDrill ? window.__pmDrill.read() : null;
+        return d && d.active ? d : null;
+    })();
     const U        = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
     const state = {
@@ -299,6 +309,8 @@
             return;
         }
         wf.populateOrgSelect('oaPlFilterOrg', orgs);
+        // 414: the dashboard's organization wins when it is one of these.
+        if (PL_DRILL) window.__pmDrill.preselect('oaPlFilterOrg', PL_DRILL.organizationId);
         state.orgId = document.getElementById('oaPlFilterOrg').value || '';
 
         const enabled = await wf.checkFeature(FEATURE, state.orgId);
@@ -311,6 +323,11 @@
         document.getElementById('oaPlRoot').hidden = false;
 
         try { await Promise.all([loadStatuses(), loadPlanTypes()]); } catch (_) {}
+        if (PL_DRILL) {
+            if (PL_DRILL.status && window.__pmDrill.preselect('oaPlFilterStatus', PL_DRILL.status))
+                state.status = PL_DRILL.status;
+            window.__pmDrill.banner('oaPlDrillBanner', PL_DRILL);
+        }
         // 121: employees no longer preloaded -- role-holder picker fetches
         // roles + holders lazily when the plan/item dialog opens. Also
         // invalidate any stale role/holder caches so a new org fetches fresh.
@@ -468,7 +485,7 @@
             if (id != null) state.plansById[String(id)] = row;
             const isSelected = state.selectedPlanId != null && String(state.selectedPlanId) === String(id);
             return '<tr data-id="' + id + '" data-status="' + wf.escape(stCode) + '"'
-                 + (isSelected ? ' style="background:#eff6ff;"' : '')
+                 + (isSelected ? ' style="background:var(--primary-50);"' : '')
                  + '><td>' + wf.escape(code) + '</td>'
                  + '<td>' + wf.escape(name) + '</td>'
                  + '<td>' + wf.escape(type) + '</td>'
@@ -494,7 +511,7 @@
         state.selectedPlanId = planId;
         state.selectedPlan   = state.plansById[String(planId)] || null;
         document.querySelectorAll('#oaPlPlanBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(planId)) ? '#eff6ff' : '';
+            tr.style.background = (tr.getAttribute('data-id') === String(planId)) ? 'var(--primary-50)' : '';
         });
         renderSelectedPlanHeader();
         document.getElementById('oaPlAddItemBtn').disabled = false;
@@ -549,7 +566,7 @@
                 const teamDept = [team, dept].filter(Boolean).join(' / ');
                 return '<tr data-id="' + id + '">'
                      + '<td>' + wf.escape(String(order)) + '</td>'
-                     + '<td>' + wf.escape(defName) + (defCode ? ' <span style="color:#94a3b8;">(' + wf.escape(defCode) + ')</span>' : '') + '</td>'
+                     + '<td>' + wf.escape(defName) + (defCode ? ' <span style="color:var(--fg-subtle);">(' + wf.escape(defCode) + ')</span>' : '') + '</td>'
                      + '<td>' + wf.escape(sched) + '</td>'
                      + '<td>' + wf.escape(auditor) + '</td>'
                      + '<td>' + wf.escape(teamDept) + '</td>'
@@ -947,8 +964,8 @@
     function showPlanMessage(kind, text) {
         const el = document.getElementById('oaPlPlanMessage');
         el.style.display    = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent      = text;
     }
     function clearPlanMessage() {
@@ -958,8 +975,8 @@
     function showItemMessage(kind, text) {
         const el = document.getElementById('oaPlItemMessage');
         el.style.display    = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent      = text;
     }
     function clearItemMessage() {

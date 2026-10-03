@@ -8,6 +8,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 builder.Services.AddHttpClient<SecurePracticeClient>();
+// View Data Scope (migration 415): every proxy call to the Practice
+// Management API carries the signed-in employee from the session, so the
+// API can apply the reader's role View Data Scope on every read.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<CallerIdentityHandler>();
+builder.Services.AddHttpClient("PracticeManagementApi").AddHttpMessageHandler<CallerIdentityHandler>();
 builder.Services.AddScoped<PracticeLoginService>();
 builder.Services.AddScoped<PracticeMenuService>();
 builder.Services.AddSingleton<IPracticeEmailService, PracticeEmailService>();
@@ -32,7 +38,10 @@ builder.Services.AddSession(options =>
     options.Cookie.IsEssential = true;
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
-    options.IdleTimeout = TimeSpan.FromMinutes(30);
+    // One idle-timeout value for the whole sign-in: the session and the
+    // access token (renewed per request below) both come from
+    // Security:TokenLifetimeMinutes, so they can never disagree.
+    options.IdleTimeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Security:TokenLifetimeMinutes", 30));
 });
 
 var app = builder.Build();
@@ -65,6 +74,41 @@ app.Use(async (context, next) =>
 app.UseStaticFiles();
 app.UseRouting();
 app.UseSession();
+
+// Idle timeout. The access token is signed with a fixed expiry
+// (Security:TokenLifetimeMinutes) and used to be issued once, at sign-in,
+// and never again -- so every user was cut off exactly that many minutes
+// after logging in, however actively they were working, while the 5-minute
+// notification poll kept the ASP.NET session itself alive indefinitely.
+//
+// Now: every request the USER makes re-issues the token with the same
+// subject and roles, so it expires TokenLifetimeMinutes after the last
+// activity (sliding). Background requests (X-PM-Background) do not renew
+// it. Once the token has expired the session is cleared here, so every
+// existing IsSignedIn() check sees a signed-out caller: pages redirect to
+// /Login?returnUrl=..., JSON endpoints answer 401 "Session expired", and
+// site.js sends the browser to the login page on that 401.
+app.Use(async (context, next) =>
+{
+    var session = context.Session;
+    var subject = session.GetString(PracticeSessionIdentity.UserKey);
+    if (subject is not null)
+    {
+        var tokenService = context.RequestServices.GetRequiredService<SignedAccessTokenService>();
+        var token = session.GetString(PracticeSessionIdentity.TokenKey);
+        if (string.IsNullOrWhiteSpace(token) || !tokenService.TryValidate(token, out _))
+        {
+            session.Clear();
+        }
+        else if (!context.Request.Headers.ContainsKey(PracticeSessionIdentity.BackgroundRequestHeader))
+        {
+            var roles = (session.GetString(PracticeSessionIdentity.RolesKey) ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries);
+            session.SetString(PracticeSessionIdentity.TokenKey, tokenService.Issue(subject, roles));
+        }
+    }
+    await next();
+});
 app.UseRateLimiter();
 app.UseAuthorization();
 
@@ -78,9 +122,16 @@ app.MapControllerRoute(
     pattern: "Login/{action=Index}",
     defaults: new { controller = "Login" });
 
+// areaKey may not be the literal action name "Index" (change request
+// 2026-09-27). Without the constraint /Practice/Index bound
+// areaKey = "Index" here -- this route is registered before "default" --
+// and ShowArea("Index") answered 404. With it, /Practice/Index falls
+// through to the default route (controller=Practice, action=Index, no
+// areaKey) and opens Home, the same page as /Practice. Every real area
+// URL (/Practice/<area>, /Practice/Index/<area>) is unaffected.
 app.MapControllerRoute(
     name: "practice-management-home",
-    pattern: "Practice/{areaKey?}",
+    pattern: "Practice/{areaKey:regex(^(?!index$).+$)?}",
     defaults: new { controller = "Practice", action = "Index" });
 
 app.MapControllerRoute(

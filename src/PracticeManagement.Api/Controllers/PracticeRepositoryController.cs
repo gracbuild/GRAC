@@ -36,6 +36,12 @@ public sealed class PracticeRepositoryController(
         // picker's selection is submitted as part of that same save
         // payload (mappedOrgStatementIds), not as its own manage entity.
         "practice-statement-mappings",
+        // Add Release > Subscribe from Repository (migration 406): the
+        // eligible repository releases with this organization's state
+        // (query) and a new Pending subscription request (SAVE). Routed to
+        // dedicated shims in PracticeRepositoryService.ResolveProcedureAsync;
+        // governed by organization-controls through PermissionAreaMap.
+        "repository-subscription-requests",
         // Bulk applicability. Both resolve, through PermissionAreaMap, to the
         // same area as the single-record save they loop, so a caller who cannot
         // mark one record cannot mark many.
@@ -108,6 +114,10 @@ public sealed class PracticeRepositoryController(
     public Task<IActionResult> Query([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
         ExecuteAsync(envelope, "VIEW", async (request, principal) =>
         {
+            // 415: a query is a read. Its reader is the employee the Web
+            // gateway put in the signed envelope from the session, so the
+            // reader's View Data Scope applies to every row this returns.
+            Infrastructure.CallerViewScope.BeginRead(JsonLong(request.Data, "callerEmployeeId"));
             var data = NormalizeQueryData(request);
             CaptureNormalizedQueryDiagnostic(request, data);
             return await service.QueryAsync(new PracticeRepositoryQuery

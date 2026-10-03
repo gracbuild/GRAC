@@ -16,7 +16,8 @@
 // proxy.)
 //
 // Sub-routes:
-//   GET    /scope/profiles                    Grid (paged)
+//   GET    /scope/profiles                    Grid (paged; subjectEntity
+//                                             EMPLOYEE / ASSET / ALL -- 407)
 //   GET    /scope/profiles/dimensions         Criterion dimensions
 //   GET    /scope/profiles/dimension-values   Values for one dimension
 //   GET    /scope/profiles/preview            Who a profile matches
@@ -107,8 +108,9 @@ public sealed class EventProfileController(
     {
         if (organizationId <= 0)
             return BadRequest(new { error = "organizationId is required." });
-        if (subjectEntity is not null && !EventSubjectEntities.IsValid(subjectEntity))
-            return BadRequest(new { error = "subjectEntity must be EMPLOYEE or ASSET." });
+        // 407: ALL is the Profile Type filter's "All" (People and Asset).
+        if (subjectEntity is not null && !EventSubjectEntities.IsValidListFilter(subjectEntity))
+            return BadRequest(new { error = "subjectEntity must be EMPLOYEE, ASSET or ALL." });
 
         var q = new EventProfileListQuery(
             organizationId, subjectEntity, status, search, pageNumber, pageSize);
@@ -126,15 +128,20 @@ public sealed class EventProfileController(
         [FromQuery] long  organizationId,
         [FromQuery] long? profileId,
         [FromQuery] int   sampleSize = 10,
+        // 407: the population to count for the unsaved form (no
+        // profileId). A saved profile always uses its own type.
+        [FromQuery] string? subjectEntity = null,
         CancellationToken cancellationToken = default)
     {
         if (organizationId <= 0)
             return BadRequest(new { error = "organizationId is required." });
+        if (subjectEntity is not null && !EventSubjectEntities.IsValid(subjectEntity))
+            return BadRequest(new { error = "subjectEntity must be EMPLOYEE or ASSET." });
 
         try
         {
             return Ok(await eventProfileService.PreviewMembersAsync(
-                organizationId, profileId, sampleSize, cancellationToken));
+                organizationId, profileId, sampleSize, subjectEntity, cancellationToken));
         }
         catch (Exception ex)
         {

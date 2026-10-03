@@ -91,6 +91,37 @@ public sealed class PracticeController(
         ViewBag.Screens = await VisibleScreens(cancellationToken);
         ViewBag.MenuItems = await VisibleMenu(cancellationToken);
         ViewBag.Permissions = Array.Empty<string>();
+        // Home "My work" (change request 2026-09-27). Identity comes from
+        // the session, exactly as on every other screen; the browser never
+        // names the employee it asks about. Each section is offered only
+        // when the caller already holds the grant that opens its detailed
+        // page, via the same permissionPolicy + ScreenPermissionArea check
+        // ShowArea uses -- so Home never shows what the full page would
+        // refuse. Approvals needs APPROVE on Risk Centre (the grant that
+        // decides a risk analysis), not merely VIEW.
+        ViewBag.EmployeeId  = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey) ?? "";
+        ViewBag.DisplayName = HttpContext.Session.GetString(PracticeSessionIdentity.DisplayNameKey)
+                              ?? HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) ?? "";
+        var roles = Roles();
+        bool CanView(string screenKey) => permissionPolicy.IsAllowed(roles, ScreenPermissionArea(screenKey), "VIEW");
+        // Tasks and practice instances are "assigned to / owned by ME" --
+        // a sign-in with no employee record (the bootstrap admin) has no
+        // such work, so those two areas are left off Home rather than
+        // shown as permanently unavailable.
+        var hasEmployee = long.TryParse((string?)ViewBag.EmployeeId, out var sessionEmployeeId) && sessionEmployeeId > 0;
+        ViewBag.HomeAccess = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["notifications"]    = CanView("my-notifications"),
+            ["tasks"]            = hasEmployee && CanView("tasks"),
+            ["practices"]        = hasEmployee && CanView("resolve"),
+            ["approvals"]        = permissionPolicy.IsAllowed(roles, ScreenPermissionArea("risk-centre-candidates"), "APPROVE"),   // same "risk-centre" area; the queue lives on Candidates
+            ["acknowledgements"] = CanView("my-acknowledgements"),
+            // Migration 395: repository updates waiting for this person's
+            // approval (release owner / organization admin) -- an attention
+            // item only, no My work line. The notices are addressed to an
+            // employee, so a sign-in without one has none.
+            ["repositoryUpdates"] = hasEmployee && CanView("organization-controls")
+        };
         return View("Dashboard");
     }
 
@@ -116,7 +147,11 @@ public sealed class PracticeController(
         var screen = PracticeScreen.All.FirstOrDefault(x => x.Key.Equals(areaKey, StringComparison.OrdinalIgnoreCase));
         if (screen is null) return NotFound();
         if (!string.IsNullOrWhiteSpace(requiredGroup) && !screen.Group.Equals(requiredGroup, StringComparison.OrdinalIgnoreCase)) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(screen.Key), "VIEW")) return ScreenAccessDenied(screen);
+        if (!CanViewScreen(screen.Key)) return ScreenAccessDenied(screen);
+        // Management dashboards (413/414): the sections this caller may see.
+        if (ManagementDashboards.IsDashboard(screen.Key))
+            ViewBag.DashboardSections = ManagementDashboards.AllowedSections(screen.Key, CanViewScreen);
+        screen = WithSidebarLabel(screen);
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))
             return View("Calendar", screen);
         return View("Manage", screen);
@@ -151,12 +186,33 @@ public sealed class PracticeController(
             || screen.Group.Equals(PracticeScreen.WorkflowGroup, StringComparison.OrdinalIgnoreCase)
             // Phase 2 Assurance Management (BRD Part 2) -- Organization Portal.
             // NEW, INDEPENDENT module; screens live under nav-assurance (migration 071).
-            || screen.Group.Equals(PracticeScreen.AuditManagementGroup, StringComparison.OrdinalIgnoreCase);
+            || screen.Group.Equals(PracticeScreen.AuditManagementGroup, StringComparison.OrdinalIgnoreCase)
+            // Migration 384 -- Policies & Documents root and the My Notification parent.
+            || screen.Group.Equals(PracticeScreen.PoliciesDocumentsGroup, StringComparison.OrdinalIgnoreCase)
+            || screen.Group.Equals(PracticeScreen.MyNotificationGroup, StringComparison.OrdinalIgnoreCase);
         if (!allowedGroup) return NotFound();
-        if (!permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(screen.Key), "VIEW")) return ScreenAccessDenied(screen);
+        if (!CanViewScreen(screen.Key)) return ScreenAccessDenied(screen);
+        // Management dashboards (413/414): the sections this caller may see.
+        if (ManagementDashboards.IsDashboard(screen.Key))
+            ViewBag.DashboardSections = ManagementDashboards.AllowedSections(screen.Key, CanViewScreen);
+        screen = WithSidebarLabel(screen);
         if (screen.Key.Equals("assurance-calendar", StringComparison.OrdinalIgnoreCase))
             return View("Calendar", screen);
         return View("Manage", screen);
+    }
+
+    // The page heading and eyebrow follow the sidebar label (change request
+    // 2026-09-28): ViewBag.Screens already carries each screen with its
+    // menu_master name / module overlaid (PracticeMenuService), while
+    // PracticeScreen.All holds the static defaults -- e.g. the menu reads
+    // "Organization Practices" but the page said "Practices". Applied after
+    // the group and permission checks above, which keep using the static
+    // definition.
+    private PracticeScreen WithSidebarLabel(PracticeScreen screen)
+    {
+        var visible = (ViewBag.Screens as PracticeScreen[] ?? [])
+            .FirstOrDefault(x => x.Key.Equals(screen.Key, StringComparison.OrdinalIgnoreCase));
+        return visible is null ? screen : screen with { Title = visible.Title, Group = visible.Group };
     }
 
     private bool IsSignedIn() => HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is not null;
@@ -206,6 +262,19 @@ public sealed class PracticeController(
             .ToArray();
     }
 
+    // VIEW on a screen. A module dashboard (414) is its "Dashboard"
+    // submenu since 416: it needs VIEW on its own menu row AND on at least
+    // one child screen it summarises (ManagementDashboards.CanOpen) -- the
+    // same rule the Web proxy applies to its data
+    // (ManagementDashboardController).
+    private bool CanViewScreen(string screenKey)
+    {
+        if (ManagementDashboards.IsDashboard(screenKey))
+            return ManagementDashboards.CanOpen(screenKey,
+                key => permissionPolicy.IsAllowed(Roles(), key, "VIEW"), CanViewScreen);
+        return permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(screenKey), "VIEW");
+    }
+
     private string[] ActionsFor(string? areaKey)
     {
         if (string.IsNullOrWhiteSpace(areaKey)) return [];
@@ -221,7 +290,8 @@ public sealed class PracticeController(
     // for the gateway entity types, kept separate here because that map
     // is keyed on Web -> API entity types, and this one is keyed on the
     // Web-tier's screen list.
-    private static string ScreenPermissionArea(string screenKey)
+    // internal: the management dashboard Web proxy applies the same mapping.
+    internal static string ScreenPermissionArea(string screenKey)
     {
         if (string.IsNullOrWhiteSpace(screenKey)) return screenKey;
 
@@ -241,6 +311,15 @@ public sealed class PracticeController(
         if (screenKey.Equals("practice-instances", StringComparison.OrdinalIgnoreCase))
             return "organization-requirements";
 
+        // Practice View has no menu_master row at all, so "practice-view:VIEW"
+        // could never be granted and the page refused everyone but PM_ADMIN.
+        // It is opened only by "View" on the Organization Practices grid, so
+        // it follows that screen -- same rule as practice-instances above,
+        // and the same mapping PermissionAreaMap gives the gateway's
+        // navigation-code / navigation-context checks.
+        if (screenKey.Equals("practice-view", StringComparison.OrdinalIgnoreCase))
+            return "organization-requirements";
+
         // custom-source-statements has no menu_master row either (see the
         // comment on its PracticeScreen entry) -- it is reached only by a
         // link from the Standards & Frameworks screen, so it shares that
@@ -252,6 +331,22 @@ public sealed class PracticeController(
         // page-load VIEW access and API-call access on the same area.
         if (screenKey.Equals("custom-source-statements", StringComparison.OrdinalIgnoreCase))
             return "organization-controls";
+
+        // repository-updates (migration 395) is opened from the same screen's
+        // release row, so it shares that screen's permission area too. Who
+        // may APPROVE is decided by sp_repository_change_apply (release
+        // owner or organization admin), not by this VIEW grant.
+        if (screenKey.Equals("repository-updates", StringComparison.OrdinalIgnoreCase))
+            return "organization-controls";
+
+        // Risk Management submenus (migration 383) are standalone pages that
+        // reuse the risk-centre partial, so they share risk-centre's VIEW
+        // permission rather than each carrying its own -- same pattern as
+        // practice-instances / custom-source-statements above. Their own
+        // menu rows still exist for the sidebar; enforcement rides on the
+        // existing 'risk-centre' grant every user with Risk access already has.
+        if (screenKey.StartsWith("risk-centre-", StringComparison.OrdinalIgnoreCase))
+            return "risk-centre";
 
         return screenKey;
     }

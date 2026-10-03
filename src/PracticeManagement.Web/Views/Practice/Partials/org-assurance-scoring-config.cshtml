@@ -54,15 +54,15 @@
 <section class="pm-panel" id="oaScRoot" hidden>
     @* Picker toolbar *@
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaScPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaScPickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+        <label class="pm-field" style="flex:1; min-width:320px;">
             <span>Audit</span>
-            <select id="oaScPickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaScPickDef">
                 <option value="">Select an organization first</option>
             </select>
         </label>
@@ -72,7 +72,7 @@
         <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
             <span style="font-weight:600;" id="oaScDefName">Definition</span>
             <span class="pm-badge" id="oaScDefStatus">Status</span>
-            <span style="color:#64748b;" id="oaScDefVersion">Version</span>
+            <span style="color:var(--fg-muted);" id="oaScDefVersion">Version</span>
         </div>
         <div style="display:flex; gap:6px;">
             <button class="pm-button" id="oaScReloadBtn" type="button">Reload</button>
@@ -81,65 +81,65 @@
     </div>
 
     <div id="oaScReadonlyBanner" hidden
-         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+         style="margin:8px 0; padding:10px 12px; border-radius:var(--radius-md); background:var(--warning-100); color:var(--warning-700); font-size:13px;">
         This version is not a Draft, so the scoring config is shown read-only.
     </div>
 
     <div id="oaScMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
     @* Header form *@
     <div id="oaScHeaderForm" hidden
-         style="margin-top:12px; padding:12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+         style="margin-top:12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--neutral-50);">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Model Type <span style="color:#b91c1c;">*</span></span>
-                <select id="oaScHeaderType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;"></select>
+            <label class="pm-field">
+                <span>Model Type <span class="required">*</span></span>
+                <select class="pm-input" id="oaScHeaderType"></select>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Admin Scoring Model (optional)</span>
-                <select id="oaScHeaderModel" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                <select class="pm-input" id="oaScHeaderModel">
                     <option value="">-- none --</option>
                 </select>
             </label>
         </div>
 
         <div id="oaScThresholdRow" style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Max Score</span>
-                <input id="oaScHeaderMax" type="number" step="0.01"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaScHeaderMax" type="number" step="0.01"
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Pass Threshold</span>
-                <input id="oaScHeaderPass" type="number" step="0.01"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaScHeaderPass" type="number" step="0.01"
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Warning Threshold</span>
-                <input id="oaScHeaderWarn" type="number" step="0.01"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaScHeaderWarn" type="number" step="0.01"
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Fail Threshold</span>
-                <input id="oaScHeaderFail" type="number" step="0.01"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaScHeaderFail" type="number" step="0.01"
+                       />
             </label>
         </div>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Description</span>
-            <textarea id="oaScHeaderDescription" rows="2" maxlength="4000"
-                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="oaScHeaderDescription" rows="2" maxlength="4000"
+                     ></textarea>
         </label>
 
-        <div id="oaScTypeHint" style="margin-top:8px; font-size:12px; color:#64748b;"></div>
+        <div id="oaScTypeHint" style="margin-top:8px; font-size:12px; color:var(--fg-muted);"></div>
     </div>
 
     @* Bands table -- only visible when the type supports bands *@
     <div id="oaScBandsBlock" hidden style="margin-top:12px;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-            <h2 style="font-size:15px; margin:0; color:#0f172a;">Score Bands</h2>
+            <h2 style="font-size:15px; margin:0; color:var(--fg-strong);">Score Bands</h2>
             <button class="pm-button primary" id="oaScAddBandBtn" type="button" disabled>
                 <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Band
             </button>
@@ -167,28 +167,28 @@
 </section>
 
 @* ---------- Add / Edit Band dialog ---------- *@
-<dialog id="oaScBandDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="oaScBandForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaScBandDialogTitle" style="margin:0; font-size:18px;">Add Score Band</h2>
-            <button type="button" id="oaScBandClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="oaScBandDialog" style="max-width:720px; width:96%;">
+    <form id="oaScBandForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaScBandDialogTitle">Add Score Band</h2>
+            <button class="pm-icon-button" type="button" id="oaScBandClose" aria-label="Close">&times;</button>
         </div>
-        <div id="oaScBandMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="oaScBandMessage" style="display:none;"></div>
 
         <div style="display:grid; grid-template-columns:1fr 100px 130px; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Band Name <span style="color:#b91c1c;">*</span></span>
-                <input id="oaScBandName" type="text" maxlength="160" required
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Band Name <span class="required">*</span></span>
+                <input class="pm-input" id="oaScBandName" type="text" maxlength="160" required
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Order</span>
-                <input id="oaScBandOrder" type="number" min="1" step="1"
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaScBandOrder" type="number" min="1" step="1"
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Outcome</span>
-                <select id="oaScBandOutcome" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff;">
+                <select class="pm-input" id="oaScBandOutcome">
                     <option value="">-- none --</option>
                     <option value="PASS">Pass</option>
                     <option value="WARNING">Warning</option>
@@ -197,38 +197,38 @@
             </label>
         </div>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Band Code</span>
-            <input id="oaScBandCode" type="text" maxlength="60"
+            <input class="pm-input" id="oaScBandCode" type="text" maxlength="60"
                    placeholder="Short code (auto if blank)"
-                   style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                   />
         </label>
 
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Min Score <span style="color:#b91c1c;">*</span></span>
-                <input id="oaScBandMin" type="number" step="0.01" required
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Min Score <span class="required">*</span></span>
+                <input class="pm-input" id="oaScBandMin" type="number" step="0.01" required
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Max Score <span style="color:#b91c1c;">*</span></span>
-                <input id="oaScBandMax" type="number" step="0.01" required
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Max Score <span class="required">*</span></span>
+                <input class="pm-input" id="oaScBandMax" type="number" step="0.01" required
+                       />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Color</span>
                 <input id="oaScBandColor" type="color" value="#94a3b8"
-                       style="padding:2px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; width:100%; height:32px;" />
+                       style="padding:2px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:2px; width:100%; height:32px;" />
             </label>
         </div>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span>Description</span>
-            <textarea id="oaScBandDescription" rows="2" maxlength="4000"
-                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+            <textarea class="pm-input" id="oaScBandDescription" rows="2" maxlength="4000"
+                     ></textarea>
         </label>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="oaScBandCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaScBandSubmit" class="pm-button primary">Save Band</button>
         </div>
@@ -624,7 +624,7 @@
             const outcome = b.outcomeCode ? '<span class="pm-badge">' + wf.escape(outcomeName(b.outcomeCode)) + '</span>' : '';
             const color   = b.colorHex
                 ? '<span style="display:inline-block; width:20px; height:20px; border-radius:4px; background:'
-                     + wf.escape(b.colorHex) + '; border:1px solid #cbd5e1;"></span>'
+                     + wf.escape(b.colorHex) + '; border:1px solid var(--border-strong);"></span>'
                 : '';
             return '<tr data-idx="' + idx + '">'
                 + '<td>' + wf.escape(String(b.bandOrder ?? '')) + '</td>'
@@ -776,8 +776,8 @@
     function showBandMessage(kind, text) {
         const el = document.getElementById('oaScBandMessage');
         el.style.display    = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent      = text;
     }
     function clearBandMessage() {
@@ -863,8 +863,8 @@
         const el = document.getElementById('oaScMessage');
         el.hidden = false;
         el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
 })();

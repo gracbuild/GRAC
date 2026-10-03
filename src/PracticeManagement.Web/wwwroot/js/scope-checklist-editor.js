@@ -85,14 +85,24 @@
       { code: "ASSET_COMMISSIONING",   label: "Commissioning"   },
       { code: "ASSET_DECOMMISSIONING", label: "Decommissioning" }
     ],
-    // Migration 329-331. A Profile is a people population, so it gets the
-    // same two events as ORG_ROLE -- it replaces the role as the thing
-    // scoped, not the events scoped to it.
+    // Migration 329-331. A People Profile is a people population, so it
+    // gets the same two events as ORG_ROLE -- it replaces the role as the
+    // thing scoped, not the events scoped to it. An Asset Profile (407)
+    // passes opts.events = ASSET_CATEGORY's list instead (see eventsFor).
     PROFILE: [
       { code: "PEOPLE_ONBOARDING",  label: "Onboarding"  },
       { code: "PEOPLE_OFFBOARDING", label: "Offboarding" }
     ]
   };
+
+  // The events a scope's panels are built for. A host may pass opts.events
+  // (migration 407: an Asset Profile is scoped as PROFILE but answers the
+  // asset events); otherwise the scope dimension decides, as before.
+  function eventsFor(opts) {
+    return (opts && Array.isArray(opts.events) && opts.events.length)
+      ? opts.events
+      : (SCOPE_EVENTS[opts.scopeDimension] || []);
+  }
 
   // Custom (organization-authored) questions are stored as checklist rows
   // keyed by scope_role_id / scope_asset_category_id and served through
@@ -173,9 +183,9 @@
     if (!el) return;
     if (!text) { el.style.display = "none"; el.textContent = ""; return; }
     el.style.display = "block"; el.textContent = text;
-    if (kind === "error")   { el.style.background = "#fee2e2"; el.style.color = "#7f1d1d"; }
-    else if (kind === "ok") { el.style.background = "#dcfce7"; el.style.color = "#166534"; }
-    else                    { el.style.background = "#dbeafe"; el.style.color = "#1e40af"; }
+    if (kind === "error")   { el.style.background = "var(--danger-100)"; el.style.color = "var(--danger-700)"; }
+    else if (kind === "ok") { el.style.background = "var(--success-100)"; el.style.color = "var(--success-700)"; }
+    else                    { el.style.background = "var(--primary-100)"; el.style.color = "var(--primary-700)"; }
   }
 
   // ------------------------------------------------------------------
@@ -187,8 +197,8 @@
   function saveBarMarkup() {
     return `<div data-scope-savebar
                  style="display:flex; align-items:center; justify-content:flex-end; gap:12px;
-                        margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
-              <span data-scope-dirty style="font-size:12px; color:#64748b;"></span>
+                        margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+              <span data-scope-dirty style="font-size:12px; color:var(--fg-muted);"></span>
               <button type="button" class="pm-button primary" data-scope-save disabled>Save changes</button>
             </div>`;
   }
@@ -213,7 +223,7 @@
     const label = bar.querySelector("[data-scope-dirty]");
     btn.disabled = n === 0;
     label.textContent = n === 0 ? "No unsaved changes" : `${n} unsaved change(s)`;
-    label.style.color = n === 0 ? "#64748b" : "#78350f";
+    label.style.color = n === 0 ? "var(--fg-muted)" : "var(--warning-700)";
   }
 
   // Writes every staged change, then reloads so the panel shows what the
@@ -255,7 +265,7 @@
 
   // Re-fetch every event panel's obligation list from the server.
   async function reloadObligationPanels(container, opts) {
-    const events = SCOPE_EVENTS[opts.scopeDimension] || [];
+    const events = eventsFor(opts);
     for (const ev of events) {
       const panel = container.querySelector(`[data-scope-panel="${ev.code}"]`);
       if (panel) await loadObligations(container, opts, ev.code, panel.querySelector("[data-scope-obligations]"));
@@ -277,7 +287,7 @@
 
     host.querySelector("[data-scope-checklist]")?.remove();
 
-    const events = SCOPE_EVENTS[opts.scopeDimension] || [];
+    const events = eventsFor(opts);
     if (!events.length) return;
 
     const container = document.createElement("section");
@@ -310,7 +320,7 @@
       // Save does it, via flushPending.
       const note = document.createElement("p");
       note.setAttribute("data-scope-holdnote", "1");
-      note.style.cssText = "margin:6px 0 0 0; font-size:12px; color:#78350f;";
+      note.style.cssText = "margin:6px 0 0 0; font-size:12px; color:var(--warning-700);";
       note.textContent = "Nothing changed yet. Ticks here are written when you press Save on this form.";
       container.querySelector(".pm-tabs").insertAdjacentElement("afterend", note);
     } else {
@@ -389,10 +399,10 @@
       return;
     }
 
-    host.innerHTML = `<h4 style="margin:4px 0 8px 0; font-size:13px; color:#334155;">Inherited obligations</h4>`;
+    host.innerHTML = `<h4 style="margin:4px 0 8px 0; font-size:13px; color:var(--neutral-700);">Inherited obligations</h4>`;
     rows.forEach(function (m) {
       const row = document.createElement("label");
-      row.style.cssText = "display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:13px;";
+      row.style.cssText = "display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-bottom:1px solid var(--neutral-100); font-size:13px;";
       const cb = document.createElement("input");
       cb.type = "checkbox";
       // A staged change wins over the stored state: re-rendering a tab must
@@ -413,10 +423,10 @@
         : "";
       row.insertAdjacentHTML("beforeend",
         `<span>${esc(m.obligationLabel || ("Obligation " + obligationDisplayId(m)))}${kindBadge}
-           ${m.isSubscribed ? "" : `<span style="color:#b91c1c; font-size:11px;">not subscribed</span>`}
-           ${m.practiceCode ? `<br><span style="font-size:11px; color:#94a3b8;">${esc(m.practiceCode)}</span>` : ""}
-           ${m.rationale ? `<br><span style="font-size:11px; color:#78350f;">N/A: ${esc(m.rationale)}</span>` : ""}
-           <span data-staged-flag style="display:none; font-size:11px; color:#78350f;"><br>Not saved yet</span>
+           ${m.isSubscribed ? "" : `<span style="color:var(--danger-700); font-size:11px;">not subscribed</span>`}
+           ${m.practiceCode ? `<br><span style="font-size:11px; color:var(--fg-subtle);">${esc(m.practiceCode)}</span>` : ""}
+           ${m.rationale ? `<br><span style="font-size:11px; color:var(--warning-700);">N/A: ${esc(m.rationale)}</span>` : ""}
+           <span data-staged-flag style="display:none; font-size:11px; color:var(--warning-700);"><br>Not saved yet</span>
          </span>`);
       host.appendChild(row);
       markRow(row, !!staged);
@@ -429,7 +439,7 @@
   // be visible.
   function markRow(row, dirty) {
     if (!row) return;
-    row.style.background = dirty ? "#fffbeb" : "";
+    row.style.background = dirty ? "var(--warning-50)" : "";
     const flag = row.querySelector("[data-staged-flag]");
     if (flag) flag.style.display = dirty ? "inline" : "none";
   }
@@ -511,12 +521,12 @@
       } catch (_) { /* fall through to an empty list */ }
     }
 
-    host.innerHTML = `<h4 style="margin:4px 0 8px 0; font-size:13px; color:#334155;">Your own checklists</h4>
+    host.innerHTML = `<h4 style="margin:4px 0 8px 0; font-size:13px; color:var(--neutral-700);">Your own checklists</h4>
       <div data-scope-question-list></div>
       <div style="display:flex; gap:6px; margin-top:8px;">
         <input data-scope-new-question type="text" maxlength="500" placeholder="Add a checklist for this event..."
-               style="flex:1; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" />
-        <label style="display:flex; align-items:center; gap:4px; font-size:12px; color:#475569;">
+               style="flex:1; padding:6px 8px; border:1px solid var(--border-strong); border-radius:4px; font-size:13px;" />
+        <label style="display:flex; align-items:center; gap:4px; font-size:12px; color:var(--fg-secondary);">
           <input data-scope-new-mandatory type="checkbox" checked /> Mandatory
         </label>
         <button type="button" class="pm-button" data-scope-add>Add</button>
@@ -528,9 +538,9 @@
     } else {
       rows.forEach(function (q) {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:13px;";
+        row.style.cssText = "display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--neutral-100); font-size:13px;";
         row.insertAdjacentHTML("beforeend",
-          `<span style="flex:1;">${esc(q.questionText)}${q.isMandatory ? `<span style="color:#b91c1c;"> *</span>` : ""}</span>`);
+          `<span style="flex:1;">${esc(q.questionText)}${q.isMandatory ? `<span style="color:var(--danger-700);"> *</span>` : ""}</span>`);
         const del = document.createElement("button");
         del.type = "button"; del.className = "pm-button"; del.textContent = "Remove";
         del.addEventListener("click", function () { removeQuestion(container, opts, eventCode, q, host); });

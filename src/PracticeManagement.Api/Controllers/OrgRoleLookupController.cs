@@ -37,6 +37,7 @@ public sealed class OrgRoleLookupController(
             var connString = SqlConnectionStringResolver.Resolve(configuration);
             await using var connection = new SqlConnection(connString);
             await connection.OpenAsync(cancellationToken);
+            await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
             await using var command = connection.CreateCommand();
             command.CommandType = CommandType.StoredProcedure;
             command.CommandText = "grac_practice.sp_org_assurance_organization_role_list";
@@ -78,6 +79,7 @@ public sealed class OrgRoleLookupController(
             var connString = SqlConnectionStringResolver.Resolve(configuration);
             await using var connection = new SqlConnection(connString);
             await connection.OpenAsync(cancellationToken);
+            await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
             await using var command = connection.CreateCommand();
             command.CommandType = CommandType.StoredProcedure;
             command.CommandText = "grac_practice.sp_org_role_holders_list";

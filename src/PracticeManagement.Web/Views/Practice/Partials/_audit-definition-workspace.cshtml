@@ -201,8 +201,8 @@
         const needsId = key !== 'details';
         el.guard.style.display = (needsId && !state.definitionId) ? 'block' : 'none';
         if (needsId && !state.definitionId) {
-            el.guard.style.background = '#fef3c7';
-            el.guard.style.color      = '#92400e';
+            el.guard.style.background = 'var(--warning-100)';
+            el.guard.style.color      = 'var(--warning-700)';
             el.guard.textContent      = 'Save the definition details first -- scope and question sets attach to the saved audit.';
         }
 

@@ -71,7 +71,7 @@
 
     if (!state.gapId) {
       document.getElementById("gapDetailTitle").textContent = "Gap not selected";
-      document.getElementById("gapDetailSubtitle").textContent = "Open a gap from Gap Centre to see its lifecycle.";
+      document.getElementById("gapDetailSubtitle").textContent = "Open a gap from Gap Register to see its lifecycle.";
       return;
     }
 
@@ -320,7 +320,10 @@
       const r = await fetch(url, { credentials: "same-origin" });
       if (r.ok) { const b = await r.json(); rows = (b && (b.data || b.Data)) || []; }
     } catch (err) { console.warn("gap mapped practices load failed", err); return; }
-    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId))));
+    // 388: show the mapped practice instance next to its practice.
+    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId)))
+      + ((x.practiceInstanceName || x.PracticeInstanceName)
+          ? " - " + escapeHtml(x.practiceInstanceName || x.PracticeInstanceName) : ""));
     dl.innerHTML += `<dt>Mapped practices</dt><dd>${names.length ? names.join(", ") : "None"}</dd>`;
   }
 
@@ -735,7 +738,7 @@
     // reach this point (a failed save already returned earlier, above).
     // A best-effort trigger failure is called out in the text itself
     // ("Failed: ...") rather than by recoloring the whole message.
-    msg.style.color = "#22543d";
+    msg.style.color = "var(--success-700)";
   }
 
   // Report what the save actually produced.
@@ -989,7 +992,7 @@
   async function refreshHistory() {
     const ul = document.getElementById("gapHistoryList");
     if (!ul) return;
-    ul.innerHTML = `<li class="pm-hint">History is captured in custom_gap_history by the transition proc. Use the Gap Centre report for the full log.</li>`;
+    ul.innerHTML = `<li class="pm-hint">History is captured in custom_gap_history by the transition proc. Use the Gap Register report for the full log.</li>`;
   }
 
   // -------------------- helpers --------------------
@@ -1034,8 +1037,8 @@
     if (badge) {
       const src = String(h.slaSourceCode || "AUTO").toUpperCase();
       badge.textContent = src === "OVERRIDDEN" ? "Overridden" : "Auto";
-      badge.style.background = src === "OVERRIDDEN" ? "#fef3c7" : "#dcfce7";
-      badge.style.color      = src === "OVERRIDDEN" ? "#78350f" : "#166534";
+      badge.style.background = src === "OVERRIDDEN" ? "var(--warning-100)" : "var(--success-100)";
+      badge.style.color      = src === "OVERRIDDEN" ? "var(--warning-700)" : "var(--success-700)";
     }
     const name = document.getElementById("gapSlaMasterName");
     if (name) name.textContent = h.slaMasterName || h.slaMasterCode || `Master #${h.slaMasterId}`;
@@ -1119,8 +1122,8 @@
     const el = document.getElementById("gapSlaOverrideMessage");
     if (!el) return;
     el.style.display    = "block";
-    el.style.background = isError ? "#fee2e2" : "#dcfce7";
-    el.style.color      = isError ? "#991b1b" : "#166534";
+    el.style.background = isError ? "var(--danger-100)" : "var(--success-100)";
+    el.style.color      = isError ? "var(--danger-700)" : "var(--success-700)";
     el.textContent      = msg;
   }
 

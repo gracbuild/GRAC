@@ -73,7 +73,7 @@
     state.initialTitle = params.get("title") || "";
 
     if (!state.gapId) {
-      unavailable("No gap was specified.", "Open this page from Gap Centre's Actions menu.");
+      unavailable("No gap was specified.", "Open this page from Gap Register's Actions menu.");
       return;
     }
 
@@ -188,7 +188,10 @@
         { credentials: "same-origin" });
       if (r.ok) { const b = await r.json(); rows = (b && (b.data || b.Data)) || []; }
     } catch (_) { return; }
-    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId))));
+    // 388: show the mapped practice instance next to its practice.
+    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId)))
+      + ((x.practiceInstanceName || x.PracticeInstanceName)
+          ? " - " + escapeHtml(x.practiceInstanceName || x.PracticeInstanceName) : ""));
     el.insertAdjacentHTML("beforeend",
       `<div><dt>Mapped Practices</dt><dd>${names.length ? names.join(", ") : "None"}</dd></div>`);
   }
@@ -412,7 +415,7 @@
 
     if (!shown.length) {
       const p = document.createElement("div");
-      p.style.cssText = "padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;";
+      p.style.cssText = "padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;";
       p.textContent = "No actions available";
       actionsMenuEl.appendChild(p);
     }
@@ -471,7 +474,7 @@
     actionsMenuEl.className = "pm-action-menu";
     actionsMenuEl.setAttribute("role", "menu");
     const loading = document.createElement("div");
-    loading.style.cssText = "padding:8px 12px; font-size:12px; color:#94a3b8; white-space:nowrap;";
+    loading.style.cssText = "padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;";
     loading.textContent = "Loading…";
     actionsMenuEl.appendChild(loading);
     document.body.appendChild(actionsMenuEl);

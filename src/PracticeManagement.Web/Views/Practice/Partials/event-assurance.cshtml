@@ -50,36 +50,36 @@
     </div>
 </section>
 
-<dialog id="eaDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="eaForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Trigger Event</h2>
-            <button type="button" id="eaClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="eaDialog" style="max-width:640px; width:92%;">
+    <form id="eaForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2>Trigger Event</h2>
+            <button class="pm-icon-button" type="button" id="eaClose" aria-label="Close">&times;</button>
         </div>
-        <div id="eaMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Event *
-            <select id="eaEvent" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+        <div class="pm-message" id="eaMessage" style="display:none;"></div>
+        <label class="pm-field">Event *
+            <select class="pm-input" id="eaEvent" required><option value="">Loading...</option></select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Entity Type
-            <select id="eaEntityType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">(select)</option></select>
+        <label class="pm-field" style="margin-top:10px;">Entity Type
+            <select class="pm-input" id="eaEntityType"><option value="">(select)</option></select>
         </label>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Entity Reference
-                <input id="eaEntityRef" type="text" maxlength="200" placeholder="external id" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">Entity Reference
+                <input class="pm-input" id="eaEntityRef" type="text" maxlength="200" placeholder="external id" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Entity Display Name
-                <input id="eaEntityName" type="text" maxlength="300" placeholder="e.g. John Doe" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">Entity Display Name
+                <input class="pm-input" id="eaEntityName" type="text" maxlength="300" placeholder="e.g. John Doe" />
             </label>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Trigger Source
-            <select id="eaSource" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+        <label class="pm-field" style="margin-top:10px;">Trigger Source
+            <select class="pm-input" id="eaSource">
                 <option value="Manual" selected>Manual</option>
                 <option>API</option><option>HRMS</option><option>ERP</option>
                 <option>ITSM</option><option>CMDB</option>
                 <option>Webhook</option><option>MessageQueue</option>
             </select>
         </label>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="eaCancel" class="pm-button">Cancel</button>
             <button type="submit" id="eaSubmit" class="pm-button primary">Trigger</button>
         </div>

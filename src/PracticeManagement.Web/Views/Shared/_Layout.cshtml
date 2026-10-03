@@ -4,6 +4,7 @@
    implicit usings do not include it. *@
 @using Microsoft.AspNetCore.Http
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @{
     var screens = ViewBag.Screens as PracticeScreen[] ?? Array.Empty<PracticeScreen>();
     var menuItems = ViewBag.MenuItems as IReadOnlyList<PracticeMenuItem> ?? Array.Empty<PracticeMenuItem>();
@@ -20,6 +21,12 @@
     var logoutUrl = isOrganizationManagementModule && string.IsNullOrEmpty(pathBaseForLogout)
         ? "/OrganizationManagement/Login/Logout"
         : $"{pathBaseForLogout}/Login/Logout";
+    // Same construction as logoutUrl. site.js sends the browser here when
+    // the session has timed out (see Program.cs, idle-timeout middleware).
+    var loginUrl = isOrganizationManagementModule && string.IsNullOrEmpty(pathBaseForLogout)
+        ? "/OrganizationManagement/Login"
+        : $"{pathBaseForLogout}/Login";
+    var sessionTimeoutMinutes = Configuration.GetValue("Security:TokenLifetimeMinutes", 30);
     if (string.IsNullOrWhiteSpace(currentArea)) currentArea = ViewContext.RouteData.Values["areaKey"]?.ToString() ?? "";
     var isDashboard = string.IsNullOrWhiteSpace(currentArea);
     var dashboardScreen = screens.FirstOrDefault(x => x.Key == "dashboard");
@@ -61,6 +68,8 @@
     <title>@ViewData["Title"] | @moduleTitle | GRAC</title>
     <meta name="csrf-token" content="@Antiforgery.GetAndStoreTokens(Context).RequestToken" />
     <link rel="icon" type="image/x-icon" href="~/css/Images/favicon.ico" />
+    @* GRAC design tokens -- must load before every other stylesheet. *@
+    <link rel="stylesheet" href="~/css/grac-tokens.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/cacca-styles.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/phosphor/regular/style.css" />
     <link rel="stylesheet" href="~/css/phosphor/bold/style.css" />
@@ -118,7 +127,7 @@
             </li>
             <li class="nav-item d-none d-sm-flex align-items-center">
                 <ol class="breadcrumb mb-0">
-                    <li class="breadcrumb-item"><a asp-controller="Practice" asp-action="Index">Home</a></li>
+                    <li class="breadcrumb-item"><a asp-controller="Practice" asp-action="Index" asp-route-areaKey="">Home</a></li>
                     <li class="breadcrumb-item">@currentGroup</li>
                     @if (!isDashboard)
                     {
@@ -169,7 +178,7 @@
     </nav>
 
     <aside class="main-sidebar sidebar-dark-primary elevation-4">
-        <a asp-controller="Practice" asp-action="Index" class="brand-link">
+        <a asp-controller="Practice" asp-action="Index" asp-route-areaKey="" class="brand-link">
             <img src="~/css/Images/Logo.png" class="brand-image logo-expanded" alt="GRAC" />
             <img src="~/css/Images/logo-cacca.png" class="brand-image logo-collapsed" alt="GRAC" />
         </a>
@@ -178,14 +187,17 @@
                 <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
                     @if (menuItems.Any())
                     {
-                        @await Html.PartialAsync("_PracticeMenuTree", menuItems, new ViewDataDictionary(ViewData) { ["CurrentArea"] = currentArea })
+                        @* Home (menu_key 'dashboard') has no areaKey, so it is
+                           passed explicitly -- otherwise the Home item was never
+                           highlighted on the Home page itself. *@
+                        @await Html.PartialAsync("_PracticeMenuTree", menuItems, new ViewDataDictionary(ViewData) { ["CurrentArea"] = isDashboard ? "dashboard" : currentArea })
                     }
                     @if (!menuItems.Any())
                     {
                         @if (dashboardScreen is not null)
                         {
                             <li class="nav-item">
-                                <a asp-controller="Practice" asp-action="Index" class="nav-link @(isDashboard ? "active" : "")">
+                                <a asp-controller="Practice" asp-action="Index" asp-route-areaKey="" class="nav-link @(isDashboard ? "active" : "")">
                                     <i class="nav-icon fas fa-@dashboardScreen.Icon"></i><p>@dashboardScreen.Title</p>
                                 </a>
                             </li>
@@ -359,6 +371,8 @@
     <script>
         window.pmPathBase = "@appBasePath";
         window.appBasePath = window.pmPathBase || "";
+        window.pmLoginUrl = "@loginUrl";
+        window.pmSessionTimeoutMinutes = @sessionTimeoutMinutes;
         window.pmBuildUrl = function (path) {
             path = String(path || "");
             if (!path || path === "#") return path || "#";
@@ -580,7 +594,13 @@
     <script>
         (function () {
             'use strict';
-            var host = document.querySelector('li[data-menu-key="my-notifications"] a .nav-link-text, li[data-menu-key="my-notifications"] a p');
+            // Migration 390: the My group lives on the Home page and is no
+            // longer in the sidebar, so the unread count rides on Home --
+            // where the notifications themselves are now shown. If a
+            // database still shows My Notifications in the sidebar, the
+            // badge stays on that item as before.
+            var host = document.querySelector('li[data-menu-key="my-notifications"] a .nav-link-text, li[data-menu-key="my-notifications"] a p')
+                    || document.querySelector('li[data-menu-key="dashboard"] > a .nav-link-text, li[data-menu-key="dashboard"] > a p');
             if (!host) return;   // screen not permitted for this user, or feature flag off
 
             var base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
@@ -599,7 +619,12 @@
             }
 
             function poll() {
-                fetch(base + '/practice/api/task-notifications/me/counts', { credentials: 'same-origin' })
+                fetch(base + '/practice/api/task-notifications/me/counts', {
+                    credentials: 'same-origin',
+                    // Not user activity: must not keep the session alive
+                    // (see PracticeSessionIdentity.BackgroundRequestHeader).
+                    headers: { 'X-PM-Background': '1' }
+                })
                     .then(function (r) { return r.ok ? r.json() : null; })
                     .then(function (c) { if (c) render(Number(c.pendingCount) || 0); })
                     .catch(function () { /* leave the sidebar untouched */ });

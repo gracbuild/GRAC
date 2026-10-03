@@ -274,8 +274,8 @@
 
     function showMessage(kind, text) {
         el.message.style.display    = 'block';
-        el.message.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.message.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.message.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.message.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.message.textContent      = text;
     }
     function clearMessage() {

@@ -55,7 +55,9 @@ public sealed record PracticeObligationRow(
     /// panel needs that the definition itself does not hold — it is what
     /// makes "this applies everywhere" visible rather than promised.
     /// </summary>
-    int     InstanceCount);
+    int     InstanceCount,
+    /// <summary>Migration 412: the owner employee behind Responsibility.</summary>
+    long?   OwnerEmployeeId = null);
 
 public sealed record PracticeObligationListResult(
     bool Success,
@@ -89,7 +91,16 @@ public sealed record PracticeObligationSaveRequest(
     /// </summary>
     IReadOnlyList<PracticeObligationEvidenceItem>? Evidence,
     bool    Retire,
-    string? Actor);
+    string? Actor,
+    /// <summary>
+    /// Migration 412: the obligation Owner as an EMPLOYEE (a Functional
+    /// User). Null keeps the stored owner (older callers), 0 clears it,
+    /// &gt; 0 sets it -- the procedure refuses anyone who is not an active
+    /// Functional User of the organization and writes Responsibility (the
+    /// display name) from the employee record. Optional and last so older
+    /// payloads still bind.
+    /// </summary>
+    long?   OwnerEmployeeId = null);
 
 public sealed record PracticeObligationEvidenceItem(
     int     EvidenceTypeId,

@@ -56,7 +56,7 @@
       // a key this page does not read -- three different bugs with three
       // different fixes, and no way to tell them apart from the screen.
       unavailable("No exception request was specified.",
-                  "Open this page from Exception Centre's Actions menu. "
+                  "Open this page from the Actions menu in Exceptions & Waivers. "
                   + "The page was opened with " + describeLocation()
                   + " -- it expects ?exceptionId=<number>.");
       return;

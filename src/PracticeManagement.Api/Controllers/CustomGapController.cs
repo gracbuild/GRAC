@@ -93,11 +93,15 @@ public sealed class CustomGapController(
         [FromQuery] long?   observationId = null,
         [FromQuery] int page     = 1,
         [FromQuery] int pageSize = 25,
+        // Migration 414 -- management dashboard drill-down (?drillCode=,
+        // statusText=, severityText=, minAgeDays=, maxAgeDays=, noOwner=).
+        // Every value absent = the list exactly as before.
+        [FromQuery] ListDrillQuery? drill = null,
         CancellationToken cancellationToken = default)
     {
         var result = await customGapService.ListGapCentreAsync(
             new GapCentreListQuery(organizationId, sourceModuleCode, statusCode, search,
-                                   observationId, page, pageSize),
+                                   observationId, page, pageSize, drill?.ToFilter()),
             cancellationToken);
         // Carry the reason through instead of letting the exception become
         // an anonymous 500 -- the screen shows this text verbatim.

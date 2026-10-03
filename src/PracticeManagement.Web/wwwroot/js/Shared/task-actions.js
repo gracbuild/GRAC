@@ -82,26 +82,26 @@
   function ownerCell(r) {
     if (r.assignedToEmployeeName) {
       var src = r.ownerSourceCode && r.ownerSourceCode !== 'EXPLICIT_SOURCE' && r.ownerSourceCode !== 'REASSIGNED'
-        ? '<div style="font-size:11px; color:#64748b;">' + escape(ownerSourceLabel(r.ownerSourceCode)) + '</div>'
+        ? '<div style="font-size:11px; color:var(--fg-muted);">' + escape(ownerSourceLabel(r.ownerSourceCode)) + '</div>'
         : '';
       return escape(r.assignedToEmployeeName) + src;
     }
     if (r.assignedToEmployeeId) return escape(r.assignedToEmployeeId);
-    return '<span style="color:#b45309;">Unassigned</span>';
+    return '<span style="color:var(--warning-700);">Unassigned</span>';
   }
   var SLA_BADGE_STYLE = {
-    OnTrack:   { bg: '#dcfce7', fg: '#166534', label: 'On Track'  },
-    DueSoon:   { bg: '#fef9c3', fg: '#854d0e', label: 'Due Soon'  },
-    DueToday:  { bg: '#ffedd5', fg: '#9a3412', label: 'Due Today' },
-    Breached:  { bg: '#fee2e2', fg: '#991b1b', label: 'Breached'  },
-    Extended:  { bg: '#e0e7ff', fg: '#3730a3', label: 'Extended'  },
-    Completed: { bg: '#f1f5f9', fg: '#475569', label: 'Completed' },
-    NotSet:    { bg: '#f1f5f9', fg: '#64748b', label: 'No SLA'    }
+    OnTrack:   { bg: 'var(--success-100)', fg: 'var(--success-700)', label: 'On Track'  },
+    DueSoon:   { bg: 'var(--warning-50)', fg: 'var(--warning-700)', label: 'Due Soon'  },
+    DueToday:  { bg: 'var(--warning-100)', fg: 'var(--danger-700)', label: 'Due Today' },
+    Breached:  { bg: 'var(--danger-100)', fg: 'var(--danger-700)', label: 'Breached'  },
+    Extended:  { bg: 'var(--primary-100)', fg: 'var(--primary-800)', label: 'Extended'  },
+    Completed: { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: 'Completed' },
+    NotSet:    { bg: 'var(--bg-subtle)', fg: 'var(--fg-muted)', label: 'No SLA'    }
   };
   function slaStatusBadge(r) {
     var code = r.slaStatusCode;
     if (!code) return r.isOverdue ? '<span class="pm-badge">Breached</span>' : '';
-    var s = SLA_BADGE_STYLE[code] || { bg: '#f1f5f9', fg: '#475569', label: code };
+    var s = SLA_BADGE_STYLE[code] || { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: code };
     return '<span class="pm-badge" style="background:' + s.bg + '; color:' + s.fg + ';">'
          + escape(s.label) + '</span>';
   }
@@ -382,7 +382,7 @@
     var mand = $('tefMandatory');
 
     var title = (val('tefTitle') || '').trim();
-    if (!title) { msg.style.color = '#b91c1c'; msg.textContent = 'Task name is required.'; return; }
+    if (!title) { msg.style.color = 'var(--danger-700)'; msg.textContent = 'Task name is required.'; return; }
 
     var body = {
       subjectTitle:         title,
@@ -397,7 +397,7 @@
       expectedUpdatedDt:    (currentEditOptions && currentEditOptions.updatedDt) || null
     };
 
-    msg.style.color = '#64748b';
+    msg.style.color = 'var(--fg-muted)';
     msg.textContent = 'Saving...';
 
     try {
@@ -408,7 +408,7 @@
       var b = await r.json().catch(function () { return {}; });
 
       if (!r.ok) {
-        msg.style.color = '#b91c1c';
+        msg.style.color = 'var(--danger-700)';
         msg.textContent = (b.error || ('Save failed (HTTP ' + r.status + ')'))
                         + (b.reasonCode ? ' [' + b.reasonCode + ']' : '');
         return;
@@ -416,7 +416,7 @@
 
       var changes = b.changes || [];
       if (!changes.length) {
-        msg.style.color = '#64748b';
+        msg.style.color = 'var(--fg-muted)';
         msg.textContent = 'Nothing was different — no changes were recorded.';
         return;
       }
@@ -425,7 +425,7 @@
       renderSaveOutcome(changes);
       changed();
     } catch (err) {
-      msg.style.color = '#b91c1c';
+      msg.style.color = 'var(--danger-700)';
       msg.textContent = 'Network error: ' + err.message;
     }
   }
@@ -441,17 +441,17 @@
            + '<strong>' + escape(c.fieldLabel) + ':</strong> '
            + escape(c.fromValue || '—') + ' → ' + escape(c.toValue || '—')
            + (isPend
-               ? ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">awaiting approval</span>'
+               ? ' <span class="pm-badge" style="background:var(--warning-50); color:var(--warning-700);">awaiting approval</span>'
                : '')
-           + (c.detail ? '<div style="font-size:11px; color:#64748b;">' + escape(c.detail) + '</div>' : '')
+           + (c.detail ? '<div style="font-size:11px; color:var(--fg-muted);">' + escape(c.detail) + '</div>' : '')
            + '</li>';
     }).join('');
 
     var box = document.createElement('div');
     box.style.cssText = 'border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:12px; '
                       + (pending.length
-                          ? 'background:#fffbeb; border:1px solid #fcd34d; color:#78350f;'
-                          : 'background:#f0fdf4; border:1px solid #86efac; color:#14532d;');
+                          ? 'background:var(--warning-50); border:1px solid var(--warning-200); color:var(--warning-700);'
+                          : 'background:var(--success-50); border:1px solid var(--success-200); color:var(--success-700);');
     box.innerHTML = '<div style="font-weight:700; margin-bottom:5px;">'
                   + (pending.length
                       ? 'Saved — but ' + pending.length + ' change'
@@ -463,9 +463,9 @@
   }
 
   function detailField(label, value) {
-    return '<div><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">'
-         + escape(label) + '</div><div style="font-weight:600; color:#0f172a;">'
-         + (value || '<span style="font-weight:400; color:#94a3b8;">&mdash;</span>') + '</div></div>';
+    return '<div><div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">'
+         + escape(label) + '</div><div style="font-weight:600; color:var(--fg-strong);">'
+         + (value || '<span style="font-weight:400; color:var(--fg-subtle);">&mdash;</span>') + '</div></div>';
   }
 
   function renderTaskDetail(d) {
@@ -490,7 +490,7 @@
     parts.push(detailField('Status',   escape(h.currentStatusName || '')));
     parts.push(detailField('Priority', escape(h.priority || '')
                + (h.priorityChangeStatusCode === 'Pending'
-                  ? ' <span class="pm-badge" style="background:#fef9c3; color:#854d0e;">'
+                  ? ' <span class="pm-badge" style="background:var(--warning-50); color:var(--warning-700);">'
                     + escape(h.requestedPriority || '') + ' pending</span>' : '')));
     parts.push(detailField('Owner',    ownerCell(h)));
     parts.push(detailField('Origin',   h.sourceTypeCode
@@ -500,7 +500,7 @@
                  + escape(h.parentTaskNumber || ('#' + h.parentTaskId)) + '</a>' : ''));
     parts.push('</div>');
 
-    parts.push('<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:14px;">');
+    parts.push('<div style="background:var(--neutral-50); border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin-bottom:14px;">');
     parts.push('<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;">');
     parts.push(detailField('Standard SLA', h.standardSlaDays != null ? escape(h.standardSlaDays + ' days') : ''));
     parts.push(detailField('Standard Due', escape(fmtDate(h.standardDueAt))));
@@ -508,13 +508,13 @@
     parts.push(detailField('SLA Status', slaStatusBadge(h)));
     parts.push('</div>');
     if (h.extensionStatusCode === 'Pending') {
-      parts.push('<div style="margin-top:8px; font-size:12px; color:#854d0e;">'
+      parts.push('<div style="margin-top:8px; font-size:12px; color:var(--warning-700);">'
                + 'Extension to ' + escape(fmtDate(h.requestedDueAt))
-               + ' is awaiting Exception Centre approval. The due date is unchanged until then.'
+               + ' is awaiting Exceptions &amp; Waivers approval. The due date is unchanged until then.'
                + '</div>');
     }
     if (h.slaSourceCode === 'TYPE_DEFAULT') {
-      parts.push('<div style="margin-top:8px; font-size:12px; color:#64748b;">'
+      parts.push('<div style="margin-top:8px; font-size:12px; color:var(--fg-muted);">'
                + 'No organisation SLA policy matched this priority — the task-type default was used. '
                + 'Configure an SLA for this classification in Org SLA Configuration.'
                + '</div>');
@@ -522,8 +522,8 @@
     parts.push('</div>');
 
     if (h.subjectDescription) {
-      parts.push('<div style="margin-bottom:14px;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Action required</div>'
-               + '<div style="white-space:pre-wrap; color:#0f172a;">' + escape(h.subjectDescription) + '</div></div>');
+      parts.push('<div style="margin-bottom:14px;"><div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Action required</div>'
+               + '<div style="white-space:pre-wrap; color:var(--fg-strong);">' + escape(h.subjectDescription) + '</div></div>');
     }
 
     var children = d.children || [];
@@ -544,7 +544,7 @@
       }
       parts.push('</tbody></table></div>');
       if (!h.isEligibleForCompletion && !h.closedAt) {
-        parts.push('<p style="font-size:12px; color:#854d0e; margin:6px 0 0;">'
+        parts.push('<p style="font-size:12px; color:var(--warning-700); margin:6px 0 0;">'
                  + escape(h.mandatoryChildOpenCount) + ' mandatory child task(s) still open — '
                  + 'the parent cannot be completed until they are done.</p>');
       }
@@ -552,7 +552,7 @@
 
     var reqs = d.governanceRequests || [];
     if (reqs.length) {
-      parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Exception Centre requests</h3>'
+      parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Exceptions &amp; Waivers requests</h3>'
                + '<div class="pm-table-wrap"><table><thead><tr>'
                + '<th>Type</th><th>Asked for</th><th>Status</th><th>Requested by</th><th>Decision</th>'
                + '</tr></thead><tbody>');
@@ -575,19 +575,19 @@
     var acts = d.activity || [];
     parts.push('<h3 style="font-size:13px; margin:14px 0 6px;">Activity</h3>');
     if (!acts.length) {
-      parts.push('<p style="color:#94a3b8; font-size:12px;">No activity recorded yet.</p>');
+      parts.push('<p style="color:var(--fg-subtle); font-size:12px;">No activity recorded yet.</p>');
     } else {
       parts.push('<ul style="list-style:none; margin:0; padding:0;">');
       for (var ai = 0; ai < acts.length; ai++) {
         var a = acts[ai];
         var change = (a.fromValue || a.toValue)
-            ? ' <span style="color:#64748b;">' + escape(a.fromValue || '') + ' → ' + escape(a.toValue || '') + '</span>'
+            ? ' <span style="color:var(--fg-muted);">' + escape(a.fromValue || '') + ' → ' + escape(a.toValue || '') + '</span>'
             : '';
-        parts.push('<li style="border-left:2px solid #e2e8f0; padding:4px 0 8px 10px; margin-bottom:2px;">'
-                 + '<div style="font-size:12px; font-weight:600; color:#0f172a;">'
+        parts.push('<li style="border-left:2px solid var(--border); padding:4px 0 8px 10px; margin-bottom:2px;">'
+                 + '<div style="font-size:12px; font-weight:600; color:var(--fg-strong);">'
                  + escape(a.activityTypeCode) + change + '</div>'
-                 + (a.remark ? '<div style="font-size:12px; color:#334155; white-space:pre-wrap;">' + escape(a.remark) + '</div>' : '')
-                 + '<div style="font-size:11px; color:#94a3b8;">'
+                 + (a.remark ? '<div style="font-size:12px; color:var(--neutral-700); white-space:pre-wrap;">' + escape(a.remark) + '</div>' : '')
+                 + '<div style="font-size:11px; color:var(--fg-subtle);">'
                  + escape(a.actorDisplayName || 'system') + ' · ' + escape(fmtDate(a.enteredDt))
                  + '</div></li>');
       }
@@ -617,18 +617,18 @@
 
     if (!opts.compact) {
       p.push('<h3 style="font-size:13px; margin:14px 0 6px;">Evidence'
-           + (n ? ' <span class="pm-badge" style="background:#e2e8f0; color:#334155;">' + n + '</span>' : '')
+           + (n ? ' <span class="pm-badge" style="background:var(--neutral-200); color:var(--neutral-700);">' + n + '</span>' : '')
            + '</h3>');
     }
 
     if (!n) {
-      p.push('<p style="color:#94a3b8; font-size:12px; margin:0 0 8px;">No evidence uploaded.</p>');
+      p.push('<p style="color:var(--fg-subtle); font-size:12px; margin:0 0 8px;">No evidence uploaded.</p>');
       return p.join('');
     }
 
-    p.push('<div style="border:1px solid #e2e8f0; border-radius:6px; overflow:hidden; margin-bottom:10px;">');
+    p.push('<div style="border:1px solid var(--border); border-radius:6px; overflow:hidden; margin-bottom:10px;">');
     p.push('<table style="width:100%; border-collapse:collapse; font-size:12px;">');
-    p.push('<thead><tr style="background:#f8fafc; color:#64748b;">'
+    p.push('<thead><tr style="background:var(--neutral-50); color:var(--fg-muted);">'
          + '<th style="text-align:left; padding:5px 8px; font-weight:600;">File</th>'
          + '<th style="text-align:left; padding:5px 8px; font-weight:600;">Uploaded by</th>'
          + '<th style="text-align:left; padding:5px 8px; font-weight:600;">Uploaded</th>'
@@ -638,11 +638,11 @@
       var f = files[fi];
       var href = U('/practice/api/tasks/attachments/') + escape(f.taskAttachmentId);
       var kb   = Math.max(1, Math.round((f.fileSizeBytes || 0) / 1024));
-      p.push('<tr style="border-top:1px solid #f1f5f9;">'
+      p.push('<tr style="border-top:1px solid var(--neutral-100);">'
            + '<td style="padding:5px 8px;">' + escape(f.fileName)
-           + ' <span style="color:#94a3b8;">(' + kb + ' KB)</span>'
+           + ' <span style="color:var(--fg-subtle);">(' + kb + ' KB)</span>'
            + (f.evidenceDescription
-               ? '<div style="color:#64748b; font-size:11px;">' + escape(f.evidenceDescription) + '</div>' : '')
+               ? '<div style="color:var(--fg-muted); font-size:11px;">' + escape(f.evidenceDescription) + '</div>' : '')
            + '</td>'
            + '<td style="padding:5px 8px;">' + escape(f.uploadedByName || '—') + '</td>'
            + '<td style="padding:5px 8px;">' + escape(fmtDate(f.uploadedDt)) + '</td>'
@@ -681,14 +681,14 @@
     dlg.setAttribute('data-task-id', taskId);
 
     var listEl = $('taskEvidenceExisting');
-    listEl.innerHTML = '<p style="color:#94a3b8; font-size:12px; margin:0;">Loading…</p>';
+    listEl.innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Loading…</p>';
     showDialog(dlg);
     try {
       var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
       var d = r.ok ? await r.json() : null;
       listEl.innerHTML = renderEvidenceList((d && d.attachments) || [], { compact: true });
     } catch (_e) {
-      listEl.innerHTML = '<p style="color:#94a3b8; font-size:12px; margin:0;">Existing evidence could not be loaded.</p>';
+      listEl.innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Existing evidence could not be loaded.</p>';
     }
   }
 
@@ -698,16 +698,16 @@
     var taskId = dlg.getAttribute('data-task-id');
     var input  = $('taskEvidenceFile');
     var msg    = $('taskEvidenceMsg');
-    msg.style.color = '#b91c1c';
+    msg.style.color = 'var(--danger-700)';
     msg.textContent = '';
 
     if (!input.files || !input.files.length) { msg.textContent = 'Choose a file first.'; return; }
 
-    msg.style.color = '#64748b';
+    msg.style.color = 'var(--fg-muted)';
     msg.textContent = 'Uploading…';
     var res = await postEvidence(taskId, input.files[0],
                                    $('taskEvidenceDesc').value.trim() || null);
-    if (!res.ok) { msg.style.color = '#b91c1c'; msg.textContent = res.error; return; }
+    if (!res.ok) { msg.style.color = 'var(--danger-700)'; msg.textContent = res.error; return; }
 
     hideDialog(dlg);
     openView(taskId);
@@ -755,11 +755,11 @@
         var el = await r.json();
         if (el && el.isEligible === false) {
           gate.style.cssText = 'display:block; font-size:12px; border-radius:5px; padding:8px 10px; '
-                             + 'margin-bottom:10px; background:#fffaf0; border:1px solid #fbd38d; color:#7b341e;';
+                             + 'margin-bottom:10px; background:var(--warning-50); border:1px solid var(--warning-200); color:var(--danger-700);';
           gate.textContent = el.reason || 'Mandatory sub tasks are still open (BRD §12).';
         } else if (el && el.mandatoryChildCount > 0) {
           gate.style.cssText = 'display:block; font-size:12px; border-radius:5px; padding:8px 10px; '
-                             + 'margin-bottom:10px; background:#f0fff4; border:1px solid #9ae6b4; color:#22543d;';
+                             + 'margin-bottom:10px; background:var(--success-50); border:1px solid var(--success-200); color:var(--success-700);';
           gate.textContent = 'All ' + el.mandatoryChildCount
                            + ' mandatory sub task(s) are complete. Confirm the overall objective is achieved.';
         }
@@ -772,13 +772,13 @@
   async function refreshCompleteEvidence(taskId) {
     var el = $('taskCompleteEvidence');
     if (!el) return;
-    el.innerHTML = '<p style="color:#94a3b8; font-size:12px; margin:0;">Loading…</p>';
+    el.innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Loading…</p>';
     try {
       var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
       var d = r.ok ? await r.json() : null;
       el.innerHTML = renderEvidenceList((d && d.attachments) || [], { compact: true });
     } catch (_e) {
-      el.innerHTML = '<p style="color:#94a3b8; font-size:12px; margin:0;">Evidence could not be loaded.</p>';
+      el.innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Evidence could not be loaded.</p>';
     }
   }
 
@@ -787,16 +787,16 @@
     var taskId = dlg.getAttribute('data-task-id');
     var input  = $('taskCompleteFile');
     var msg    = $('taskCompleteMsg');
-    msg.style.color = '#b91c1c';
+    msg.style.color = 'var(--danger-700)';
     if (!input.files || !input.files.length) { msg.textContent = 'Choose a file to attach.'; return; }
 
-    msg.style.color = '#64748b';
+    msg.style.color = 'var(--fg-muted)';
     msg.textContent = 'Uploading evidence…';
     var res = await postEvidence(taskId, input.files[0], null);
-    if (!res.ok) { msg.style.color = '#b91c1c'; msg.textContent = res.error; return; }
+    if (!res.ok) { msg.style.color = 'var(--danger-700)'; msg.textContent = res.error; return; }
 
     input.value = '';
-    msg.style.color = '#166534';
+    msg.style.color = 'var(--success-700)';
     msg.textContent = 'Evidence attached.';
     await refreshCompleteEvidence(taskId);
   }

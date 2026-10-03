@@ -169,8 +169,8 @@
     .gof {
         width: min(880px, calc(100vw - 32px));
         max-height: calc(100vh - 64px);
-        padding: 0; border: 0; border-radius: 10px;
-        background: #fff; color: var(--grac-ink, #25345a);
+        padding: 0; border: 0; border-radius: var(--radius-md);
+        background: var(--bg-surface); color: var(--fg-default);
     }
     .gof::backdrop { background: rgba(15, 23, 42, .45); }
 
@@ -178,7 +178,7 @@
 
     .gof-head {
         display: flex; align-items: center; gap: 10px;
-        padding: 12px 16px; border-bottom: 1px solid var(--grac-line, #e2e7f0);
+        padding: 12px 16px; border-bottom: 1px solid var(--border);
     }
     .gof-head h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
 
@@ -188,8 +188,8 @@
 
     .gof-foot {
         display: flex; align-items: center; gap: 8px;
-        padding: 12px 16px; border-top: 1px solid var(--grac-line, #e2e7f0);
-        background: #f8fafc;
+        padding: 12px 16px; border-top: 1px solid var(--border);
+        background: var(--neutral-50);
     }
 
     .gof-fields {
@@ -199,19 +199,19 @@
     .gof-fields + .gof-fields, .gof-fields + #gofRuleBox { margin-top: 12px; }
     .gof-fields .full { grid-column: 1 / -1; }
 
-    .gof label { display: block; font-size: 12px; color: var(--grac-muted, #758095); }
+    .gof label { display: block; font-size: 12px; color: var(--fg-muted); }
     .gof label > select,
     .gof label > input,
     .gof label > textarea {
         display: block; width: 100%; margin-top: 3px;
-        font-size: 13px; color: var(--grac-ink, #25345a);
+        font-size: 13px; color: var(--fg-default);
         padding: 4px 6px;
-        border: 1px solid var(--grac-line, #e2e7f0); border-radius: 5px;
-        background: #fff; font-family: inherit;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        background: var(--bg-surface); font-family: inherit;
     }
     .gof label > textarea { resize: vertical; }
-    .gof .required { color: #b91c1c; }
-    .gof-note { font-size: 11px; color: var(--grac-muted, #758095); margin: 0; }
+    .gof .required { color: var(--danger-700); }
+    .gof-note { font-size: 11px; color: var(--fg-muted); margin: 0; }
 
     /* The typed panel and the evidence block: separated from the fields
        above by a rule rather than by whitespace alone, because both are a
@@ -219,12 +219,12 @@
        other is what will prove it. */
     #gofRuleBox, .gof-typed {
         margin-top: 14px; padding-top: 12px;
-        border-top: 1px dashed var(--grac-line, #e2e7f0);
+        border-top: 1px dashed var(--border);
     }
     #gofRuleBox .gof-note { margin-bottom: 8px; }
     .gof-typed h4 {
         margin: 0 0 4px; font-size: 12px; text-transform: uppercase;
-        letter-spacing: .04em; color: var(--grac-muted, #758095);
+        letter-spacing: .04em; color: var(--fg-muted);
     }
 
     /* A button that has to line up with the bottom edge of the select
@@ -235,7 +235,7 @@
 
     .gof-evidence-line {
         display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-        padding: 6px 0; border-bottom: 1px dashed var(--grac-line, #e2e7f0);
+        padding: 6px 0; border-bottom: 1px dashed var(--border);
     }
     .gof-evidence-line:last-child { border-bottom: 0; }
     .gof-evidence-line .gof-evidence-name { flex: 1 1 160px; font-size: 13px; }

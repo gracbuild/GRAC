@@ -32,7 +32,7 @@
 <section class="pm-panel" id="gapCenterUnavailable" hidden>
     <div class="pm-empty">
         <i class="fa-solid fa-flag-checkered pm-empty-icon" aria-hidden="true"></i>
-        <h2 id="gapCenterUnavailableTitle">Gap Center is not yet enabled for this organization.</h2>
+        <h2 id="gapCenterUnavailableTitle">Gap Register is not yet enabled for this organization.</h2>
         <p id="gapCenterUnavailableBody">Ask a GRAC Admin to turn on the <code>screen.gaps</code> feature flag in your organization settings.</p>
     </div>
 </section>
@@ -65,13 +65,17 @@
        ?observationId=, and the banner is what tells the operator the
        list they are looking at is filtered. *@
     <div id="assuranceObsFilterBanner" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;
-                background:#dbeafe; color:#1e40af; display:flex; justify-content:space-between; align-items:center;">
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;
+                background:var(--primary-100); color:var(--primary-700); display:flex; justify-content:space-between; align-items:center;">
         <span>Showing only gaps linked to Observation <strong id="assuranceObsFilterLabel">#?</strong>.</span>
         <button class="pm-button" id="assuranceObsFilterClear" type="button">
             <i class="fa-solid fa-xmark"></i> Clear filter
         </button>
     </div>
+    @* Issues & Actions dashboard drill-down (414): painted by
+       Shared/dashboard-drill.js when the page is opened from a tile,
+       ageing band or distribution bar. *@
+    <div id="gapDrillBanner" hidden></div>
 
     <div class="pm-table-wrap">
         <table>
@@ -116,49 +120,49 @@
 </section>
 
 @* ---------- Add Custom Gap dialog ---------- *@
-<dialog id="newCustomGapDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:94%; max-height:96vh; overflow:auto; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="newCustomGapDialog" style="max-width:820px; width:94%; max-height:96vh; overflow:auto;">
     <form id="newCustomGapForm" method="dialog" style="margin:0; padding:14px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Add Custom Gap</h2>
-            <button type="button" id="newGapClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        <div class="pm-dialog-heading">
+            <h2>Add Custom Gap</h2>
+            <button class="pm-icon-button" type="button" id="newGapClose" aria-label="Close">&times;</button>
         </div>
-        <div id="newGapMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; margin-bottom:14px;">
-            <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.04em;">Organization</div>
-            <div id="newGapOrgLabel" style="font-weight:600; color:#0f172a;">-</div>
+        <div class="pm-message" id="newGapMessage" style="display:none;"></div>
+        <div style="background:var(--neutral-50); border:1px solid var(--border); border-radius:var(--radius-md); padding:8px 12px; margin-bottom:14px;">
+            <div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Organization</div>
+            <div id="newGapOrgLabel" style="font-weight:600; color:var(--fg-strong);">-</div>
         </div>
         <div style="display:grid; grid-template-columns:1fr; gap:8px;">
             <div style="display:grid; grid-template-columns:170px 1fr; gap:10px; align-items:end;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Gap Type
-                    <input id="newGapType" type="text" value="Custom" readonly
-                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#f1f5f9;" />
+                <label class="pm-field">Gap Type
+                    <input class="pm-input" id="newGapType" type="text" value="Custom" readonly
+                           style="background:var(--bg-subtle);" />
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;"><span>Title <span style="color:#b91c1c;">*</span></span>
-                    <input id="newGapTitle" type="text" maxlength="250" required
-                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
-                </label>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Description
-                    <textarea id="newGapDescription" rows="2" maxlength="4000"
-                              style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
-                </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Remarks
-                    <textarea id="newGapRemarks" rows="2" maxlength="1000"
-                              style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+                <label class="pm-field"><span>Title <span class="required">*</span></span>
+                    <input class="pm-input" id="newGapTitle" type="text" maxlength="250" required
+                           />
                 </label>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Priority
-                    <select id="newGapPriority" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <label class="pm-field">Description
+                    <textarea class="pm-input" id="newGapDescription" rows="2" maxlength="4000"
+                             ></textarea>
+                </label>
+                <label class="pm-field">Remarks
+                    <textarea class="pm-input" id="newGapRemarks" rows="2" maxlength="1000"
+                             ></textarea>
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label class="pm-field">Priority
+                    <select class="pm-input" id="newGapPriority">
                         <option value="Low">Low</option>
                         <option value="Medium" selected>Medium</option>
                         <option value="High">High</option>
                         <option value="Critical">Critical</option>
                     </select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Status
-                    <select id="newGapStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <label class="pm-field">Status
+                    <select class="pm-input" id="newGapStatus">
                         <option value="Open" selected>Open</option>
                         <option value="InProgress">In Progress</option>
                         <option value="Closed">Closed</option>
@@ -167,14 +171,14 @@
                 </label>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Owner
-                    <select id="newGapOwner" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <label class="pm-field">Owner
+                    <select class="pm-input" id="newGapOwner">
                         <option value="">Loading employees...</option>
                     </select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Due Date
-                    <input id="newGapDueDate" type="date"
-                           style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <label class="pm-field">Due Date
+                    <input class="pm-input" id="newGapDueDate" type="date"
+                           />
                 </label>
             </div>
             @* Migration 250: Detection Method + Severity captured at Add
@@ -184,8 +188,8 @@
                dropdowns match the vocabularies the analysis form uses,
                so a value picked here maps 1:1 to the analysis field. *@
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Detection Method
-                    <select id="newGapDetectionMethod" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <label class="pm-field">Detection Method
+                    <select class="pm-input" id="newGapDetectionMethod">
                         <option value="">--</option>
                         <option value="Manual">Manual review</option>
                         <option value="Assurance">Assurance observation</option>
@@ -194,8 +198,8 @@
                         <option value="External">External report</option>
                     </select>
                 </label>
-                <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Severity
-                    <select id="newGapSeverity" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <label class="pm-field">Severity
+                    <select class="pm-input" id="newGapSeverity">
                         <option value="">-- default from priority --</option>
                         <option value="Low">Low</option>
                         <option value="Medium">Medium</option>
@@ -208,13 +212,13 @@
                cascading Practice Picker used by Risk Analysis. *@
             <div style="margin-top:6px;">
                 <div style="display:flex; align-items:center; justify-content:space-between;">
-                    <label style="font-size:12px; color:#475569; font-weight:600;">Mapped Practices <span style="color:#b91c1c;">*</span></label>
+                    <label style="font-size:12px; color:var(--fg-secondary); font-weight:600;">Mapped Practice Instances <span class="required">*</span></label>
                     <button type="button" id="newGapMapPracticeBtn" class="pm-button" style="padding:4px 10px; font-size:12px;">
-                        <i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Map practice
+                        <i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Map practice instance
                     </button>
                 </div>
                 <div id="newGapPracticeList" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
-                    <span class="pm-hint" style="font-size:12px; color:#94a3b8;">No practices mapped yet.</span>
+                    <span class="pm-hint" style="font-size:12px; color:var(--fg-subtle);">No practices mapped yet.</span>
                 </div>
             </div>
         </div>
@@ -228,27 +232,29 @@
 @* Migration 382: Map-a-practice dialog for the Add Custom Gap form.
    Reuses the shared cascading Practice Picker (practice-picker.js,
    migration 282) exactly as Risk Centre's #riskMapPracticeModal does. *@
-<dialog id="gapMapPracticeModal" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; max-height:92vh; overflow:auto; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="gapMapPracticeModal" style="max-width:720px; width:94%; max-height:92vh; overflow:auto;">
     <div style="padding:20px 24px;">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-            <h2 style="margin:0; font-size:18px;">Map a practice</h2>
-            <button type="button" data-close-gap-map aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+            <h2 style="margin:0; font-size:18px;">Map a practice instance</h2>
+            <button class="pm-icon-button" type="button" data-close-gap-map aria-label="Close">&times;</button>
         </div>
-        <p class="pm-hint" style="font-size:12px; color:#64748b;">
-            Choose the framework, then narrow down to the practice. Each list loads only
-            what sits under the selection above it. Practices already mapped to this gap are not offered.
+        <p class="pm-hint" style="font-size:12px; color:var(--fg-muted);">
+            Choose the framework, then narrow down to the practice and its instance. Each list loads only
+            what sits under the selection above it. Instances already mapped to this gap are not offered.
         </p>
         <div id="gapMapPickerHost"></div>
         <p class="pm-form-message" id="gapMapPickerMessage" role="status" aria-live="polite"></p>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" class="pm-button" data-close-gap-map>Cancel</button>
             <button type="button" class="pm-button primary" id="gapMapPickerConfirm">
-                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice
+                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice instance
             </button>
         </div>
     </div>
 </dialog>
 <script src="~/js/practice-picker.js" asp-append-version="true"></script>
+@* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 
 @* Reuse the existing Add Implementation Task modal — exposes window.__openAddImplTask *@
 <partial name="Partials/_add-implementation-task-modal" model="Model" />
@@ -311,6 +317,10 @@
         } catch (_) { /* ignore */ }
         return '';
     })();
+    // Issues & Actions dashboard drill-down (414): ?drill= / statusText= /
+    // severity= / minAge= / maxAge= narrow the list server-side
+    // (sp_gap_centre_list, same definitions the dashboard counted with).
+    const GAP_DRILL = window.__pmDrill ? window.__pmDrill.read() : null;
     const PAGE_SIZE   = 25;
     let searchDebounce = null;
     let openMenuEl      = null;
@@ -389,6 +399,8 @@
             sel.appendChild(opt);
         }
         if (orgs.length > 0) sel.value = orgs[0].value;
+        // 414: the dashboard's organization wins when it is one of these.
+        if (GAP_DRILL && GAP_DRILL.organizationId) window.__pmDrill.preselect(sel, GAP_DRILL.organizationId);
         sel.disabled = orgs.length <= 1;
     }
 
@@ -505,6 +517,11 @@
         // alternative was returning unrelated rows under a banner
         // claiming they were filtered.
         if (assuranceObservationFilter) params.set('observationId', String(assuranceObservationFilter));
+        // 414: dashboard drill-down.
+        if (GAP_DRILL && GAP_DRILL.active) {
+            window.__pmDrill.appendTo(params, GAP_DRILL);
+            window.__pmDrill.banner('gapDrillBanner', GAP_DRILL);
+        }
 
         const banner = document.getElementById('assuranceObsFilterBanner');
         const label  = document.getElementById('assuranceObsFilterLabel');
@@ -561,8 +578,8 @@
             // would have been two different facts wearing one hat.
             const linkedNote = !linked ? ''
                 : (row.isMaterialized || row.IsMaterialized
-                    ? '<div style="font-size:11px; color:#64748b;">' + linked + ' observation' + (linked === 1 ? '' : 's') + '</div>'
-                    : '<div style="font-size:11px; color:#64748b;">' + linked + ' obligation' + (linked === 1 ? '' : 's') + '</div>');
+                    ? '<div style="font-size:11px; color:var(--fg-muted);">' + linked + ' observation' + (linked === 1 ? '' : 's') + '</div>'
+                    : '<div style="font-size:11px; color:var(--fg-muted);">' + linked + ' obligation' + (linked === 1 ? '' : 's') + '</div>');
             tr.innerHTML = [
                 '<td><div>' + escape(row.title || row.Title || '') + '</div>' + linkedNote + sourceNote(row) + '</td>',
                 '<td>' + escape(row.statusText || row.StatusText || '') + '</td>',
@@ -586,7 +603,7 @@
     // column it used to live in was dropped from the grid.
     function sourceNote(row) {
         const isMat = row.isMaterialized || row.IsMaterialized;
-        return isMat ? '' : '<div style="font-size:11px; color:#64748b;">not yet analysed</div>';
+        return isMat ? '' : '<div style="font-size:11px; color:var(--fg-muted);">not yet analysed</div>';
     }
 
     // Practice Instance / Task / Risk / Exception Status (migration 371):
@@ -595,7 +612,7 @@
     // unset value, so an absent status reads as "nothing here" rather
     // than a blank that could be mistaken for a loading gap.
     function statusOrDash(v) {
-        return v ? escape(v) : '<span style="font-weight:400; color:#94a3b8;">&mdash;</span>';
+        return v ? escape(v) : '<span style="font-weight:400; color:var(--fg-subtle);">&mdash;</span>';
     }
 
     function fmtDate(v) {
@@ -654,13 +671,13 @@
         const list = document.getElementById('newGapPracticeList');
         if (!list) return;
         if (!selectedPractices.length) {
-            list.innerHTML = '<span class="pm-hint" style="font-size:12px; color:#94a3b8;">No practices mapped yet.</span>';
+            list.innerHTML = '<span class="pm-hint" style="font-size:12px; color:var(--fg-subtle);">No practice instances mapped yet.</span>';
             return;
         }
         list.innerHTML = selectedPractices.map(function (pr) {
-            return '<span style="display:inline-flex; align-items:center; gap:6px; background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; border-radius:12px; padding:2px 10px; font-size:12px;">'
-                + gapEsc(pr.practiceName)
-                + ' <button type="button" data-remove-practice="' + pr.practiceId + '" aria-label="Remove practice" style="background:none; border:none; cursor:pointer; color:#3730a3; font-size:14px; line-height:1;">&times;</button></span>';
+            return '<span style="display:inline-flex; align-items:center; gap:6px; background:var(--primary-50); border:1px solid var(--primary-200); color:var(--primary-800); border-radius:12px; padding:2px 10px; font-size:12px;">'
+                + gapEsc(pr.practiceName) + (pr.practiceInstanceName ? ' - ' + gapEsc(pr.practiceInstanceName) : '')
+                + ' <button type="button" data-remove-practice="' + pr.practiceInstanceId + '" aria-label="Remove practice instance" style="background:none; border:none; cursor:pointer; color:var(--primary-800); font-size:14px; line-height:1;">&times;</button></span>';
         }).join('');
     }
     function closeGapMapPractice() {
@@ -679,13 +696,15 @@
         if (!window.__practicePicker) { host.innerHTML = '<span class="pm-hint">Practice picker unavailable - practice-picker.js did not load.</span>'; showMap(); return; }
         if (!selectedOrgId) { host.innerHTML = '<span class="pm-hint">Select an organization first.</span>'; showMap(); return; }
         // Fresh instance each open: exclude what is already mapped so the
-        // same practice cannot be added twice (same behaviour as Risk Analysis).
-        const excluded = selectedPractices.map(function (pr) { return pr.practiceId; });
+        // same practice INSTANCE cannot be added twice (388 -- same
+        // behaviour as Risk Analysis since 387). Another instance of an
+        // already-mapped practice can still be added.
+        const excluded = selectedPractices.map(function (pr) { return pr.practiceInstanceId; });
         try { if (gapMapPicker && gapMapPicker.destroy) gapMapPicker.destroy(); } catch (e) {}
         gapMapPicker = window.__practicePicker.attach({
             host: host,
             organizationId: Number(selectedOrgId),
-            excludePracticeIds: excluded
+            excludePracticeInstanceIds: excluded
         });
         showMap();
     }
@@ -693,9 +712,14 @@
         const msg = document.getElementById('gapMapPickerMessage');
         const st  = (gapMapPicker && gapMapPicker.getState) ? gapMapPicker.getState() : null;
         const pid = st && st.practiceId ? Number(st.practiceId) : null;
-        if (!pid) { if (msg) { msg.textContent = 'Select a practice first.'; msg.className = 'pm-form-message error'; } return; }
-        if (!selectedPractices.some(function (pr) { return pr.practiceId === pid; })) {
-            selectedPractices.push({ practiceId: pid, practiceName: st.practiceName || ('Practice #' + pid) });
+        const iid = st && st.practiceInstanceId ? Number(st.practiceInstanceId) : null;
+        // 388: the picker ends at the practice instance (isComplete).
+        if (!pid || !iid || !st.isComplete) { if (msg) { msg.textContent = 'Select a practice instance first.'; msg.className = 'pm-form-message error'; } return; }
+        if (!selectedPractices.some(function (pr) { return pr.practiceInstanceId === iid; })) {
+            selectedPractices.push({
+                practiceId: pid, practiceName: st.practiceName || ('Practice #' + pid),
+                practiceInstanceId: iid, practiceInstanceName: st.practiceInstanceName || ('Instance #' + iid)
+            });
             renderGapPractices();
         }
         closeGapMapPractice();
@@ -762,8 +786,8 @@
         if (list) list.addEventListener('click', function (e) {
             const rm = e.target.closest('[data-remove-practice]');
             if (!rm) return;
-            const pid = Number(rm.getAttribute('data-remove-practice'));
-            selectedPractices = selectedPractices.filter(function (pr) { return pr.practiceId !== pid; });
+            const iid = Number(rm.getAttribute('data-remove-practice'));
+            selectedPractices = selectedPractices.filter(function (pr) { return pr.practiceInstanceId !== iid; });
             renderGapPractices();
         });
         const mapModal = document.getElementById('gapMapPracticeModal');
@@ -778,7 +802,7 @@
             e.preventDefault();
             const title = document.getElementById('newGapTitle').value.trim();
             if (!title) { setGapMsg('Title is required.', 'error'); return; }
-            if (!selectedPractices.length) { setGapMsg('Map at least one Practice.', 'error'); return; }
+            if (!selectedPractices.length) { setGapMsg('Map at least one Practice Instance.', 'error'); return; }
             const submit = document.getElementById('newGapSubmit');
             submit.disabled = true; setGapMsg('Saving...');
             const owner = document.getElementById('newGapOwner').value;
@@ -804,8 +828,12 @@
                 // Same label the analysis form's dropdown carries; kept
                 // for parity in downstream reports.
                 detectionMethodName:  detMeth || null,
-                // Migration 382: mapped practices saved with the gap.
+                // Migration 382: mapped practices saved with the gap
+                // (distinct -- two instances can share a practice).
                 practiceIds:          selectedPractices.map(function (p) { return p.practiceId; })
+                                          .filter(function (v, i, a) { return a.indexOf(v) === i; }),
+                // Migration 388: the mapped practice instances.
+                practiceInstanceIds:  selectedPractices.map(function (p) { return p.practiceInstanceId; })
             };
             try {
                 const r = await fetch(U('/practice/api/gaps/custom'), {

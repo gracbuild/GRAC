@@ -179,6 +179,23 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             await command.ExecuteNonQueryAsync(cancellationToken);
             var id = idOut.Value is long l ? l : Convert.ToInt64(idOut.Value);
 
+            // Migration 388: record the chosen practice instances. The
+            // create above wrote one practice-level row per practice; this
+            // claims those rows for the instances (and adds a row for a
+            // second instance of the same practice).
+            if (request.PracticeInstanceIds is { Count: > 0 })
+            {
+                await using var instCmd = connection.CreateCommand();
+                instCmd.CommandType = CommandType.StoredProcedure;
+                instCmd.CommandText = "grac_practice.sp_custom_gap_practice_instance_set";
+                AddParam(instCmd, "@custom_gap_id",              DbType.Int64,  id);
+                AddParam(instCmd, "@practice_instance_ids_json", DbType.String,
+                    JsonSerializer.Serialize(request.PracticeInstanceIds), -1);
+                AddParam(instCmd, "@actor_employee_id",          DbType.Int64,
+                    (object?)request.ActorEmployeeId ?? DBNull.Value);
+                await instCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             // Migration 189: custom gaps only carry priority at Add Gap
             // time; sp_custom_gap_apply_sla falls back to priority when
             // severity_code is null, so an SLA auto-lands even here.
@@ -213,7 +230,12 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
                 Convert.ToInt64(reader["PracticeId"]),
                 reader["PracticeName"] as string,
                 reader["PracticeCode"] as string,
-                reader["MappedDt"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(reader["MappedDt"])));
+                reader["MappedDt"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(reader["MappedDt"]),
+                // Migration 388 columns; absent on a pre-388 database.
+                HasColumn(reader, "PracticeInstanceId") && reader["PracticeInstanceId"] != DBNull.Value
+                    ? Convert.ToInt64(reader["PracticeInstanceId"]) : null,
+                HasColumn(reader, "PracticeInstanceName") ? reader["PracticeInstanceName"] as string : null,
+                HasColumn(reader, "PracticeInstanceCode") ? reader["PracticeInstanceCode"] as string : null));
         }
         return rows;
     }
@@ -828,6 +850,8 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             AddParam(command, "@observation_id",     DbType.Int64,  (object?)query.ObservationId ?? DBNull.Value);
             AddParam(command, "@page",               DbType.Int32,  Math.Max(1, query.Page));
             AddParam(command, "@page_size",          DbType.Int32,  Math.Clamp(query.PageSize, 1, 200));
+            // 414: dashboard drill-down, sent only when declared.
+            await Infrastructure.ListDrillParameters.AddAsync(connection, command, "sp_gap_centre_list", query.Drill, cancellationToken);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -935,6 +959,7 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

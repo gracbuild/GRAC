@@ -56,15 +56,15 @@
        screen. When the URL carries ?definitionId=X, that value is
        preselected here on load. *@
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaScopePickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaScopePickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:320px;">
+        <label class="pm-field" style="flex:1; min-width:320px;">
             <span>Audit</span>
-            <select id="oaScopePickDef" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaScopePickDef">
                 <option value="">Select an organization first</option>
             </select>
         </label>
@@ -74,7 +74,7 @@
         <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
             <span style="font-weight:600;" id="oaScopeDefName">Definition</span>
             <span class="pm-badge" id="oaScopeDefStatus">Status</span>
-            <span style="color:#64748b;" id="oaScopeDefVersion">Version</span>
+            <span style="color:var(--fg-muted);" id="oaScopeDefVersion">Version</span>
         </div>
         <div style="display:flex; gap:6px;">
             <button class="pm-button" id="oaScopeReloadBtn" type="button">Reload</button>
@@ -83,29 +83,29 @@
     </div>
 
     <div id="oaScopeReadonlyBanner" hidden
-         style="margin:8px 0; padding:10px 12px; border-radius:6px; background:#fef3c7; color:#78350f; font-size:13px;">
+         style="margin:8px 0; padding:10px 12px; border-radius:var(--radius-md); background:var(--warning-100); color:var(--warning-700); font-size:13px;">
         This version is not a Draft, so the scope is shown read-only. Edit
         the definition to create a new Draft version before changing scope.
     </div>
 
     <div id="oaScopeMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
     @* ===================================================================
        Mode toggle. Simple is the default; Advanced unlocks groups /
        AND / OR / NOT / labels / non-pickable dimensions.
        =================================================================== *@
-    <div id="oaScopeModeToggle" hidden style="margin:12px 0; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <div style="font-size:13px; color:#475569;">
-            <strong style="color:#0f172a;">Mode:</strong>
+    <div id="oaScopeModeToggle" hidden style="margin:12px 0; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--neutral-50); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div style="font-size:13px; color:var(--fg-secondary);">
+            <strong style="color:var(--fg-strong);">Mode:</strong>
             <span id="oaScopeModeSimpleLabel" style="margin-left:8px;">Simple</span>
-            <span style="color:#94a3b8;">&middot;</span>
+            <span style="color:var(--fg-subtle);">&middot;</span>
             <span id="oaScopeModeAdvancedLabel">Advanced</span>
-            <span id="oaScopeModeHint" style="margin-left:12px; color:#64748b; font-style:italic;">
+            <span id="oaScopeModeHint" style="margin-left:12px; color:var(--fg-muted); font-style:italic;">
                 Simple mode is easiest for most cases. Switch to Advanced if you need AND / OR / NOT rules.
             </span>
         </div>
-        <div role="group" aria-label="Mode" style="display:inline-flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden;">
+        <div role="group" aria-label="Mode" style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden;">
             <button type="button" id="oaScopeModeSimpleBtn"   class="pm-button"
                     style="border:none; border-radius:0; padding:4px 12px;" aria-pressed="true">Simple</button>
             <button type="button" id="oaScopeModeAdvancedBtn" class="pm-button"
@@ -117,7 +117,7 @@
        Simple Mode -- Filter cards
        =================================================================== *@
     <div id="oaScopeSimpleMode" hidden style="margin-top:12px;">
-        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:13px; color:#1e40af;">
+        <div style="background:var(--primary-50); border:1px solid var(--primary-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px; font-size:13px; color:var(--primary-700);">
             <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
             <strong>How to use this page:</strong>
             Pick values under any of the filters below. The audit will apply to items that match
@@ -143,54 +143,54 @@
 @* Simple Mode filter card template *@
 <template id="oaScopeSimpleFilterTemplate">
     <div class="oa-simple-filter" data-dim-code=""
-         style="border:1px solid #cbd5e1; border-radius:8px; background:#fff;">
+         style="border:1px solid var(--border-strong); border-radius:var(--radius-md); background:var(--bg-surface);">
         <div class="oa-simple-filter-header"
              style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; cursor:pointer;">
             <div style="min-width:0; flex:1;">
-                <div data-role="dim-name" style="font-weight:600; color:#0f172a; font-size:14px;">Filter Name</div>
-                <div data-role="dim-summary" style="color:#64748b; font-size:12px; margin-top:2px;">Not filtered</div>
+                <div data-role="dim-name" style="font-weight:600; color:var(--fg-strong); font-size:14px;">Filter Name</div>
+                <div data-role="dim-summary" style="color:var(--fg-muted); font-size:12px; margin-top:2px;">Not filtered</div>
             </div>
             <div style="display:flex; align-items:center; gap:6px;">
                 <span data-role="count-badge" class="pm-badge" hidden></span>
-                <i data-role="chevron" class="fa-solid fa-chevron-down" aria-hidden="true" style="color:#94a3b8;"></i>
+                <i data-role="chevron" class="fa-solid fa-chevron-down" aria-hidden="true" style="color:var(--fg-subtle);"></i>
             </div>
         </div>
         <div class="oa-simple-filter-body" hidden
-             style="border-top:1px solid #e2e8f0; padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+             style="border-top:1px solid var(--border); padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; gap:8px; align-items:center;">
-                <input data-role="search" type="text" placeholder="Search..."
-                       style="flex:1; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px;" />
+                <input class="pm-input" data-role="search" type="text" placeholder="Search..."
+                       style="flex:1;" />
                 <button data-role="select-all" type="button" class="pm-button">Select all</button>
                 <button data-role="clear"      type="button" class="pm-button">Clear</button>
             </div>
             <div data-role="list"
-                 style="max-height:220px; overflow:auto; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
+                 style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:var(--radius-sm); padding:6px 8px;">
                 <!-- Checkboxes rendered by JS. -->
             </div>
-            <div data-role="status" style="font-size:12px; color:#64748b;"></div>
+            <div data-role="status" style="font-size:12px; color:var(--fg-muted);"></div>
         </div>
     </div>
 </template>
 
 <template id="oaScopeGroupTemplate">
     <div class="oa-scope-group" data-group-index=""
-         style="border:1px solid #cbd5e1; border-radius:8px; padding:12px; background:#f8fafc;">
+         style="border:1px solid var(--border-strong); border-radius:var(--radius-md); padding:12px; background:var(--neutral-50);">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
-            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#475569;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-secondary);">
                 Combine with previous group:
                 <select data-role="group-operator"
-                        style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px;">
+                        style="padding:4px 8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm);">
                     <option value="AND">AND (both groups apply)</option>
                     <option value="OR">OR (either group applies)</option>
                 </select>
             </label>
-            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#475569; flex:1; min-width:220px;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-secondary); flex:1; min-width:220px;">
                 Label:
                 <input data-role="group-label" type="text" maxlength="200" placeholder="Optional label for this group"
-                       style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; flex:1;" />
+                       style="padding:4px 8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); flex:1;" />
             </label>
             <button data-role="remove-group" type="button" class="pm-button"
-                    style="color:#b91c1c;" title="Remove this group">
+                    style="color:var(--danger-700);" title="Remove this group">
                 <i class="fa-solid fa-trash" aria-hidden="true"></i>
             </button>
         </div>
@@ -205,41 +205,41 @@
 
 <template id="oaScopeConditionTemplate">
     <div class="oa-scope-condition"
-         style="border:1px solid #e2e8f0; border-radius:6px; padding:10px; background:#fff;">
+         style="border:1px solid var(--border); border-radius:var(--radius-md); padding:10px; background:var(--bg-surface);">
         <div style="display:grid; grid-template-columns:150px 1fr 140px 140px auto; gap:8px; align-items:center;">
-            <label style="font-size:12px; color:#475569;">
+            <label style="font-size:12px; color:var(--fg-secondary);">
                 Match:
                 <select data-role="condition-operator"
-                        style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:2px;">
                     <option value="AND">AND (all conditions)</option>
                     <option value="OR">OR (any condition)</option>
                 </select>
             </label>
-            <label style="font-size:12px; color:#475569;">
+            <label style="font-size:12px; color:var(--fg-secondary);">
                 Filter By:
                 <select data-role="dimension"
-                        style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                        style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:2px;">
                 </select>
             </label>
-            <label style="font-size:12px; color:#475569; display:flex; align-items:center; gap:6px;">
+            <label style="font-size:12px; color:var(--fg-secondary); display:flex; align-items:center; gap:6px;">
                 <input data-role="is-not" type="checkbox" />
                 <span>Exclude selected</span>
             </label>
-            <label style="font-size:12px; color:#475569; display:flex; align-items:center; gap:6px;">
+            <label style="font-size:12px; color:var(--fg-secondary); display:flex; align-items:center; gap:6px;">
                 <input data-role="include-all" type="checkbox" />
                 <span>Include all values</span>
             </label>
             <button data-role="remove-condition" type="button" class="pm-button"
-                    style="color:#b91c1c;" title="Remove this condition">
+                    style="color:var(--danger-700);" title="Remove this condition">
                 <i class="fa-solid fa-trash" aria-hidden="true"></i>
             </button>
         </div>
         <div data-role="values-host" style="margin-top:8px;">
-            <label style="font-size:12px; color:#475569;">Values:</label>
+            <label style="font-size:12px; color:var(--fg-secondary);">Values:</label>
             <select data-role="values" multiple size="5"
-                    style="width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; margin-top:4px;">
+                    style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:4px;">
             </select>
-            <div data-role="values-hint" style="font-size:11px; color:#64748b; margin-top:4px;"></div>
+            <div data-role="values-hint" style="font-size:11px; color:var(--fg-muted); margin-top:4px;"></div>
         </div>
     </div>
 </template>
@@ -973,8 +973,8 @@
         const el = document.getElementById('oaScopeMessage');
         el.hidden = false;
         el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
 
     // ==================================================================
@@ -1060,10 +1060,10 @@
         const aBtn = document.getElementById('oaScopeModeAdvancedBtn');
         sBtn.setAttribute('aria-pressed', String(simple));
         aBtn.setAttribute('aria-pressed', String(!simple));
-        sBtn.style.background = simple ? '#0f172a' : '';
-        sBtn.style.color      = simple ? '#fff'    : '';
-        aBtn.style.background = simple ? '' : '#0f172a';
-        aBtn.style.color      = simple ? '' : '#fff';
+        sBtn.style.background = simple ? 'var(--grac-navy-deep)' : '';
+        sBtn.style.color      = simple ? 'var(--fg-on-dark)'    : '';
+        aBtn.style.background = simple ? '' : 'var(--grac-navy-deep)';
+        aBtn.style.color      = simple ? '' : 'var(--fg-on-dark)';
 
         if (simple) renderSimpleFilters();
         else        renderGroups();
@@ -1187,7 +1187,7 @@
         const selectedIds = new Set(selected.map(function (v) { return String(v.entityId); }));
 
         if (!values.length) {
-            list.innerHTML = '<div style="padding:8px; color:#94a3b8; font-size:12px;">' +
+            list.innerHTML = '<div style="padding:8px; color:var(--fg-subtle); font-size:12px;">' +
                 (state.valueCache[dim.dimensionCode] && state.valueCache[dim.dimensionCode].length
                     ? 'No matches.'
                     : 'No values available for this organization.') + '</div>';

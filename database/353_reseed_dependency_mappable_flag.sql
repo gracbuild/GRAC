@@ -87,7 +87,7 @@ UPDATE grac_practice.dependency_type_master
        updated_by = N'reseed-353',
        updated_dt = SYSUTCDATETIME()
  WHERE is_dependency_mappable = 1
-   AND dependency_type_name IN (N'Application', N'Tool', N'Process', N'Location');
+   AND dependency_type_name IN (N'Application', N'Tool', N'Process');   -- Location removed by 385 (now an Impact category)
 GO
 
 -- =====================================================================
@@ -107,15 +107,15 @@ SELECT '353-a all five expected categories are now mappable' AS Check_,
                      AND dependency_type_name IN (N'Asset', N'Vendor', N'Person', N'Team', N'Committee')) = 5
             THEN 'PASS' ELSE 'FAIL' END AS Result
 UNION ALL
-SELECT '353-b the four retired categories remain off',
+SELECT '353-b the retired categories remain off (Location left on by 385)',
        CASE WHEN (SELECT COUNT(*) FROM grac_practice.dependency_type_master
                    WHERE is_dependency_mappable = 1
-                     AND dependency_type_name IN (N'Application', N'Tool', N'Process', N'Location')) = 0
+                     AND dependency_type_name IN (N'Application', N'Tool', N'Process')) = 0
             THEN 'PASS' ELSE 'FAIL' END
 UNION ALL
-SELECT '353-c exactly five categories are mappable in total',
+SELECT '353-c at least the five categories are mappable (385 adds Location, Department)',
        CASE WHEN (SELECT COUNT(*) FROM grac_practice.dependency_type_master
-                   WHERE is_dependency_mappable = 1) = 5
+                   WHERE is_dependency_mappable = 1) >= 5
             THEN 'PASS' ELSE 'FAIL' END;
 
 PRINT '';

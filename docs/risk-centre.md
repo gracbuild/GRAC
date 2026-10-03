@@ -25,7 +25,7 @@ Migration 216 splits it:
 
 | | Asks for | Where |
 | --- | --- | --- |
-| **Stage 1 — Assessment** | risk statement · threat · vulnerability · risk owner · business function | Risk Candidate |
+| **Stage 1 — Assessment** | risk title (417) · risk statement · threat · vulnerability · risk owner (business function dropped in 417 -- captured per impact in Impact details) | Risk Candidate |
 | **Stage 2 — Analysis** | category · likelihood · impact → rating · cause · consequence · controls | Risk Register |
 
 **§24 rule 1 still holds.** `risk_register.risk_analysis_id` is still NOT
@@ -195,6 +195,8 @@ if its prerequisite has not run.
 | 297 | `297_bulk_review_returns_to_acceptance.sql` | Re-issues `sp_risk_bulk_review` so `next_review_date` is **assigned, not COALESCEd** — a blank date clears the schedule and 296 routes the risk to `AcceptanceDue`. Also makes the `@applied` test and the date audit row NULL-safe, and stops the report claiming a cleared date survived. |
 | 296 | `296_reviewed_risk_returns_to_acceptance.sql` | Re-issues `vw_pm_risk_workflow_stage`. A ready risk with no `next_review_date` is now `AcceptanceDue`, and `Tolerate` is decided entirely inside its own branch. Fixes two stranding defects — see below. View only; no data written. |
 | 295 | `295_risk_bulk_accept.sql` | `sp_risk_bulk_accept` — composes `sp_risk_acceptance_save` over a selection with **no review stamp**. Creates one new procedure and modifies nothing. Error range 56750–56769. Backs the Accept Risk tab. |
+| 417 | `417_risk_assessment_title.sql` | `risk_analysis.risk_title`, `sp_risk_analysis_title_set`, and a re-issue of 216's `sp_risk_analysis_get` with `RiskTitle` appended. |
+| 418 | `418_risk_treatment_task_optional.sql` | Re-issues 263's `sp_risk_treatment_option_set` with `@raise_task BIT = 1`; 0 records the decision without calling `sp_risk_treatment_task_ensure`. |
 
 Rollbacks exist for all seventeen, in reverse order:
 `267 → 266 → 265 → 264 → 263 → 262 → 261 → 258 → 216 → 215 → 214 → 213 → 212 → 207 → 206 → 205 → 204`.
@@ -501,7 +503,7 @@ caller stamped from session)
 
 | Method | Route | Notes |
 | --- | --- | --- |
-| GET | `/?organizationId=&statusCode=&sourceTypeCode=&page=&pageSize=` | `sourceTypeCode` is new |
+| GET | `/?organizationId=&statusCode=&sourceTypeCode=&page=&pageSize=&openOnly=&minAgeDays=&maxAgeDays=` | `sourceTypeCode` is new; `openOnly` / `minAgeDays` / `maxAgeDays` (413) are the dashboard's ageing-band drill-down |
 | GET | `/{id}` | now returns the source + analysis fields |
 | POST | `/{id}/accept` | **legacy**, see below |
 | POST | `/{id}/reject` | §8B |
@@ -513,16 +515,17 @@ caller stamped from session)
 | Method | Route | BRD |
 | --- | --- | --- |
 | GET | `/scoring-options?organizationId=` | §7, §12, §13 |
-| GET | `/{id}/analysis` | §7.1 current version |
+| GET | `/{id}/analysis` | §7.1 current version — carries `riskTitle` (417) |
 | GET | `/{id}/analysis/history` | §20 |
-| POST | `/{id}/analysis` | §7 — writes a **new version** each call |
+| POST | `/{id}/analysis` | §7 — writes a **new version** each call; optional `riskTitle` (417); `businessFunctionId` optional |
 | POST | `/{id}/assign` | §6.2, §18 |
 | POST | `/{id}/clarify` | §8C |
 | POST | `/{id}/close-duplicate` | §15 |
-| POST | `/{id}/register` | §8A — Route A |
+| POST | `/{id}/register` | §8A — Route A; blank `riskTitle` → the current analysis's title (417) → candidate title |
 | POST | `/duplicate-check` | §15 |
 | POST | `/custom` | §4B, §11 — Route B |
 | GET | `/register?organizationId=&statusCode=&sourceTypeCode=&categoryCode=&ratingCode=&ownerEmployeeId=&search=&page=&pageSize=` | §9, §23 |
+| | 413 drill-down additions: `&noOwner=1` (owner ID is NULL), `&openOnly=1` (not Closed / Retired), `&likelihoodValue=&impactValue=` (inherent heatmap cell), `&residualLikelihoodValue=&residualImpactValue=` (residual heatmap cell) | dashboard |
 | GET | `/register/{riskId}` | §9.1 + §10 chain in one row |
 | POST | `/register/{riskId}/status` | §17 |
 | POST | `/register/{riskId}/owner` | §18 |
@@ -568,7 +571,7 @@ arguments".
 | DELETE | `/register/{riskId}/practices/{practiceId}` | returns `assetsRemoved` **and** `assetsKept` |
 | POST | `/register/{riskId}/assets` | direct mapping; no practice asked for or inferred |
 | DELETE | `/register/{riskId}/assets/{assetId}` | removes the *direct reason*; `assetRemoved: false` + `remainingSources` when a practice still reaches it |
-| POST | `/register/{riskId}/treatment-option` | the decision **and** its dispatch; `taskCreated` and `nextStep` say what happened |
+| POST | `/register/{riskId}/treatment-option` | the decision **and** its dispatch; `taskCreated` and `nextStep` say what happened. Optional `raiseTask` (418): `false` records the decision without raising the treatment task |
 | GET | `/register/{riskId}/treatment-state` | counts, task list, `residualAvailable` **and `reason`** |
 | POST | `/register/treatment-sync` | idempotent sweep; `riskRegisterId` **or** `organizationId` |
 | GET | `/register/{riskId}/acceptance` | current acceptance + `canAccept` and `acceptGuidance`; `reviewFrequencyId` / `reviewFrequencyName` since 293 |
@@ -577,7 +580,7 @@ arguments".
 | POST | `/register/bulk-accept` | 295 — accept a selection; `nextReviewDate` **required**. 200 with `skippedCount`, not "all accepted" |
 | GET | `/register?workflowStageCode=AcceptanceDue` | the Accept tab's list — no endpoint of its own |
 | POST | `/register/{riskId}/review` | delegates to `sp_risk_register_assess` |
-| GET | `/review-due` | `next_review_date <= today`; `includeFutureDays` widens the horizon |
+| GET | `/review-due` | `next_review_date <= today`; `includeFutureDays` widens the horizon; `daysOverdueMin` / `daysOverdueMax` (413) narrow to one review-ageing band |
 | GET | `/review-calendar` | one row per risk in a date window, shaped for a month grid |
 
 `/register` gains three more filters — `treatmentOptionCode`,
@@ -627,7 +630,7 @@ Do not re-add these routes without reading it.
 | GET | `/notifications?organizationId=&statusCode=&notifyEventCode=&subjectTypeCode=&subjectRecordId=&recipientEmployeeId=` | §21 |
 | GET | `/notifications/counts?organizationId=` | §21 |
 | POST | `/notifications/{notificationId}/mark` | §21 |
-| GET | `/dashboard?organizationId=&trendMonths=` | §23 |
+| GET | `/dashboard?organizationId=&trendMonths=` | §23; since 413 also matrix axes, both heatmaps, heatmap coverage, review ageing and Top 5 (sets 11-16) |
 | GET | `/ageing?organizationId=&minAgeDays=&page=&pageSize=` | §23 |
 | POST | `/register/{riskId}/treatment-task` | §22 |
 | GET | `/register/{riskId}/treatment-tasks` | §22 |
@@ -644,7 +647,7 @@ Two procs return multiple result sets read **by position**, not by name:
 | Proc | Sets | Reader |
 | --- | --- | --- |
 | `sp_risk_scoring_options_get` | 5 — Likelihood, Impact, Categories, Sources, Matrix | `GetScoringOptionsAsync` |
-| `sp_risk_dashboard_counts` | 11 — see 214's header | `GetDashboardAsync` |
+| `sp_risk_dashboard_counts` | 17 — 214's 11, plus 413's 11-16 (axes, inherent heatmap, residual heatmap, coverage, review ageing, top 5) | `GetDashboardAsync` |
 
 Changing the order in either proc breaks the service **silently**. Add at
 the end instead.
@@ -3100,15 +3103,18 @@ target date and mandatory-or-not, and **not** priority or SLA — the child
 inherits those from its parent (§11), and a field that would be ignored
 should not be offered.
 
-The Residual cell has three states, because each calls for a different
-action: `awaiting inherent rating` (nothing to be residual to),
-`Not assessed` (outstanding work, badged the way 216 badges an unscored
-risk), and the rating chip with the likelihood × impact that produced it.
-It is painted by the **same** `severityChip` as the Inherent column — two
-columns meant to be read with one eye are painted by one function — and
-its likelihood/impact selects are filled from the **same**
-`/scoring-options` payload and previewed by the **same** `renderRating`
-resolver as the inherent form.
+The register grid's two rating columns show a bare `--` until analysis
+has actually produced a rating (change request 2026-09-30). Placeholder
+text is no longer printed: the Inherent cell is just
+`severityChip(r.inherentRatingCode)` (which returns `--` for a null
+code), and the Residual cell (`residualCell`) returns `--` whenever
+`residualRatingCode` is absent — whether inherent analysis is still
+pending or inherent is scored but residual is not. Only a real rating
+prints its chip, plus the likelihood × impact that produced it. Both
+columns are painted by the **same** `severityChip`, so they read with one
+eye, and the residual likelihood/impact selects are filled from the
+**same** `/scoring-options` payload and previewed by the **same**
+`renderRating` resolver as the inherent form.
 
 Both analysis forms — the candidate one and the custom one — are driven
 by **one** `/scoring-options` payload and **one** rating resolver. If they
@@ -3518,3 +3524,383 @@ they are separate tables with their own `<thead>`/row templates, and
 sir's request named "the Risk list" (the register grid) specifically;
 the risk detail view, which still shows Category and Source; and
 `sp_risk_register_list`, the API contract, and every filter.
+
+## View Risk -> Risk context layout (change request 2026-09-26)
+
+Display-only change on the read-only Risk View page (`openRiskDetailPage`
+in `wwwroot/js/RiskCentre/risk-centre.js`, `#rdContext` in
+`Views/Practice/Partials/risk-centre.cshtml`). No API, procedure or data change.
+
+- Risk context shows exactly ten fields:
+  Risk ID | Source | Owner | Record status | Registered / Title | Category, then
+  Statement, Threat and Vulnerability each on its own full-width row
+  (`pm-detail-span`) because they carry long text.
+- `#rdContext` uses five columns down to 1100px (then two, one below 640px);
+  `.rd-row-start` pins Title to column 1 so row 2 starts on a new line.
+  `ddReq` gained an optional 4th `cls` argument passed through to `dd()`.
+- Every field uses `ddReq`, so an empty value shows "Not available" and
+  keeps its slot instead of shifting the rows.
+- Removed from this section: Description, Business function, Process,
+  Linked practice, Risk cause, Existing controls, Risk version,
+  Next review, Last reviewed, Reviews, Closed. The register detail modal
+  is unchanged. `practiceScopeCell` / `riskVersionCell` are now unused.
+- Traceability is unchanged except the step label "Assessment" now reads
+  "Identify" (`riskTraceSteps`, shared with the register detail modal).
+- Risk Analysis page, Risk context (`#raMeta`, `openRiskAnalysisPage`), same
+  request: Row 1 Risk ID | Owner | Source | Current inherent | Current
+  residual (five columns, two below 1100px, one below 640px), then
+  Statement, Threat, Vulnerability one full-width row each. Business
+  function, Business unit and Linked practice removed (display only). The
+  "Saving again replaces the version waiting for review" note still shows,
+  full width, only while a version is pending approval.
+- Impact Details moved from the Risk Treatment page to the Risk Analysis
+  page, directly above Inherent scoring (`#raImpactPanel` /
+  `#raImpactScope`). Same `riskMapping` component, `/mapping` call and
+  "Save impact details" path. New mount options: `impactOnly` (Analysis:
+  render only the impact table) and `hideImpact` (Treatment: render only
+  Existing Controls). Every other mount is unchanged.
+- Impact Details -> Location / Department / Person (migration 385,
+  2026-09-26, supersedes the earlier Location+Department filter and the
+  Person "All" option):
+  - **Location** is its own Impact category row (multi-select), saved as
+    location ids. It inherits from mapped practices like the others.
+  - **Department** is its own Impact category (`dependency_type_master`
+    code `Department`, source `organization_department`), saved as
+    department ids. On an editable table it has no row of its own: it is
+    the multi-select Department picker inside the Person row
+    (`departmentPickerCell`). Read-only pages show a normal Department row.
+  - Ticked departments narrow the Person list to their employees
+    (`applyPersonFilters`). **No person ticked** -> Save stores the
+    departments ("All" on the Person trigger). **Any person ticked** ->
+    Save stores the persons and removes directly-mapped departments.
+  - Saving departments is a rule, not a snapshot: the stored row is the
+    department, so it does not go stale when people join or leave.
+  - API: `dependency-options` allow-list gains `organization_department`;
+    Person options carry DepartmentId/DepartmentName (and LocationId/
+    LocationName, currently unused). 267 and 353 no longer switch Location
+    off; 272 seeds the Department type and source row.
+- Business Function as a category (migration 386, 2026-09-27): new
+  dependency type `BusinessFunction` / "Business Function" (source
+  `organization_business_function`, mappable). Shows as its own row in
+  Risk -> Impact Details and in the Operationalize Dependencies table
+  (`DEP_TABLE_CATEGORIES` in resolve-workspace.cshtml). API
+  dependency-options allow-list gains `organization_business_function`.
+  Inherits into risks from mapped practices like every other category,
+  and appears in every dependency-type dropdown. 272 seeds it.
+
+- Operationalize Dependencies table also offers Location and Department
+  (2026-09-27): `DEP_TABLE_CATEGORIES` now Asset, Vendor, Person, Team,
+  Committee, Location, Department, Business Function. Needs 385 (Department
+  type) and the API allow-list change; Location's type already existed.
+- Operationalize Dependencies table, Department + Person (2026-09-27):
+  same rule as Risk -> Impact Details. Department has no row of its own;
+  the Person row ("Department / Person") carries a multi-select Department
+  picker (`buildDepartmentPickerCell`) beside the Persons picker. Ticked
+  departments narrow the Persons list. Save posts BOTH categories to
+  `/resolve/dependency-category`: persons ticked -> persons saved,
+  departments cleared; no person ticked -> departments saved, persons
+  cleared. "No" on the row clears both. Order is now Asset, Vendor,
+  Department / Person, Team, Committee, Location, Business Function.
+
+## Practice INSTANCE mapping, Treatment page layout, Map open task (migrations 387, 388 — change request 2026-09-27)
+
+### What changed for the user
+
+- **The Practice Picker ends at the instance.** The picker has a fifth
+  level: Framework -> Source Structure -> Control -> Practice -> **Practice
+  Instance** (active instances only). `isComplete` now means an instance is
+  chosen. All three callers save the instance: Risk (Existing Controls /
+  Map a practice instance), Gap Register (Add Custom Gap -> Map practice
+  instance) and Exceptions (Add Custom Exception -> Add a practice
+  instance). Exclusion is by instance, so a second instance of a practice
+  that is already mapped can still be added.
+- **Treatment page order** now matches Risk Analysis: row 1 is Risk
+  context (the same compact 5-column block as `#raMeta`, rendered by the
+  shared `riskContextCompactHtml`); row 2 is Treatment progress (gate and
+  tiles); then Existing Controls (the mapped practice instances), Treatment
+  option, the impact note, and Treatment tasks.
+- **Treatment tasks, "from Task Board"** lists three kinds of top-level
+  task, shown in a new **From** column:
+  - `Treatment`: raised for this risk (unchanged).
+  - `Gap`: raised from a gap of a mapped practice instance, where the gap
+    either has `source_reference_type='PracticeInstance'` (387) or is a
+    Custom Gap mapped to that instance (388). These appear automatically
+    once the instance is mapped.
+  - `Mapped`: an open task linked with **Map open task**.
+
+  All three count toward the treatment gate (residual unlocks only when
+  they are all closed).
+- **Task buttons moved.** Map open task and Add treatment task now sit in
+  the Treatment tasks section. Add sub task is offered only on each task's
+  row menu (the page-level button was removed). The page action bar keeps
+  Close and Residual. Map open task opens a searchable list of open,
+  top-level tasks of the organization (not already this risk's), with
+  multi-select. A mapped task's row menu offers **Unmap from this risk**,
+  which removes the link and leaves the task untouched.
+
+### Data model
+
+- `risk_practice_map` (387): adds `practice_instance_id` (FK),
+  `practice_instance_name`, `practice_instance_code` and the computed
+  `practice_instance_key`. The unique key becomes
+  `ux_pm_risk_practice_map_instance(risk_register_id, practice_id,
+  practice_instance_key)`. `practice_id` stays populated.
+- `risk_treatment_task_link` (387): one row per (risk, task).
+- `custom_gap_practice_map` and `exception_request_practice` (388): the
+  same four instance columns. Their uniques become
+  `ux_pm_custom_gap_practice_instance` and
+  `ux_pm_exception_request_practice_instance`.
+- Backfill: an old practice-level row claims the practice's first active
+  instance, and every other active instance gets its own row. A practice
+  with no active instance stays practice-level; the UI shows it as
+  "Practice-level (no active instance)". For risks, `GetMappingAsync`
+  also runs `sp_risk_practice_map_expand_instances` after the Primary
+  sync, so a Primary row re-created by the sync is converted too.
+
+### Procedures
+
+| Proc | Purpose |
+|---|---|
+| `sp_practice_picker_instances` | Picker level 5 |
+| `sp_risk_practice_instance_map` / `_unmap` | Map or unmap one instance on a risk (inherits the instance's dependencies; unmap refuses Primary) |
+| `sp_risk_practice_map_expand_instances` | Converts practice-level rows to instance rows |
+| `fn_risk_instance_dependencies` | Dependencies reachable from one instance |
+| `sp_risk_open_task_list` / `sp_risk_treatment_task_link` / `_unlink` | Map open task |
+| `sp_risk_treatment_state` | Re-issued in 387 and again in 388. Rows carry `LinkSourceCode` (Treatment / Gap / Linked) |
+| `sp_custom_gap_practice_instance_set` / `sp_exception_request_practice_instance_set` | 388; called by the API straight after the create. They claim the practice-level row for the same practice or insert a new one |
+| `sp_custom_gap_practice_map_list` / `sp_exception_request_practice_list` | 388; return `PracticeInstanceId/Name/Code` |
+
+### API
+
+| Method | Route (API `api/practice/...`; the Web proxy is the same path under `/practice/api/...`) | Body / query | Returns |
+|---|---|---|---|
+| GET | `practice-picker/instances` | `organizationId, practiceId[, riskRegisterId]` | `PracticePickerInstance[]` |
+| POST | `risk-centre/register/{riskId}/practice-instances` | `{ practiceInstanceId, remarks? }` | `RiskPracticeInstanceMapResult` |
+| DELETE | `risk-centre/register/{riskId}/practice-map/{riskPracticeMapId}` | none | `RiskPracticeUnmapResult` |
+| GET | `risk-centre/register/{riskId}/open-tasks` | `search?, top?` (default 200) | `RiskOpenTaskRow[]` |
+| POST | `risk-centre/register/{riskId}/treatment-links` | `{ taskId }` | `RiskTreatmentLinkResult` |
+| DELETE | `risk-centre/register/{riskId}/treatment-links/{taskId}` | none | `RiskTreatmentLinkResult` |
+
+Other response changes:
+
+- `GET risk-centre/register/{riskId}/mapping`: practice rows gain
+  `practiceInstanceId/Name/Code`.
+- `GET .../treatment-state`: task rows gain `linkSourceCode`.
+- `POST gaps/custom` accepts `practiceInstanceIds: long[]`, and
+  `GET gaps/custom/{id}/practices` rows gain the instance columns.
+- `POST exception-centre` (Add Custom Exception) accepts
+  `linkedPracticeInstanceIds: long[]`.
+
+All the new fields are optional, so older payloads still bind.
+
+### Deployment order
+
+1. Run 387, then 388.
+2. Deploy the API and then the Web. The API calls the 388 procs whenever
+   the UI sends instance ids.
+3. Rollback runs in reverse: 388 rollback, then re-run 387 (or its
+   rollback), which restores `sp_risk_treatment_state`.
+
+## Residual analysis with open treatment tasks: organisation switch (migration 389, 2026-09-27)
+
+By default a risk cannot go to residual risk analysis while any treatment
+task is open. Some organisations cannot work that way, so **Risk Centre
+settings** now has *Allow residual risk analysis while treatment tasks are
+still open* (`org_risk_config.allow_residual_with_open_tasks`, default
+off).
+
+| Where | Switch off (default) | Switch on |
+|---|---|---|
+| `sp_risk_treatment_state.ResidualAvailable` (Treatment page Residual button, gate text) | 0 while any task is open | 1 even with open tasks; the reason says how many are open and that the org allows it |
+| Register / Risk View 3-dot menu, "Residual risk analysis" (`residualMenuGate`) | Disabled, with the open-task count as the reason | Enabled |
+| `sp_risk_residual_analysis_save` gate 3 | Refuses (56574) | Skipped |
+
+The other gates are unchanged: analysis must be complete, a treatment
+option must be chosen, a Tolerate risk goes to acceptance, and the risk
+must not be closed or retired.
+
+- **One definition of "treatment work".** `fn_risk_treatment_roots(@risk_register_id)`
+  returns the root tasks with `link_source_code` (Treatment > Gap >
+  Linked). `sp_risk_treatment_state` and gate 3 of the residual save both
+  read it, so the save refuses exactly what the Treatment page shows as
+  open (own, gap-derived and mapped tasks, plus their sub tasks). Before
+  389, gate 3 counted only the risk's own tasks.
+- **API.** `GET/POST risk-centre/config` gains `allowResidualWithOpenTasks`
+  (bool; on POST, null means leave unchanged). `treatment-state` also
+  returns `allowResidualWithOpenTasks`.
+- **Limitation.** The Register grid's open-task count
+  (`vw_pm_risk_workflow_stage`, migration 264) still counts only the
+  risk's own treatment tasks. So when only gap or mapped tasks are open
+  and the switch is off, the menu item can be enabled while the save
+  refuses with 56574. The save is the authority.
+- **Rollback.** `389_..._rollback.sql` is self-contained. It restores the
+  212, 263 and 388 procedure bodies, then drops the function and the
+  column.
+
+
+## Risk Management dashboard (migration 413)
+
+The Risk Management parent menu (`risk-centre`) now opens
+`Practice/Index/risk-centre-dashboard` (menu_url, 274 snapshot updated).
+Every child menu and route is unchanged. The Dashboard tab follows the
+agreed structure; everything is computed by `sp_risk_dashboard_counts`
+in one call.
+
+| Block | Source | Rule (existing, not re-derived) |
+| --- | --- | --- |
+| A. Candidate summary | set 0 | Total; **Assessed** = `AnalysisCompleted` ("Assessment completed"); **Converted** = `Registered`; **Open** = 214's `@open` set (Pending, UnderAnalysis, ClarificationRequired, AnalysisCompleted) |
+| B. Candidate ageing | set 8 (+ `MinAgeDays` / `MaxAgeDays`, 413) | open candidates only, age from `COALESCE(identified_dt, requested_dt)`, bands 0-7 / 8-30 / 31-90 / 91-180 / 180+ |
+| Register summary | set 2 | Total, `UnderTreatment`, `Accepted`, `Retired`; **No owner** = `risk_owner_employee_id IS NULL` |
+| Inherent heatmap | sets 11, 12, 14 | every `risk_matrix_cell` of the organisation (its rating and colour); count = open risks (not Closed / Retired) on `likelihood_value` x `impact_value` |
+| Residual heatmap | sets 11, 13, 14 | same matrix; count = open risks on `residual_likelihood_value` x `residual_impact_value`; risks with no residual assessment are counted separately |
+| Review ageing | set 15 | open risks with `next_review_date`: due in 8-30 / 1-7 days (pending) and 0-7 ... 180+ days overdue; due = `next_review_date <= today`, the `is_review_due` rule |
+| Top 5 | set 16 | open risks by inherent score, then residual score, then registration date, then id (deterministic); inherent and residual ratings both shown |
+
+Drill-down is the existing in-page mechanism: a click sets a filter on the
+Candidates / Register / Review list of the same page (no new list page)
+and a banner on that list names the filter, with **Dashboard** and
+**Clear filter**. The filters are sent to the API and applied in SQL:
+
+| Click | List | Query parameters |
+| --- | --- | --- |
+| Candidate tiles | Candidates | `statusCode` (Assessed / Converted), `openOnly=1` (Open) |
+| Ageing band | Candidates | `openOnly=1&minAgeDays=&maxAgeDays=` |
+| Register tiles | Register | `statusCode=` / `noOwner=1` |
+| Heatmap cell | Register | `openOnly=1` + the cell's inherent or residual likelihood / impact |
+| Review band | Review Risk | `daysOverdueMin=&daysOverdueMax=` (negative = still upcoming) |
+| Top 5 row | Risk View | `data-open-risk` (existing) |
+
+`GET /review-due` accepts `daysOverdueMin` / `daysOverdueMax` since 413.
+The trend table and the by-category / by-source / by-unit / by-owner bars
+are no longer drawn (the API still returns them); the approval queue,
+overdue risk actions and notification outbox stay below the new blocks.
+Rollback: `413_risk_management_dashboard_rollback.sql`.
+
+### Dashboard layout change (2026-10-01)
+
+This change is UI only. No migration was needed, and the API and its
+contracts are unchanged.
+
+The Risk Management dashboard is now two rows. Each row is split
+**25% | 25% | 50%** (`.risk-dash-row` in `risk-centre.cshtml`).
+
+| Row | 25% | 25% | 50% |
+| --- | --- | --- | --- |
+| 1 | Risk candidate tiles (one row of 4), and Risk register tiles (4 + 1) below them. Both sit on one 4-column grid (`.risk-tiles-4`) across the 50%. | (same block) | Inherent and residual heatmaps, side by side |
+| 2 | Candidate ageing (open only) | Risk review ageing (pending / overdue) | Top 5 risks by rating |
+
+**Responsive behaviour**
+
+- Below 1200px, the 50% block drops under the two 25% blocks.
+- Below 900px, everything stacks.
+- Below 640px, the two heatmaps stack.
+
+**Heatmap columns**
+
+- The heatmap column floors were narrowed in `heatmap()` (axis 64px,
+  cell 28px) so both heatmaps fit in the 50% column.
+- Long axis names ellipsise and keep their full name as a tooltip.
+
+**Removed from the dashboard**
+
+- **Awaiting approval** moved to the **Risk Candidates** tab, under the
+  candidate grid. This is the same table, the same pager (`apprPager`)
+  and the same `refreshApprovalQueue()`. It is now reloaded by
+  `refresh()`.
+  - The Home "My work" approval items now link to
+    `/Practice/Index/risk-centre-candidates`, and so does Home's "Open
+    approval queue" link.
+  - The Home approvals flag reads the same `risk-centre` permission area
+    as before.
+- **Overdue risk actions** were removed. They remain on the Task Board.
+- **Notification outbox** was removed, together with its "Run sweep"
+  button. Its JS (`refreshNotifications`, `onNotificationSweep`,
+  `eventLabel`) was removed too.
+  - The `/notifications*` endpoints, `sp_risk_notification_sweep` and the
+    Settings notification options are untouched.
+  - Without the button, the sweep is run by scheduling
+    `sp_risk_notification_sweep`, as described under §21.
+
+**Unused data left in place**
+
+`/dashboard` still returns `overdueActions`. The screen no longer reads
+it, but it was left in place so the stored procedure and API contract do
+not change.
+
+## Risk title typed on the assessment; business function removed (417)
+
+**Why.** Registration used the candidate title (e.g. *"Risk: ..."*) as the
+risk title, which often was not an apt name for the risk. Business
+function was asked on the assessment form *and* per impact in the risk
+analysis (Impact details) -- two inputs for one fact.
+
+**UI.** `riskAnalysisModal` gains **Risk title** (`anTitle`, required,
+300 chars) above Risk statement. A first assessment pre-fills it with
+the candidate title minus its `Risk:` prefix; a revision pre-fills the
+saved title. Business function is removed from **both** forms --
+`anBusinessFunction` (candidate assessment) and `cxBusinessFunction`
+(custom risk, Route B). `assessmentPayload` no longer reads, validates
+or sends `businessFunctionId`; `sp_risk_analysis_save` and
+`sp_risk_custom_create` (216) already default it to NULL. The custom
+form already had its own typed title (`cxTitle`). Risks registered from
+here on carry no business function on the risk itself; it lives on
+each Impact details row. The "Business function" line is therefore
+removed from the risk display too -- the register detail modal
+(`openRegisterDetail`), the Residual page (`openResidualPage`) and the
+Acceptance page (`openAcceptancePage`). Display only: the column,
+`/register/{id}` and the procedures are untouched, so values stored on
+older risks are kept, just not shown.
+
+**Database (417).**
+
+| Object | Change |
+| --- | --- |
+| `risk_analysis.risk_title` | `NVARCHAR(300) NULL`, new. NULL on every row written before 417. |
+| `sp_risk_analysis_title_set` | New. Sets/clears the title on one analysis version. THROW 56970 (id missing), 56971 (row not found). |
+| `sp_risk_analysis_get` | 216's body re-issued with `a.risk_title AS RiskTitle` as the last column. Strict superset. |
+
+`sp_risk_analysis_save` is **not** re-issued: the Api calls the setter
+right after the save, on the version the save just wrote. It already
+accepted a NULL `@business_function_id` (216).
+
+**API.** `RiskAnalysisSaveRequest.RiskTitle` (optional, last) and
+`RiskAnalysisDetail.RiskTitle` (last; read with `HasColumn`, so the Api
+still runs against a database without 417). `RegisterAsync`: a blank
+`riskTitle` on the request is resolved to the current analysis's title,
+so Save & register and register-after-approval both use it;
+`sp_risk_candidate_register` still falls back to the candidate title
+when both are empty (analyses saved before 417). The duplicate check
+(§15) is sent the typed title.
+
+**Rollback.** `417_risk_assessment_title_rollback.sql` re-issues 216's
+`sp_risk_analysis_get`, drops the setter and the column.
+
+## Treatment task is generated only on Yes (418)
+
+**Why.** On Risk Treatment, applying Terminate / Treat / Transfer raised
+the treatment task automatically. The user is now asked first.
+
+**UI.** `onApplyTreatmentOption`: for any option except Tolerate, a
+confirm -- *"Generate treatment task?"* -- **Yes, generate** / **No**
+(Esc = No). The answer goes as `raiseTask`. No still applies the option
+(and moves the risk to UnderTreatment, as before); the page message says
+no task was generated and points to **Add treatment task** /
+**Map open task**. Tolerate is unchanged (never raised a task).
+
+**Database (418).** `sp_risk_treatment_option_set` -- 263's body with a
+trailing `@raise_task BIT = 1`. On 0: decision, status move and the s20
+history row are written as before, `sp_risk_treatment_task_ensure` is
+skipped (`TaskCreated` 0, `TreatmentTaskId` NULL), and the history
+remark says the task was declined. A risk with no treatment task stays
+UnderTreatment: `sp_risk_treatment_sync` only moves risks that HAVE a
+task, all closed. The other callers (`sp_risk_review_perform`,
+`sp_risk_residual_analysis_save`) use the default, so they are unchanged.
+
+**API.** `RiskTreatmentOptionRequest.RaiseTask` (`bool?`, optional,
+last). Only `false` is sent to the procedure; it is probed, and against
+a database without 418 the request is refused with a message naming 418
+rather than raising the task the user declined.
+
+**Rollback.** `418_risk_treatment_task_optional_rollback.sql` re-issues
+263's body.
+

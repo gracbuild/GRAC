@@ -28,7 +28,7 @@
 <section class="pm-panel" id="oaDefUnavailable" hidden>
     <div class="pm-empty">
         <i class="fa-solid fa-file-shield pm-empty-icon" aria-hidden="true"></i>
-        <h2 id="oaDefUnavailableTitle">Audit Management is not yet enabled for this organization.</h2>
+        <h2 id="oaDefUnavailableTitle">Audit Assurance is not yet enabled for this organization.</h2>
         <p id="oaDefUnavailableBody">Ask a GRAC Admin to turn on <code>screen.org-assurance-definitions</code>.</p>
     </div>
 </section>
@@ -71,13 +71,13 @@
 </section>
 
 @* ---------- Add / Edit dialog ---------- *@
-<dialog id="oaDefDialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="oaDefForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaDefDialogTitle" style="margin:0; font-size:18px;">Add Audit Definition</h2>
-            <button type="button" id="oaDefClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="oaDefDialog" style="max-width:720px; width:94%;">
+    <form id="oaDefForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaDefDialogTitle">Add Audit Definition</h2>
+            <button class="pm-icon-button" type="button" id="oaDefClose" aria-label="Close">&times;</button>
         </div>
-        <div id="oaDefMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="oaDefMessage" style="display:none;"></div>
         <input type="hidden" id="oaDefEditId" />
         @* Identity row: Code 25% | Name 50% | Effective Date 25%.
            Name used to sit on its own full-width row below; folding it in
@@ -96,17 +96,17 @@
 
            Stacks to one column under 900px (practice-management.css). *@
         <div style="display:grid; grid-template-columns:1fr 2fr 1fr; gap:10px; align-items:start;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
-                <span>Code <span style="color:#b91c1c;">*</span></span>
-                <input id="oaDefCode" type="text" maxlength="80" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field" style="min-width:0;">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="oaDefCode" type="text" maxlength="80" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
-                <span>Name <span style="color:#b91c1c;">*</span></span>
-                <input id="oaDefName" type="text" maxlength="240" required style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field" style="min-width:0;">
+                <span>Name <span class="required">*</span></span>
+                <input class="pm-input" id="oaDefName" type="text" maxlength="240" required />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <label class="pm-field" style="min-width:0;">
                 <span>Effective Date</span>
-                <input id="oaDefEffectiveDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+                <input class="pm-input" id="oaDefEffectiveDate" type="date" />
             </label>
         </div>
         @* SAME 1fr/2fr/1fr tracks as the identity row above, so the two
@@ -123,9 +123,9 @@
             @* Assurance Category is fed from the GRAC Admin (Phase 1) master
                grac_new.assurance_category via /practice/api/org-assurance/categories.
                Selected option carries category id / code / name via data-* attrs. *@
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <label class="pm-field" style="min-width:0;">
                 <span>Audit Category</span>
-                <select id="oaDefCategory" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#fff; width:100%; box-sizing:border-box;">
+                <select class="pm-input" id="oaDefCategory">
                     <option value="">Loading categories...</option>
                 </select>
             </label>
@@ -133,25 +133,25 @@
                Role dropdown = organization_role (assurance-capable roles).
                Employee dropdown = current active holders of the picked role.
                The SP auto-resolves whichever side is left blank (Q1-A). *@
-            <div style="display:flex; flex-direction:column; font-size:12px; color:#475569; min-width:0;">
+            <div class="pm-field" style="min-width:0;">
                 <span>Owner</span>
                 <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                    <select id="oaDefOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Role">
+                    <select class="pm-input" id="oaDefOwnerRole" style="min-width:0;" aria-label="Owner Role">
                         <option value="">Loading roles...</option>
                     </select>
-                    <select id="oaDefOwnerEmployee" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:#fff; width:100%; box-sizing:border-box; min-width:0;" aria-label="Owner Employee (current holder)">
+                    <select class="pm-input" id="oaDefOwnerEmployee" style="min-width:0;" aria-label="Owner Employee (current holder)">
                         <option value="">-- pick a role first --</option>
                     </select>
                 </div>
             </div>
         </div>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Objective
-            <textarea id="oaDefObjective" rows="2" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        <label class="pm-field" style="margin-top:10px;">Objective
+            <textarea class="pm-input" id="oaDefObjective" rows="2" maxlength="4000"></textarea>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Description
-            <textarea id="oaDefDescription" rows="3" maxlength="4000" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+        <label class="pm-field" style="margin-top:10px;">Description
+            <textarea class="pm-input" id="oaDefDescription" rows="3" maxlength="4000"></textarea>
         </label>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="oaDefCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaDefSubmit" class="pm-button primary">Save</button>
         </div>
@@ -159,22 +159,22 @@
 </dialog>
 
 @* ---------- History / Version dialog ---------- *@
-<dialog id="oaDefHistoryDialog" style="border:none; border-radius:8px; padding:0; max-width:820px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="oaDefHistoryDialog" style="max-width:820px; width:94%;">
     <div style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 id="oaDefHistoryTitle" style="margin:0; font-size:18px;">Version History</h2>
-            <button type="button" id="oaDefHistoryClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        <div class="pm-dialog-heading">
+            <h2 id="oaDefHistoryTitle">Version History</h2>
+            <button class="pm-icon-button" type="button" id="oaDefHistoryClose" aria-label="Close">&times;</button>
         </div>
         <div style="max-height:60vh; overflow:auto;">
             <table style="width:100%; border-collapse:collapse; font-size:13px;">
                 <thead>
                     <tr>
-                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">When</th>
-                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">Action</th>
-                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">From</th>
-                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">To</th>
-                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">Actor</th>
-                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0;">Reason</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">When</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Action</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">From</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">To</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Actor</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Reason</th>
                     </tr>
                 </thead>
                 <tbody id="oaDefHistoryBody">
@@ -242,7 +242,7 @@
         const enabled = await wf.checkFeature(FEATURE, state.orgId);
         if (!enabled) {
             wf.unavailable('oaDefUnavailable', 'oaDefUnavailableTitle', 'oaDefUnavailableBody',
-                'Audit Management is not yet enabled for this organization.',
+                'Audit Assurance is not yet enabled for this organization.',
                 'Ask a GRAC Admin to turn on ' + FEATURE + ' for this organization.');
             return;
         }
@@ -830,12 +830,12 @@
             }
             body.innerHTML = rows.map(function (h) {
                 return '<tr>'
-                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(formatDate(h.enteredDt || h.EnteredDt)) + '</td>'
-                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.actionCode || h.ActionCode || '') + '</td>'
-                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.fromStatusName || h.FromStatusName || '') + '</td>'
-                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.toStatusName   || h.ToStatusName   || '') + '</td>'
-                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.actorDisplayName || h.ActorDisplayName || h.enteredBy || h.EnteredBy || '') + '</td>'
-                    + '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + wf.escape(h.reasonText || h.ReasonText || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(formatDate(h.enteredDt || h.EnteredDt)) + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.actionCode || h.ActionCode || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.fromStatusName || h.FromStatusName || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.toStatusName   || h.ToStatusName   || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.actorDisplayName || h.ActorDisplayName || h.enteredBy || h.EnteredBy || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.reasonText || h.ReasonText || '') + '</td>'
                     + '</tr>';
             }).join('');
         } catch (err) {
@@ -849,8 +849,8 @@
     function showMessage(kind, text) {
         const el = document.getElementById('oaDefMessage');
         el.style.display    = 'block';
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
         el.textContent      = text;
     }
     function clearMessage() {

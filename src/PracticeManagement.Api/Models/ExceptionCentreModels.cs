@@ -374,4 +374,9 @@ public sealed record ExceptionCreateCustomRequest(
     /// must not look approved to the days-left badge or the expiry sweep.</summary>
     DateTime? ProposedEffectiveFrom,
     DateTime? ProposedEffectiveUntil,
-    string? CallerDisplayName);
+    string? CallerDisplayName,
+    /// <summary>388. The practice INSTANCES picked (one per entry in the
+    /// dialog's list; LinkedPracticeIds still carries their practices).
+    /// Saved by sp_exception_request_practice_instance_set right after
+    /// the create.</summary>
+    IReadOnlyList<long>? LinkedPracticeInstanceIds = null);

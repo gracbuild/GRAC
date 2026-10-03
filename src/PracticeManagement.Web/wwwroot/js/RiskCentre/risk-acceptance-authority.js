@@ -320,9 +320,9 @@
     if (!text) { el.hidden = true; el.textContent = ""; return; }
     el.hidden = false;
     el.textContent = text;
-    el.style.background = kind === "error" ? "#fef2f2" : kind === "ok" ? "#ecfdf5" : "#eff6ff";
-    el.style.color      = kind === "error" ? "#b91c1c" : kind === "ok" ? "#065f46" : "#1e40af";
-    el.style.border     = "1px solid " + (kind === "error" ? "#fecaca" : kind === "ok" ? "#a7f3d0" : "#bfdbfe");
+    el.style.background = kind === "error" ? "var(--danger-50)" : kind === "ok" ? "var(--success-50)" : "var(--primary-50)";
+    el.style.color      = kind === "error" ? "var(--danger-700)" : kind === "ok" ? "var(--success-700)" : "var(--primary-700)";
+    el.style.border     = "1px solid " + (kind === "error" ? "var(--danger-200)" : kind === "ok" ? "var(--success-200)" : "var(--primary-200)");
   }
 
   function esc(s) {

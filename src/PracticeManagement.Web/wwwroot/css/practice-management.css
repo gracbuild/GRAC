@@ -2,11 +2,11 @@
    practice-management.css
    -----------------------
    Aligns Practice Management screens with the Control Management
-   visual standard.  All values below re-use the exact GRAC design
-   tokens declared in control-management.css and cacca-styles.css
-   (colour palette, typography, spacing, border-radius, shadow) so
-   PracticeManagement inherits the same theme rather than defining
-   a new one.
+   visual standard.  Colour, radius, shadow and font values are read
+   from the GRAC design tokens in grac-tokens.css (var(--primary-500),
+   var(--border), var(--radius-md), ...) -- never typed in as a hex --
+   so PracticeManagement inherits one theme rather than defining a
+   new one. See docs/design-tokens.md.
 
    Practice Management markup uses a `pm-` class prefix, whereas
    Control Management uses the un-prefixed class names.  This file
@@ -19,15 +19,34 @@
    ------------------------------------------------------------------ */
 .pm-page-heading {
     align-items: center;
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
-    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
     display: flex;
     gap: 16px;
     justify-content: space-between;
     margin-bottom: 14px;
     padding: 14px 16px;
+    /* Frozen page header (2026-10-01): the heading stays at the top of
+       the window while the page scrolls, so the user always sees which
+       page they are on. The top bar is not fixed (the body has no
+       layout-navbar-fixed), so it scrolls away and the heading sticks at
+       top:0. Every screen renders exactly one visible .pm-page-heading
+       (nested hosted ones are display:none, see .oa-flow-panel), so
+       there is never a second sticky header.
+       z-index 50 sits above in-page content and in-page menus
+       (.pm-checkcombo-menu / .tp-menu are 40, grid thead 2), so they
+       scroll under it. It stays below the body-level 3-dot menu (1000),
+       the full-page dialog (1020), the AdminLTE sidebar/top bar
+       (1037/1038) and .pm-modal (1100).
+       site.js publishes its live height as --pm-page-head-h; the grid
+       cap (--pm-grid-max-h, section 8) subtracts it, so a grid scrolled
+       up under the heading fits below it with its own column header
+       visible. */
+    position: sticky;
+    top: 0;
+    z-index: 50;
 }
 
 .pm-page-heading.compact {
@@ -35,7 +54,7 @@
 }
 
 .pm-page-heading h1 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 22px;
     font-weight: 750;
     line-height: 1.18;
@@ -43,13 +62,13 @@
 }
 
 .pm-page-heading p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     margin: 0;
 }
 
 .pm-eyebrow {
-    color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
     font-size: 11px;
     font-weight: 800;
     letter-spacing: 1.2px;
@@ -71,16 +90,16 @@
 .pm-panel,
 .pm-setup-card,
 .pm-subscription-card {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
-    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
     padding: 14px;
 }
 
 .pm-panel p,
 .pm-setup-card p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     margin: 0;
 }
@@ -94,14 +113,14 @@
 }
 
 .pm-section-heading h2 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 16px;
     font-weight: 750;
     margin: 0 0 4px;
 }
 
 .pm-section-heading p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     margin: 0;
 }
@@ -111,10 +130,10 @@
    ------------------------------------------------------------------ */
 .pm-button {
     align-items: center;
-    background: #fff;
-    border: 1px solid #d3dae7;
-    border-radius: 7px;
-    color: #27344e;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     cursor: pointer;
     display: inline-flex;
     font: inherit;
@@ -129,37 +148,37 @@
 }
 
 .pm-button:hover {
-    background: #f2f6ff;
-    color: var(--grac-blue, #2465ca);
+    background: var(--primary-50);
+    color: var(--primary-600);
     text-decoration: none;
 }
 
 .pm-button.primary {
-    background: var(--grac-blue, #2465ca);
-    border-color: var(--grac-blue, #2465ca);
-    color: #fff;
+    background: var(--primary-500);
+    border-color: var(--primary-500);
+    color: var(--fg-on-dark);
 }
 
 .pm-button.primary:hover {
-    background: #1f58b2;
-    color: #fff;
+    background: var(--primary-600);
+    color: var(--fg-on-dark);
 }
 
 .pm-button.danger {
-    border-color: #f1c4c4;
-    color: var(--grac-danger, #b42318);
+    border-color: var(--danger-200);
+    color: var(--danger-700);
 }
 
 .pm-button.recommendation {
-    border-color: #cfe0ff;
-    background: #eef5ff;
-    color: #1d4ed8;
+    border-color: var(--primary-100);
+    background: var(--primary-50);
+    color: var(--primary-600);
 }
 
 .pm-button.recommendation.clear {
-    background: #fff;
-    border-color: #d3dae7;
-    color: #536077;
+    background: var(--bg-surface);
+    border-color: var(--border-strong);
+    color: var(--fg-secondary);
 }
 
 .pm-button:disabled {
@@ -173,8 +192,8 @@
     align-items: center;
     background: transparent;
     border: 0;
-    border-radius: 7px;
-    color: #25344e;
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     cursor: pointer;
     display: inline-flex;
     font-size: 18px;
@@ -187,8 +206,8 @@
 .pm-button.icon:hover,
 .pm-compact-icon:hover,
 .pm-icon-button:hover {
-    background: #eef4ff;
-    color: var(--grac-blue, #2465ca);
+    background: var(--primary-50);
+    color: var(--primary-600);
 }
 
 /* ------------------------------------------------------------------
@@ -216,10 +235,10 @@
 .pm-setup-toolbar select,
 .pm-tree-toolbar input,
 .pm-recommendation-toolbar input {
-    border: 1px solid #d5dce7;
-    border-radius: 7px;
-    color: var(--grac-ink, #172033);
-    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
+    font-family: var(--font-ui);
     font-size: 13px;
     height: 34px;
     padding: 7px 9px;
@@ -236,20 +255,20 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    color: #536077;
+    color: var(--fg-secondary);
     font-size: 12px;
     font-weight: 700;
     margin: 0;
 }
 
 .pm-setup-toolbar label span {
-    color: #536077;
+    color: var(--fg-secondary);
     font-size: 12px;
     font-weight: 700;
 }
 
 .pm-recommendation-toolbar span {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
 }
 
@@ -261,14 +280,14 @@
     flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 12px;
-    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    border-bottom: 1px solid var(--border);
 }
 
 .pm-tabs button {
     background: transparent;
     border: 0;
     border-bottom: 2px solid transparent;
-    color: #536077;
+    color: var(--fg-secondary);
     cursor: pointer;
     font: inherit;
     font-size: 13px;
@@ -278,12 +297,12 @@
 }
 
 .pm-tabs button:hover {
-    color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
 }
 
 .pm-tabs button.active {
-    color: var(--grac-blue, #2465ca);
-    border-bottom-color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
+    border-bottom-color: var(--primary-500);
 }
 
 .pm-setup-tab-panel {
@@ -352,7 +371,7 @@
 
 .pm-form-grid .form-field,
 .pm-form-grid label {
-    color: #536077;
+    color: var(--fg-secondary);
     display: block;
     font-size: 13px;
     font-weight: 650;
@@ -363,14 +382,15 @@
     grid-column: 1 / -1;
 }
 
-.pm-form-grid input:not([type="checkbox"]),
+.pm-form-grid input:not([type="checkbox"]):not([type="radio"]),
 .pm-form-grid select,
-.pm-form-grid textarea {
-    border: 1px solid #d5dce7;
-    border-radius: 7px;
-    color: var(--grac-ink, #172033);
+.pm-form-grid textarea,
+.pm-input {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     display: block;
-    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-family: var(--font-ui);
     font-size: 13px;
     height: 34px;
     margin-top: 6px;
@@ -383,10 +403,40 @@
     min-height: 76px;
 }
 
+/* .pm-input -- the same control outside a .pm-form-grid (design
+   alignment Phase 3, 2026-09-25). ~150 inputs/selects/textareas in the
+   workflow partials each carried their own inline
+   `padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px;
+   margin-top:2px`; they now take this class and share the box above.
+   Sits inside a .pm-field label, whose grid gap supplies the spacing
+   the inline margin-top used to, so the top margin is dropped here. */
+.pm-input {
+    background: var(--bg-surface);
+    margin-top: 0;
+}
+
+textarea.pm-input {
+    height: auto;
+    min-height: 60px;
+    resize: vertical;
+}
+
+.pm-input:focus {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+    outline: none;
+}
+
+.pm-input:disabled {
+    background: var(--neutral-50);
+    color: var(--fg-subtle);
+    cursor: not-allowed;
+}
+
 .pm-message {
-    background: #fff2f0;
-    border-radius: 7px;
-    color: var(--grac-danger, #b42318);
+    background: var(--danger-50);
+    border-radius: var(--radius-md);
+    color: var(--danger-700);
     font-weight: 700;
     margin-bottom: 12px;
     padding: 10px;
@@ -394,13 +444,13 @@
 }
 
 .pm-message.success {
-    background: #e6f4ed;
-    color: #187747;
+    background: var(--success-100);
+    color: var(--success-700);
 }
 
 .pm-message.info {
-    background: #eef5ff;
-    color: #2454a6;
+    background: var(--primary-50);
+    color: var(--primary-700);
 }
 
 /* ------------------------------------------------------------------
@@ -415,14 +465,14 @@
 }
 
 .pm-dialog-heading h2 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 20px;
     font-weight: 750;
     margin: 0;
 }
 
 .pm-dialog-heading p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 13px;
     margin: 4px 0 0;
 }
@@ -452,22 +502,98 @@
    8. Grids / tables (matches .table-wrap)
    ------------------------------------------------------------------ */
 .pm-table-wrap {
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    max-height: var(--pm-grid-max-h);
     overflow: auto;
+}
+
+/* Sticky grid header (2026-10-01). The column header row stays frozen
+   while the rows scroll.
+   - The page itself scrolls the window, but .pm-table-wrap is already
+     overflow:auto (horizontal scroll), so a sticky header can only stick
+     to the wrap. The wrap is therefore capped at the viewport height
+     left below the frozen page heading (section 1), and the rows scroll
+     inside it. Its thead sticks at top:0 OF THE WRAP, so it always sits
+     under the page heading and never above it; the page heading's
+     z-index (50) also covers it if the page is scrolled further. A grid shorter than
+     the cap is unchanged. A wrap with its own inline max-height (dialogs,
+     inbox panels) keeps that cap; .pm-role-perms-table keeps its 60vh.
+   - The whole <thead> is sticky, not each <th>, so two-row headers
+     (Governance Overview group + metric row) stay stacked correctly.
+     The header and body are the same <table>, so columns stay aligned
+     under horizontal scroll.
+   - With border-collapse the header's bottom border belongs to the table
+     and would scroll away; it is redrawn as an inset 1px line in the
+     same colour on the last header row (identical at rest; the line
+     sits 1px higher, inside the header cell).
+   - Row 3-dot menus portal to <body> and close on any scroll (practice.js
+     closeActionMenu, capture listener), so the inner scroll does not
+     leave a menu floating.
+   - .pm-sticky-grid gives the same behaviour to a grid that has its own
+     wrapper instead of .pm-table-wrap (Operationalize .rv-scroll). */
+:root {
+    /* Viewport height, minus the frozen page heading (--pm-page-head-h,
+       measured by site.js) and its 14px margin, minus about 96px for the
+       pager row and the content's bottom padding. */
+    --pm-grid-max-h: max(320px, calc(100vh - var(--pm-page-head-h, 72px) - 14px - 96px));
+}
+
+.pm-sticky-grid {
+    max-height: var(--pm-grid-max-h);
+    overflow: auto;
+}
+
+.pm-table-wrap > table > thead,
+.pm-sticky-grid > table > thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.pm-table-wrap > table > thead > tr:last-child > th,
+.pm-sticky-grid > table > thead > tr:last-child > th {
+    /* !important: a screen's own id-scoped th rule (#rvRoot .rv-grid th)
+       would otherwise keep the real border and draw the line twice. */
+    border-bottom-color: transparent !important;
+    box-shadow: inset 0 -1px 0 var(--border);
+}
+
+@media (max-height: 560px) {
+    /* A short window has no room for a frozen heading plus a grid. */
+    .pm-page-heading {
+        position: static;
+    }
+}
+
+@media print {
+    .pm-page-heading {
+        position: static;
+    }
+
+    .pm-table-wrap,
+    .pm-sticky-grid {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .pm-table-wrap > table > thead,
+    .pm-sticky-grid > table > thead {
+        position: static;
+    }
 }
 
 .pm-table-wrap table {
     border-collapse: collapse;
-    color: #25344e;
+    color: var(--fg-default);
     font-size: 13px;
     width: 100%;
 }
 
 .pm-table-wrap th {
-    background: var(--grac-soft, #f7f9fc);
-    border-bottom: 1px solid #e5e9f0;
-    color: #6a778d;
+    background: var(--bg-page);
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-muted);
     font-size: 12px;
     font-weight: 750;
     padding: 10px 11px;
@@ -476,7 +602,7 @@
 }
 
 .pm-table-wrap td {
-    border-bottom: 1px solid #edf0f5;
+    border-bottom: 1px solid var(--neutral-100);
     line-height: 1.25;
     padding: 10px 11px;
     vertical-align: middle;
@@ -496,11 +622,11 @@
 }
 
 .pm-table-wrap tbody tr:nth-child(even) td {
-    background: #fbfcff;
+    background: var(--neutral-50);
 }
 
 .pm-table-wrap tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td {
-    background: var(--grac-row-hover-bg, #eaf4ff);
+    background: var(--grac-row-hover-bg);
     color: var(--grac-row-hover-text, inherit);
 }
 
@@ -515,7 +641,8 @@
    what the click resolves to, and why a row without this class (an
    un-materialized Gap row, for instance) is left with the plain cursor:
    it has nowhere new to go. */
-.pm-table-wrap tbody tr.pm-row-clickable {
+.pm-table-wrap tbody tr.pm-row-clickable,
+.pm-sticky-grid tbody tr.pm-row-clickable {   /* Operationalize grid, 2026-10-03 */
     cursor: pointer;
 }
 
@@ -596,10 +723,10 @@
  * counts under one "Governance Overview" cell so each count column only has to
  * be as wide as its number, not as wide as "Not Applicable Statements". */
 .pm-table-wrap thead th.pm-th-group {
-    border-bottom: 1px solid #e5e9f0;
-    border-left: 1px solid #e5e9f0;
-    border-right: 1px solid #e5e9f0;
-    color: #47566f;
+    border-bottom: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    color: var(--fg-secondary);
     text-align: center;
 }
 
@@ -633,7 +760,7 @@
  * 20px padding / centring knocks the placeholder out of line with the real
  * values in the column. */
 .pm-cell-muted {
-    color: #94a3b8;
+    color: var(--fg-subtle);
     font-style: italic;
 }
 
@@ -656,7 +783,7 @@
 }
 
 .pm-empty {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     padding: 20px 10px;
     text-align: center;
     font-size: 13px;
@@ -671,7 +798,7 @@
    ------------------------------------------------------------------ */
 .pm-pager {
     align-items: center;
-    color: #53627a;
+    color: var(--fg-secondary);
     display: flex;
     font-size: 13px;
     font-weight: 650;
@@ -705,7 +832,7 @@
 /* "Rows" rather than a bare select: the generic pager's options read
    "25 / page", which says what it is without a label, but a mounted
    pager can sit under a narrow grid where that is the only clue. */
-.pm-grid-pager .pm-grid-pager-label { color: #8792a6; font-weight: 600; }
+.pm-grid-pager .pm-grid-pager-label { color: var(--fg-subtle); font-weight: 600; }
 
 .pm-pager label {
     align-items: center;
@@ -715,10 +842,10 @@
 }
 
 .pm-pager select {
-    background: #fff;
-    border: 1px solid #d7e0ec;
-    border-radius: 8px;
-    color: var(--grac-ink, #172033);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     font-weight: 650;
     height: 34px;
     min-width: 72px;
@@ -729,23 +856,23 @@
    10. Home / Hero (Views/Home/Index.cshtml)
    ------------------------------------------------------------------ */
 .pm-hero {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
-    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
     margin-bottom: 14px;
     padding: 22px 20px;
 }
 
 .pm-hero h1 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 24px;
     font-weight: 750;
     margin: 4px 0;
 }
 
 .pm-hero p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 13px;
     margin: 4px 0 12px;
 }
@@ -766,12 +893,12 @@
 }
 
 .pm-list li {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 10px 12px;
     font-size: 13px;
-    color: #25344e;
+    color: var(--fg-default);
 }
 
 /* ------------------------------------------------------------------
@@ -789,16 +916,16 @@
 }
 
 .pm-dashboard-org-filter span {
-    color: #536077;
+    color: var(--fg-secondary);
     font-size: 12px;
     font-weight: 700;
 }
 
 .pm-dashboard-org-filter select {
-    background: #fff;
-    border: 1px solid #d7e0ec;
-    border-radius: 8px;
-    color: var(--grac-ink, #172033);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     font-size: 13px;
     font-weight: 650;
     height: 34px;
@@ -814,10 +941,10 @@
 }
 
 .pm-dashboard-card {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
-    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -826,32 +953,32 @@
 
 .pm-dashboard-card-title {
     align-items: center;
-    color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
     display: flex;
     gap: 10px;
 }
 
 .pm-dashboard-card-title h2 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 15px;
     font-weight: 750;
     margin: 0;
 }
 
 .pm-dashboard-card-title i {
-    color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
     font-size: 18px;
 }
 
 .pm-dashboard-primary {
     align-items: baseline;
-    color: #183b72;
+    color: var(--primary-800);
     display: flex;
     gap: 8px;
 }
 
 .pm-dashboard-primary span {
-    color: #183b72;
+    color: var(--primary-800);
     display: block;
     font-size: 26px;
     font-weight: 800;
@@ -860,7 +987,7 @@
 }
 
 .pm-dashboard-primary small {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -868,7 +995,7 @@
 }
 
 .pm-mini-metrics {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     display: grid;
     gap: 4px 12px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -883,7 +1010,7 @@
 }
 
 .pm-mini-metrics b {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 13px;
     font-weight: 750;
 }
@@ -908,12 +1035,376 @@
 }
 
 .pm-attention-list > * {
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 10px 12px;
-    background: #fff;
+    background: var(--bg-surface);
     font-size: 13px;
-    color: #25344e;
+    color: var(--fg-default);
+}
+
+/* ------------------------------------------------------------------
+   11b. Dashboard blocks -- tiles, proportional bars, sub-heads
+   Moved here from risk-centre.cshtml (migration 414) so the Risk
+   Management dashboard and the module dashboards (Governance, Issues &
+   Actions, Audit & Assurance) render with ONE set of rules. The .risk-*
+   names are kept for the Risk Centre; .pm-dash-* are the same rules for
+   the shared management-dashboard partial.
+   ------------------------------------------------------------------ */
+.risk-subhead, .pm-dash-subhead {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--fg-muted); margin: 16px 0 8px;
+}
+.risk-tiles, .pm-dash-tiles {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px; margin-bottom: 8px;
+}
+.risk-tile, .pm-dash-tile {
+    background: var(--neutral-50); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 12px 14px;
+}
+.risk-tile .v, .pm-dash-tile .v { font-size: 24px; font-weight: 700; color: var(--neutral-700); line-height: 1.1; }
+.risk-tile .k, .pm-dash-tile .k {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--fg-muted); margin-top: 4px;
+}
+.risk-tile.is-clickable, .pm-dash-tile.is-clickable { cursor: pointer; }
+.risk-tile.is-clickable:hover, .pm-dash-tile.is-clickable:hover { border-color: var(--primary-600); background: var(--primary-50); }
+.risk-tile.is-alert .v, .pm-dash-tile.is-alert .v { color: var(--danger-700); }
+
+.risk-grid-4, .pm-dash-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px; margin-bottom: 8px;
+}
+.risk-two-col, .pm-dash-two-col { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 16px; }
+@media (max-width: 900px) { .risk-two-col, .pm-dash-two-col { grid-template-columns: 1fr; } }
+
+/* Management dashboards layout (2026-10-01).
+   .pm-dash-split -- KPI cards (left half) beside the ageing groups
+     (right half), so the cards no longer leave the right side empty.
+     In the half width every KPI section is a fixed six-column row (the
+     largest section has six cards; a smaller one leaves the rest empty),
+     so the six cards stay on one row whatever the screen scaling -- a
+     px floor gave five at 125% Windows scaling (2026-10-02). The ageing
+     groups sit one column each
+     (--pm-dash-cols, set by management-dashboard.js) with a narrower
+     label column. Below 1400px the two halves stack again.
+   .pm-dash-grid-dist -- distributions on a 180px floor (auto-fit: the groups
+     share the full width) so all six groups
+     of Issues & Actions fit one row on a wide screen.
+   .pm-dash-lists -- each list a full row (or, beside the KPIs, under the
+     ageing -- see .pm-dash-side); the title column may wrap so the table
+     does not scroll sideways. */
+.pm-dash-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.pm-dash-split .pm-dash-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.pm-dash-split .pm-dash-grid-ageing { grid-template-columns: repeat(var(--pm-dash-cols, 3), minmax(0, 1fr)); }
+.pm-dash-split .pm-dash-bar-row { grid-template-columns: minmax(64px, 100px) minmax(0, 1fr) 32px; }
+/* Right half (2026-10-02): ageing, then the lists filling what is left.
+   contain:size keeps this column from adding height to the row, so the
+   row is as tall as the KPI cards; the grid then stretches the column to
+   that height (align-self), and the list tables share the space below
+   the ageing and scroll inside it with their sticky header. */
+.pm-dash-split > .pm-dash-side { align-self: stretch; contain: size; display: flex; flex-direction: column; min-height: 0; }
+.pm-dash-side > .pm-dash-lists { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.pm-dash-side > .pm-dash-lists > div { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.pm-dash-side > .pm-dash-lists .pm-table-wrap { flex: 1 1 0; min-height: 0; max-height: none; }
+@media (max-width: 1400px) {
+    .pm-dash-split { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .pm-dash-split .pm-dash-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    /* Stacked: the lists flow at their own height again. */
+    .pm-dash-split > .pm-dash-side { contain: none; display: block; }
+    .pm-dash-side > .pm-dash-lists { display: grid; }
+    .pm-dash-side > .pm-dash-lists .pm-table-wrap { max-height: var(--pm-grid-max-h); }
+    .pm-dash-split .pm-dash-grid-ageing { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+}
+.pm-dash-grid-dist { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.pm-dash-grid-dist .pm-dash-bar-row { grid-template-columns: minmax(70px, 110px) minmax(0, 1fr) 36px; }
+.pm-dash-lists { display: grid; gap: 8px; }
+.pm-dash-lists td:nth-child(2) { white-space: normal; }
+
+/* A bar chart made of divs. Deliberate: dashboards render with no
+   charting dependency, and a labelled proportional bar is what these
+   blocks actually need. */
+.risk-bars, .pm-dash-bars { display: flex; flex-direction: column; gap: 6px; }
+.risk-bar-row, .pm-dash-bar-row {
+    display: grid; grid-template-columns: 130px 1fr 46px;
+    align-items: center; gap: 8px; font-size: 12px;
+}
+.risk-bar-row .lbl, .pm-dash-bar-row .lbl { color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.risk-bar-row .trk, .pm-dash-bar-row .trk { background: var(--bg-subtle); border-radius: var(--radius-sm); height: 14px; overflow: hidden; }
+/* display:block -- .fil is a <span>; inline, its width/height were
+   ignored and every bar rendered empty whatever the count (2026-10-01). */
+.risk-bar-row .fil, .pm-dash-bar-row .fil { background: var(--primary-500); display: block; height: 100%; border-radius: var(--radius-sm); }
+.risk-bar-row .num, .pm-dash-bar-row .num { text-align: right; color: var(--neutral-700); font-weight: 600; }
+.risk-bar-row.is-clickable, .pm-dash-bar-row.is-clickable { cursor: pointer; }
+.risk-bar-row.is-clickable:hover .lbl, .pm-dash-bar-row.is-clickable:hover .lbl { color: var(--primary-600); text-decoration: underline; }
+
+/* Filter banner -- "this list is filtered, and here is the way out".
+   Same look as the Gap Register's observation banner; used by every
+   list a dashboard drills into (414). */
+.pm-filter-banner {
+    margin: 8px 0; padding: 8px 12px; border-radius: var(--radius-md); font-size: 13px;
+    background: var(--primary-100); color: var(--primary-700);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.pm-filter-banner[hidden] { display: none; }
+.pm-filter-banner-actions { display: inline-flex; gap: 8px; }
+
+/* Home -- "My work" (change requests 2026-09-27 / 2026-09-28)
+   My work is the primary column. On wide viewports the row is a
+   two-column grid: a larger left ("primary") column stacking the My work
+   summary above the "Needs your attention" list, beside a compact right
+   column holding the Organization overview cards (which collapse behind
+   their heading). Built on the dashboard's own .pm-panel /
+   .pm-section-heading / .pm-attention-list pieces; only the row anatomy,
+   the summary list and the overview collapse control are new. */
+.pm-home-work {
+    /* start: the primary column carries its own stacked panels and the
+       overview may be collapsed, so the two columns keep their natural
+       heights rather than stretching to match. */
+    align-items: start;
+    display: grid;
+    gap: 14px;
+    /* Expanded (default): My work shrinks to a narrow strip -- the same
+       width the overview takes when collapsed -- and the overview fills the
+       rest for a roomy two-column card view. The two states are mirrors:
+       whichever side is collapsed is the strip, the other takes the width. */
+    grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+    margin-bottom: 18px;
+}
+
+.pm-home-work.org-collapsed {
+    /* Mirror of the expanded state: the overview narrows to the strip (cards
+       stay visible in one column, so height is kept) and My work reclaims
+       the full remaining width. */
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+}
+
+
+.pm-home-attention,
+.pm-home-summary {
+    padding: 14px;
+}
+
+.pm-home-attention {
+    display: flex;
+    flex-direction: column;
+}
+
+.pm-home-org {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 14px;
+}
+
+.pm-home-summary {
+    display: flex;
+    flex-direction: column;
+}
+
+.pm-home-org .pm-dashboard-kpi-grid {
+    margin-bottom: 0;
+}
+
+@media (min-width: 1181px) {
+    .pm-home-work:not(.org-collapsed) .pm-home-org .pm-dashboard-kpi-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .pm-home-work.org-collapsed .pm-home-org .pm-dashboard-kpi-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* My work and the Overview share one fixed height so the two cards line
+       up regardless of how much data each holds. Each panel's list / cards
+       scroll inside rather than growing the row -- which is what pushed
+       "Needs your attention" down and left an empty gap beside a short My
+       work list, most visible once the Overview is collapsed to a single,
+       tall card column. */
+    .pm-home-work .pm-home-summary,
+    .pm-home-work .pm-home-org {
+        height: 430px;
+    }
+
+    .pm-home-work .pm-home-summary .pm-home-summary-list,
+    .pm-home-work .pm-home-org .pm-dashboard-kpi-grid {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+    }
+}
+
+/* Overview collapse control -- chevron button on the left of the heading,
+   matching the mapping-tree toggles (primary-50 chip, primary-600 glyph).
+   The heading row keeps the toggle and title on one line; the caption
+   sits below as before. */
+.pm-home-org-heading-row {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+}
+
+.pm-home-org-toggle {
+    background: var(--primary-50);
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--primary-600);
+    cursor: pointer;
+    display: grid;
+    flex: none;
+    /* 18px matches the mapping-tree toggles and stays within the h2 line box,
+       so the Overview heading lines up with the My work heading. */
+    height: 18px;
+    place-items: center;
+    width: 18px;
+}
+
+.pm-home-org-toggle i {
+    font-size: 10px;
+}
+
+.pm-home-attention #homeAttentionList {
+    align-content: start;
+    flex: 1;
+}
+
+/* Empty / loading state fills the panel and sits in its middle. */
+.pm-home-attention #homeAttentionList.is-empty {
+    display: flex;
+}
+
+.pm-home-attention #homeAttentionList.is-empty > .pm-empty {
+    align-items: center;
+    display: flex;
+    flex: 1;
+    justify-content: center;
+    min-height: 120px;
+    text-align: center;
+}
+
+#homeAttentionList .pm-home-item {
+    align-items: center;
+    border-left: 3px solid var(--border-strong);
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+#homeAttentionList .pm-home-item.severity-danger  { border-left-color: var(--danger-500); }
+#homeAttentionList .pm-home-item.severity-warning { border-left-color: var(--warning-500); }
+#homeAttentionList .pm-home-item.severity-info    { border-left-color: var(--primary-500); }
+
+.pm-home-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.pm-home-item-main strong {
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pm-home-item-main span {
+    color: var(--fg-muted);
+    font-size: 12px;
+}
+
+.pm-home-item-main .pm-home-item-type {
+    color: var(--fg-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.pm-home-item .pm-attention-action a {
+    color: var(--primary-600);
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.pm-home-summary-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pm-home-summary-list li {
+    align-items: start;
+    border-top: 1px solid var(--border);
+    column-gap: 10px;
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    padding: 10px 0;
+    row-gap: 4px;
+}
+
+.pm-home-summary-list li:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.pm-home-summary-list i {
+    color: var(--primary-600);
+    margin-top: 3px;
+    text-align: center;
+}
+
+.pm-home-summary-list strong {
+    color: var(--fg-default);
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.pm-home-detail {
+    color: var(--fg-muted);
+    display: block;
+    font-size: 12px;
+}
+
+.pm-home-detail.is-alert {
+    color: var(--danger-600);
+    font-weight: 650;
+}
+
+.pm-home-count {
+    color: var(--primary-800);
+    line-height: 1.1;
+    min-width: 28px;
+    font-family: var(--font-num);
+    font-size: 20px;
+    font-weight: 800;
+    text-align: right;
+}
+
+.pm-home-summary-list a {
+    color: var(--primary-600);
+    font-size: 12px;
+    font-weight: 650;
+    grid-column: 2 / 4;
+}
+
+.pm-home-footnote {
+    color: var(--fg-muted);
+    font-size: 12px;
+    margin: 10px 0 0;
+}
+
+.pm-home-org-heading {
+    margin-top: 0;
+}
+
+@media (max-width: 1180px) {
+    .pm-home-work {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* ------------------------------------------------------------------
@@ -936,10 +1427,10 @@
 }
 
 .pm-subscription-tree {
-    background: #f8fbff;
-    border: 1px solid #e2eaf5;
-    border-radius: 8px;
-    color: #25344e;
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     font-size: 12px;
     max-height: 380px;
     overflow: auto;
@@ -956,14 +1447,14 @@
 }
 
 .pm-workbench-categories {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 12px;
 }
 
 .pm-workbench-title {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 14px;
     font-weight: 750;
     margin: 0 0 8px;
@@ -982,8 +1473,8 @@
 .pm-workbench-category-list button {
     background: transparent;
     border: 0;
-    border-radius: 6px;
-    color: #25344e;
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     cursor: pointer;
     display: block;
     font: inherit;
@@ -997,8 +1488,8 @@
 .pm-workbench-category-list a:hover,
 .pm-workbench-category-list button:hover,
 .pm-workbench-category-list .active {
-    background: #eaf2ff;
-    color: var(--grac-blue, #2465ca);
+    background: var(--primary-50);
+    color: var(--primary-600);
 }
 
 .pm-workbench-main {
@@ -1008,10 +1499,10 @@
 }
 
 .pm-workbench-context {
-    background: #f8fbff;
-    border: 1px solid #e1e7f0;
-    border-radius: 9px;
-    color: #344054;
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     display: flex;
     flex-wrap: wrap;
     font-size: 12px;
@@ -1060,17 +1551,17 @@
 }
 
 .pm-tree-indent > strong {
-    color: #172033;
+    color: var(--fg-default);
     font-weight: 700;
 }
 
 /* Expand/collapse round button - matches .tree-toggle in CM. */
 .pm-tree-toggle {
     align-items: center;
-    background: #eef5ff;
-    border: 1px solid #d7e3f5;
-    border-radius: 999px;
-    color: #2563eb;
+    background: var(--primary-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--primary-600);
     cursor: pointer;
     display: inline-grid;
     flex: 0 0 20px;
@@ -1083,12 +1574,12 @@
 }
 
 .pm-tree-toggle:hover {
-    background: #dbeafe;
+    background: var(--primary-100);
     transform: scale(1.04);
 }
 
 .pm-tree-toggle:focus-visible {
-    outline: 2px solid #2465ca;
+    outline: 2px solid var(--primary-600);
     outline-offset: 2px;
 }
 
@@ -1108,7 +1599,7 @@
 /* Continuation "branch" line rendered inside child rows for the
    practice-instance drill-in (mirrors CM's tree-toggle-spacer). */
 .pm-tree-branch {
-    background: linear-gradient(to right, transparent 0 9px, #cad4e4 9px 11px, transparent 11px);
+    background: linear-gradient(to right, transparent 0 9px, var(--border-strong) 9px 11px, transparent 11px);
     display: inline-block;
     flex: 0 0 22px;
     height: 16px;
@@ -1122,20 +1613,20 @@
    .req-tree-statement .fa-file-lines rules. */
 .pm-tree-indent .fa-folder,
 .pm-source-node-row td .fa-folder {
-    color: #e0a11a;
+    color: var(--warning-600);
     font-size: 13px;
 }
 
 .pm-tree-indent .fa-layer-group,
 .pm-source-node-row td .fa-layer-group {
-    color: #1f5fbf;
+    color: var(--primary-600);
     font-size: 12px;
     margin-right: 6px;
 }
 
 .pm-tree-indent .fa-file-lines,
 .pm-statement-child-row td .fa-file-lines {
-    color: #2465ca;
+    color: var(--primary-600);
     font-size: 12px;
 }
 
@@ -1146,8 +1637,8 @@
 .pm-table-wrap tbody tr.pm-source-node-row td,
 .pm-table-wrap tbody tr.pm-release-source-row td,
 .pm-table-wrap tbody tr.pm-tree-parent td {
-    background: #f6f9fd;
-    color: #172033;
+    background: var(--neutral-50);
+    color: var(--fg-default);
     font-weight: 400;
 }
 
@@ -1162,16 +1653,16 @@
    alternate-row background so hierarchy stays readable. */
 .pm-table-wrap tbody tr.pm-statement-child-row td,
 .pm-table-wrap tbody tr.pm-tree-child td {
-    background: #fff;
-    color: #344054;
+    background: var(--bg-surface);
+    color: var(--neutral-700);
     font-weight: 400;
 }
 
 /* Inline sub-heading between practice groups (Framework Statement
    label above a set of practices).  Sits flush under the parent. */
 .pm-table-wrap tbody tr.pm-statement-row td {
-    background: #f0f4fa;
-    color: #475467;
+    background: var(--bg-subtle);
+    color: var(--fg-secondary);
     font-size: 12px;
     font-weight: 700;
     padding: 6px 11px;
@@ -1182,15 +1673,15 @@
    as pm-statement-row above, but it keeps the grid's body text size -
    it is the outermost grouping level, not a sub-heading under one. */
 .pm-table-wrap tbody tr.pm-control-group-row td {
-    color: #172033;
+    color: var(--fg-default);
     font-weight: 700;
 }
 
 /* Release drill-in context row (release label + back button). */
 .pm-table-wrap tbody tr.pm-release-context-row td {
     align-items: center;
-    background: #eef5ff;
-    color: #172033;
+    background: var(--primary-50);
+    color: var(--fg-default);
     display: flex;
     flex-wrap: wrap;
     font-weight: 700;
@@ -1203,7 +1694,7 @@
 }
 
 .pm-table-wrap tbody tr.pm-release-context-row span {
-    color: #667085;
+    color: var(--fg-muted);
     font-size: 12px;
     font-weight: 600;
 }
@@ -1222,7 +1713,7 @@
    row's first column. */
 .pm-tree-title {
     align-items: center;
-    color: #172033;
+    color: var(--fg-default);
     display: inline-flex;
     font-weight: 700;
     gap: 6px;
@@ -1235,8 +1726,8 @@
     align-items: center;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 7px;
-    color: #536077;
+    border-radius: var(--radius-md);
+    color: var(--fg-secondary);
     cursor: pointer;
     display: inline-grid;
     font-size: 14px;
@@ -1249,13 +1740,13 @@
 
 .pm-action-trigger:hover,
 .pm-action-trigger[aria-expanded="true"] {
-    background: #f7f9fc;
-    border-color: #d5dce7;
-    color: #2465ca;
+    background: var(--neutral-50);
+    border-color: var(--border-strong);
+    color: var(--primary-600);
 }
 
 .pm-action-trigger:focus-visible {
-    outline: 2px solid #2465ca;
+    outline: 2px solid var(--primary-600);
     outline-offset: 2px;
 }
 
@@ -1273,7 +1764,7 @@
 .pm-table-wrap tbody tr.pm-tree-parent .pm-action-trigger,
 .pm-table-wrap tbody tr.pm-tree-child .pm-action-trigger,
 .pm-table-wrap tbody tr.pm-statement-child-row .pm-action-trigger {
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     height: 26px;
     width: 26px;
 }
@@ -1319,10 +1810,10 @@
 
 /* Action-menu popover - mirrors CM's .action-menu. */
 .pm-action-menu {
-    background: #fff;
-    border: 1px solid #dfe5ee;
-    border-radius: 8px;
-    box-shadow: 0 10px 25px #17203322;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-menu);
     display: grid;
     min-width: 160px;
     padding: 5px;
@@ -1334,8 +1825,8 @@
     align-items: center;
     background: transparent;
     border: 0;
-    border-radius: 5px;
-    color: #344054;
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     cursor: pointer;
     display: flex;
     font: inherit;
@@ -1348,25 +1839,25 @@
 
 .pm-action-menu button:hover,
 .pm-action-menu button:focus {
-    background: #f2f6fc;
+    background: var(--bg-subtle);
     outline: none;
 }
 
 .pm-action-menu button i {
-    color: #667085;
+    color: var(--fg-muted);
     width: 13px;
 }
 
 .pm-action-menu button[data-action="inactive"],
 .pm-action-menu button[data-action="retire"],
 .pm-action-menu button[data-action="delete"] {
-    color: #a92828;
+    color: var(--danger-700);
 }
 
 .pm-action-menu button[data-action="inactive"] i,
 .pm-action-menu button[data-action="retire"] i,
 .pm-action-menu button[data-action="delete"] i {
-    color: #a92828;
+    color: var(--danger-700);
 }
 
 /* Compact tree cells share the same first-column padding so the
@@ -1403,7 +1894,7 @@
 .pm-link-button {
     background: transparent;
     border: 0;
-    color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
     cursor: pointer;
     display: inline;
     font: inherit;
@@ -1427,7 +1918,7 @@
 }
 
 .pm-table-wrap tbody tr.pm-framework-summary-row:focus-visible {
-    outline: 2px solid var(--grac-blue, #2465ca);
+    outline: 2px solid var(--primary-600);
     outline-offset: -2px;
 }
 
@@ -1445,8 +1936,8 @@
 .pm-subscription-tree .pm-tree-row {
     align-items: center;
     border: 1px solid transparent;
-    border-radius: 7px;
-    color: #344054;
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     display: flex;
     font-size: 12px;
     gap: 8px;
@@ -1457,35 +1948,35 @@
 }
 
 .pm-subscription-tree .pm-tree-row.authority {
-    background: #eaf2ff;
-    color: #14213d;
+    background: var(--primary-50);
+    color: var(--fg-default);
     font-weight: 700;
 }
 
 .pm-subscription-tree .pm-tree-row.artifact {
-    background: #f8fafc;
-    color: #344054;
+    background: var(--neutral-50);
+    color: var(--neutral-700);
     font-weight: 650;
 }
 
 .pm-subscription-tree .pm-tree-row.release {
-    background: #fff;
+    background: var(--bg-surface);
     cursor: pointer;
 }
 
 .pm-subscription-tree .pm-tree-row.release.recommended {
-    background: #eef7ee;
-    border-color: #b6dcbd;
+    background: var(--success-50);
+    border-color: var(--success-200);
 }
 
 .pm-subscription-tree .pm-tree-row:hover {
-    background: var(--grac-row-hover-bg, #eaf4ff);
+    background: var(--grac-row-hover-bg);
     border-color: transparent;
 }
 
 .pm-subscription-tree .pm-tree-row.release:has(input[type="checkbox"]:checked) {
-    background: #eaf2ff;
-    border-color: #b7c7dc;
+    background: var(--primary-50);
+    border-color: var(--border-strong);
 }
 
 /* Read-only variant used by Organization Administration -> Subscribed
@@ -1501,7 +1992,7 @@
 }
 
 .pm-subscription-tree.pm-subscription-readonly .pm-tree-row.release:hover {
-    background: #fff;
+    background: var(--bg-surface);
 }
 
 .pm-subscription-tree .pm-tree-row .pm-tree-icon {
@@ -1511,24 +2002,24 @@
 }
 
 .pm-subscription-tree .pm-tree-row.authority .pm-tree-icon.fa-building-columns {
-    color: #1f5fbf;
+    color: var(--primary-600);
 }
 
 .pm-subscription-tree .pm-tree-row.artifact .pm-tree-icon.fa-folder {
-    color: #e0a11a;
+    color: var(--warning-600);
 }
 
 .pm-subscription-tree .pm-tree-row.release .pm-tree-icon.fa-file-lines {
-    color: #2465ca;
+    color: var(--primary-600);
 }
 
 .pm-subscription-tree .pm-tree-row input[type="checkbox"] {
-    accent-color: var(--grac-blue, #2465ca);
+    accent-color: var(--primary-500);
     margin: 0;
 }
 
 .pm-subscription-tree .pm-tree-row small {
-    color: #667085;
+    color: var(--fg-muted);
     font-size: 11px;
     font-weight: 500;
     margin-left: 4px;
@@ -1548,7 +2039,7 @@
 /* Field wrapper (label + control). */
 .pm-form-grid .pm-field,
 .pm-field {
-    color: #536077;
+    color: var(--fg-secondary);
     display: grid;
     font-size: 13px;
     font-weight: 650;
@@ -1561,7 +2052,7 @@
 }
 
 .pm-field > span {
-    color: #536077;
+    color: var(--fg-secondary);
     display: block;
     font-size: 12px;
     font-weight: 700;
@@ -1598,6 +2089,31 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     margin-bottom: 18px;
 }
 
+/* Add Release (migration 406): the shared #recordDialog, widened and made
+   taller ONLY while it hosts the Custom Release / Subscribe from Repository
+   tabs, so the Repository release list fits without scrolling. practice.js
+   toggles the class in openCustomReleaseForm (Add only) and removes it on
+   close; every other form keeps the default dialog size. */
+dialog.pm-dialog-add-release {
+    max-height: 94vh;
+    width: min(1280px, 96vw);
+}
+
+dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wrap {
+    max-height: calc(94vh - 250px);
+}
+
+/* Long framework / publisher names wrap inside their cell instead of
+   pushing the table past the dialog (no horizontal scroll). Release
+   Status and Subscription keep their badge / button on one line. */
+dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wrap td {
+    white-space: normal;
+}
+
+dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wrap td:nth-last-child(-n+2) {
+    white-space: nowrap;
+}
+
 /* Combo container. */
 .pm-checkcombo {
     position: relative;
@@ -1610,10 +2126,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* Trigger button - the "input-like" thing that shows selected chips. */
 .pm-checkcombo-trigger {
     align-items: center;
-    background: #fff;
-    border: 1px solid #d5dce7;
-    border-radius: 7px;
-    color: #172033;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     cursor: pointer;
     display: flex;
     font: inherit;
@@ -1629,14 +2145,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-checkcombo-trigger:hover,
 .pm-checkcombo-trigger:focus-visible {
-    border-color: var(--grac-blue, #2465ca);
+    border-color: var(--primary-500);
     outline: none;
 }
 
 .pm-checkcombo-trigger:disabled,
 .pm-checkcombo-trigger[disabled] {
-    background: #f8fafc;
-    color: #98a2b3;
+    background: var(--neutral-50);
+    color: var(--fg-subtle);
     cursor: not-allowed;
 }
 
@@ -1666,10 +2182,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    ------------------------------------------------------------------ */
 .pm-field-empty {
     align-items: center;
-    background: #f8fafc;
-    border: 1px solid #d5dce7;
-    border-radius: 7px;
-    color: #98a2b3;
+    background: var(--neutral-50);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-subtle);
     cursor: default;
     display: flex;
     font-size: 13px;
@@ -1684,7 +2200,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    -- e.g. a category the catalogue on this database does not carry.
    Amber matches .rw-warn, which this replaces on Operationalize. */
 .pm-field-empty.warn {
-    color: #b45309;
+    color: var(--warning-700);
 }
 
 /* ------------------------------------------------------------------
@@ -1703,12 +2219,12 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    for the caption above each value.
    ------------------------------------------------------------------ */
 .pm-view-value {
-    background: #f8fafc;
-    border: 1px solid #e5e9f0;
-    border-radius: 7px;
-    color: var(--grac-ink, #172033);
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     display: block;
-    font-family: "Lato", "Segoe UI", Arial, sans-serif;
+    font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 500;
     line-height: 1.4;
@@ -1723,8 +2239,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-checkcombo-trigger.field-error {
-    border-color: #d92d20;
-    box-shadow: 0 0 0 3px rgba(217, 45, 32, .08);
+    border-color: var(--danger-600);
+    box-shadow: 0 0 0 3px var(--focus-ring-danger);
 }
 
 /* Container for chips + placeholder. */
@@ -1741,7 +2257,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 /* Chevron caret on the right side. */
 .pm-checkcombo-caret {
-    color: #667085;
+    color: var(--fg-muted);
     flex: 0 0 auto;
     font-size: 11px;
     margin-left: 6px;
@@ -1756,10 +2272,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* Individual selected chip. */
 .pm-checkcombo-chip {
     align-items: center;
-    background: #eef5ff;
-    border: 1px solid #d7e3f5;
-    border-radius: 999px;
-    color: #1d4ed8;
+    background: var(--primary-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--primary-600);
     display: inline-flex;
     font-size: 11px;
     font-weight: 700;
@@ -1773,17 +2289,17 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 /* Muted "Select..." placeholder when nothing is selected. */
 .pm-checkcombo-placeholder {
-    color: #98a2b3;
+    color: var(--fg-subtle);
     font-size: 13px;
     font-weight: 500;
 }
 
 /* Dropdown menu with the searchable options list. */
 .pm-checkcombo-menu {
-    background: #fff;
-    border: 1px solid #dfe5ee;
-    border-radius: 7px;
-    box-shadow: 0 10px 25px #17203322;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-menu);
     display: grid;
     gap: 4px;
     grid-template-rows: auto minmax(0, 1fr);
@@ -1803,16 +2319,16 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-checkcombo-search {
-    border: 1px solid #d5dce7;
-    border-radius: 6px;
-    color: #172033;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     font-size: 12px;
     padding: 7px 9px;
     width: 100%;
 }
 
 .pm-checkcombo-search:focus {
-    border-color: var(--grac-blue, #2465ca);
+    border-color: var(--primary-500);
     outline: none;
 }
 
@@ -1828,8 +2344,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* Each option is a <label data-checkcombo-option>. */
 [data-checkcombo-option] {
     align-items: center;
-    border-radius: 5px;
-    color: #344054;
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     cursor: pointer;
     display: flex;
     font-size: 12px;
@@ -1840,11 +2356,11 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 [data-checkcombo-option]:hover {
-    background: #f2f6fc;
+    background: var(--bg-subtle);
 }
 
 [data-checkcombo-option] input[type="checkbox"] {
-    accent-color: var(--grac-blue, #2465ca);
+    accent-color: var(--primary-500);
     margin: 0;
 }
 
@@ -1883,6 +2399,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     .pm-page-heading {
         align-items: flex-start;
         flex-direction: column;
+        /* Stacked, the heading is too tall to freeze on a phone. */
+        position: static;
     }
 
     .pm-actions {
@@ -1918,7 +2436,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    driven by --tree-depth (0, 1, 2) set inline by practice.js. */
 .pm-subscription-tree .pm-tree-row {
     align-items: center;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     display: flex;
     gap: 8px;
     line-height: 1.35;
@@ -1928,27 +2446,27 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-subscription-tree .pm-tree-row:hover {
-    background: #eef4fd;
+    background: var(--primary-50);
 }
 
 .pm-subscription-tree .pm-tree-row.authority strong {
-    color: #172033;
+    color: var(--fg-default);
     font-size: 12.5px;
     font-weight: 750;
 }
 
 .pm-subscription-tree .pm-tree-row.artifact > span {
-    color: #25344e;
+    color: var(--fg-default);
     font-weight: 600;
 }
 
 /* Round +/- expand-collapse toggle (matches .pm-tree-toggle look). */
 .pm-subscription-tree .pm-tree-row [data-tree-toggle] {
     align-items: center;
-    background: #eef5ff;
-    border: 1px solid #d7e3f5;
-    border-radius: 999px;
-    color: #2563eb;
+    background: var(--primary-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--primary-600);
     cursor: pointer;
     display: inline-grid;
     flex: 0 0 20px;
@@ -1963,12 +2481,12 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-subscription-tree .pm-tree-row [data-tree-toggle]:hover {
-    background: #dbeafe;
+    background: var(--primary-100);
     transform: scale(1.04);
 }
 
 .pm-subscription-tree .pm-tree-row [data-tree-toggle]:focus-visible {
-    outline: 2px solid #2465ca;
+    outline: 2px solid var(--primary-600);
     outline-offset: 2px;
 }
 
@@ -1988,7 +2506,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-subscription-tree .pm-tree-row.release input[type="checkbox"] {
-    accent-color: #2465ca;
+    accent-color: var(--primary-500);
     flex: 0 0 auto;
     height: 14px;
     margin: 0;
@@ -2009,14 +2527,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-dialog::backdrop {
-    background: rgba(23, 32, 51, 0.45);
+    background: var(--overlay);
 }
 
 .pm-obligation-modal {
-    background: #f5f7fb;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 10px;
-    box-shadow: 0 18px 50px rgba(23, 32, 51, 0.25);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-modal);
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -2025,8 +2543,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-obligation-header {
     align-items: center;
-    background: #fff;
-    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
     display: flex;
     gap: 14px;
     padding: 14px 18px;
@@ -2037,14 +2555,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-header h2 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 18px;
     font-weight: 750;
     margin: 0;
 }
 
 .pm-obligation-header p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     margin: 2px 0 0;
 }
@@ -2057,19 +2575,19 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-context span {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 13px;
 }
 
 .pm-obligation-context em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-style: normal;
     font-weight: 500;
     margin-right: 4px;
 }
 
 .pm-obligation-count {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     flex: 0 0 auto;
     font-size: 12px;
     font-weight: 650;
@@ -2095,7 +2613,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    ------------------------------------------------------------------ */
 .pm-modal {
     align-items: flex-start;
-    background: rgba(15, 23, 42, 0.55);
+    background: var(--overlay);
     display: flex;
     inset: 0;
     justify-content: center;
@@ -2111,9 +2629,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-modal-panel {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-modal);
     max-height: calc(100vh - 80px);
     max-width: 560px;
     overflow-y: auto;
@@ -2127,7 +2645,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-modal-panel > header {
     align-items: center;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     margin-bottom: 16px;
@@ -2135,13 +2653,13 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-modal-panel > header h2 {
-    color: #2d3748;
+    color: var(--neutral-700);
     font-size: 18px;
     margin: 0;
 }
 
 .pm-modal-footer {
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 8px;
     justify-content: flex-end;
@@ -2151,10 +2669,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-modal-close {
     align-items: center;
-    background: #fff;
-    border: 1px solid #d3dae7;
-    border-radius: 7px;
-    color: #27344e;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     cursor: pointer;
     display: inline-flex;
     flex: 0 0 auto;
@@ -2165,12 +2683,12 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-modal-close:hover {
-    background: #eef3fb;
+    background: var(--bg-subtle);
 }
 
 .pm-obligation-toolbar {
-    background: #fff;
-    border-bottom: 1px solid var(--grac-line, #e2e7f0);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
@@ -2189,7 +2707,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-toolbar label span {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: .4px;
@@ -2198,10 +2716,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-obligation-toolbar select,
 .pm-obligation-toolbar input {
-    background: #fff;
-    border: 1px solid #d3dae7;
-    border-radius: 7px;
-    color: var(--grac-ink, #172033);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     font: inherit;
     font-size: 13px;
     padding: 7px 10px;
@@ -2209,7 +2727,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-obligation-toolbar select:focus-visible,
 .pm-obligation-toolbar input:focus-visible {
-    outline: 2px solid var(--grac-blue, #2465ca);
+    outline: 2px solid var(--primary-600);
     outline-offset: 1px;
 }
 
@@ -2223,29 +2741,29 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-empty {
-    background: #fff;
-    border: 1px dashed #d3dae7;
-    border-radius: 8px;
-    color: var(--grac-muted, #758095);
+    background: var(--bg-surface);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--fg-muted);
     font-size: 13px;
     padding: 26px;
     text-align: center;
 }
 
 .pm-obligation-group {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
-    box-shadow: 0 2px 7px rgba(37, 52, 90, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
     overflow: hidden;
 }
 
 .pm-obligation-group-toggle {
     align-items: center;
-    background: #f0f4fb;
+    background: var(--bg-subtle);
     border: none;
-    border-bottom: 1px solid var(--grac-line, #e2e7f0);
-    color: var(--grac-ink, #172033);
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-default);
     cursor: pointer;
     display: flex;
     font: inherit;
@@ -2262,13 +2780,13 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-group-toggle i {
-    color: var(--grac-blue, #2465ca);
+    color: var(--primary-600);
     flex: 0 0 auto;
     font-size: 12px;
 }
 
 .pm-obligation-group-toggle em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     font-style: normal;
     font-weight: 600;
@@ -2283,14 +2801,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-card {
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-left: 3px solid var(--grac-blue, #2465ca);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary-500);
+    border-radius: var(--radius-md);
     padding: 11px 13px;
 }
 
 .pm-obligation-card h4 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 13.5px;
     font-weight: 700;
     line-height: 1.35;
@@ -2306,9 +2824,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-obligation-chip {
     align-items: baseline;
-    background: #eef3fb;
-    border-radius: 999px;
-    color: var(--grac-ink, #172033);
+    background: var(--bg-subtle);
+    border-radius: var(--radius-pill);
+    color: var(--fg-default);
     display: inline-flex;
     font-size: 12px;
     gap: 6px;
@@ -2328,7 +2846,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .pm-obligation-type-badge {
     align-items: center;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: #fff;
     display: inline-flex;
     font-size: 10.5px;
@@ -2348,10 +2866,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 .pm-obligation-type-retention     { background: #0f766e; }  /* teal    */
 
 .pm-typed-detail-body {
-    background: #f6f8fc;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 6px;
-    color: var(--grac-ink, #172033);
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     display: flex;
     flex-direction: column;
     flex: 1 1 100%;
@@ -2369,13 +2887,13 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-typed-detail-row strong {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
 }
 
 .pm-typed-detail-row .pm-typed-op {
-    background: #eef3fb;
-    border-radius: 4px;
-    color: var(--grac-blue, #2465ca);
+    background: var(--bg-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--primary-600);
     font-family: monospace;
     padding: 0 4px;
 }
@@ -2385,21 +2903,21 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-typed-detail-row em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     font-style: normal;
 }
 
 .pm-obligation-evidence-row .pm-typed-src {
     background: #f0e9db;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     color: #8a5a00;
     font-size: 10.5px;
     padding: 1px 6px;
 }
 
 .pm-obligation-chip em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 10.5px;
     font-style: normal;
     font-weight: 700;
@@ -2408,7 +2926,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-evidence {
-    border-top: 1px dashed #d3dae7;
+    border-top: 1px dashed var(--border-strong);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -2416,7 +2934,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-evidence-title {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 10.5px;
     font-weight: 700;
     letter-spacing: .4px;
@@ -2432,16 +2950,16 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-obligation-evidence-row strong {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-weight: 650;
 }
 
 .pm-obligation-evidence-row span {
-    color: #46536d;
+    color: var(--fg-secondary);
 }
 
 .pm-obligation-evidence-row em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-style: normal;
     max-width: 46ch;
     overflow: hidden;
@@ -2467,19 +2985,19 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pm-subscription-tree .pm-tree-row.release small {
-    color: #64748b;
+    color: var(--fg-muted);
     font-size: 11px;
     white-space: nowrap;
 }
 
 /* Applicability-engine recommended releases. */
 .pm-subscription-tree .pm-tree-row.release.recommended {
-    background: #f0f7ec;
+    background: var(--success-50);
     box-shadow: inset 3px 0 0 #4d9a3f;
 }
 
 .pm-subscription-tree .pm-tree-row.release.recommended:hover {
-    background: #e6f2df;
+    background: var(--success-100);
 }
 
 /* ------------------------------------------------------------------
@@ -2490,9 +3008,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    with a subtle header instead of a full dialog chrome.
    ------------------------------------------------------------------ */
 .pm-inline-obligations {
-    background: #f8fafc;
-    border: 1px solid #e2e7f0;
-    border-radius: 8px;
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     grid-column: 1 / -1; /* span the full form grid width */
     margin-top: 16px;
     padding: 12px 14px;
@@ -2505,7 +3023,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     margin-bottom: 8px;
 }
 .pm-inline-obligations-header h3 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 13px;
     font-weight: 700;
     letter-spacing: .3px;
@@ -2513,7 +3031,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     text-transform: uppercase;
 }
 .pm-inline-obligations-header p {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11.5px;
     margin: 0;
 }
@@ -2527,14 +3045,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* Slightly tighter card layout inside the inline panel -- the modal
    has more room so its default padding is generous; here we shave it. */
 .pm-inline-obligations-body .pm-obligation-group {
-    background: #fff;
-    border: 1px solid #e2e7f0;
-    border-radius: 6px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 8px 10px;
 }
 .pm-inline-obligations-body .pm-obligation-group-header {
     align-items: center;
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     display: flex;
     font-size: 12px;
     gap: 8px;
@@ -2542,7 +3060,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     margin-bottom: 6px;
 }
 .pm-inline-obligations-body .pm-obligation-group-header em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     font-style: normal;
     font-weight: 500;
@@ -2553,9 +3071,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     gap: 6px;
 }
 .pm-inline-obligations-body .pm-obligation-card {
-    background: #fbfcfe;
-    border: 1px solid #edf1f7;
-    border-radius: 5px;
+    background: var(--neutral-50);
+    border: 1px solid var(--neutral-100);
+    border-radius: var(--radius-md);
     padding: 6px 8px;
 }
 .pm-inline-obligations-body .pm-obligation-card-header h4 {
@@ -2570,20 +3088,20 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     margin-bottom: 4px;
 }
 .pm-inline-obligations-body .pm-obligation-chip {
-    background: #eef2f7;
-    border-radius: 3px;
-    color: var(--grac-ink, #172033);
+    background: var(--bg-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--fg-default);
     display: inline-flex;
     font-size: 10.5px;
     gap: 3px;
     padding: 2px 6px;
 }
 .pm-inline-obligations-body .pm-obligation-chip em {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-style: normal;
 }
 .pm-inline-obligations-body .pm-obligation-evidence {
-    border-top: 1px dashed #edf1f7;
+    border-top: 1px dashed var(--neutral-100);
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -2591,7 +3109,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     padding-top: 4px;
 }
 .pm-inline-obligations-body .pm-obligation-evidence-title {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: .4px;
@@ -2605,12 +3123,12 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     gap: 4px;
 }
 .pm-inline-obligations-body .pm-obligation-empty {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     padding: 6px 2px;
 }
 .pm-inline-obligations-body .pm-obligation-remarks {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     font-style: italic;
 }
@@ -2630,9 +3148,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* Step number chip. Mirrors the active colours of .pm-tabs button. */
 .oa-flow-shell .oa-step-no {
     align-items: center;
-    background: #e8edf6;
+    background: var(--primary-50);
     border-radius: 50%;
-    color: #536077;
+    color: var(--fg-secondary);
     display: inline-flex;
     font-size: 11px;
     font-weight: 700;
@@ -2642,12 +3160,12 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .oa-flow-shell .oa-flow-steps button.active .oa-step-no {
-    background: var(--grac-blue, #2465ca);
-    color: #fff;
+    background: var(--primary-500);
+    color: var(--fg-on-dark);
 }
 
 .oa-flow-caption {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     margin: -4px 0 12px;
 }
@@ -2671,7 +3189,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .oa-flow-nav {
     align-items: center;
-    border-top: 1px solid var(--grac-line, #e2e7f0);
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 12px;
     justify-content: space-between;
@@ -2680,7 +3198,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .oa-flow-position {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     font-weight: 700;
 }
@@ -2697,9 +3215,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    ------------------------------------------------------------------ */
 .oa-flow-context {
     align-items: end;
-    background: #f6f8fc;
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
@@ -2712,25 +3230,25 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     flex-direction: column;
     font-size: 12px;
     gap: 2px;
-    color: #475569;
+    color: var(--fg-secondary);
 }
 
 .oa-flow-context select {
-    border: 1px solid #cbd5e1;
-    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
     min-width: 240px;
     padding: 6px 8px;
 }
 
 .oa-flow-ctx-state {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     padding-bottom: 6px;
 }
 
 /* Step status chip. Sits after the tab label. */
 .oa-step-chip {
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: .2px;
@@ -2740,14 +3258,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     white-space: nowrap;
 }
 
-.oa-step-chip.is-complete { background: #dcfce7; color: #166534; }
-.oa-step-chip.is-partial  { background: #fef3c7; color: #92400e; }
-.oa-step-chip.is-empty    { background: #eef1f6; color: #64748b; }
+.oa-step-chip.is-complete { background: var(--success-100); color: var(--success-700); }
+.oa-step-chip.is-partial  { background: var(--warning-100); color: var(--warning-700); }
+.oa-step-chip.is-empty    { background: var(--bg-subtle); color: var(--fg-muted); }
 
 /* Question-set adoption panel (the 277 edge). */
 .oa-adopt-panel {
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     margin-bottom: 14px;
     padding: 12px;
 }
@@ -2764,14 +3282,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .oa-adopt-grid select {
-    border: 1px solid #cbd5e1;
-    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
     padding: 4px;
     width: 100%;
 }
 
 .oa-adopt-label {
-    color: #475569;
+    color: var(--fg-secondary);
     display: block;
     font-size: 12px;
     font-weight: 700;
@@ -2785,14 +3303,14 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .oa-adopt-hint {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     margin: 4px 0 0;
 }
 
 .oa-adopt-footer {
     align-items: center;
-    border-top: 1px solid var(--grac-line, #e2e7f0);
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 12px;
     justify-content: space-between;
@@ -2803,8 +3321,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* The adoption panel is the shell's own chrome, not a hosted screen, so
    it keeps its frame where .oa-flow-panel > .pm-panel drops one. */
 .oa-flow-panel > .oa-adopt-panel {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
     padding: 12px;
 }
 
@@ -2912,10 +3430,10 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 /* --- Form card: fills the panel, so its edges match the page heading
        card above it instead of floating in the left third ----------- */
 .oa-ws[data-mode="detail"] #oaDefDialog[open] {
-    background: #fff;
-    border: 1px solid var(--grac-line, #e2e7f0) !important;
-    border-radius: 8px !important;
-    box-shadow: 0 2px 7px rgba(37, 52, 90, .04) !important;
+    background: var(--bg-surface);
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-card) !important;
     max-width: none !important;
     width: 100% !important;
 }
@@ -2982,8 +3500,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 .oa-ws #oaDefForm input,
 .oa-ws #oaDefForm select,
 .oa-ws #oaDefForm textarea {
-    border: 1px solid var(--grac-line, #e2e7f0) !important;
-    border-radius: 6px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
     box-sizing: border-box;
     font-size: 13px;
     margin-top: 5px !important;
@@ -3005,8 +3523,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 .oa-ws #oaDefForm input:focus,
 .oa-ws #oaDefForm select:focus,
 .oa-ws #oaDefForm textarea:focus {
-    border-color: #467CEB !important;
-    box-shadow: 0 0 0 3px rgba(70, 124, 235, .18);
+    border-color: var(--primary-500) !important;
+    box-shadow: 0 0 0 3px var(--focus-ring);
     outline: none;
 }
 
@@ -3015,7 +3533,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    Save would otherwise sit alone against a 1120-px rule. Give the row a
    divider and keep it on the form's right edge. */
 .oa-ws #oaDefForm > div[style*="justify-content:flex-end"] {
-    border-top: 1px solid var(--grac-line, #e2e7f0);
+    border-top: 1px solid var(--border);
     margin-top: 14px !important;
     padding-top: 12px;
 }
@@ -3127,20 +3645,20 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pp-label {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 12px;
     font-weight: 600;
     margin-bottom: 4px;
 }
 
 .pp-required {
-    color: #b91c1c;
+    color: var(--danger-700);
     margin-left: 2px;
 }
 
 .pp-root select {
-    border: 1px solid var(--grac-line, #e2e7f0);
-    border-radius: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     font-size: 13px;
     height: 34px;
     padding: 6px 10px;
@@ -3148,36 +3666,36 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .pp-root select:focus {
-    border-color: #467CEB;
-    box-shadow: 0 0 0 3px rgba(70, 124, 235, .18);
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px var(--focus-ring);
     outline: none;
 }
 
 /* A disabled level is a waiting level, not a broken one -- keep it
    legible rather than greying it into the background. */
 .pp-root select:disabled {
-    background: #f6f8fc;
-    color: var(--grac-muted, #758095);
+    background: var(--neutral-50);
+    color: var(--fg-muted);
     cursor: default;
 }
 
 .pp-hint {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 11px;
     margin-top: 3px;
     min-height: 14px;             /* reserved, so rows do not jump on load */
 }
 
 .pp-message {
-    color: var(--grac-muted, #758095);
+    color: var(--fg-muted);
     font-size: 12px;
     grid-column: 1 / -1;
     margin: 0;
     min-height: 16px;
 }
 
-.pp-message.is-error { color: #b42318; }
-.pp-message.is-warn  { color: #92400e; }
+.pp-message.is-error { color: var(--danger-700); }
+.pp-message.is-warn  { color: var(--warning-700); }
 
 /* Inside a dialog the picker gets a full row per level. The Risk Centre
    mounts it in #riskMapPracticeModal for exactly this reason -- inline in
@@ -3203,13 +3721,32 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
    the rest of the risk page in risk-centre.cshtml; only the task status
    chip stays here, beside the other shared badge sizing.
 
-   Self-sufficient on purpose. The markup carries `pm-badge t-status`,
-   but .pm-badge is NOT DEFINED anywhere in this project -- 66 uses
-   across the views and scripts, zero rules -- so it contributes
-   nothing and the status rendered as bare text. Everything the chip
-   looks like has to come from .t-status. Leaving .pm-badge in the
-   markup: defining it globally would restyle 66 unrelated places and
-   belongs in its own change. */
+   Self-sufficient on purpose. The markup carries `pm-badge t-status`;
+   .pm-badge now has a global rule (section "Badge" below, 2026-09-25)
+   and .t-status, being more specific, still decides how this chip
+   looks. */
+
+/* ------------------------------------------------------------------
+   Badge (design alignment Phase 3, 2026-09-25)
+   .pm-badge was used ~90 times with no global rule. practice-view,
+   resolve and resolve-workspace each carried the SAME local rule
+   (scoped to their own root); that rule is hoisted here unchanged
+   apart from tokens, so every other screen's counts and chips stop
+   rendering as bare text. Status-specific colours stay with the
+   modifier classes that already set them (.t-status, .gap-state-chip,
+   .risk-tab-badge, inline bg/fg from the SLA maps).
+   ------------------------------------------------------------------ */
+.pm-badge {
+    background: var(--neutral-200);
+    border-radius: var(--radius-pill);
+    color: var(--fg-default);
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    padding: 1px 7px;
+    white-space: nowrap;
+}
 /* ------------------------------------------------------------------
    Tag Picker (wwwroot/js/tag-picker.js, migrations 285/286)
    Multi-select with chips and inline create. Shaped to match
@@ -3220,9 +3757,9 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 
 .tp-control {
     align-items: center;
-    background: #fff;
-    border: 1px solid #d5dce7;
-    border-radius: 7px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -3231,7 +3768,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
     padding: 4px 8px;
 }
 
-.tp-control:focus-within { border-color: #90cdf4; box-shadow: 0 0 0 3px #ebf8ff; outline: none; }
+.tp-control:focus-within { border-color: var(--primary-500); box-shadow: 0 0 0 3px var(--focus-ring); outline: none; }
 
 /* flex:1 with a min-width so the box keeps a usable typing area no
    matter how many chips are in front of it, instead of collapsing to a
@@ -3244,52 +3781,52 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 .tp-chips { display: contents; }
 
 .tp-chip {
-    align-items: center; background: #edf2f7; border-radius: 999px;
-    color: #2d3748; display: inline-flex; font-size: 12px; gap: 4px;
+    align-items: center; background: var(--bg-subtle); border-radius: var(--radius-pill);
+    color: var(--neutral-700); display: inline-flex; font-size: 12px; gap: 4px;
     line-height: 1.4; padding: 2px 4px 2px 10px;
 }
 
 /* A legacy "Others" value carried forward. Dashed, because it is not a
    list entry yet -- saving the risk is what makes it one. */
-.tp-chip.is-pending { background: #fffaf0; border: 1px dashed #fbd38d; color: #7b341e; }
+.tp-chip.is-pending { background: var(--warning-50); border: 1px dashed var(--warning-200); color: var(--danger-700); }
 
 .tp-chip-x {
-    background: transparent; border: 0; color: #a0aec0; cursor: pointer;
+    background: transparent; border: 0; color: var(--fg-subtle); cursor: pointer;
     font-size: 15px; line-height: 1; padding: 0 4px;
 }
-.tp-chip-x:hover { color: #e53e3e; }
+.tp-chip-x:hover { color: var(--danger-700); }
 
 .tp-menu {
-    background: #fff; border: 1px solid #d5dce7; border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(16, 24, 40, .12);
+    background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    box-shadow: var(--shadow-menu);
     left: 0; max-height: 240px; overflow-y: auto;
     position: absolute; right: 0; top: 100%; z-index: 40;
     margin-top: 4px; padding: 4px;
 }
 
 .tp-opt {
-    background: transparent; border: 0; border-radius: 6px; color: #2d3748;
+    background: transparent; border: 0; border-radius: var(--radius-md); color: var(--neutral-700);
     cursor: pointer; display: block; font-size: 13px; padding: 7px 10px;
     text-align: left; width: 100%;
 }
-.tp-opt:hover { background: #f7fafc; }
-.tp-opt.is-muted, .tp-opt.is-busy { color: #a0aec0; cursor: default; font-style: italic; }
+.tp-opt:hover { background: var(--neutral-50); }
+.tp-opt.is-muted, .tp-opt.is-busy { color: var(--fg-subtle); cursor: default; font-style: italic; }
 .tp-opt.is-muted:hover, .tp-opt.is-busy:hover { background: transparent; }
 
 /* The create row leads, and is tinted, because it is the one action
    that changes the org's list rather than just this risk. */
-.tp-opt-create { background: #f0f7ff; color: #2b6cb0; font-weight: 600; }
-.tp-opt-create:hover { background: #e1efff; }
+.tp-opt-create { background: var(--primary-50); color: var(--primary-600); font-weight: 600; }
+.tp-opt-create:hover { background: var(--primary-50); }
 
-.tp-own { color: #a0aec0; font-size: 11px; }
+.tp-own { color: var(--fg-subtle); font-size: 11px; }
 
-.tp-message { color: #718096; font-size: 11px; margin: 4px 0 0; }
-.tp-message.is-error { color: #c53030; }
+.tp-message { color: var(--fg-muted); font-size: 11px; margin: 4px 0 0; }
+.tp-message.is-error { color: var(--danger-700); }
 
 .rmp-task-table .t-status {
-    background: #edf2f7;
+    background: var(--bg-subtle);
     border-radius: 10px;
-    color: #4a5568;
+    color: var(--fg-secondary);
     display: inline-block;
     font-size: 10px;
     font-weight: 600;
@@ -3299,8 +3836,8 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .risk-map-empty {
-    border: 1px dashed var(--grac-line, #e2e7f0);
-    border-radius: 8px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -3309,7 +3846,7 @@ dialog.pm-manage-structure-dialog .pm-dialog-heading {
 }
 
 .risk-map-empty strong { font-size: 13px; }
-.risk-map-empty span   { color: var(--grac-muted, #758095); font-size: 12px; }
+.risk-map-empty span   { color: var(--fg-muted); font-size: 12px; }
 
 /* ------------------------------------------------------------------
    Add/Edit Practice: Source Statement mapping picker + true full-page
@@ -3446,7 +3983,7 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-statement-mapping {
-    border-top: 1px solid #e7ecf5;
+    border-top: 1px solid var(--border);
     grid-column: 1 / -1;
     margin-top: 8px;
     padding-top: 16px;
@@ -3462,21 +3999,21 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-statement-mapping-header h3 {
-    color: var(--grac-ink, #172033);
+    color: var(--fg-default);
     font-size: 15px;
     font-weight: 750;
     margin: 0 0 2px;
 }
 
 .pm-statement-mapping-header p {
-    color: #6b7994;
+    color: var(--fg-muted);
     font-size: 12.5px;
     margin: 0;
 }
 
 .pm-statement-mapping-header select {
-    border: 1px solid #d5dce7;
-    border-radius: 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
     font-size: 13px;
     height: 34px;
     min-width: 260px;
@@ -3500,9 +4037,9 @@ dialog.pm-dialog-fullpage #recordFields {
    drifted out of sync. Names what didn't load instead of silently
    dropping it from the tree with no explanation. */
 .pm-map-warning {
-    background: #fff6e5;
-    border-radius: 7px;
-    color: #8a5a00;
+    background: var(--warning-50);
+    border-radius: var(--radius-md);
+    color: var(--warning-700);
     font-size: 12px;
     font-weight: 650;
     margin-bottom: 10px;
@@ -3523,17 +4060,17 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-panel {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 11px;
+    background: var(--neutral-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     min-height: 340px;
     overflow: hidden;
 }
 
 .pm-map-panel-head {
     align-items: center;
-    background: #fff;
-    border-bottom: 1px solid #e4eaf2;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
     display: grid;
     gap: 10px;
     grid-template-columns: 1fr minmax(140px, 200px);
@@ -3546,12 +4083,12 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-panel-head strong {
-    color: #172033;
+    color: var(--fg-default);
     font-size: 13px;
 }
 
 .pm-map-panel-head small {
-    color: #667085;
+    color: var(--fg-muted);
     font-size: 11px;
 }
 
@@ -3562,7 +4099,7 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-hint {
-    color: #6b7a90;
+    color: var(--fg-muted);
     display: block;
     font-size: 11px;
     margin-top: 2px;
@@ -3580,8 +4117,8 @@ dialog.pm-dialog-fullpage #recordFields {
 .pm-map-tree-row {
     align-items: center;
     border: 1px solid transparent;
-    border-radius: 7px;
-    color: #344054;
+    border-radius: var(--radius-md);
+    color: var(--neutral-700);
     display: grid;
     font-size: 12px;
     gap: 6px;
@@ -3591,11 +4128,11 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-tree-row:hover {
-    background: #eaf4ff;
+    background: var(--primary-50);
 }
 
 .pm-map-tree-row.parent {
-    color: #172033;
+    color: var(--fg-default);
     font-weight: 700;
 }
 
@@ -3603,16 +4140,16 @@ dialog.pm-dialog-fullpage #recordFields {
    `rel-<releaseId>` nodes) -- tinted so the Framework/Release branch reads as
    a distinct top level from the Source Structure folders nested under it. */
 .pm-map-tree-row.release-row {
-    background: #eef2ff;
-    border-color: #c7d2fe;
+    background: var(--primary-50);
+    border-color: var(--primary-200);
 }
 
 .pm-map-tree-row.release-row .pm-map-parent-dot.pm-map-folder-dot {
-    color: #4338ca;
+    color: var(--primary-700);
 }
 
 .pm-map-tree-row.release-row .pm-map-node-text {
-    color: #312e81;
+    color: var(--primary-800);
 }
 
 .pm-map-tree-toggle,
@@ -3624,10 +4161,10 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-tree-toggle {
-    background: #edf4ff;
+    background: var(--primary-50);
     border: 0;
-    border-radius: 5px;
-    color: #2563eb;
+    border-radius: var(--radius-md);
+    color: var(--primary-600);
     cursor: pointer;
 }
 
@@ -3640,7 +4177,7 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-parent-dot.pm-map-folder-dot {
-    color: #6b7a90;
+    color: var(--fg-muted);
     font-size: 12px;
     justify-self: center;
 }
@@ -3652,12 +4189,12 @@ dialog.pm-dialog-fullpage #recordFields {
 }
 
 .pm-map-tree-row.parent .pm-map-node-text {
-    color: #1f2d3d;
+    color: var(--fg-default);
     font-weight: 600;
 }
 
 .pm-map-empty {
-    color: #667085;
+    color: var(--fg-muted);
     padding: 30px;
     text-align: center;
 }
@@ -3681,4 +4218,246 @@ dialog.pm-dialog-fullpage #recordFields {
     .pm-map-panels {
         grid-template-columns: 1fr;
     }
+}
+
+/* Risk Management submenus (migration 383).
+   Each of the six Risk Management submenu pages loads the shared risk-centre
+   partial locked to a single tab (risk-centre.js adds body.risk-single-tab
+   when window.riskCentreInitialTab is set). On those standalone pages the tab
+   strip is no longer navigation, so hide the tab buttons -- the page heading
+   names the page instead. The settings gear (.risk-tab-action) is kept so the
+   Risk Centre configuration stays reachable from every risk page. The legacy
+   combined risk-centre page sets no single-tab class and is unaffected. */
+body.risk-single-tab .risk-tabs .risk-tab { display: none; }
+
+/* ------------------------------------------------------------------
+   Task Board -- sub task tree (the caret beside a task number)
+   The toggle previously fell back to a bare browser button; these give
+   it the same primary-tinted chip as the mapping-tree / overview
+   toggles, and rotate the chevron when the row opens (the script only
+   toggles .is-open -- the icon class does not change). Spacer and branch
+   keep every task number aligned in the column.
+   ------------------------------------------------------------------ */
+.task-tree-cell {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.task-tree-indent {
+    display: inline-block;
+    flex: none;
+}
+
+.task-tree-branch {
+    border-bottom: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+    border-left: 1px solid var(--border);
+    flex: none;
+    height: 9px;
+    margin-right: 2px;
+    width: 8px;
+}
+
+.task-tree-toggle {
+    align-items: center;
+    background: var(--primary-50);
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--primary-600);
+    cursor: pointer;
+    display: inline-flex;
+    flex: none;
+    height: 20px;
+    justify-content: center;
+    padding: 0;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    width: 20px;
+}
+
+.task-tree-toggle:hover {
+    background: var(--primary-100);
+    color: var(--primary-700);
+}
+
+.task-tree-toggle i {
+    font-size: 10px;
+    transition: transform 0.15s ease;
+}
+
+/* Collapsed chevron points right; rotate to point down when open. */
+.task-tree-toggle.is-open i {
+    transform: rotate(90deg);
+}
+
+.task-tree-toggle.is-busy {
+    cursor: progress;
+    opacity: 0.6;
+}
+
+/* No sub tasks: an invisible chip-sized spacer so numbers stay aligned. */
+.task-tree-toggle.is-empty {
+    background: transparent;
+    cursor: default;
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.task-tree-num {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------
+   Role Master -- Menu Permissions matrix (role-menu-permission-editor.js)
+   Rendered as a section inside the Role add/edit editor. Parent menu =
+   section header row with an All checkbox; child menus = permission rows
+   with All + View/Add/Edit/Delete/Approve. Reuses .pm-panel / .pm-table.
+   ------------------------------------------------------------------ */
+.pm-role-perms {
+    /* #recordFields is a 2-column .pm-form-grid; span both columns so the
+       matrix uses the full content width of the (now full-page) role editor
+       rather than sitting in one half-width form cell. */
+    grid-column: 1 / -1;
+    margin-top: 16px;
+}
+
+/* Cap the matrix and let it scroll, so a long menu list does not make the
+   role dialog grow without bound. */
+.pm-role-perms-table {
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.pm-role-perms .pm-perms-check {
+    text-align: center;
+    white-space: nowrap;
+    width: 64px;
+}
+
+/* Parent menu section header row. */
+.pm-role-perms .pm-perms-parent > td {
+    background: var(--neutral-50);
+    border-top: 1px solid var(--border);
+    color: var(--fg-default);
+    font-weight: 700;
+}
+
+/* Category-level ("all menus below") checkboxes -- the category All and
+   the per-permission column boxes in the section header row. Same size as
+   the menu-row checkboxes, but drawn with a thicker 2px primary border so
+   they read as "all of the rows below". appearance:none is needed because
+   a native checkbox's border width cannot be changed; checked and
+   indeterminate (some rows on) states are drawn here to match. */
+.pm-role-perms .pm-perms-parent .pm-perms-bulk {
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-surface) center / 10px 10px no-repeat;
+    border: 2px solid var(--primary-700);
+    border-radius: 3px;
+    cursor: pointer;
+    display: inline-block;
+    height: 14px;
+    margin: 0;
+    vertical-align: middle;
+    width: 14px;
+}
+
+.pm-role-perms .pm-perms-parent .pm-perms-bulk:checked {
+    background-color: var(--primary-700);
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3e%3cpath d='M1.5 5.2 4 7.5 8.5 2.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+}
+
+.pm-role-perms .pm-perms-parent .pm-perms-bulk:indeterminate {
+    background-color: var(--primary-700);
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3e%3cpath d='M2 5h6' stroke='white' stroke-width='1.8' stroke-linecap='round'/%3e%3c/svg%3e");
+}
+
+.pm-role-perms .pm-perms-parent .pm-perms-bulk:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.pm-role-perms .pm-perms-parent .pm-perms-bulk:disabled {
+    cursor: default;
+    opacity: .5;
+}
+
+.pm-role-perms .pm-perms-all-label {
+    align-items: center;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 650;
+    gap: 6px;
+}
+
+.pm-role-perms .pm-perms-menu {
+    white-space: normal;
+}
+
+/* A parent that is itself a screen keeps its own permission row, nudged in
+   so it reads as belonging to the section above it. */
+.pm-role-perms .pm-perms-row-parent-self .pm-perms-menu {
+    padding-left: 18px;
+}
+
+.pm-role-perms .pm-perms-key {
+    color: var(--fg-muted);
+    font-size: 11px;
+}
+
+/* Advanced Settings -> View Data Scope (migration 415). Sits under the
+   matrix in the same section; a plain radio list in the form's own type
+   scale. */
+.pm-role-perms .pm-role-adv {
+    border-top: 1px solid var(--border);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.pm-role-perms .pm-view-scope {
+    border: 0;
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+}
+
+.pm-role-perms .pm-view-scope legend {
+    color: var(--fg-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.pm-role-perms .pm-view-scope-opt {
+    align-items: flex-start;
+    cursor: pointer;
+    display: flex;
+    font-size: 13px;
+    gap: 8px;
+}
+
+.pm-role-perms .pm-view-scope-opt input {
+    flex: 0 0 auto;
+    margin: 3px 0 0;
+}
+
+.pm-role-perms .pm-view-scope-opt small {
+    color: var(--fg-muted);
+    display: block;
+    font-size: 12px;
+}
+
+.pm-inline-note {
+    color: var(--primary-700);
+    font-size: 12px;
+    margin: 6px 0 0;
+}
+
+.pm-inline-error {
+    color: var(--danger-600);
+    font-size: 12px;
+    font-weight: 650;
+    margin: 6px 0 0;
 }

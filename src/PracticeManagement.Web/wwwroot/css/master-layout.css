@@ -37,16 +37,9 @@
     --ml-gutter: 20px;
     --ml-brand-h: 76px;
 
-    /* Palette -- GRAC tokens. Names are prefixed so they cannot collide
-       with the --grac-* variables control-management.css already owns. */
-    --ml-navy: #0C1129;
-    --ml-page: #F9FAFB;
-    --ml-surface: #FFFFFF;
-    --ml-border: #E5E7EB;
-    --ml-ink: #1F2937;
-    --ml-muted: #6B7280;
-    --ml-primary: #467CEB;
-    --ml-primary-600: #3568D4;
+    /* Palette (--ml-navy, --ml-page, --ml-surface, --ml-border, --ml-ink,
+       --ml-muted, --ml-primary, --ml-primary-600) is declared once in
+       grac-tokens.css. */
 }
 
 /* ==================================================================
@@ -60,8 +53,8 @@
    ================================================================== */
 .main-header.navbar {
     align-items: center;
-    background: var(--ml-surface);
-    border-bottom: 1px solid var(--ml-border);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
     box-shadow: none;
     height: var(--ml-topbar-h);
     min-height: var(--ml-topbar-h);
@@ -77,15 +70,15 @@
    sized to the same 36-px hit target. */
 .main-header.navbar .nav-item > .nav-link {
     align-items: center;
-    border-radius: 8px;
-    color: var(--ml-ink);
+    border-radius: var(--radius-md);
+    color: var(--fg-default);
     display: flex;
     min-height: 36px;
     padding: 0 8px;
 }
 
 .main-header.navbar .nav-item > .nav-link:hover {
-    background: #F3F4F6;
+    background: var(--bg-subtle);
 }
 
 /* Sidebar toggle: optical size match with the icon buttons opposite. */
@@ -96,7 +89,7 @@
 }
 
 .main-header.navbar [data-widget="fullscreen"] {
-    color: var(--ml-muted);
+    color: var(--fg-muted);
     font-size: 15px;
 }
 
@@ -137,16 +130,16 @@
 
 .main-header .breadcrumb-item,
 .main-header .breadcrumb a {
-    color: var(--ml-muted);
+    color: var(--fg-muted);
 }
 
 .main-header .breadcrumb a:hover {
-    color: var(--ml-primary);
+    color: var(--primary-600);
     text-decoration: none;
 }
 
 .main-header .breadcrumb-item.active {
-    color: var(--ml-ink);
+    color: var(--fg-default);
     font-weight: 700;
 }
 
@@ -192,7 +185,7 @@
 }
 
 .main-header .user-panel .info #spnUserName {
-    color: var(--ml-ink);
+    color: var(--fg-default);
     display: block;
     font-size: 13px;
     font-weight: 700;
@@ -207,7 +200,7 @@
 }
 
 .main-header .user-panel .info #spnUserRole {
-    color: var(--ml-muted);
+    color: var(--fg-muted);
     display: block;
     font-size: 11px;
     font-weight: 400;
@@ -294,7 +287,7 @@ body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
    ================================================================== */
 .main-sidebar.sidebar-dark-primary,
 [class*="sidebar-dark-"] {
-    background: var(--ml-navy) !important;
+    background: var(--grac-navy-deep) !important;
 }
 
 .main-sidebar .sidebar {
@@ -308,20 +301,32 @@ body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
    indent. Icons share a fixed 22-px column so every label starts on the
    same x, whatever glyph precedes it.
    ================================================================== */
+/* Bootstrap's .nav is flex-wrap:wrap. In a flex-column list that makes
+   the single flex line as wide as its widest row, so one over-wide row
+   (see Section 7, 2026-10-01) widened every <li> past the sidebar and
+   no percentage cap could hold. A vertical menu never wraps, so nowrap
+   only pins the line -- and every row -- to the sidebar's width. */
+.main-sidebar .nav-sidebar {
+    flex-wrap: nowrap;
+}
+
 .main-sidebar .nav-sidebar > .nav-item {
     margin: 2px 0;
 }
 
 .main-sidebar .nav-sidebar > .nav-item > .nav-link {
     align-items: center;
-    border-radius: 8px;
-    color: #D5DEEE !important;
+    border-radius: var(--radius-md);
+    color: var(--fg-on-dark-muted) !important;
     display: flex;
     font-size: 13.5px;
     font-weight: 600;
     letter-spacing: .1px;
     margin: 0;
     min-height: 44px;
+    /* Never wider than the sidebar's content box -- see the note on the
+       child-row max-width in Section 7. */
+    max-width: 100%;
     padding: 10px 12px !important;
     transition: background-color .16s ease, color .16s ease;
 }
@@ -329,16 +334,16 @@ body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
 /* No translate on hover -- a menu that shifts sideways reads as playful,
    and it breaks the icon column alignment mid-interaction. */
 .main-sidebar .nav-sidebar > .nav-item > .nav-link:hover {
-    background: rgba(255, 255, 255, .08) !important;
-    color: #FFFFFF !important;
+    background: var(--nav-hover) !important;
+    color: var(--fg-on-dark) !important;
     transform: none;
 }
 
 .main-sidebar .nav-sidebar > .nav-item > .nav-link.active,
 .main-sidebar .nav-sidebar > .nav-item > .nav-link.active-current {
-    background: var(--ml-primary) !important;
+    background: var(--primary-500) !important;
     box-shadow: none;
-    color: #FFFFFF !important;
+    color: var(--fg-on-dark) !important;
     font-weight: 700;
 }
 
@@ -346,9 +351,9 @@ body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
    blue, so the blue always means "this is the page you are on". */
 .main-sidebar .nav-sidebar > .nav-item.menu-open > .nav-link.active:not(:only-child),
 .main-sidebar .nav-sidebar > .nav-item.menu-open > .nav-link.active-parent {
-    background: rgba(255, 255, 255, .10) !important;
+    background: var(--nav-active) !important;
     box-shadow: none;
-    color: #FFFFFF !important;
+    color: var(--fg-on-dark) !important;
     font-weight: 700;
 }
 
@@ -460,20 +465,37 @@ body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
 
 .main-sidebar .nav-sidebar .nav-treeview .nav-link {
     align-items: center;
-    border-radius: 8px !important;
-    color: #B9C6DC !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--fg-on-dark-subtle) !important;
     display: flex;
     font-size: 13px;
     font-weight: 500;
     margin: 0 0 0 34px;
+    /* Menu shifting left after a submenu is selected (2026-10-01).
+       AdminLTE gives every sidebar .nav-link a fixed
+       width: calc(250px - .5rem * 2) = 234px. A child row adds the 34px
+       indent above, so it is 268px wide inside a 230px content box: the
+       sidebar gets 28px of hidden horizontal overflow. overflow-x:hidden
+       hides it from the user but not from scripts, and the layout's
+       activeItem.scrollIntoView({ block: 'nearest' }) (menu state sync,
+       _Layout.cshtml) also scrolls the INLINE axis to show the whole
+       selected row -- so the entire sidebar slid 28px left and the icons
+       and left padding were cut off. It showed after picking a submenu
+       because only then is the selected row a child row.
+       max-width (not width) caps the row to its indented space in every
+       sidebar mode: it wins over AdminLTE's width rules whatever their
+       specificity (including the collapsed hover-expand one), and the
+       collapsed 3.6rem width is already below it. No overflow, nothing
+       to scroll; labels still ellipsise via the <p> rule below. */
+    max-width: calc(100% - 34px);
     min-height: 36px;
     padding: 7px 12px !important;
     transition: background-color .16s ease, color .16s ease;
 }
 
 .main-sidebar .nav-sidebar .nav-treeview .nav-link:hover {
-    background: rgba(255, 255, 255, .07) !important;
-    color: #FFFFFF !important;
+    background: var(--nav-hover) !important;
+    color: var(--fg-on-dark) !important;
 }
 
 .main-sidebar .nav-sidebar .nav-treeview .nav-link .nav-icon {
@@ -523,15 +545,19 @@ body.sidebar-collapse .main-sidebar:hover .brand-link .logo-expanded {
 .main-sidebar .nav-sidebar .nav-treeview .nav-item > .nav-link.active,
 .main-sidebar .nav-sidebar .nav-treeview .nav-item > .nav-link.active-current {
     background: rgba(70, 124, 235, .16) !important;
-    box-shadow: inset 2px 0 0 var(--ml-primary);
-    color: #FFFFFF !important;
+    box-shadow: inset 2px 0 0 var(--primary-500);
+    color: var(--fg-on-dark) !important;
     font-weight: 700;
     margin-left: 34px;
+    /* cacca-styles.css's selected-row rule sets max-width:none, which
+       undid the cap on exactly the row that overflowed -- the selected
+       one. Restated here with the margin it pairs with. */
+    max-width: calc(100% - 34px);
 }
 
 .main-sidebar .nav-sidebar .nav-treeview .nav-link.active .nav-icon,
 .main-sidebar .nav-sidebar .nav-treeview .nav-link.active-current .nav-icon {
-    color: #8FB4FF;
+    color: var(--primary-300);
 }
 
 /* Collapsed rail hides the connector entirely. */
@@ -559,6 +585,7 @@ body.sidebar-collapse .main-sidebar .nav-sidebar .nav-treeview::before {
 */
 .main-sidebar .nav-sidebar .nav-treeview .nav-treeview .nav-link {
     margin-left: 68px;
+    max-width: calc(100% - 68px);
 }
 
 .main-sidebar .nav-sidebar .nav-treeview .nav-treeview::before {
@@ -572,6 +599,7 @@ body.sidebar-collapse .main-sidebar .nav-sidebar .nav-treeview::before {
 .main-sidebar .nav-sidebar .nav-treeview .nav-treeview .nav-item > .nav-link.active,
 .main-sidebar .nav-sidebar .nav-treeview .nav-treeview .nav-item > .nav-link.active-current {
     margin-left: 68px !important;
+    max-width: calc(100% - 68px);
 }
 
 body.sidebar-collapse .main-sidebar .nav-sidebar .nav-treeview .nav-treeview::before {
@@ -711,7 +739,7 @@ body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini
    right edge.
    ================================================================== */
 .content-wrapper {
-    background: var(--ml-page);
+    background: var(--bg-page);
 }
 
 .content-wrapper > .content {
@@ -739,8 +767,8 @@ body.sidebar-collapse.sidebar-hover-push:not(.sidebar-mini-md):not(.sidebar-mini
 .content-wrapper .page-heading,
 .content-wrapper .pm-panel,
 .content-wrapper .panel {
-    border-color: var(--ml-border);
-    border-radius: 8px;
+    border-color: var(--border);
+    border-radius: var(--radius-md);
 }
 
 .content-wrapper .pm-page-heading,

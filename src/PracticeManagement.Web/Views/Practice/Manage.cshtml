@@ -108,8 +108,45 @@
         // a link from the Standards & Frameworks screen below. See the
         // PracticeScreen.cs entry and PracticeController.ScreenPermissionArea
         // for the rest of the no-menu-row wiring.
-        "custom-source-statements"
+        "custom-source-statements",
+        // Repository Updates (migration 395) -- approve / reject Control
+        // Management changes to a subscribed release. Same no-menu-row
+        // wiring as custom-source-statements above.
+        "repository-updates"
     };
+    // Risk Management submenus (migration 383). Each of these keys is its
+    // own route/screen but REUSES the existing risk-centre partial, opened
+    // locked to one tab. window.riskCentreInitialTab tells risk-centre.js
+    // which tab to show and to hide the tab strip (single-tab page mode);
+    // scope-checklist-editor.js is emitted exactly as the risk-centre branch
+    // in workflowScreens does, since the same partial mounts it.
+    var riskSubTab = Model.Key switch
+    {
+        "risk-centre-candidates" => "candidates",
+        "risk-centre-register"   => "register",
+        "risk-centre-accept"     => "accept",
+        "risk-centre-review"     => "review",
+        "risk-centre-calendar"   => "calendar",
+        "risk-centre-dashboard"  => "dashboard",
+        _ => null
+    };
+    // Management dashboards (migration 414): three screen keys, one shared
+    // partial. The partial reads Model.Key to know which dashboard it is.
+    if (PracticeManagement.Web.Models.ManagementDashboards.IsDashboard(Model.Key))
+    {
+        <partial name="Partials/management-dashboard" model="Model" />
+        return;
+    }
+
+    if (riskSubTab is not null)
+    {
+        <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
+        <script src="~/js/role-menu-permission-editor.js" asp-append-version="true"></script>
+        <script>window.riskCentreInitialTab = "@riskSubTab";</script>
+        <partial name="Partials/risk-centre" model="Model" />
+        return;
+    }
+
     if (workflowScreens.Contains(Model.Key))
     {
         @* Emitted before the early return below, so BOTH paths get it: the
@@ -117,6 +154,7 @@
            down that loads practice.js. Without this the asset screen would
            need its own copy of the editor. *@
         <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
+        <script src="~/js/role-menu-permission-editor.js" asp-append-version="true"></script>
         <partial name="Partials/@Model.Key" model="Model" />
         return;
     }
@@ -179,7 +217,7 @@
     <div class="pm-actions">
         @if (!isOrganizationWorkspace && Model.Key != "organizations")
         {
-        <a class="pm-button" id="pageBackBtn" asp-controller="Practice" asp-action="Index"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
+        <a class="pm-button" id="pageBackBtn" asp-controller="Practice" asp-action="Index" asp-route-areaKey=""><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
         }
         @if (!isOrganizationWorkspace && !isDependencyWorkbench && Model.Key != "organizations" && Model.Key != "audit-trace" && Model.Key != "control-applicability" && !isResolve && !isReadOnlyAssuranceView && permissions.Contains("ADD"))
         {
@@ -365,17 +403,17 @@
          Control Statement dialogs below -- keeps every Committee Members
          interaction in the one place the top-of-file comment on that
          listener already explains. *@
-    <dialog id="committeeDesignationDialog" style="border:none; border-radius:8px; padding:0; max-width:420px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-        <form id="committeeDesignationForm" method="dialog" style="margin:0; padding:20px 24px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <h2 style="margin:0; font-size:18px;">Add Designation</h2>
-                <button type="button" id="closeCommitteeDesignation" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+    <dialog id="committeeDesignationDialog" style="max-width:420px; width:92%;">
+        <form id="committeeDesignationForm" method="dialog">
+            <div class="pm-dialog-heading">
+                <h2>Add Designation</h2>
+                <button class="pm-icon-button" type="button" id="closeCommitteeDesignation" aria-label="Close">&times;</button>
             </div>
-            <div id="committeeDesignationMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Designation Name <span style="color:#b91c1c;">*</span>
-                <input id="committeeDesignationName" type="text" maxlength="200" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; margin-top:2px;" />
+            <div class="pm-message" id="committeeDesignationMessage" style="display:none;"></div>
+            <label class="pm-field">Designation Name <span class="required">*</span>
+                <input class="pm-input" id="committeeDesignationName" type="text" maxlength="200" />
             </label>
-            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <div class="pm-dialog-actions">
                 <button type="button" id="cancelCommitteeDesignation" class="pm-button">Cancel</button>
                 <button type="button" id="saveCommitteeDesignation" class="pm-button primary">Save</button>
             </div>
@@ -398,9 +436,12 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
             <input id="search" placeholder="Search..." />
         }
         <select id="organizationFilter"><option value="">All organizations</option></select>
-        @if (Model.Key == "organization-requirements" || Model.Key == "organization-controls")
+        @* source-statements (Control Statements) shows one release's statement
+           tree at a time; this filter switches between the ready releases
+           (2026-09-28, filled by practice.js openControlStatementsRelease). *@
+        @if (Model.Key == "organization-requirements" || Model.Key == "organization-controls" || Model.Key == "source-statements")
         {
-            <select id="subscribedFrameworkFilter"><option value="">All subscribed frameworks</option></select>
+            <select id="subscribedFrameworkFilter" title="Framework"><option value="">All subscribed frameworks</option></select>
         }
         @if (Model.Key == "organization-controls")
         {
@@ -565,6 +606,7 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         window.pmEmployeeId="@(ViewBag.EmployeeId ?? "")";
     </script>
     <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
+    <script src="~/js/role-menu-permission-editor.js" asp-append-version="true"></script>
     @* pm-grid before practice.js: the grid mounts its pager during init. *@
     <script src="~/js/pm-grid.js" asp-append-version="true"></script>
     <script src="~/js/practice.js" asp-append-version="true"></script>

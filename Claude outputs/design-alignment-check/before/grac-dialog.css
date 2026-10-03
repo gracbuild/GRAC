@@ -1,0 +1,141 @@
+.grac-dialog-overlay {
+    align-items: center;
+    animation: gracDialogFadeIn 160ms ease-out;
+    background: rgba(15, 23, 42, 0.42);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 20px;
+    position: fixed;
+    z-index: 2147483000;
+}
+
+.grac-dialog-overlay.closing {
+    animation: gracDialogFadeOut 140ms ease-in forwards;
+}
+
+.grac-dialog {
+    animation: gracDialogRiseIn 180ms ease-out;
+    background: #fff;
+    border: 1px solid #dbe4f0;
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+    color: #172033;
+    max-width: 440px;
+    overflow: hidden;
+    width: min(440px, 100%);
+}
+
+.grac-dialog-overlay.closing .grac-dialog {
+    animation: gracDialogRiseOut 140ms ease-in forwards;
+}
+
+.grac-dialog-body {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 46px minmax(0, 1fr);
+    padding: 22px 22px 16px;
+}
+
+.grac-dialog-icon {
+    align-items: center;
+    border-radius: 13px;
+    display: inline-flex;
+    font-size: 18px;
+    height: 42px;
+    justify-content: center;
+    width: 42px;
+}
+
+.grac-dialog-icon.success { background: #e8f7ef; color: #12824c; }
+.grac-dialog-icon.info { background: #eaf2ff; color: #2367c9; }
+.grac-dialog-icon.warning { background: #fff6e5; color: #b56a00; }
+.grac-dialog-icon.error { background: #fdecee; color: #bd2b3a; }
+.grac-dialog-icon.confirm { background: #eef4ff; color: #2458b8; }
+
+.grac-dialog-title {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.25;
+    margin: 0 0 6px;
+}
+
+.grac-dialog-message {
+    color: #56657d;
+    font-size: 14px;
+    line-height: 1.55;
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.grac-dialog-input {
+    border: 1px solid #cfd9e8;
+    border-radius: 8px;
+    color: #172033;
+    font-size: 14px;
+    margin-top: 12px;
+    min-height: 38px;
+    padding: 8px 10px;
+    width: 100%;
+}
+
+.grac-dialog-input:focus {
+    border-color: #2c6ed5;
+    box-shadow: 0 0 0 3px rgba(44, 110, 213, 0.14);
+    outline: none;
+}
+
+.grac-dialog-actions {
+    align-items: center;
+    border-top: 1px solid #edf2f8;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding: 14px 18px 18px;
+}
+
+.grac-dialog-button {
+    border: 1px solid #cfd9e8;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    min-height: 38px;
+    padding: 8px 16px;
+}
+
+.grac-dialog-button.secondary {
+    background: #fff;
+    color: #26354d;
+}
+
+.grac-dialog-button.primary {
+    background: #2b6ed3;
+    border-color: #2b6ed3;
+    box-shadow: 0 8px 18px rgba(43, 110, 211, 0.22);
+    color: #fff;
+}
+
+.grac-dialog-button:hover {
+    filter: brightness(0.98);
+}
+
+@media (max-width: 520px) {
+    .grac-dialog-body {
+        grid-template-columns: 1fr;
+        padding: 18px 18px 12px;
+    }
+
+    .grac-dialog-actions {
+        flex-direction: column-reverse;
+    }
+
+    .grac-dialog-button {
+        width: 100%;
+    }
+}
+
+@keyframes gracDialogFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes gracDialogFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes gracDialogRiseIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes gracDialogRiseOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(8px) scale(0.985); } }

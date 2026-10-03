@@ -543,7 +543,7 @@
     let html = `<div class="cal-day-header">${isToday ? "Today — " : ""}${formatDate(currentDate)}</div>`;
     html += '<div class="cal-day-events">';
     if (dayEvents.length === 0) {
-      html += '<p style="color:var(--grac-muted);font-size:13px;padding:24px 0;">No audit events scheduled for this day.</p>';
+      html += '<p style="color:var(--fg-muted);font-size:13px;padding:24px 0;">No audit events scheduled for this day.</p>';
     } else {
       dayEvents.forEach((ev, idx) => {
         const crit = (ev.Criticality || ev.criticality || "medium").toLowerCase();
@@ -622,7 +622,7 @@
     const linkedTaskDeepLink = ev.LinkedTaskDeepLink || ev.linkedTaskDeepLink;
 
     let html = `<div class="cal-side-source-badge source-${src}"><i class="fa-solid fa-tag" aria-hidden="true"></i>${escapeHtml(srcLabel)}</div>`;
-    if (subtitle) html += `<div style="color:var(--grac-muted, #758095); font-size:12px; margin-bottom:10px;">${escapeHtml(subtitle)}</div>`;
+    if (subtitle) html += `<div style="color:var(--fg-muted); font-size:12px; margin-bottom:10px;">${escapeHtml(subtitle)}</div>`;
     html += `<div class="cal-detail-row"><span class="cal-detail-label">Date</span><span class="cal-detail-value">${formatDate(startDate)}${endDate && endDate.getTime() !== (startDate ? startDate.getTime() : 0) ? " → " + formatDate(endDate) : ""}</span></div>`;
     if (ev.FrequencyName || ev.frequencyName) html += `<div class="cal-detail-row"><span class="cal-detail-label">Cadence</span><span class="cal-detail-value">${escapeHtml(ev.FrequencyName || ev.frequencyName)}</span></div>`;
     if (defCode) html += `<div class="cal-detail-row"><span class="cal-detail-label">Definition</span><span class="cal-detail-value">${escapeHtml(defCode)}</span></div>`;
@@ -632,7 +632,7 @@
     html += `<div class="cal-detail-row"><span class="cal-detail-label">Owner</span><span class="cal-detail-value">${escapeHtml(ownerLabel)}</span></div>`;
     html += `<div class="cal-detail-row"><span class="cal-detail-label">Status</span><span class="cal-detail-value"><span class="cal-status-dot ${statusLower}"></span>${escapeHtml(status)}</span></div>`;
     if (linkedTaskNumber) {
-      html += `<div class="cal-detail-row"><span class="cal-detail-label">Task</span><span class="cal-detail-value">${escapeHtml(linkedTaskNumber)}${linkedTaskStatus ? ` <span style="color:var(--grac-muted, #758095);">(${escapeHtml(linkedTaskStatus)})</span>` : ""}</span></div>`;
+      html += `<div class="cal-detail-row"><span class="cal-detail-label">Task</span><span class="cal-detail-value">${escapeHtml(linkedTaskNumber)}${linkedTaskStatus ? ` <span style="color:var(--fg-muted);">(${escapeHtml(linkedTaskStatus)})</span>` : ""}</span></div>`;
     }
 
     if (ev.IsOverride || ev.isOverride) {

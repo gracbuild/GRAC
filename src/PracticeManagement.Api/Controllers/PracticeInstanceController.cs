@@ -45,6 +45,7 @@ public sealed class PracticeInstanceController(
         {
             await using var connection = new Microsoft.Data.SqlClient.SqlConnection(conn);
             await connection.OpenAsync(cancellationToken);
+            await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
             await using var cmd = connection.CreateCommand();
             cmd.CommandType = System.Data.CommandType.StoredProcedure;
             cmd.CommandText = "grac_practice.sp_task_center_gaps_list";

@@ -1,0 +1,161 @@
+/* ==================================================================
+   grac-tokens.css
+   ---------------
+   The ONE place GRAC design-system values are declared. Every other
+   stylesheet in PracticeManagement.Web reads colour, radius, shadow
+   and font from these custom properties instead of typing a hex.
+
+   WHY THIS FILE EXISTS
+     Before it, three stylesheets each declared their own palette:
+         control-management.css  --grac-ink / --grac-blue #2465CA / ...
+         master-layout.css       --ml-navy / --ml-primary #467CEB / ...
+         login.css               --brand-navy / --brand-blue #4E78F5
+     and ~900 further colours were typed in directly, so the same
+     "primary blue" appeared as seven different hexes. This file holds
+     the design-guide values once; the old variable names are kept as
+     aliases (section 9) so no rule that already uses them has to change.
+
+   LOAD ORDER
+     Linked FIRST in Views/Shared/_Layout.cshtml, Views/Login/Index.cshtml
+     and Views/Login/ChangePassword.cshtml. Custom properties resolve at
+     computed-value time, so order only matters if another file
+     re-declares one of these names -- none may.
+
+   DESIGN SOURCE
+     GRAC Design System (grac-design-guide): navy chrome, white work
+     surface on a near-white page, #467CEB as the only action colour,
+     gold #E8A33D brand-only (never on a control), Lato for UI, Inter
+     for numerics, 1-px borders, 8-px canonical radius, one soft card
+     shadow, 3-px focus ring. The guide names shade ramps by role but
+     does not publish their hexes; the ramps below are derived from the
+     guide's base values (neutral = the guide's #E5E7EB/#F9FAFB grey
+     family; primary/success/danger/warning derived per hue).
+   ================================================================== */
+:root {
+    /* 1. Brand + chrome ------------------------------------------- */
+    --grac-navy-deep: #0C1129;               /* sidebar / chrome            */
+    --grac-gold:      #E8A33D;               /* BRAND ONLY -- never a control */
+    --bg-page:        #F9FAFB;               /* near-white page             */
+    --bg-surface:     #FFFFFF;               /* work surface                */
+    --bg-subtle:      #F3F4F6;               /* table head, muted fills     */
+    --fg-on-dark:     #FFFFFF;               /* text on navy / blue         */
+    --fg-on-dark-muted:  rgba(255, 255, 255, 0.84);  /* sidebar labels */
+    --fg-on-dark-subtle: rgba(255, 255, 255, 0.68);  /* sidebar sub-items */
+    --fg-on-dark-faint:  rgba(255, 255, 255, 0.50);  /* sidebar sub-icons */
+    --nav-hover:      rgba(255, 255, 255, 0.08);  /* sidebar item hover   */
+    --nav-active:     rgba(255, 255, 255, 0.12);
+
+    /* 2. Neutral ramp (text, lines, fills) ------------------------ */
+    --neutral-0:   #FFFFFF;
+    --neutral-50:  #F9FAFB;
+    --neutral-100: #F3F4F6;
+    --neutral-200: #E5E7EB;
+    --neutral-300: #D1D5DB;
+    --neutral-400: #9CA3AF;
+    --neutral-500: #6B7280;
+    --neutral-600: #4B5563;
+    --neutral-700: #374151;
+    --neutral-800: #1F2937;
+    --neutral-900: #111827;
+
+    --fg-default:   var(--neutral-800);      /* body + headings             */
+    --fg-strong:    var(--neutral-900);
+    --fg-secondary: var(--neutral-600);
+    --fg-muted:     var(--neutral-500);      /* labels, help, meta          */
+    --fg-subtle:    var(--neutral-400);      /* placeholders, disabled      */
+
+    /* 3. Primary (action) ramp ------------------------------------ */
+    --primary-50:  #EEF3FD;
+    --primary-100: #DCE6FB;
+    --primary-200: #B7CCF7;
+    --primary-300: #91B1F3;
+    --primary-400: #6B96EF;
+    --primary-500: #467CEB;                  /* primary action              */
+    --primary-600: #3568D4;                  /* hover; link/icon text (AA)  */
+    --primary-700: #2A55B0;                  /* press; pill text            */
+    --primary-800: #22458F;
+
+    /* 4. Status ramps (pills, banners, validation) ---------------- */
+    --success-50:  #ECFDF3;
+    --success-100: #D1FADF;
+    --success-200: #A6F4C5;
+    --success-500: #12B76A;
+    --success-600: #039855;
+    --success-700: #027A48;
+
+    --danger-50:   #FEF3F2;
+    --danger-100:  #FEE4E2;
+    --danger-200:  #FECDCA;
+    --danger-500:  #F04438;
+    --danger-600:  #D92D20;
+    --danger-700:  #B42318;
+
+    --warning-50:  #FFFAEB;
+    --warning-100: #FEF0C7;
+    --warning-200: #FEDF89;
+    --warning-500: #F79009;
+    --warning-600: #DC6803;
+    --warning-700: #B54708;
+
+    /* 5. Lines ---------------------------------------------------- */
+    --border:        var(--neutral-200);     /* cards, tables, dividers     */
+    --border-input:  #EAEBEE;                /* inputs (slightly cooler)    */
+    --border-strong: var(--neutral-300);
+
+    /* 6. Effects -------------------------------------------------- */
+    --focus-ring:   rgba(70, 124, 235, 0.20);/* 3-px ring outside border    */
+    --focus-ring-danger: rgba(217, 45, 32, 0.16);
+    --overlay:      rgba(12, 17, 41, 0.48);  /* modal scrim                 */
+    --shadow-card:  0 1px 3px rgba(12, 17, 41, 0.06), 0 1px 2px rgba(12, 17, 41, 0.04);
+    --shadow-modal: 0 20px 40px rgba(12, 17, 41, 0.18);
+    --shadow-menu:  0 8px 24px rgba(12, 17, 41, 0.12);
+
+    /* 7. Shape ---------------------------------------------------- */
+    --radius-sm: 4px;                        /* chips, checks               */
+    --radius-md: 8px;                        /* buttons, inputs, cards      */
+    --radius-lg: 12px;                       /* large preview tiles         */
+    --radius-pill: 999px;
+
+    /* 8. Type + motion -------------------------------------------- */
+    --font-ui:  'Lato', "Segoe UI", system-ui, Arial, sans-serif;
+    --font-num: 'Inter', "Segoe UI", ui-sans-serif, Arial, sans-serif;
+    --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+    --duration-fast: 180ms;
+
+    /* 9. Legacy aliases ------------------------------------------- *
+     * Earlier palettes, re-pointed at the tokens above. Existing
+     * rules keep working; new CSS should use the token names.     */
+    --grac-ink:    var(--fg-default);
+    --grac-muted:  var(--fg-muted);
+    --grac-line:   var(--border);
+    --grac-blue:   var(--primary-500);
+    --grac-soft:   var(--bg-page);
+    --grac-hover:  var(--primary-50);
+    --grac-danger: var(--danger-700);
+
+    /* Row hover stays a light blue tint for now; the guide's faint-
+       neutral hover is a separate, not-yet-approved change. */
+    --grac-row-hover-bg:     var(--primary-50);
+    --grac-row-hover-text:   var(--fg-default);
+    --grac-row-hover-border: var(--primary-500);
+
+    --ml-navy:        var(--grac-navy-deep);
+    --ml-page:        var(--bg-page);
+    --ml-surface:     var(--bg-surface);
+    --ml-border:      var(--border);
+    --ml-ink:         var(--fg-default);
+    --ml-muted:       var(--fg-muted);
+    --ml-primary:     var(--primary-500);
+    --ml-primary-600: var(--primary-600);
+
+    --brand-navy:   var(--grac-navy-deep);
+    --brand-blue:   var(--primary-500);
+    --text-muted:   var(--fg-muted);
+    --border-color: var(--border);
+
+    /* Referenced by document-uploads.cshtml and practice.js but never
+       declared anywhere, so they only ever hit their fallbacks. */
+    --pm-border-color:   var(--border-strong);
+    --pm-primary:        var(--primary-500);
+    --pm-text-secondary: var(--fg-muted);
+}

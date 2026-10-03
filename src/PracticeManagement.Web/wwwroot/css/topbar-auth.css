@@ -11,12 +11,12 @@
 .logout-link {
   border: 0;
   background: transparent;
-  color: #536077;
+  color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
 }
 
 .logout-link:hover {
-  color: #2465ca;
+  color: var(--primary-600);
 }

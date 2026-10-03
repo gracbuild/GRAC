@@ -19,4 +19,20 @@ public static class PracticeSessionIdentity
     public const string RoleIdKey = "PracticeManagement.RoleId";
     public const string RoleNameKey = "PracticeManagement.RoleName";
     public const string DataScopeKey = "PracticeManagement.DataScope";
+
+    // Stable per-session secret used ONLY to encrypt/decrypt navigation
+    // codes (NavigationContextProtector). It is minted once per session and
+    // never rotates, unlike TokenKey which the idle-timeout middleware
+    // re-issues on every foreground request -- see NavigationKey() in
+    // PracticeManagementGatewayController for why the rotating token made
+    // navigation codes fail after deployment.
+    public const string NavigationKeyKey = "PracticeManagement.NavigationKey";
+
+    // Sent by requests the page makes on its own, without the user doing
+    // anything (the sidebar notification poll in _Layout.cshtml). The
+    // idle-timeout middleware in Program.cs does not renew the access
+    // token for these, so an open-but-idle tab still times out after
+    // Security:TokenLifetimeMinutes instead of being kept alive forever
+    // by its own polling.
+    public const string BackgroundRequestHeader = "X-PM-Background";
 }

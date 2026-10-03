@@ -1,0 +1,56 @@
+<dialog open id="oaPlPlanDialog" style="max-width:720px; width:96%;">
+    <form id="oaPlPlanForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaPlPlanDialogTitle">Add Plan</h2>
+            <button class="pm-icon-button" type="button" id="oaPlPlanClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="pm-message" id="oaPlPlanMessage" style=""></div>
+        <input type="hidden" id="oaPlPlanEditId" />
+
+        
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start;">
+            <label class="pm-field" style="min-width:0;">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="oaPlPlanCode" type="text" maxlength="80" required />
+            </label>
+            <label class="pm-field" style="min-width:0;">
+                <span>Type <span class="required">*</span></span>
+                <select class="pm-input" id="oaPlPlanType" required></select>
+            </label>
+        </div>
+        
+        <div class="pm-field" style="min-width:0; margin-top:10px;">
+            <span>Owner</span>
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                <select class="pm-input" id="oaPlPlanOwnerRole" style="min-width:0;" aria-label="Owner Role">
+                    <option value="">Loading roles...</option>
+                </select>
+                <select class="pm-input" id="oaPlPlanOwner" style="min-width:0;" aria-label="Owner Employee (current holder)">
+                    <option value="">-- pick a role first --</option>
+                </select>
+            </div>
+        </div>
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Name <span class="required">*</span></span>
+            <input class="pm-input" id="oaPlPlanName" type="text" maxlength="240" required />
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label class="pm-field">
+                <span>Period From</span>
+                <input class="pm-input" id="oaPlPlanFrom" type="date" />
+            </label>
+            <label class="pm-field">
+                <span>Period To</span>
+                <input class="pm-input" id="oaPlPlanTo" type="date" />
+            </label>
+        </div>
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Description</span>
+            <textarea class="pm-input" id="oaPlPlanDescription" rows="3" maxlength="4000"></textarea>
+        </label>
+        <div class="pm-dialog-actions">
+            <button type="button" id="oaPlPlanCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaPlPlanSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>

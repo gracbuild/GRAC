@@ -65,6 +65,8 @@
             <i class="fa-solid fa-arrows-rotate"></i>
         </button>
     </div>
+    @* Issues & Actions dashboard drill-down (414). *@
+    <div id="excDrillBanner" hidden></div>
 
     <div class="pm-table-wrap">
         <table id="excTable">
@@ -191,7 +193,7 @@
                     <span>Related Control / Practice(s) <span class="pm-hint">(where applicable -- add as many as apply)</span></span>
                     <div class="exc-practice-add-row">
                         <button type="button" class="pm-button" id="newExcPracticeAddBtn">
-                            <i class="fa-solid fa-plus"></i> Add a practice
+                            <i class="fa-solid fa-plus"></i> Add a practice instance
                         </button>
                     </div>
                     <ul class="exc-practice-list" id="newExcPracticeList"></ul>
@@ -246,40 +248,40 @@
 <div class="pm-modal" id="newExcPracticeModal" hidden>
     <div class="pm-modal-panel pm-modal-wide">
         <header>
-            <h2>Add a practice</h2>
+            <h2>Add a practice instance</h2>
             <button class="pm-modal-close" type="button" data-close-exc-practice aria-label="Close">&times;</button>
         </header>
         <p class="pm-hint">
-            Choose the framework, then narrow down to the practice. Each list loads only
-            what sits under the selection above it. Practices already added to this
-            exception are not offered again.
+            Choose the framework, then narrow down to the practice and its instance. Each
+            list loads only what sits under the selection above it. Instances already added
+            to this exception are not offered again.
         </p>
         <div id="newExcPracticePickerHost"></div>
         <p class="pm-form-message" id="newExcPracticeAddHint" role="status" aria-live="polite"></p>
         <footer class="pm-modal-footer">
             <button type="button" class="pm-button" data-close-exc-practice>Cancel</button>
             <button type="button" class="pm-button primary" id="newExcPracticeConfirm">
-                <i class="fa-solid fa-plus"></i> Add practice
+                <i class="fa-solid fa-plus"></i> Add practice instance
             </button>
         </footer>
     </div>
 </div>
 
 <style>
-    .exc-status-chip { display: inline-block; padding: 2px 8px; border-radius: 999px;
+    .exc-status-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
         font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .exc-pending   { background: #fefcbf; color: #744210; }
-    .exc-approved  { background: #c6f6d5; color: #22543d; }
-    .exc-rejected  { background: #fed7d7; color: #742a2a; }
-    .exc-withdrawn { background: #edf2f7; color: #4a5568; }
+    .exc-pending   { background: var(--warning-50); color: var(--warning-700); }
+    .exc-approved  { background: var(--success-100); color: var(--success-700); }
+    .exc-rejected  { background: var(--danger-200); color: var(--danger-700); }
+    .exc-withdrawn { background: var(--bg-subtle); color: var(--fg-secondary); }
 
     .exc-meta {
         display: grid; grid-template-columns: 120px 1fr; row-gap: 6px; column-gap: 12px;
-        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md); font-size: 13px;
     }
-    .exc-meta dt { color: #718096; font-weight: 600; margin: 0;
+    .exc-meta dt { color: var(--fg-muted); font-weight: 600; margin: 0;
                    text-transform: uppercase; font-size: 11px; align-self: center; }
-    .exc-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+    .exc-meta dd { margin: 0; color: var(--neutral-700); word-break: break-word; }
 
     /* Modal overlay (same defensive CSS as gap-detail so pm-modal
        renders as a proper popup regardless of global stylesheet). */
@@ -296,8 +298,8 @@
            The .pm-modal-close override below is kept deliberately:
            the global rule is a bordered button, this is a glyph. */
         .pm-modal-close { background: transparent; border: 0; padding: 0;
-        font-size: 26px; line-height: 1; cursor: pointer; color: #718096; }
-    .pm-modal-close:hover { color: #e53e3e; }
+        font-size: 26px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
 
     /* Migration 328 -- the Add Custom Exception dialog's own
        Practice Picker "Add to list" row and the resulting list. */
@@ -305,11 +307,11 @@
     .exc-practice-list { list-style: none; margin: 8px 0 0; padding: 0;
         display: flex; flex-direction: column; gap: 6px; }
     .exc-practice-list li { display: flex; align-items: center; justify-content: space-between;
-        gap: 10px; background: #f7fafc; border-radius: 6px; padding: 6px 10px;
-        font-size: 13px; color: #2d3748; }
-    .exc-practice-list button { background: transparent; border: 0; color: #718096;
+        gap: 10px; background: var(--neutral-50); border-radius: var(--radius-md); padding: 6px 10px;
+        font-size: 13px; color: var(--neutral-700); }
+    .exc-practice-list button { background: transparent; border: 0; color: var(--fg-muted);
         cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
-    .exc-practice-list button:hover { color: #e53e3e; }
+    .exc-practice-list button:hover { color: var(--danger-700); }
 
 </style>
 
@@ -321,5 +323,7 @@
    Exception dialog opens (same ordering reason risk-centre.cshtml
    states for its own load of this file). *@
 <script src="~/js/practice-picker.js" asp-append-version="true"></script>
+@* Management dashboard drill-down receiver (414) -- read by exception-centre.js. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 <script src="~/js/ExceptionCentre/exception-centre.js" asp-append-version="true"></script>
 <script src="~/js/Shared/exception-actions.js" asp-append-version="true"></script>

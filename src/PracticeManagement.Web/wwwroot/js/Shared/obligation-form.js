@@ -82,6 +82,14 @@
 
   const $ = id => document.getElementById(id);
 
+  // Migration 412: the stored owner name when the form opened, and
+  // whether the Owner dropdown still shows a legacy role placeholder.
+  let seedResponsibility = null;
+  function ownerIsLegacy() {
+    const opt = $("gofResponsibility").selectedOptions && $("gofResponsibility").selectedOptions[0];
+    return !!(opt && opt.disabled);
+  }
+
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -618,6 +626,7 @@
           description: F(row, "obligationDescription"),
           typeCode:    F(row, "obligationTypeCode"),
           responsibility:         F(row, "responsibility"),
+          ownerEmployeeId:        F(row, "ownerEmployeeId"),   // 412
           approvalAuthority:      F(row, "approvalAuthority"),
           assuranceType:          F(row, "assuranceType"),
           implementationStatusId: F(row, "implementationStatusId"),
@@ -630,6 +639,7 @@
           description: F(row, "obligationDescription"),
           typeCode:    F(row, "typeCode"),
           responsibility:         F(row, "responsibility"),
+          ownerEmployeeId:        F(row, "ownerEmployeeId"),   // 412
           approvalAuthority:      F(row, "approvalAuthority"),
           assuranceType:          F(row, "adoptedAssuranceType"),
           implementationStatusId: F(row, "implementationStatusId"),
@@ -666,7 +676,16 @@
     const rowType = String(seed.typeCode || "");
     $("gofType").innerHTML = options(typeOptionsFor(rowType), rowType, "Select a type...");
 
-    $("gofResponsibility").innerHTML = options(lookup("roles"), seed.responsibility, "Not set");
+    // Migration 412: Owner is an EMPLOYEE (a Functional User -- the host
+    // passes them as lookups.owners), no longer a Role Master name. A
+    // legacy role name stored before 412 shows as a disabled placeholder
+    // until an employee is picked.
+    const ownerId = seed.ownerEmployeeId == null ? "" : String(seed.ownerEmployeeId);
+    seedResponsibility = seed.responsibility || null;
+    const legacyOwner = !ownerId ? String(seed.responsibility || "").trim() : "";
+    $("gofResponsibility").innerHTML =
+        (legacyOwner ? '<option value="" selected disabled>' + esc(legacyOwner) + " (role - pick an employee)</option>" : "")
+      + options(lookup("owners"), ownerId, "Not set");
     $("gofApproval").innerHTML       = options(lookup("roles"), seed.approvalAuthority, "Not set");
     $("gofAssuranceType").innerHTML  = options(lookup("assuranceTypes"), seed.assuranceType, "Not set");
     $("gofImplStatus").innerHTML     = options(lookup("implementationStatuses"), seed.implementationStatusId, "Not set");
@@ -799,7 +818,14 @@
       typedDetailJson:       Object.keys(detail).length ? JSON.stringify([detail]) : "[]",
       executionFrequencyId:  execId ? Number(execId) : null,
       executionFrequency:    labelOf(lookup("frequencies"), execId),
-      responsibility:        $("gofResponsibility").value || null,
+      // Migration 412: the owner EMPLOYEE (0 = none) and its name. The
+      // procedure re-derives the name from the employee record.
+      // A legacy role name left untouched (its disabled placeholder is
+      // still the selection) is kept as it is: null owner = no change.
+      ownerEmployeeId:       ownerIsLegacy() ? null
+                           : ($("gofResponsibility").value ? Number($("gofResponsibility").value) : 0),
+      responsibility:        ownerIsLegacy() ? (seedResponsibility || null)
+                           : labelOf(lookup("owners"), $("gofResponsibility").value),
       approvalAuthority:     $("gofApproval").value || null,
       assuranceType:         $("gofAssuranceType").value || null,
       // Migration 242: per-obligation implementation status.

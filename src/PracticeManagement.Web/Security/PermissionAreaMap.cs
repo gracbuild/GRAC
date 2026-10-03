@@ -62,13 +62,27 @@ public static class PermissionAreaMap
         // (change request 2026-09-22, part 2) -- same screen, same gate as
         // custom-release-source-structure above.
         "custom-statement-classification",
-        "subscription-owner"
+        "subscription-owner",
+        // Add Release > Subscribe from Repository (migration 406): lives in
+        // the Add Release dialog of this screen, so it needs exactly what
+        // Add Release needs -- VIEW to list, ADD to submit a request.
+        "repository-subscription-requests"
     };
 
     // Single-owner helpers that map to a screen of their own.
     private static readonly Dictionary<string, string> DirectMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["evidence-obligations-typed"] = "evidence-obligations",
+        // Published (typed) obligations of a practice. Read by the Practice
+        // View page's Obligations panel and the Practice Instance form's
+        // obligation section -- both governed by Organization Practices
+        // (see practice-view / practice-instances below). It used to map to
+        // "evidence-obligations", the old View Obligations screen, which has
+        // no menu_master row: no role could hold "evidence-obligations:VIEW",
+        // so every non-admin got HTTP 403 on the panel while
+        // admin@grac.local ("*:*") loaded it. The procedure still scopes the
+        // rows to the requested organization, and the API still checks the
+        // caller's access to that organization.
+        ["evidence-obligations-typed"] = "organization-requirements",
         // Calendar grid feed (practice-calendar.js). No menu of its own;
         // the screen it belongs to is assurance-calendar (migration 028).
         ["assurance-calendar-events"] = "assurance-calendar",
@@ -116,13 +130,40 @@ public static class PermissionAreaMap
         // quick-create, reached from the Committee Member row on the
         // Add/Edit Committee form. No menu_master row of its own -- it is
         // a per-form auxiliary write, governed by the same permission as
-        // the Committee form itself (committees:ADD / committees:EDIT),
-        // same reasoning as practice-instances/user-ownership above.
+        // the Committee form itself -- which is now Organization
+        // Administration's ADD / EDIT (see the tab entries below), so this
+        // points straight there rather than at "committees" (DirectMap is
+        // one hop, not chained). Same reasoning as practice-instances/
+        // user-ownership above.
         // Reading designations (committee-designations:VIEW) is instead
         // granted to every role via LoginController.SupportingReads, same
         // as team-department-employees/team-members -- see that list's
         // own comment for why.
-        ["committee-designations"] = "committees"
+        ["committee-designations"] = "organization-administration",
+        // The Organization Administration tabs. Migration 060 set these five
+        // menu_master rows Inactive to take them out of the sidebar (they
+        // are tabs inside Organization Administration now), but permissions
+        // load only from Active menu rows -- so "committees:VIEW" and the
+        // rest became grants no role could hold, and every non-admin got
+        // "You do not have permission to view committees" on the tab.
+        // The screen that shows them governs them instead: VIEW on
+        // Organization Administration lists them, its ADD/EDIT/DELETE
+        // govern Add/Edit/Inactive. Users / Employees is NOT here -- its
+        // "users" menu row (User Management) is still Active and grantable.
+        ["locations"] = "organization-administration",
+        ["departments"] = "organization-administration",
+        ["business-functions"] = "organization-administration",
+        ["teams"] = "organization-administration",
+        ["committees"] = "organization-administration",
+        // Practice View (practice-view.cshtml) is a screen with no
+        // menu_master row, so no role could ever be granted
+        // "practice-view:VIEW" and every non-admin was refused both the
+        // navigation code and the navigation-context read. It is reached
+        // only by "View" on the Organization Practices grid, so that
+        // screen governs it -- same rule as practice-instances above, and
+        // the same mapping PracticeController.ScreenPermissionArea applies
+        // to the page itself.
+        ["practice-view"] = "organization-requirements"
     };
 
     /// <summary>

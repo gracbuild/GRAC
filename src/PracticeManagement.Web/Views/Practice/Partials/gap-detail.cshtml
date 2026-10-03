@@ -55,7 +55,7 @@
 
     <div class="pm-toolbar gap-detail-toolbar">
         <a class="pm-button" href="~/Practice/Index/gaps">
-            <i class="fa-solid fa-arrow-left"></i> Back to Gap Centre
+            <i class="fa-solid fa-arrow-left"></i> Back to Gap Register
         </a>
         @* Migration 325. The read-only "everything about this gap"
            companion page -- full details plus Task/Exception/Risk cards.
@@ -163,15 +163,15 @@
        for this gap and exposes the Override action. Hidden when the gap
        has no severity_code (nothing to match against). *@
     <div id="gapSlaCard"
-         style="display:none; margin:12px 0; padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc;">
+         style="display:none; margin:12px 0; padding:10px 14px; border:1px solid var(--border-strong); border-radius:var(--radius-md); background:var(--neutral-50);">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:#0f172a;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--fg-strong);">
                 <span id="gapSlaSourceBadge" class="pm-badge"
-                      style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">Auto</span>
+                      style="background:var(--success-100); color:var(--success-700); padding:2px 8px; border-radius:var(--radius-md); font-size:11px; font-weight:600;">Auto</span>
                 <strong id="gapSlaMasterName">--</strong>
-                <span id="gapSlaDaysText" style="color:#475569;">-- days</span>
-                <span id="gapSlaDueText" style="color:#475569;"></span>
-                <span id="gapSlaPendingHint" style="color:#78350f; font-size:12px;" hidden>
+                <span id="gapSlaDaysText" style="color:var(--fg-secondary);">-- days</span>
+                <span id="gapSlaDueText" style="color:var(--fg-secondary);"></span>
+                <span id="gapSlaPendingHint" style="color:var(--warning-700); font-size:12px;" hidden>
                     <i class="fa-solid fa-clock" aria-hidden="true"></i>
                     Override request pending approval.
                 </span>
@@ -245,7 +245,7 @@
                        reclassification is needed, do it via the source
                        (practice_instance.criticality / observation /
                        custom-gap priority). *@
-                    <span>Severity <small style="color:#94a3b8; font-weight:normal;">(auto)</small></span>
+                    <span>Severity <small style="color:var(--fg-subtle); font-weight:normal;">(auto)</small></span>
                     @* Explicit disabled="disabled" -- Razor/HTML sanitisers
                        sometimes strip boolean attributes when they carry
                        no value. Belt-and-suspenders JS lock lives in
@@ -253,7 +253,7 @@
                     <select id="anSeverityCode"
                             disabled="disabled"
                             aria-disabled="true"
-                            style="background:#f1f5f9; color:#475569; cursor:not-allowed;"
+                            style="background:var(--bg-subtle); color:var(--fg-secondary); cursor:not-allowed;"
                             title="Severity is auto-derived from the gap source. Not editable here.">
                         <option value="">--</option>
                         <option value="Low">Low</option>
@@ -446,17 +446,17 @@
         grid-column: 1 / -1;
         margin: 4px 0 4px;
         padding: 14px 16px 12px;
-        border: 1px solid #cbd5e0;
-        border-radius: 8px;
-        background: #f7fafc;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-md);
+        background: var(--neutral-50);
     }
     .pm-rca-block > legend {
         padding: 0 6px;
         font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
-        text-transform: uppercase; color: #2d3748;
+        text-transform: uppercase; color: var(--neutral-700);
     }
     .pm-rca-block .pm-form-grid { gap: 10px 14px; }
-    .pm-rca-block textarea { background: #fff; }
+    .pm-rca-block textarea { background: var(--bg-surface); }
     /* One-column at narrow widths; the outer 2-col grid does the same. */
     @@media (max-width: 900px) {
         .pm-rca-block .pm-form-grid { grid-template-columns: 1fr; }
@@ -470,7 +470,7 @@
     }
     .pm-rca-tick-row > input[type="checkbox"] { margin: 0; }
     .pm-rca-tick-row > .pm-rca-hint {
-        font-size: 11px; color: #718096;
+        font-size: 11px; color: var(--fg-muted);
     }
 
     /* Migration 323: three independent decision checkboxes (Generate
@@ -482,13 +482,13 @@
         display: flex; flex-wrap: wrap; gap: 10px 22px;
         margin: 4px 0 4px;
         padding: 12px 16px;
-        border: 1px solid #cbd5e0;
-        border-radius: 8px;
-        background: #f7fafc;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-md);
+        background: var(--neutral-50);
     }
     .pm-decision-checkboxes .pm-decision-check {
         display: flex; align-items: center; gap: 8px;
-        font-weight: 600; color: #2d3748;
+        font-weight: 600; color: var(--neutral-700);
         cursor: pointer;
     }
     .pm-decision-checkboxes .pm-decision-check input[type="checkbox"] { margin: 0; }
@@ -497,37 +497,37 @@
        state highlighted. Terminal-invalid states render red. */
     .gap-stepper-compact {
         display: inline-flex; align-items: center; gap: 4px;
-        padding: 4px 8px; background: #f7fafc; border-radius: 999px;
-        font-size: 11px; color: #4a5568;
+        padding: 4px 8px; background: var(--neutral-50); border-radius: var(--radius-pill);
+        font-size: 11px; color: var(--fg-secondary);
     }
     .gap-stepper-compact .step {
         display: inline-flex; align-items: center; gap: 4px;
-        padding: 2px 8px; border-radius: 999px;
+        padding: 2px 8px; border-radius: var(--radius-pill);
     }
-    .gap-stepper-compact .step.past    { color: #22543d; }
-    .gap-stepper-compact .step.current { background: #bee3f8; color: #2c5282; font-weight: 700; }
-    .gap-stepper-compact .step.terminal-invalid { background: #fed7d7; color: #742a2a; font-weight: 700; }
-    .gap-stepper-compact .sep { color: #cbd5e0; }
+    .gap-stepper-compact .step.past    { color: var(--success-700); }
+    .gap-stepper-compact .step.current { background: var(--primary-100); color: var(--primary-700); font-weight: 700; }
+    .gap-stepper-compact .step.terminal-invalid { background: var(--danger-200); color: var(--danger-700); font-weight: 700; }
+    .gap-stepper-compact .sep { color: var(--neutral-300); }
 
     .gap-action-strip {
         display: flex; flex-wrap: wrap; gap: 6px;
         padding: 12px 16px; margin-bottom: 12px;
-        background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 6px;
+        background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
     }
     .gap-action-strip:empty { display: none; }
     .gap-action-strip::before {
         content: "Actions:"; font-size: 11px; font-weight: 600;
-        color: #4a5568; text-transform: uppercase; letter-spacing: 0.02em;
+        color: var(--fg-secondary); text-transform: uppercase; letter-spacing: 0.02em;
         align-self: center; margin-right: 8px;
     }
 
     .gap-detail-meta {
         display: grid; grid-template-columns: 140px 1fr; row-gap: 6px; column-gap: 12px;
-        margin: 0 0 16px 0; padding: 12px 14px; background: #f7fafc; border-radius: 6px; font-size: 13px;
+        margin: 0 0 16px 0; padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md); font-size: 13px;
     }
-    .gap-detail-meta dt { color: #718096; font-weight: 600; margin: 0;
+    .gap-detail-meta dt { color: var(--fg-muted); font-weight: 600; margin: 0;
                           text-transform: uppercase; font-size: 11px; align-self: center; }
-    .gap-detail-meta dd { margin: 0; color: #2d3748; word-break: break-word; }
+    .gap-detail-meta dd { margin: 0; color: var(--neutral-700); word-break: break-word; }
 
     /* Practice Instance link (321) -- plain "open in a new tab" line
        above the analysis form; no dedicated tab/panel any more.
@@ -537,37 +537,37 @@
     .gap-instance-link-wrap a { font-weight: 600; }
 
     /* History compact -- lives inside Metadata tab now. */
-    .gap-history-compact h3 { font-size: 12px; text-transform: uppercase; color: #718096;
+    .gap-history-compact h3 { font-size: 12px; text-transform: uppercase; color: var(--fg-muted);
                               margin: 16px 0 8px 0; letter-spacing: 0.02em; }
     .gap-history-compact ul { list-style: none; padding: 0; margin: 0; font-size: 12px; }
-    .gap-history-compact li { padding: 6px 10px; border-bottom: 1px dashed #e2e8f0; }
+    .gap-history-compact li { padding: 6px 10px; border-bottom: 1px dashed var(--border); }
 
     /* Linked artefacts chips -- one card per Task/Exception/Risk. */
-    .gap-linked-strip { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    .gap-linked-strip { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
     .gap-linked-strip[hidden] { display: none !important; }
-    .gap-linked-strip h3 { font-size: 12px; text-transform: uppercase; color: #718096;
+    .gap-linked-strip h3 { font-size: 12px; text-transform: uppercase; color: var(--fg-muted);
                            margin: 0 0 10px 0; letter-spacing: 0.02em; }
     .gap-linked-chips { display: flex; flex-wrap: wrap; gap: 10px; }
     .gap-linked-chip {
         display: flex; flex-direction: column; gap: 4px;
-        padding: 10px 14px; border: 1px solid #cbd5e0; border-radius: 6px;
-        background: #fff; min-width: 220px; text-decoration: none; color: inherit;
+        padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+        background: var(--bg-surface); min-width: 220px; text-decoration: none; color: inherit;
         transition: box-shadow 0.15s ease;
     }
-    .gap-linked-chip:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: #3182ce; }
+    .gap-linked-chip:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: var(--primary-600); }
     .gap-linked-chip .chip-type {
         font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-        color: #718096;
+        color: var(--fg-muted);
     }
-    .gap-linked-chip.type-task      .chip-type { color: #2c5282; }
-    .gap-linked-chip.type-exception .chip-type { color: #744210; }
-    .gap-linked-chip.type-risk      .chip-type { color: #742a2a; }
-    .gap-linked-chip.type-obligation .chip-type { color: #9b2c2c; }
-    .gap-linked-chip .chip-title  { font-size: 13px; font-weight: 600; color: #2d3748; }
+    .gap-linked-chip.type-task      .chip-type { color: var(--primary-700); }
+    .gap-linked-chip.type-exception .chip-type { color: var(--warning-700); }
+    .gap-linked-chip.type-risk      .chip-type { color: var(--danger-700); }
+    .gap-linked-chip.type-obligation .chip-type { color: var(--danger-700); }
+    .gap-linked-chip .chip-title  { font-size: 13px; font-weight: 600; color: var(--neutral-700); }
     .gap-linked-chip .chip-status {
-        display: inline-block; align-self: flex-start; padding: 2px 8px; border-radius: 999px;
+        display: inline-block; align-self: flex-start; padding: 2px 8px; border-radius: var(--radius-pill);
         font-size: 10px; font-weight: 700; text-transform: uppercase;
-        background: #edf2f7; color: #4a5568;
+        background: var(--bg-subtle); color: var(--fg-secondary);
     }
     /* Failed Obligation(s) strip -- migration 317. Same chip shape as the
        Task/Exception/Risk strip below (.gap-linked-chip, reused rather
@@ -578,32 +578,32 @@
        of the gap, not something the gap created. */
     .gap-failed-obligations-strip { margin: 0 0 20px; }
     .gap-failed-obligations-strip[hidden] { display: none !important; }
-    .gap-failed-obligations-strip h3 { font-size: 12px; text-transform: uppercase; color: #718096;
+    .gap-failed-obligations-strip h3 { font-size: 12px; text-transform: uppercase; color: var(--fg-muted);
                            margin: 0 0 4px 0; letter-spacing: 0.02em; }
     .gap-failed-obligations-strip .pm-hint { margin: 0 0 10px; }
     .gap-linked-chip.type-obligation .chip-status {
-        background: #fff5f5; color: #9b2c2c;
+        background: var(--danger-50); color: var(--danger-700);
     }
 
     .gap-state-chip {
-        display: inline-block; padding: 4px 10px; border-radius: 999px;
+        display: inline-block; padding: 4px 10px; border-radius: var(--radius-pill);
         font-size: 12px; font-weight: 600;
     }
-    .gap-state-chip.state-new { background: #edf2f7; color: #4a5568; }
-    .gap-state-chip.state-validation, .gap-state-chip.state-analysis { background: #fefcbf; color: #744210; }
-    .gap-state-chip.state-delegated { background: #c6f6d5; color: #22543d; }
-    .gap-state-chip.state-invalid, .gap-state-chip.state-duplicate { background: #fed7d7; color: #742a2a; }
+    .gap-state-chip.state-new { background: var(--bg-subtle); color: var(--fg-secondary); }
+    .gap-state-chip.state-validation, .gap-state-chip.state-analysis { background: var(--warning-50); color: var(--warning-700); }
+    .gap-state-chip.state-delegated { background: var(--success-100); color: var(--success-700); }
+    .gap-state-chip.state-invalid, .gap-state-chip.state-duplicate { background: var(--danger-200); color: var(--danger-700); }
     /* Dormant states (retained for historical gaps) */
     .gap-state-chip.state-resolutionplanning,
     .gap-state-chip.state-execution,
     .gap-state-chip.state-verification { background: #e9d8fd; color: #553c9a; }
-    .gap-state-chip.state-closed { background: #c6f6d5; color: #22543d; }
+    .gap-state-chip.state-closed { background: var(--success-100); color: var(--success-700); }
 
     /* Read-only banner (from 173). */
     .gap-terminal-banner {
         display: flex; align-items: flex-start; gap: 12px;
-        background: #fff5f5; border: 1px solid #fc8181; color: #742a2a;
-        border-radius: 6px; padding: 12px 14px; margin: 12px 0;
+        background: var(--danger-50); border: 1px solid var(--danger-500); color: var(--danger-700);
+        border-radius: var(--radius-md); padding: 12px 14px; margin: 12px 0;
     }
     .gap-terminal-banner[hidden] { display: none !important; }
     .gap-terminal-banner i { font-size: 18px; padding-top: 2px; }
@@ -615,8 +615,8 @@
        is the successful outcome, not a problem. */
     .gap-analysed-banner {
         display: flex; align-items: flex-start; gap: 12px;
-        background: #f0fff4; border: 1px solid #9ae6b4; color: #22543d;
-        border-radius: 6px; padding: 12px 14px; margin: 12px 0;
+        background: var(--success-50); border: 1px solid var(--success-200); color: var(--success-700);
+        border-radius: var(--radius-md); padding: 12px 14px; margin: 12px 0;
     }
     .gap-analysed-banner[hidden] { display: none !important; }
     .gap-analysed-banner i { font-size: 18px; padding-top: 2px; }
@@ -629,8 +629,8 @@
        on, not a terminal state and not yet a success. */
     .gap-obligations-blocked-banner {
         display: flex; align-items: flex-start; gap: 12px;
-        background: #fffbeb; border: 1px solid #fbd38d; color: #7b341e;
-        border-radius: 6px; padding: 12px 14px; margin: 12px 0;
+        background: var(--warning-50); border: 1px solid var(--warning-200); color: var(--danger-700);
+        border-radius: var(--radius-md); padding: 12px 14px; margin: 12px 0;
     }
     .gap-obligations-blocked-banner[hidden] { display: none !important; }
     .gap-obligations-blocked-banner i { font-size: 18px; padding-top: 2px; }
@@ -644,7 +644,7 @@
         display: flex; align-items: flex-start; gap: 12px;
         margin: 12px 0; padding: 10px 14px;
         border: 1px solid #b794f4; background: #faf5ff; color: #44337a;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
     }
     .gap-duplicate-strip[hidden] { display: none !important; }
     .gap-duplicate-strip i { font-size: 16px; padding-top: 2px; }
@@ -654,8 +654,8 @@
 
     .gap-invalid-card {
         margin: 12px 0; padding: 12px 14px;
-        border: 1px solid #fc8181; background: #fff5f5; border-radius: 6px;
-        color: #742a2a;
+        border: 1px solid var(--danger-500); background: var(--danger-50); border-radius: var(--radius-md);
+        color: var(--danger-700);
     }
     .gap-invalid-card[hidden] { display: none !important; }
     .gap-invalid-card strong { display: block; font-size: 13px; margin-bottom: 4px;
@@ -675,9 +675,9 @@
            the global rule is a bordered button, this is a glyph. */
         .pm-modal-close {
         background: transparent; border: 0; padding: 0;
-        font-size: 26px; line-height: 1; cursor: pointer; color: #718096;
+        font-size: 26px; line-height: 1; cursor: pointer; color: var(--fg-muted);
     }
-    .pm-modal-close:hover { color: #e53e3e; }
+    .pm-modal-close:hover { color: var(--danger-700); }
 
     /* Mark Duplicate / Mark Invalid dialog (#gapActionModal) -- a bit
        roomier than the shared .pm-modal-panel default (560px / content-
@@ -709,40 +709,40 @@
 @* SLA Override dialog (migration 184). Raises an SLA_CANDIDATE
    exception request; goes to Exception Centre "SLA Candidate" tab. *@
 <dialog id="gapSlaOverrideDialog"
-        style="border:none; border-radius:8px; padding:0; max-width:520px; width:96%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="gapSlaOverrideForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Request SLA Override</h2>
-            <button type="button" id="gapSlaOverrideClose" aria-label="Close"
-                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        style="max-width:520px; width:96%;">
+    <form id="gapSlaOverrideForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2>Request SLA Override</h2>
+            <button class="pm-icon-button" type="button" id="gapSlaOverrideClose" aria-label="Close"
+                   >&times;</button>
         </div>
-        <p style="margin:0 0 12px; color:#475569; font-size:13px;">
-            Override goes to the Exception Centre <strong>SLA Candidate</strong> tab.
+        <p style="margin:0 0 12px; color:var(--fg-secondary); font-size:13px;">
+            Override goes to the Exceptions &amp; Waivers <strong>SLA Candidate</strong> tab.
             The new SLA applies to this gap only if the request is approved.
         </p>
-        <div id="gapSlaOverrideMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="gapSlaOverrideMessage" style="display:none;"></div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Current SLA (days)</span>
-                <input id="gapSlaOverrideCurrent" type="text" disabled
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; background:#f1f5f9;" />
+                <input class="pm-input" id="gapSlaOverrideCurrent" type="text" disabled
+                       style="background:var(--bg-subtle);" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Requested SLA (days) <span style="color:#b91c1c;">*</span></span>
-                <input id="gapSlaOverrideRequested" type="number" min="0" step="1" required
-                       style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+            <label class="pm-field">
+                <span>Requested SLA (days) <span class="required">*</span></span>
+                <input class="pm-input" id="gapSlaOverrideRequested" type="number" min="0" step="1" required
+                       />
             </label>
         </div>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-            <span>Reason <span style="color:#b91c1c;">*</span></span>
-            <textarea id="gapSlaOverrideReason" rows="3" maxlength="4000" required
+        <label class="pm-field">
+            <span>Reason <span class="required">*</span></span>
+            <textarea class="pm-input" id="gapSlaOverrideReason" rows="3" maxlength="4000" required
                       placeholder="Why is a different SLA needed for this gap?"
-                      style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; resize:vertical;"></textarea>
+                     ></textarea>
         </label>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="gapSlaOverrideCancel" class="pm-button">Cancel</button>
             <button type="submit" id="gapSlaOverrideSubmit" class="pm-button primary">Send Request</button>
         </div>

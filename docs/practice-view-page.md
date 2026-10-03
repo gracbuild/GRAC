@@ -588,3 +588,62 @@ The `instanceColumns` column removal (Execution Frequency, Assurance Frequency, 
 Type) has no database or API component and so nothing to roll back beyond re-adding the
 three array entries in `practice-view.cshtml` — see
 [Practice Instances section](#practice-instances-section).
+
+## Row click and the Actions menu (2026-10-03)
+
+This change is UI only. No migration was needed and no API changed.
+
+### Row click
+
+Clicking a row on **Organization Practices** opens this page for that
+practice. It goes through the row's own **View** action
+(`handleAction("view")` in `practice.js`), so it sends the same
+identifiers (practice or organization requirement) and the same
+organization context.
+
+- The row is marked `.pm-row-clickable` with `data-practice-view-index`.
+  This happens only when the caller has VIEW, the same permission that
+  shows View in the row menu.
+- A click on any of these keeps its own behaviour and does not open the
+  page:
+  - the 3-dot trigger;
+  - the bulk-select cell;
+  - any `a`, `button`, `input`, `label` or `select`.
+
+### Actions menu
+
+The page heading has an **Actions** button, the same pattern as Gap, Task
+and Exception View: a `.pm-button` that opens a `.pm-action-menu`
+portalled to the document body. The menu closes on an outside click,
+Escape, resize or scroll.
+
+The drawing and dismissing live in the shared
+`wwwroot/js/Shared/page-actions-menu.js` (`window.gracPageActions.attach`).
+The Operationalize workspace uses the same module. This page only supplies
+the list of items.
+
+It offers what the Organization Practices row menu offers for this
+practice, except **View**, because this page is the view.
+
+- The item reads **Mark Applicability** while the practice is Not
+  Updated, and **Update Applicability** after that.
+- It is shown only when the caller has EDIT or ADD. This page shares
+  `organization-requirements`' permission area, so the grant comes from
+  `ViewBag.Permissions`.
+- It also needs the practice's organization requirement.
+- When neither condition is met, the menu reads "No actions available".
+
+**Configure** and **Add Obligation** stay on their own panels.
+
+### How the applicability form opens
+
+The applicability form belongs to `practice.js`, which this page does not
+load. So the menu item opens Organization Practices with
+`?applicabilityFor=<organization_requirement_id>&organizationId=<org>`.
+
+1. `openRequestedApplicability()` opens the same dialog the row menu
+   opens: `openForm("applicability", id)`. That reads the record by id.
+2. It applies the same EDIT/ADD check.
+3. When the dialog closes, whether saved or cancelled, it returns to this
+   practice's View page with a fresh navigation code. Navigation codes
+   expire after 30 minutes, so the old URL is not reused.

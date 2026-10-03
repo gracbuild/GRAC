@@ -348,7 +348,12 @@ public sealed class ResolveWorkspaceService(
                     RowKey:                 OptionalString(reader, "RowKey")
                                             ?? $"p{Convert.ToInt64(reader["ObligationId"])}",
                     IsOrganizationDefined:  HasColumn(reader, "IsOrganizationDefined")
-                                            && reader["IsOrganizationDefined"] is bool od && od));
+                                            && reader["IsOrganizationDefined"] is bool od && od,
+                    // Migration 396. Optional: absent column = not retired.
+                    RepositoryLifecycleStatus: OptionalString(reader, "RepositoryLifecycleStatus"),
+                    // Migration 412. Optional so a database without 412
+                    // still loads (the Owner picker then shows Not set).
+                    OwnerEmployeeId:           OptionalInt64(reader, "OwnerEmployeeId")));
 
             return new ResolveObligationResult(true, rows);
         }
@@ -419,7 +424,10 @@ public sealed class ResolveWorkspaceService(
                 // Same "null preserves stored" contract; the procedure
                 // COALESCEs onto the target column.
                 connectionTypeId       = d.ConnectionTypeId,
-                connectionUrl          = d.ConnectionUrl
+                connectionUrl          = d.ConnectionUrl,
+                // Migration 412: owner employee. Null keeps the stored
+                // owner; 0 clears it; > 0 sets it (Functional User only).
+                ownerEmployeeId        = d.OwnerEmployeeId
             }));
 
             AddParam(command, "@practice_instance_id", DbType.Int64,  request.PracticeInstanceId);
@@ -1286,6 +1294,9 @@ public sealed class ResolveWorkspaceService(
             AddParam(command, "@execution_frequency_id", DbType.Int32,  (object?)request.ExecutionFrequencyId ?? DBNull.Value);
             AddParam(command, "@execution_frequency",    DbType.String, Text(request.ExecutionFrequency), 120);
             AddParam(command, "@responsibility",         DbType.String, Text(request.Responsibility), 300);
+            // Migration 412: owner employee (null keep / 0 clear / > 0 set).
+            AddParam(command, "@owner_employee_id",      DbType.Int64,
+                     (object?)request.OwnerEmployeeId ?? DBNull.Value);
             AddParam(command, "@approval_authority",     DbType.String, Text(request.ApprovalAuthority), 300);
             AddParam(command, "@assurance_type",         DbType.String, Text(request.AssuranceType), 40);
             AddParam(command, "@remarks",                DbType.String, Text(request.Remarks));
@@ -1503,6 +1514,7 @@ public sealed class ResolveWorkspaceService(
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

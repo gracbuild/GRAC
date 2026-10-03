@@ -63,13 +63,13 @@
     }
 
     const SLA_STYLE = {
-        OnTrack:   { bg: '#dcfce7', fg: '#166534', label: 'On Track'  },
-        DueSoon:   { bg: '#fef9c3', fg: '#854d0e', label: 'Due Soon'  },
-        DueToday:  { bg: '#ffedd5', fg: '#9a3412', label: 'Due Today' },
-        Breached:  { bg: '#fee2e2', fg: '#991b1b', label: 'Breached'  },
-        Extended:  { bg: '#e0e7ff', fg: '#3730a3', label: 'Extended'  },
-        Completed: { bg: '#f1f5f9', fg: '#475569', label: 'Completed' },
-        NotSet:    { bg: '#f1f5f9', fg: '#64748b', label: 'No SLA'    }
+        OnTrack:   { bg: 'var(--success-100)', fg: 'var(--success-700)', label: 'On Track'  },
+        DueSoon:   { bg: 'var(--warning-50)', fg: 'var(--warning-700)', label: 'Due Soon'  },
+        DueToday:  { bg: 'var(--warning-100)', fg: 'var(--danger-700)', label: 'Due Today' },
+        Breached:  { bg: 'var(--danger-100)', fg: 'var(--danger-700)', label: 'Breached'  },
+        Extended:  { bg: 'var(--primary-100)', fg: 'var(--primary-800)', label: 'Extended'  },
+        Completed: { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: 'Completed' },
+        NotSet:    { bg: 'var(--bg-subtle)', fg: 'var(--fg-muted)', label: 'No SLA'    }
     };
 
     function badge(text, bg, fg) {
@@ -78,7 +78,7 @@
 
     function slaBadge(code) {
         if (!code) return '';
-        const s = SLA_STYLE[code] || { bg: '#f1f5f9', fg: '#475569', label: code };
+        const s = SLA_STYLE[code] || { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: code };
         return badge(s.label, s.bg, s.fg);
     }
 
@@ -86,8 +86,8 @@
     // useful than showing a status code the source owner has no context for.
     function kindBadge(row) {
         return row.itemKind === 'Candidate'
-            ? badge('Awaiting validation', '#fef9c3', '#854d0e')
-            : badge('Task', '#e2e8f0', '#334155');
+            ? badge('Awaiting validation', 'var(--warning-50)', 'var(--warning-700)')
+            : badge('Task', 'var(--neutral-200)', 'var(--neutral-700)');
     }
 
     // BRD §14 — the message always ends by handing the closure decision
@@ -95,14 +95,14 @@
     // rather than reworded here.
     function renderStatusLine(state) {
         if (!state) {
-            return '<p style="margin:0 0 10px; color:#64748b; font-size:12px;">'
+            return '<p style="margin:0 0 10px; color:var(--fg-muted); font-size:12px;">'
                  + 'No task action has been raised for this record yet.</p>';
         }
         const done = state.actionStatusCode === 'Completed';
         return '<div style="margin:0 0 12px; padding:8px 12px; border-radius:6px; font-size:12px;'
-             + ' background:' + (done ? '#dcfce7' : '#f8fafc') + ';'
-             + ' border:1px solid ' + (done ? '#86efac' : '#e2e8f0') + ';'
-             + ' color:' + (done ? '#166534' : '#334155') + ';">'
+             + ' background:' + (done ? 'var(--success-100)' : 'var(--neutral-50)') + ';'
+             + ' border:1px solid ' + (done ? 'var(--success-200)' : 'var(--border)') + ';'
+             + ' color:' + (done ? 'var(--success-700)' : 'var(--neutral-700)') + ';">'
              + '<strong>' + esc(state.actionStatusCode) + '</strong> — ' + esc(state.actionStatusMessage)
              + '</div>';
     }
@@ -119,9 +119,9 @@
             // Children are indented rather than hidden: BRD §11 says the
             // parent owns the commitment, but a source owner still wants to
             // see how the work was distributed.
-            const indent = r.isChild ? 'padding-left:22px; color:#475569;' : '';
+            const indent = r.isChild ? 'padding-left:22px; color:var(--fg-secondary);' : '';
             const childNote = (!r.isChild && r.childCount)
-                ? ' <span style="font-size:11px; color:#64748b;">(' + esc(r.childCount) + ' child)</span>' : '';
+                ? ' <span style="font-size:11px; color:var(--fg-muted);">(' + esc(r.childCount) + ' child)</span>' : '';
             out.push('<tr>',
                 '<td style="' + indent + '">' + esc(r.itemNumber || r.itemId) + '</td>',
                 '<td>' + kindBadge(r) + '</td>',

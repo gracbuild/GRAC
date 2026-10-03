@@ -99,9 +99,9 @@
     let eventFilter  = '';
 
     const EVENT_STYLE = {
-        WARNING:    { bg: '#fef9c3', fg: '#854d0e', label: 'Due soon'   },
-        BREACH:     { bg: '#fee2e2', fg: '#991b1b', label: 'Breached'   },
-        ESCALATION: { bg: '#ffedd5', fg: '#9a3412', label: 'Escalation' }
+        WARNING:    { bg: 'var(--warning-50)', fg: 'var(--warning-700)', label: 'Due soon'   },
+        BREACH:     { bg: 'var(--danger-100)', fg: 'var(--danger-700)', label: 'Breached'   },
+        ESCALATION: { bg: 'var(--warning-100)', fg: 'var(--danger-700)', label: 'Escalation' }
     };
 
     function esc(v) {
@@ -212,14 +212,14 @@
         } else {
             for (const n of rows) {
                 const ev = EVENT_STYLE[n.notifyEventCode]
-                        || { bg: '#f1f5f9', fg: '#475569', label: n.notifyEventCode };
+                        || { bg: 'var(--bg-subtle)', fg: 'var(--fg-secondary)', label: n.notifyEventCode };
                 const unread = n.statusCode === 'Pending';
                 const tr = document.createElement('tr');
                 if (unread) tr.style.fontWeight = '600';
                 tr.innerHTML = [
                     '<td><span class="pm-badge" style="background:' + ev.bg + '; color:' + ev.fg + ';">'
                         + esc(ev.label) + '</span></td>',
-                    '<td>' + esc(n.taskNumber || ('#' + n.taskId)) + '<div style="font-size:11px; font-weight:400; color:#64748b;">'
+                    '<td>' + esc(n.taskNumber || ('#' + n.taskId)) + '<div style="font-size:11px; font-weight:400; color:var(--fg-muted);">'
                         + esc(n.taskTitle || '') + '</div></td>',
                     // BRD §13 distinguishes owner reminders from configured
                     // management escalation; the recipient should know which
@@ -229,7 +229,7 @@
                               : 'Role: ' + esc(n.roleName || '')) + '</td>',
                     '<td>' + esc(fmtDate(n.dueAt)) + '</td>',
                     '<td>' + esc(fmtDate(n.enteredDt)) + '</td>',
-                    '<td>' + (unread ? '<span class="pm-badge" style="background:#dbeafe; color:#1e40af;">Unread</span>'
+                    '<td>' + (unread ? '<span class="pm-badge" style="background:var(--primary-100); color:var(--primary-700);">Unread</span>'
                                      : '<span class="pm-badge">Read</span>') + '</td>',
                     '<td>' + (unread
                         ? '<button type="button" class="pm-button" data-mark="' + esc(n.taskNotificationId) + '">Mark read</button>'

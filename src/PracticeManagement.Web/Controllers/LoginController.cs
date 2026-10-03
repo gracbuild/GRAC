@@ -97,8 +97,8 @@ public sealed class LoginController(
         // selected members, regardless of whether their role separately
         // holds "committees:VIEW". The write side of Committee
         // Designations (the inline Add Designation quick-create) is NOT
-        // here -- it is gated by "committees:ADD"/"committees:EDIT" via
-        // PermissionAreaMap instead, since creating data (unlike reading
+        // here -- it is gated by the Committee form's ADD/EDIT (now
+        // Organization Administration's, see PermissionAreaMap) instead, since creating data (unlike reading
         // an auxiliary lookup) should follow the same permission as
         // editing the Committee itself.
         "committee-members:VIEW",

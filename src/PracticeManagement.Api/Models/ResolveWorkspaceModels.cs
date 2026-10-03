@@ -229,7 +229,19 @@ public sealed record ResolveObligationRow(
     /// has no published side to compare against, is always adopted, and
     /// can be edited and removed rather than only adopted.
     /// </summary>
-    bool    IsOrganizationDefined = false);
+    bool    IsOrganizationDefined = false,
+    /// <summary>
+    /// Migration 396: "Retired" once a Control Management retirement of
+    /// this obligation has been approved for the organization (flag only --
+    /// the card stays, with a badge). Null on organization-defined
+    /// obligations and on a database without 396.
+    /// </summary>
+    string? RepositoryLifecycleStatus = null,
+    /// <summary>
+    /// Migration 412: the owner employee behind Responsibility. Null on a
+    /// row still carrying a legacy role name, or with no owner yet.
+    /// </summary>
+    long?   OwnerEmployeeId = null);
 
 public sealed record ResolveObligationResult(
     bool Success, IReadOnlyList<ResolveObligationRow> Obligations, string? Error = null);
@@ -384,7 +396,16 @@ public sealed record ResolveLocalObligationSaveRequest(
     /// somebody has already located or assigned an owner to is kept even
     /// when its type is dropped from the list.
     /// </summary>
-    IReadOnlyList<ResolveLocalEvidenceItem>? Evidence = null);
+    IReadOnlyList<ResolveLocalEvidenceItem>? Evidence = null,
+    /// <summary>
+    /// Migration 412: the obligation Owner as an EMPLOYEE (a Functional
+    /// User). Null keeps the stored owner (older callers), 0 clears it,
+    /// &gt; 0 sets it -- the procedure refuses anyone who is not an active
+    /// Functional User of the organization and writes Responsibility (the
+    /// display name) from the employee record. Optional and last so older
+    /// payloads still bind.
+    /// </summary>
+    long?   OwnerEmployeeId = null);
 
 public sealed record ResolveLocalEvidenceItem(
     int     EvidenceTypeId,
@@ -457,7 +478,16 @@ public sealed record ResolveObligationDecision(
     /// Carried to sp_pm_sync_instance_schedule_rules after adoption, not
     /// to sp_resolve_obligation_adopt.
     /// </summary>
-    DateTime? FirstOccurrenceDate = null);
+    DateTime? FirstOccurrenceDate = null,
+    /// <summary>
+    /// Migration 412: the obligation Owner as an EMPLOYEE (a Functional
+    /// User). Null keeps the stored owner (older callers), 0 clears it,
+    /// &gt; 0 sets it -- the procedure refuses anyone who is not an active
+    /// Functional User of the organization and writes Responsibility (the
+    /// display name) from the employee record. Optional and last so older
+    /// payloads still bind.
+    /// </summary>
+    long?   OwnerEmployeeId = null);
 
 public sealed record ResolveObligationAdoptRequest(
     long PracticeInstanceId,

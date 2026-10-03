@@ -1,0 +1,306 @@
+@*
+    Repository Updates -- screen key `repository-updates` (migration 395,
+    statement subscription copy model phase 3).
+
+    Control Management changes to a subscribed release (new, edited or
+    retired statements, structure, controls, practice links, requirements,
+    obligations) no longer reach the organization directly. The scheduled
+    detection (RepositoryChangeDetectWorker -> sp_repository_change_detect)
+    records each difference here, and the release owner or an organization
+    admin approves or rejects it (sir's decisions, 2026-09-28).
+
+    Reached from the Standards & Frameworks release row ("Repository
+    Updates", with the pending count) and from Home -> Needs your attention.
+    No menu row of its own -- same convention as custom-source-statements;
+    PracticeController.ScreenPermissionArea maps it onto organization-controls.
+    Who may DECIDE is enforced by sp_repository_change_apply, not here.
+
+    Query string: organizationId (required), releaseId (optional).
+    Self-contained: its own helpers, talks to /practice/api/repository-changes.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<style>
+    #ruRoot .ru-hint { color: var(--fg-muted); font-size: 12px; margin: 0 0 14px; }
+    #ruRoot .ru-msg { margin: 0 0 14px; padding: 8px 12px; border-radius: var(--radius-md); font-size: 13px; display: none; }
+    #ruRoot .ru-msg.info    { display: block; background: var(--primary-50); color: var(--primary-800); border: 1px solid var(--primary-100); }
+    #ruRoot .ru-msg.error   { display: block; background: var(--danger-50); color: var(--danger-700); border: 1px solid var(--danger-200); }
+    #ruRoot .ru-msg.success { display: block; background: var(--success-50); color: var(--success-700); border: 1px solid var(--success-200); }
+    #ruRoot .ru-actions { display: flex; gap: 10px; margin: 0 0 12px; flex-wrap: wrap; }
+    #ruRoot table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #ruRoot th, #ruRoot td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    #ruRoot th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted); }
+    #ruRoot .ru-diff { background: var(--bg-subtle, var(--neutral-50)); }
+    #ruRoot .ru-diff table { margin: 4px 0; }
+    #ruRoot .ru-diff td { font-size: 12px; word-break: break-word; }
+    #ruRoot .ru-old { color: var(--danger-700); }
+    #ruRoot .ru-new { color: var(--success-700); }
+    #ruRoot .ru-row-actions { white-space: nowrap; display: flex; gap: 6px; }
+</style>
+
+<div id="ruRoot">
+    <p class="ru-hint">
+        Changes Control Management made to your subscribed releases since they were copied into this
+        organization. Nothing here reaches the organization until it is approved. Retiring an item only
+        flags it; practices, instances and tasks are not closed. Approve structure and statements before
+        the links that depend on them -- "Approve selected" applies them in that order.
+    </p>
+
+    <div class="ru-msg" id="ruMessage" role="status"></div>
+
+    <div class="pm-toolbar pm-toolbar-compact">
+        <select id="ruRelease" aria-label="Release"><option value="">All releases</option></select>
+        <select id="ruStatus" aria-label="Status">
+            <option value="Pending" selected>Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Superseded">Superseded</option>
+            <option value="All">All</option>
+        </select>
+        <a class="pm-button" id="ruBack" href="#">Back to Standards &amp; Frameworks</a>
+    </div>
+
+    <div class="ru-actions" id="ruBulk" hidden>
+        <button type="button" class="pm-button primary" id="ruApproveSelected">Approve selected</button>
+        <button type="button" class="pm-button" id="ruRejectSelected">Reject selected</button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:28px"><input type="checkbox" id="ruSelectAll" aria-label="Select all"></th>
+                    <th>Item</th>
+                    <th>Kind</th>
+                    <th>Change</th>
+                    <th>Release</th>
+                    <th>Detected</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="ruRows">
+                <tr><td colspan="8" class="pm-empty">Loading repository updates...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+    const base = String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "");
+    const U    = p => base + p;
+    const API  = U("/practice/api/repository-changes");
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const esc  = v => String(v ?? "").replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const F = (row, key) => row == null ? undefined
+        : (row[key] !== undefined ? row[key] : row[key.charAt(0).toLowerCase() + key.slice(1)]);
+    const fmtDate = v => !v ? "" : (typeof window.gracFormatDateOnly === "function" ? window.gracFormatDateOnly(v) : String(v).slice(0, 10));
+
+    // Readable names for the copy steps (repository_copy_config.copy_code).
+    const KIND = {
+        StructureNode: "Source structure", SourceControlMap: "Control placement", Control: "Control",
+        ControlRequirementMap: "Control -> practice link", Statement: "Source statement",
+        StatementRequirementMap: "Statement -> practice link", Requirement: "Practice",
+        Obligation: "Obligation", ObligationMap: "Obligation -> practice link", ObligationEvidence: "Obligation evidence"
+    };
+    // Organization-side and technical columns never worth showing in a diff.
+    const HIDDEN = new Set(["organization_id", "lifecycle_status", "source_version_hash", "copied_dt", "copied_by",
+        "content_hash", "entered_by", "entered_dt", "updated_by", "updated_dt", "modified_by", "modified_dt"]);
+
+    const query = new URLSearchParams(window.location.search);
+    const organizationId = query.get("organizationId") || "";
+    const releaseEl = document.getElementById("ruRelease");
+    const statusEl  = document.getElementById("ruStatus");
+    const rowsEl    = document.getElementById("ruRows");
+    const bulkEl    = document.getElementById("ruBulk");
+    const allEl     = document.getElementById("ruSelectAll");
+    const msgEl     = document.getElementById("ruMessage");
+    let records = [];
+
+    document.getElementById("ruBack").href =
+        U(`/Practice/Index/organization-controls?list=1${organizationId ? "&organizationId=" + encodeURIComponent(organizationId) : ""}`);
+
+    function setMsg(text, kind) {
+        msgEl.className = "ru-msg" + (kind ? " " + kind : "");
+        msgEl.textContent = text || "";
+    }
+
+    async function call(url, options) {
+        const res = await fetch(url, Object.assign({ credentials: "same-origin" }, options));
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* non-JSON */ }
+        if (!res.ok) throw new Error((body && (body.error || body.message)) || `Request failed (HTTP ${res.status})`);
+        return body;
+    }
+    const post = (path, data) => call(`${API}${path}${path.includes("?") ? "&" : "?"}organizationId=${encodeURIComponent(organizationId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+        body: JSON.stringify(data || {})
+    });
+
+    function parse(json) {
+        if (!json) return null;
+        try { return JSON.parse(json); } catch (_) { return null; }
+    }
+
+    // Field-by-field comparison of the organization's copy and grac_new.
+    function diffMarkup(r) {
+        const oldRow = parse(F(r, "OldSnapshotJson")) || {};
+        const newRow = parse(F(r, "NewSnapshotJson")) || {};
+        const keys = [...new Set([...Object.keys(oldRow), ...Object.keys(newRow)])]
+            .filter(k => !HIDDEN.has(k) && !/^org_/.test(k));
+        const show = v => v === null || v === undefined ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v));
+        const action = F(r, "ChangeAction");
+        const lines = keys
+            .filter(k => action !== "Changed" || show(oldRow[k]) !== show(newRow[k]))
+            .map(k => `<tr><td>${esc(k)}</td>
+                <td class="ru-old">${esc(show(oldRow[k]))}</td>
+                <td class="ru-new">${esc(show(newRow[k]))}</td></tr>`).join("");
+        return lines
+            ? `<table><thead><tr><th>Field</th><th>In this organization</th><th>In the repository</th></tr></thead><tbody>${lines}</tbody></table>`
+            : `<div class="pm-cell-muted">No field-level difference to show.</div>`;
+    }
+
+    function render() {
+        const pending = records.filter(r => F(r, "Status") === "Pending");
+        bulkEl.hidden = pending.length === 0;
+        allEl.checked = false;
+        if (!records.length) {
+            rowsEl.innerHTML = `<tr><td colspan="8" class="pm-empty">${statusEl.value === "Pending"
+                ? "No repository updates are waiting for approval." : "No repository updates match this filter."}</td></tr>`;
+            return;
+        }
+        rowsEl.innerHTML = records.map((r, i) => {
+            const isPending = F(r, "Status") === "Pending";
+            const decided = !isPending && F(r, "DecidedDate")
+                ? `<div class="pm-cell-muted">${esc(F(r, "DecidedByName") || "")} ${esc(fmtDate(F(r, "DecidedDate")))}${F(r, "DecisionRemark") ? " -- " + esc(F(r, "DecisionRemark")) : ""}</div>` : "";
+            return `<tr data-index="${i}">
+                <td>${isPending ? `<input type="checkbox" data-select="${i}" aria-label="Select">` : ""}</td>
+                <td>${esc(F(r, "SourceLabel") || ("#" + F(r, "SourceKey")))}</td>
+                <td>${esc(KIND[F(r, "CopyCode")] || F(r, "CopyCode"))}</td>
+                <td><span class="pm-badge">${esc(F(r, "ChangeAction"))}</span></td>
+                <td>${esc(F(r, "FrameworkRelease") || "")}</td>
+                <td>${esc(fmtDate(F(r, "DetectedDate")))}</td>
+                <td><span class="pm-badge">${esc(F(r, "Status"))}</span>${decided}</td>
+                <td><div class="ru-row-actions">
+                    <button type="button" class="pm-button" data-diff="${i}">Details</button>
+                    ${isPending ? `<button type="button" class="pm-button primary" data-approve="${i}">Approve</button>
+                                   <button type="button" class="pm-button" data-reject="${i}">Reject</button>` : ""}
+                </div></td>
+            </tr>
+            <tr class="ru-diff" data-diff-row="${i}" hidden><td></td><td colspan="7">${diffMarkup(r)}</td></tr>`;
+        }).join("");
+    }
+
+    async function loadReleases() {
+        // Same summary the Standards & Frameworks screen reads; repository
+        // (non-custom) releases only.
+        try {
+            const body = await call(U("/practice-management-gateway/subscribed-frameworks/query"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+                body: JSON.stringify({ search: "", data: { organizationId: Number(organizationId) } })
+            });
+            const data = (body && (body.data ?? body.Data)) || [];
+            const rows = Array.isArray(data[0]) ? data[0] : data;
+            rows.filter(r => Number(F(r, "ReleaseId")) > 0).forEach(r => {
+                const o = document.createElement("option");
+                o.value = F(r, "ReleaseId");
+                const pending = Number(F(r, "PendingUpdatesCount")) || 0;
+                o.textContent = `${F(r, "FrameworkRelease") || F(r, "ReleaseVersion")}${pending ? ` (${pending} pending)` : ""}`;
+                releaseEl.appendChild(o);
+            });
+        } catch (_) { /* the list still works with "All releases" */ }
+        const requested = query.get("releaseId");
+        if (requested) releaseEl.value = requested;
+    }
+
+    async function load() {
+        setMsg("");
+        rowsEl.innerHTML = `<tr><td colspan="8" class="pm-empty">Loading repository updates...</td></tr>`;
+        const qs = new URLSearchParams({ organizationId, status: statusEl.value, pageNumber: "1", pageSize: "200" });
+        if (releaseEl.value) qs.set("releaseId", releaseEl.value);
+        try {
+            const body = await call(`${API}?${qs}`);
+            records = (body && (body.data || body.Data)) || [];
+            render();
+        } catch (err) {
+            records = [];
+            rowsEl.innerHTML = `<tr><td colspan="8" class="pm-empty">Could not load repository updates.</td></tr>`;
+            setMsg(err.message, "error");
+        }
+    }
+
+    async function decide(indexes, decision) {
+        const chosen = indexes.map(i => records[i]).filter(r => r && F(r, "Status") === "Pending");
+        if (!chosen.length) return;
+        let remark = null;
+        if (decision === "Reject") {
+            remark = await window.gracUi.promptRequired(
+                chosen.length === 1 ? "Why is this update rejected?" : `Why are these ${chosen.length} updates rejected?`,
+                { title: "Reject repository update", inputLabel: "Remark", requiredNote: "A remark is required to reject." });
+            if (remark === null) return;
+        } else if (!await window.gracUi.confirm(
+            chosen.length === 1 ? "Approve this update? It will be applied to the organization."
+                                : `Approve ${chosen.length} updates? They will be applied to the organization.`,
+            { title: "Approve repository update", confirmText: "Approve" })) {
+            return;
+        }
+        // Repository order: structure before statements before links.
+        const ids = chosen
+            .sort((a, b) => (Number(F(a, "CopyOrder")) || 0) - (Number(F(b, "CopyOrder")) || 0)
+                         || (Number(F(a, "ChangeId")) - Number(F(b, "ChangeId"))))
+            .map(r => Number(F(r, "ChangeId")));
+        try {
+            const body = ids.length === 1
+                ? await post(`/${ids[0]}/decision`, { decision, remark })
+                : await post("/decisions", { changeIds: ids, decision, remark });
+            const failed = ids.length === 1 ? [] : (F(body, "results") || []).filter(x => !F(x, "success"));
+            if (failed.length) {
+                setMsg(`${ids.length - failed.length} done, ${failed.length} not applied: ${failed.map(x => F(x, "message")).join("; ")}`, "error");
+            } else {
+                setMsg(`${ids.length === 1 ? "Update" : ids.length + " updates"} ${decision === "Approve" ? "approved and applied" : "rejected"}.`, "success");
+            }
+        } catch (err) {
+            setMsg(err.message, "error");
+        }
+        await load();
+    }
+
+    rowsEl.addEventListener("click", ev => {
+        const t = ev.target.closest("button");
+        if (!t) return;
+        if (t.dataset.diff !== undefined) {
+            const row = rowsEl.querySelector(`[data-diff-row="${t.dataset.diff}"]`);
+            if (row) row.hidden = !row.hidden;
+        } else if (t.dataset.approve !== undefined) {
+            decide([Number(t.dataset.approve)], "Approve");
+        } else if (t.dataset.reject !== undefined) {
+            decide([Number(t.dataset.reject)], "Reject");
+        }
+    });
+    allEl.addEventListener("change", () => {
+        rowsEl.querySelectorAll("[data-select]").forEach(cb => { cb.checked = allEl.checked; });
+    });
+    const selected = () => [...rowsEl.querySelectorAll("[data-select]:checked")].map(cb => Number(cb.dataset.select));
+    document.getElementById("ruApproveSelected").addEventListener("click", () => decide(selected(), "Approve"));
+    document.getElementById("ruRejectSelected").addEventListener("click", () => decide(selected(), "Reject"));
+    releaseEl.addEventListener("change", load);
+    statusEl.addEventListener("change", load);
+
+    (async () => {
+        if (!organizationId) {
+            rowsEl.innerHTML = `<tr><td colspan="8" class="pm-empty">Open Repository Updates from a release on Standards &amp; Frameworks.</td></tr>`;
+            return;
+        }
+        await loadReleases();
+        await load();
+        // Opening the page counts as reading this organization's notices
+        // (they stay on Home until the updates are decided).
+        post("/me/notifications/mark-read", {}).catch(() => {});
+    })();
+})();
+</script>

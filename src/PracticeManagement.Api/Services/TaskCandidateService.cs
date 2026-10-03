@@ -382,6 +382,7 @@ public sealed class TaskCandidateService(IConfiguration configuration, ILogger<T
 
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

@@ -421,7 +421,10 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
                 EventTypeId:               Convert.ToInt64(reader["EventTypeId"]),
                 EventTypeCode:             reader["EventTypeCode"] as string,
                 EventTypeName:             reader["EventTypeName"] as string,
-                EventDomainName:           reader["EventDomainName"] as string));
+                EventDomainName:           reader["EventDomainName"] as string,
+                // Migration 408
+                SubjectEntity:             reader["SubjectEntity"] as string,
+                ChecklistType:             reader["ChecklistType"] as string));
         }
 
         return new EventDrivenChecklistResult(rows, total, page, size);
@@ -732,6 +735,7 @@ public sealed class EventScopeService(IConfiguration configuration, ILogger<Even
             throw new InvalidOperationException("PracticeManagement connection string is not configured.");
         var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
     }
 

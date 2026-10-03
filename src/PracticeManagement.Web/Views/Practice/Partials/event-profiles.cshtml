@@ -4,7 +4,23 @@
     Feature flag: `screen.event-profiles`
     Migrations: 329 (schema) / 330 (procs) / 331 (resolution) / 332 (menu) /
     340-344 (custom obligations reach the event-driven flow + the
-    Checklists tab / View Mapped Profiles below)
+    Checklists tab / View Mapped Profiles below) /
+    407 (Profile Type: People Profile and Asset Profile) /
+    408 (Checklists tab: People / Asset column)
+
+    PROFILE TYPE (407)
+    ------------------
+    A profile is either a People Profile (Location / Department / Role,
+    matched against employees) or an Asset Profile (Location / Asset
+    Category / Asset Sub Category / Asset Type, matched against assets).
+    The type is event_profile.subject_entity (EMPLOYEE / ASSET); the list
+    shows it as Profile Type (People / Asset) with a Profile Type filter.
+    The Add / Edit dialog has the two type tabs; Edit opens the saved type
+    and the other tab is locked -- the type cannot change once saved
+    (enforced in sp_event_profile_save, 67438). Each tab's criteria rows
+    still come from the dimension master for that type, and Asset Sub
+    Category / Asset Type cascade from their parent through the master's
+    parent_dimension_code -- no dimension is named in code.
 
     TWO TABS, ONE ORGANIZATION SELECTOR
     ------------------------------------
@@ -119,6 +135,13 @@
 @* ================= LIST: Profiles ================= *@
 <section class="pm-panel" id="epRoot" hidden>
     <div class="pm-toolbar">
+        @* Profile Type filter (407). Values are event_profile.subject_entity;
+           ALL lists both kinds. *@
+        <select id="epProfileType" aria-label="Profile Type" title="Profile Type">
+            <option value="ALL">All profile types</option>
+            <option value="EMPLOYEE">People</option>
+            <option value="ASSET">Asset</option>
+        </select>
         <select id="epStatus">
             <option value="">All statuses</option>
             <option value="Active">Active</option>
@@ -136,13 +159,14 @@
     @* Coverage strip: how far each profile has been triaged. Same two
        numbers migration 130 split apart -- decided, and of those, applicable. *@
     <div id="epCoverage" style="display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 14px 0;"></div>
-    <div id="epMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+    <div class="pm-message" id="epMessage" style="display:none;"></div>
 
     <div class="pm-table-wrap">
         <table>
             <thead>
                 <tr>
                     <th>Profile Name</th>
+                    <th style="width:110px;">Profile Type</th>
                     <th>Description</th>
                     <th>Criteria</th>
                     <th style="width:110px;">Status</th>
@@ -151,7 +175,7 @@
                 </tr>
             </thead>
             <tbody id="epBody">
-                <tr><td colspan="6" class="pm-empty">Select an organization.</td></tr>
+                <tr><td colspan="7" class="pm-empty">Select an organization.</td></tr>
             </tbody>
         </table>
     </div>
@@ -173,7 +197,7 @@
         </button>
     </div>
 
-    <div id="ecMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+    <div class="pm-message" id="ecMessage" style="display:none;"></div>
 
     <div class="pm-table-wrap">
         <table>
@@ -182,11 +206,14 @@
                     <th>Practice Instance</th>
                     <th>Obligation Name</th>
                     <th style="width:150px;">Event</th>
+                    @* 408: People / Asset, from the organisation's event
+                       definition -- the profile type that receives this checklist. *@
+                    <th style="width:110px;">Profile Type</th>
                     <th style="width:60px;"></th>
                 </tr>
             </thead>
             <tbody id="ecBody">
-                <tr><td colspan="4" class="pm-empty">Select an organization.</td></tr>
+                <tr><td colspan="5" class="pm-empty">Select an organization.</td></tr>
             </tbody>
         </table>
     </div>
@@ -194,15 +221,23 @@
 </section>
 
 @* ================= CREATE / EDIT ================= *@
-<dialog id="epFormDialog" class="pm-dialog" style="border:none; border-radius:8px; padding:0; max-width:860px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="epForm" method="dialog" style="margin:0; padding:20px 24px;">
+<dialog id="epFormDialog" class="pm-dialog" style="max-width:860px; width:94%;">
+    <form id="epForm" method="dialog">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
             <h2 id="epFormTitle" style="margin:0; font-size:18px;">Add Profile</h2>
-            <button type="button" id="epFormClose" aria-label="Close"
-                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+            <button class="pm-icon-button" type="button" id="epFormClose" aria-label="Close"
+                   >&times;</button>
         </div>
 
-        <div id="epFormMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="epFormMessage" style="display:none;"></div>
+
+        @* Profile Type (407). Same .pm-tabs markup as the page's own
+           Profiles / Checklists tabs. Add starts on People Profile; Edit
+           opens the saved type and locks the other tab. *@
+        <div class="pm-tabs" role="tablist" id="epTypeTabs" aria-label="Profile Type" style="margin-bottom:14px;">
+            <button type="button" role="tab" class="active" aria-selected="true" data-ep-type="EMPLOYEE">People Profile</button>
+            <button type="button" role="tab" aria-selected="false" data-ep-type="ASSET">Asset Profile</button>
+        </div>
 
         @* Status is NOT asked for here. A new profile is always Active --
            nobody adds one in order to switch it off -- and an existing
@@ -210,22 +245,22 @@
            reactivate something that was deliberately deactivated. Status is
            changed from the row's Activate / Deactivate action, which is the
            one place it means something. *@
-        <label style="display:block; font-size:13px; color:#334155;">
+        <label style="display:block; font-size:13px; color:var(--neutral-700);">
             Profile Name *
             <input type="text" id="epName" maxlength="200" required
-                   style="width:100%; padding:7px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" />
+                   style="width:100%; padding:7px 8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); font-size:13px;" />
         </label>
 
-        <label style="display:block; margin-top:12px; font-size:13px; color:#334155;">
+        <label style="display:block; margin-top:12px; font-size:13px; color:var(--neutral-700);">
             Description
             <textarea id="epDescription" rows="2" maxlength="1000"
-                      style="width:100%; padding:7px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;"
+                      style="width:100%; padding:7px 8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); font-size:13px;"
                       placeholder="What population is this, in your own words?"></textarea>
         </label>
 
-        <h3 style="margin:18px 0 4px 0; font-size:14px; color:#334155;">Applicability criteria</h3>
-        <p style="margin:0 0 10px 0; font-size:12px; color:#64748b;">
-            A person is in this profile when they match <strong>every</strong> criterion below.
+        <h3 style="margin:18px 0 4px 0; font-size:14px; color:var(--neutral-700);">Applicability criteria</h3>
+        <p style="margin:0 0 10px 0; font-size:12px; color:var(--fg-muted);">
+            <span id="epCriteriaSubject">A person is in this profile when they match</span> <strong>every</strong> criterion below.
             Within one criterion, <strong>any</strong> of the selected values counts.
             Leave a criterion on <em>All</em> to place no constraint on it.
         </p>
@@ -235,11 +270,11 @@
         <div id="epCriteria"><div class="pm-empty">Loading criteria...</div></div>
 
         <div id="epPreview"
-             style="margin-top:14px; padding:10px 12px; border-radius:4px; background:#f1f5f9; font-size:13px; color:#334155;">
-            Matching employees will be counted once you choose some criteria.
+             style="margin-top:14px; padding:10px 12px; border-radius:var(--radius-sm); background:var(--bg-subtle); font-size:13px; color:var(--neutral-700);">
+            Save the profile to see how many it matches.
         </div>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="epFormCancel" class="pm-button">Cancel</button>
             <button type="submit" id="epFormSave" class="pm-button primary">Save Profile</button>
         </div>
@@ -247,15 +282,15 @@
 </dialog>
 
 @* ================= VIEW (read-only) ================= *@
-<dialog id="epViewDialog" class="pm-dialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="epViewDialog" class="pm-dialog" style="max-width:720px; width:92%;">
     <div style="margin:0; padding:20px 24px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
             <h2 id="epViewTitle" style="margin:0; font-size:18px;">Profile</h2>
-            <button type="button" id="epViewClose" aria-label="Close"
-                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+            <button class="pm-icon-button" type="button" id="epViewClose" aria-label="Close"
+                   >&times;</button>
         </div>
         <div id="epViewBody"></div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="epViewDone" class="pm-button">Close</button>
         </div>
     </div>
@@ -266,16 +301,16 @@
    "which profiles will receive this checklist" from saved
    event_obligation_applicability rows (sp_event_checklist_mapped_profiles_list,
    migration 344), not a second forward-mapping screen. *@
-<dialog id="ecMappedDialog" class="pm-dialog" style="border:none; border-radius:8px; padding:0; max-width:720px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="ecMappedDialog" class="pm-dialog" style="max-width:720px; width:92%;">
     <div style="margin:0; padding:20px 24px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
             <h2 id="ecMappedTitle" style="margin:0; font-size:18px;">Mapped Profiles</h2>
-            <button type="button" id="ecMappedClose" aria-label="Close"
-                    style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+            <button class="pm-icon-button" type="button" id="ecMappedClose" aria-label="Close"
+                   >&times;</button>
         </div>
-        <p id="ecMappedSubtitle" style="margin:0 0 12px 0; font-size:12px; color:#64748b;"></p>
+        <p id="ecMappedSubtitle" style="margin:0 0 12px 0; font-size:12px; color:var(--fg-muted);"></p>
         <div id="ecMappedBody"></div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="ecMappedDone" class="pm-button">Close</button>
         </div>
     </div>
@@ -287,7 +322,7 @@
         <div>
             <p class="pm-eyebrow">Event Profiles / Configure Checklists</p>
             <h2 id="epConfigureTitle" style="margin:2px 0 4px 0; font-size:18px;">Profile</h2>
-            <p id="epConfigureSummary" style="margin:0; font-size:12px; color:#64748b;"></p>
+            <p id="epConfigureSummary" style="margin:0; font-size:12px; color:var(--fg-muted);"></p>
         </div>
         <button class="pm-button" id="epConfigureBack" type="button">
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Profiles

@@ -47,27 +47,27 @@
 
 <section class="pm-panel" id="oaObRoot" hidden>
     <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Organization</span>
-            <select id="oaObPickOrg" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px; min-width:220px;">
+            <select class="pm-input" id="oaObPickOrg" style="min-width:220px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; flex:1; min-width:300px;">
+        <label class="pm-field" style="flex:1; min-width:300px;">
             <span>Filter by Execution (optional)</span>
-            <select id="oaObPickExec" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaObPickExec">
                 <option value="">All executions</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Severity</span>
-            <select id="oaObFilterSev" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaObFilterSev">
                 <option value="">All</option>
             </select>
         </label>
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+        <label class="pm-field">
             <span>Status</span>
-            <select id="oaObFilterStatus" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <select class="pm-input" id="oaObFilterStatus">
                 <option value="">All</option>
             </select>
         </label>
@@ -80,13 +80,15 @@
     </div>
 
     <div id="oaObMessage" hidden
-         style="margin:8px 0; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+         style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
+    @* Audit & Assurance dashboard drill-down (414). *@
+    <div id="oaObDrillBanner" hidden></div>
 
     <div style="display:grid; grid-template-columns:minmax(480px, 640px) 1fr; gap:12px; margin-top:12px;">
         @* LEFT: observation list *@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <h2 style="font-size:15px; margin:0; color:#0f172a;">Observations</h2>
+                <h2 style="font-size:15px; margin:0; color:var(--fg-strong);">Observations</h2>
                 <button class="pm-button icon" id="oaObRefreshBtn" type="button" title="Refresh">
                     <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                 </button>
@@ -119,14 +121,14 @@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <h2 style="font-size:15px; margin:0; color:#0f172a;" id="oaObDetailTitle">Observation Details</h2>
-                    <p style="font-size:12px; color:#64748b; margin:4px 0 0;" id="oaObDetailSubtitle">Select an observation from the list to view details, evidence and history.</p>
+                    <h2 style="font-size:15px; margin:0; color:var(--fg-strong);" id="oaObDetailTitle">Observation Details</h2>
+                    <p style="font-size:12px; color:var(--fg-muted); margin:4px 0 0;" id="oaObDetailSubtitle">Select an observation from the list to view details, evidence and history.</p>
                 </div>
             </div>
 
             <div id="oaObDetailTiles" hidden style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
 
-            <div id="oaObTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid #e2e8f0; margin-bottom:8px;">
+            <div id="oaObTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:8px;">
                 <button class="pm-tab active" data-tab="detail"   type="button">Details</button>
                 <button class="pm-tab"        data-tab="evidence" type="button">Evidence</button>
                 <button class="pm-tab"        data-tab="history"  type="button">History</button>
@@ -194,44 +196,44 @@
 
 @* --------------------- Observation Save Dialog --------------------- *@
 <div id="oaObSaveDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
-    <div style="background:#fff; width:560px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+    <div style="background:var(--bg-surface); width:560px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:var(--radius-md); padding:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <h2 id="oaObSaveDialogTitle" style="margin:0; font-size:16px;">New Observation</h2>
             <button class="pm-button icon" id="oaObSaveClose" type="button"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
         <div style="display:grid; gap:8px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Execution <span style="color:#dc2626;">*</span></span>
-                <select id="oaObFldExec" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+            <label class="pm-field">
+                <span>Execution <span style="color:var(--danger-700);">*</span></span>
+                <select class="pm-input" id="oaObFldExec">
                     <option value="">Loading...</option>
                 </select>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Entity (optional)</span>
-                <select id="oaObFldEntity" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+                <select class="pm-input" id="oaObFldEntity">
                     <option value="">(execution-level observation)</option>
                 </select>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
-                <span>Title <span style="color:#dc2626;">*</span></span>
+            <label class="pm-field">
+                <span>Title <span style="color:var(--danger-700);">*</span></span>
                 <input id="oaObFldTitle" type="text" maxlength="300" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Description</span>
                 <textarea id="oaObFldDesc" rows="3"></textarea>
             </label>
             <div style="display:flex; gap:8px;">
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Type</span>
-                    <select id="oaObFldType" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"></select>
+                    <select class="pm-input" id="oaObFldType"></select>
                 </label>
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Severity</span>
-                    <select id="oaObFldSev" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"></select>
+                    <select class="pm-input" id="oaObFldSev"></select>
                 </label>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Source Question (free text)</span>
                 <input id="oaObFldQuestion" type="text" maxlength="500" placeholder="Q code or question text..." />
             </label>
@@ -240,47 +242,47 @@
                force a horizontal scrollbar on the dialog. *@
             <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px;">
                 <div style="min-width:0;">
-                    <div style="font-size:12px; color:#475569; margin-bottom:2px;">
+                    <div style="font-size:12px; color:var(--fg-secondary); margin-bottom:2px;">
                         Owner Role
                     </div>
-                    <select id="oaObFldOwnerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                    <select class="pm-input" id="oaObFldOwnerRole" style="min-width:0;">
                         <option value="">Loading roles...</option>
                     </select>
-                    <div style="font-size:11px; color:#64748b; margin-top:6px; margin-bottom:2px;">
+                    <div style="font-size:11px; color:var(--fg-muted); margin-top:6px; margin-bottom:2px;">
                         Owner (current holder)
                     </div>
-                    <select id="oaObFldOwnerEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                    <select class="pm-input" id="oaObFldOwnerEmp" style="min-width:0;">
                         <option value="">Pick role first</option>
                     </select>
                 </div>
                 <div style="min-width:0;">
-                    <div style="font-size:12px; color:#475569; margin-bottom:2px;">
+                    <div style="font-size:12px; color:var(--fg-secondary); margin-bottom:2px;">
                         Reviewer Role
                     </div>
-                    <select id="oaObFldReviewerRole" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                    <select class="pm-input" id="oaObFldReviewerRole" style="min-width:0;">
                         <option value="">Loading roles...</option>
                     </select>
-                    <div style="font-size:11px; color:#64748b; margin-top:6px; margin-bottom:2px;">
+                    <div style="font-size:11px; color:var(--fg-muted); margin-top:6px; margin-bottom:2px;">
                         Reviewer (current holder)
                     </div>
-                    <select id="oaObFldReviewerEmp" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; width:100%; box-sizing:border-box; min-width:0;">
+                    <select class="pm-input" id="oaObFldReviewerEmp" style="min-width:0;">
                         <option value="">Pick role first</option>
                     </select>
                 </div>
             </div>
             <div style="display:flex; gap:8px;">
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Reported By</span>
                     <input id="oaObFldReporter" type="text" maxlength="240" />
                 </label>
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Due Date</span>
                     <input id="oaObFldDue" type="date" />
                 </label>
             </div>
         </div>
 
-        <div id="oaObSaveMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+        <div id="oaObSaveMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
         <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
             <button class="pm-button" id="oaObSaveCancel" type="button">Cancel</button>
@@ -291,53 +293,53 @@
 
 @* --------------------- Evidence Save Dialog --------------------- *@
 <div id="oaObEvDialog" hidden style="position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9999; display:flex; align-items:center; justify-content:center;">
-    <div style="background:#fff; width:520px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:6px; padding:16px;">
+    <div style="background:var(--bg-surface); width:520px; max-width:95vw; max-height:92vh; overflow:auto; border-radius:var(--radius-md); padding:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <h2 style="margin:0; font-size:16px;">Attach Evidence</h2>
             <button class="pm-button icon" id="oaObEvClose" type="button"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
         <div style="display:grid; gap:8px;">
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Label</span>
                 <input id="oaObEvLabel" type="text" maxlength="240" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Evidence Type Code / Name</span>
                 <div style="display:flex; gap:6px;">
                     <input id="oaObEvTypeCode" type="text" maxlength="60" placeholder="e.g. Screenshot" style="flex:1;" />
                     <input id="oaObEvTypeName" type="text" maxlength="200" placeholder="Human-readable name"  style="flex:2;" />
                 </div>
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Storage Location</span>
                 <input id="oaObEvStorageLoc" type="text" maxlength="120" placeholder="e.g. sharepoint / s3 / local" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Storage Locator (URL / path)</span>
                 <input id="oaObEvStorageLocator" type="text" maxlength="1000" />
             </label>
             <div style="display:flex; gap:8px;">
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>Original File Name</span>
                     <input id="oaObEvFileName" type="text" maxlength="400" />
                 </label>
-                <label style="display:flex; flex-direction:column; flex:1; font-size:12px; color:#475569;">
+                <label class="pm-field" style="flex:1;">
                     <span>MIME Type</span>
                     <input id="oaObEvMime" type="text" maxlength="200" />
                 </label>
             </div>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Collected By</span>
                 <input id="oaObEvCollectedBy" type="text" maxlength="240" />
             </label>
-            <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">
+            <label class="pm-field">
                 <span>Notes</span>
                 <textarea id="oaObEvNotes" rows="2"></textarea>
             </label>
         </div>
 
-        <div id="oaObEvMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+        <div id="oaObEvMsg" hidden style="margin-top:10px; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
         <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
             <button class="pm-button" id="oaObEvCancel" type="button">Cancel</button>
@@ -349,15 +351,17 @@
 <style>
     .pm-tab {
         border:none; background:transparent; padding:6px 10px; font-size:13px;
-        color:#64748b; cursor:pointer; border-bottom:2px solid transparent;
+        color:var(--fg-muted); cursor:pointer; border-bottom:2px solid transparent;
     }
-    .pm-tab.active { color:#0f172a; border-bottom-color:#0f172a; font-weight:600; }
+    .pm-tab.active { color:var(--fg-strong); border-bottom-color:var(--neutral-900); font-weight:600; }
     .pm-severity-dot {
         display:inline-block; width:8px; height:8px; border-radius:50%;
         margin-right:6px; vertical-align:middle;
     }
 </style>
 
+@* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -366,6 +370,14 @@
 
     const API = '/practice/api/org-assurance';
     const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    // Audit & Assurance dashboard drill-down (414): ?status= and ?severity=
+    // are this screen's own Status / Severity filters; ?drill= (pending /
+    // awaiting / closed / overdue / noowner) and ?minAge= / ?maxAge= are
+    // sp_org_assurance_observation_list's 414 ones.
+    const OB_DRILL = (function () {
+        const d = window.__pmDrill ? window.__pmDrill.read() : null;
+        return d && d.active ? d : null;
+    })();
 
     const state = {
         orgId              : null,
@@ -474,10 +486,19 @@
         wireEvidenceDialog();
 
         state.orgId = orgs[0].value;
+        // 414: the dashboard's organization wins when it is one of these.
+        if (OB_DRILL && orgs.some(function (o) { return String(o.value) === OB_DRILL.organizationId; }))
+            state.orgId = OB_DRILL.organizationId;
         orgSel.value = state.orgId;
 
         // Load lookups + execution filter in parallel.
         await Promise.all([loadLookups(), populateExecutionFilter()]);
+        if (OB_DRILL) {
+            if (OB_DRILL.status && window.__pmDrill.preselect('oaObFilterStatus', OB_DRILL.status))
+                state.filterStatus = OB_DRILL.status;
+            if (OB_DRILL.severity && window.__pmDrill.preselect('oaObFilterSev', OB_DRILL.severity))
+                state.filterSeverity = OB_DRILL.severity;
+        }
         if (state.filterExecutionId) {
             const sel = document.getElementById('oaObPickExec');
             if (sel && [...sel.options].some(function (o) { return o.value === String(state.filterExecutionId); }))
@@ -608,6 +629,12 @@
             if (state.filterSeverity)    qs.set('severityCode', state.filterSeverity);
             if (state.filterStatus)      qs.set('statusCode',   state.filterStatus);
             if (state.search)            qs.set('search',       state.search);
+            // 414: dashboard drill-down. Severity already travels as this
+            // screen's own severityCode filter, so it is not sent twice.
+            if (OB_DRILL) {
+                window.__pmDrill.appendTo(qs, Object.assign({}, OB_DRILL, { severity: '' }));
+                window.__pmDrill.banner('oaObDrillBanner', OB_DRILL);
+            }
             qs.set('page',     String(state.list.page));
             qs.set('pageSize', String(state.list.pageSize));
             const r = await fetch(U(API + '/observations?' + qs.toString()), { credentials: 'same-origin' });
@@ -657,13 +684,13 @@
             // filtered by this observation so the user sees them all.
             const gapBadge = gapId
                 ? ' <a class="pm-badge oa-ob-gap-link" data-obs-id="' + id + '" href="#" '
-                  + 'title="Open Gap Center filtered to this observation" '
-                  + 'style="background:#fee2e2; color:#991b1b; text-decoration:none;">Gaps &raquo;</a>'
+                  + 'title="Open Gap Register filtered to this observation" '
+                  + 'style="background:var(--danger-100); color:var(--danger-700); text-decoration:none;">Gaps &raquo;</a>'
                 : '';
-            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:#eff6ff;"' : '') + '>'
+            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:var(--primary-50);"' : '') + '>'
                  + '<td><div>' + wf.escape(title) + gapBadge + '</div>'
-                 + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(code) + '</div>'
-                 + '<div style="font-size:11px; color:#64748b;">' + wf.escape(exec) + (ent ? ' &middot; ' + wf.escape(ent) : '') + '</div></td>'
+                 + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(code) + '</div>'
+                 + '<div style="font-size:11px; color:var(--fg-muted);">' + wf.escape(exec) + (ent ? ' &middot; ' + wf.escape(ent) : '') + '</div></td>'
                  + '<td><span class="pm-severity-dot" style="background:' + severityColor(sev) + ';"></span>' + wf.escape(sevN) + '</td>'
                  + '<td>' + wf.badge(status) + '</td>'
                  + '<td style="text-align:right;">' + evCnt + '</td>'
@@ -862,7 +889,7 @@
     async function selectObservation(id) {
         state.selectedObsId = id;
         document.querySelectorAll('#oaObListBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? '#eff6ff' : '';
+            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? 'var(--primary-50)' : '';
         });
         await loadDetail(id);
         await Promise.all([loadEvidence(id), loadHistory(id)]);
@@ -970,8 +997,8 @@
     }
 
     function row(label, value) {
-        return '<div style="display:flex; gap:8px; padding:4px 0; border-bottom:1px solid #f1f5f9;">'
-             + '<div style="min-width:180px; color:#64748b;">' + wf.escape(label) + '</div>'
+        return '<div style="display:flex; gap:8px; padding:4px 0; border-bottom:1px solid var(--neutral-100);">'
+             + '<div style="min-width:180px; color:var(--fg-muted);">' + wf.escape(label) + '</div>'
              + '<div style="flex:1; white-space:pre-wrap;">' + wf.escape(value || '') + '</div>'
              + '</div>';
     }
@@ -979,9 +1006,9 @@
         const dot = dotColor
             ? '<span class="pm-severity-dot" style="background:' + dotColor + ';"></span>'
             : '';
-        return '<div style="border:1px solid #e2e8f0; border-radius:6px; padding:6px 10px; background:#f8fafc; min-width:120px;">'
-             + '<div style="font-size:11px; color:#64748b;">' + wf.escape(label) + '</div>'
-             + '<div style="font-size:14px; font-weight:600; color:#0f172a;">' + dot + wf.escape(value || '') + '</div>'
+        return '<div style="border:1px solid var(--border); border-radius:6px; padding:6px 10px; background:var(--neutral-50); min-width:120px;">'
+             + '<div style="font-size:11px; color:var(--fg-muted);">' + wf.escape(label) + '</div>'
+             + '<div style="font-size:14px; font-weight:600; color:var(--fg-strong);">' + dot + wf.escape(value || '') + '</div>'
              + '</div>';
     }
 
@@ -1019,10 +1046,10 @@
             const by      = e.collectedByDisplayName || e.CollectedByDisplayName || '';
             return '<tr>'
                  + '<td><div>' + wf.escape(label || '(no label)') + '</div>'
-                 + '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(type) + '</div></td>'
+                 + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(type) + '</div></td>'
                  + '<td>' + (url ? '<a href="' + url + '" target="_blank" rel="noopener">' + wf.escape(file || url) + '</a>'
                                  : wf.escape(file || loc || '')) + '</td>'
-                 + '<td>' + wf.escape(when) + (by ? '<div style="font-size:11px; color:#94a3b8;">' + wf.escape(by) + '</div>' : '') + '</td>'
+                 + '<td>' + wf.escape(when) + (by ? '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(by) + '</div>' : '') + '</td>'
                  + '<td><button class="pm-button icon" data-id="' + id + '" data-act="del-ev" title="Delete"><i class="fa-solid fa-trash"></i></button></td>'
                  + '</tr>';
         }).join('');
@@ -1366,14 +1393,14 @@
     function val(id) { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; }
     function showDlgMsg(el, kind, text) {
         el.hidden = false; el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function setMessage(kind, text) {
         const el = document.getElementById('oaObMessage');
         el.hidden = false; el.textContent = text;
-        el.style.background = kind === 'error' ? '#fee2e2' : '#dcfce7';
-        el.style.color      = kind === 'error' ? '#991b1b' : '#166534';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function formatDate(v) {
         if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }

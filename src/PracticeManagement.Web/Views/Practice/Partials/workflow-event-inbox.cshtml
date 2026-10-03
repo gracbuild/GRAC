@@ -40,7 +40,7 @@
             <option value="EMPLOYEE">People</option>
             <option value="ASSET">Assets</option>
         </select>
-        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--fg-secondary);">
             <input type="checkbox" id="ebOverdueOnly" /> Overdue only
         </label>
         <button class="pm-button icon" id="ebRefreshBtn" type="button" title="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
@@ -48,7 +48,7 @@
         <button class="pm-button" id="ebGapsBtn" type="button"><i class="fa-solid fa-triangle-exclamation"></i> Coverage Gaps</button>
     </div>
 
-    <div id="ebMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+    <div class="pm-message" id="ebMessage" style="display:none;"></div>
 
     <div class="pm-table-wrap">
         <table>
@@ -65,16 +65,16 @@
 </section>
 
 @* ---------------- Raise event dialog ---------------- *@
-<dialog id="ebRaiseDialog" style="border:none; border-radius:8px; padding:0; max-width:560px; width:92%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
-    <form id="ebRaiseForm" method="dialog" style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;">Raise Lifecycle Event</h2>
-            <button type="button" id="ebRaiseClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+<dialog id="ebRaiseDialog" style="max-width:560px; width:92%;">
+    <form id="ebRaiseForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2>Raise Lifecycle Event</h2>
+            <button class="pm-icon-button" type="button" id="ebRaiseClose" aria-label="Close">&times;</button>
         </div>
-        <div id="ebRaiseMessage" style="display:none; margin-bottom:10px; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div class="pm-message" id="ebRaiseMessage" style="display:none;"></div>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569;">Action *
-            <select id="ebAction" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;">
+        <label class="pm-field">Action *
+            <select class="pm-input" id="ebAction">
                 <option value="ONBOARD">Person -- Onboarding</option>
                 <option value="OFFBOARD">Person -- Offboarding</option>
                 <option value="COMMISSION">Asset -- Commissioning</option>
@@ -82,20 +82,20 @@
             </select>
         </label>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">
+        <label class="pm-field" style="margin-top:10px;">
             <span id="ebSubjectLabel">Employee *</span>
-            <select id="ebSubject" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;"><option value="">Loading...</option></select>
+            <select class="pm-input" id="ebSubject"><option value="">Loading...</option></select>
         </label>
 
-        <label style="display:flex; flex-direction:column; font-size:12px; color:#475569; margin-top:10px;">Effective date *
-            <input id="ebEffectiveDate" type="date" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; margin-top:2px;" />
+        <label class="pm-field" style="margin-top:10px;">Effective date *
+            <input class="pm-input" id="ebEffectiveDate" type="date" />
         </label>
-        <p style="font-size:11px; color:#64748b; margin:6px 0 0 0;">
+        <p style="font-size:11px; color:var(--fg-muted); margin:6px 0 0 0;">
             Due dates are calculated from the effective date, not from today. A backdated
             event therefore produces checklists that are already overdue -- which is correct.
         </p>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <div class="pm-dialog-actions">
             <button type="button" id="ebRaiseCancel" class="pm-button">Cancel</button>
             <button type="submit" id="ebRaiseSubmit" class="pm-button primary">Raise</button>
         </div>
@@ -103,16 +103,16 @@
 </dialog>
 
 @* ---------------- Checklist drawer ---------------- *@
-<dialog id="ebItemDialog" style="border:none; border-radius:8px; padding:0; max-width:840px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="ebItemDialog" style="max-width:840px; width:94%;">
     <div style="margin:0; padding:20px 24px;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
             <div>
                 <h2 style="margin:0; font-size:18px;" id="ebDrawerTitle">Checklist</h2>
-                <p style="margin:4px 0 0 0; font-size:12px; color:#64748b;" id="ebDrawerMeta"></p>
+                <p style="margin:4px 0 0 0; font-size:12px; color:var(--fg-muted);" id="ebDrawerMeta"></p>
             </div>
-            <button type="button" id="ebItemClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+            <button class="pm-icon-button" type="button" id="ebItemClose" aria-label="Close">&times;</button>
         </div>
-        <div id="ebItemMessage" style="display:none; margin:10px 0; padding:8px 12px; border-radius:4px; font-size:13px;"></div>
+        <div id="ebItemMessage" style="display:none; margin:10px 0; padding:8px 12px; border-radius:var(--radius-sm); font-size:13px;"></div>
 
         <div class="pm-table-wrap" style="max-height:52vh; overflow:auto; margin-top:12px;">
             <table>
@@ -132,13 +132,13 @@
 </dialog>
 
 @* ---------------- Trace / gaps dialog ---------------- *@
-<dialog id="ebTraceDialog" style="border:none; border-radius:8px; padding:0; max-width:900px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="ebTraceDialog" style="max-width:900px; width:94%;">
     <div style="margin:0; padding:20px 24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="margin:0; font-size:18px;" id="ebTraceTitle">Resolution Trace</h2>
-            <button type="button" id="ebTraceClose" aria-label="Close" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+        <div class="pm-dialog-heading">
+            <h2 id="ebTraceTitle">Resolution Trace</h2>
+            <button class="pm-icon-button" type="button" id="ebTraceClose" aria-label="Close">&times;</button>
         </div>
-        <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;">
+        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 10px 0;">
             Every checklist considered for this event, included and excluded, with the reason.
         </p>
         <div class="pm-table-wrap" style="max-height:56vh; overflow:auto;">
@@ -223,7 +223,7 @@
             body.innerHTML = '';
             for (const row of rows) {
                 const tr = document.createElement('tr');
-                if (row.isOverdue) tr.style.background = '#fef2f2';
+                if (row.isOverdue) tr.style.background = 'var(--danger-50)';
                 const scope = row.scopeRoleName || row.scopeAssetCategoryName || '-';
                 tr.insertAdjacentHTML('beforeend',
                       '<td>' + window.__wfCommon.escape(row.eventName) + '</td>'
@@ -248,10 +248,10 @@
     }
 
     function dueCell(row) {
-        if (!row.dueDate) return '<span style="color:#94a3b8;">-</span>';
+        if (!row.dueDate) return '<span style="color:var(--fg-subtle);">-</span>';
         const d = (typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(row.dueDate)||''):String(row.dueDate).substring(0,10));
         if (!row.isOverdue) return window.__wfCommon.escape(d);
-        return '<span style="color:#b91c1c; font-weight:600;">' + window.__wfCommon.escape(d)
+        return '<span style="color:var(--danger-700); font-weight:600;">' + window.__wfCommon.escape(d)
              + ' (+' + (row.daysOverdue || 0) + 'd)</span>';
     }
 
@@ -406,18 +406,18 @@
             tr.insertAdjacentHTML('beforeend',
                   '<td>' + it.itemSequence + '</td>'
                 + '<td>' + window.__wfCommon.escape(it.itemText)
-                    + (it.isMandatory ? ' <span style="color:#b91c1c;">*</span>' : '')
+                    + (it.isMandatory ? ' <span style="color:var(--danger-700);">*</span>' : '')
                     + (isObligation ? ' <span style="padding:1px 6px; border-radius:8px; font-size:10px;'
-                        + ' background:#e0e7ff; color:#3730a3;">obligation</span>' : '')
-                    + (it.responsibleRole ? '<br><span style="font-size:11px; color:#94a3b8;">'
+                        + ' background:var(--primary-100); color:var(--primary-800);">obligation</span>' : '')
+                    + (it.responsibleRole ? '<br><span style="font-size:11px; color:var(--fg-subtle);">'
                         + window.__wfCommon.escape(it.responsibleRole) + '</span>' : '')
-                    + (it.naJustification ? '<br><span style="font-size:11px; color:#78350f;">N/A: '
+                    + (it.naJustification ? '<br><span style="font-size:11px; color:var(--warning-700);">N/A: '
                         + window.__wfCommon.escape(it.naJustification) + '</span>' : '')
                   + '</td>');
 
             const tdResult = document.createElement('td');
             const sel = document.createElement('select');
-            sel.style.cssText = 'width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;';
+            sel.style.cssText = 'width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:4px;';
             RESULTS.forEach(function (v) {
                 const o = document.createElement('option');
                 o.value = v; o.textContent = v === 'NotApplicable' ? 'Not Applicable' : v;
@@ -432,14 +432,14 @@
             ev.type = 'url'; ev.value = it.evidenceUrl || '';
             ev.placeholder = it.evidenceRequired ? 'required' : '';
             ev.style.cssText = 'width:100%; padding:4px 6px; border:1px solid '
-                + (it.evidenceRequired && !it.evidenceUrl ? '#fca5a5' : '#cbd5e1') + '; border-radius:4px;';
+                + (it.evidenceRequired && !it.evidenceUrl ? 'var(--danger-200)' : 'var(--border-strong)') + '; border-radius:4px;';
             tdEvidence.appendChild(ev);
             tr.appendChild(tdEvidence);
 
             const tdRemarks = document.createElement('td');
             const rm = document.createElement('input');
             rm.type = 'text'; rm.value = it.remarks || '';
-            rm.style.cssText = 'width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;';
+            rm.style.cssText = 'width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:4px;';
             tdRemarks.appendChild(rm);
             tr.appendChild(tdRemarks);
 
@@ -659,7 +659,7 @@
                         '<td>' + window.__wfCommon.escape(t.eventCode) + '</td>',
                         '<td>' + window.__wfCommon.escape(scope) + '</td>',
                         '<td>' + window.__wfCommon.escape(t.reasonCode)
-                            + (t.reasonDetail ? '<br><span style="font-size:11px; color:#94a3b8;">'
+                            + (t.reasonDetail ? '<br><span style="font-size:11px; color:var(--fg-subtle);">'
                                 + window.__wfCommon.escape(t.reasonDetail) + '</span>' : '') + '</td>',
                         '<td>' + window.__wfCommon.escape((typeof window.gracFormatDisplayDate==='function'?(window.gracFormatDisplayDate(t.enteredDt)||''):String(t.enteredDt).substring(0,10))) + '</td>' ].join('');
                 body.appendChild(tr);
@@ -673,7 +673,7 @@
     function decisionBadge(d) {
         const ok = d === 'Included';
         return '<span style="padding:3px 9px; border-radius:10px; font-size:11px; background:'
-            + (ok ? '#dcfce7' : '#fee2e2') + '; color:' + (ok ? '#166534' : '#7f1d1d') + ';">'
+            + (ok ? 'var(--success-100)' : 'var(--danger-100)') + '; color:' + (ok ? 'var(--success-700)' : 'var(--danger-700)') + ';">'
             + window.__wfCommon.escape(d) + '</span>';
     }
 })();

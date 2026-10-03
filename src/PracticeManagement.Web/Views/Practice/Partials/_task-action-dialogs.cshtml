@@ -30,7 +30,7 @@
     The Edit button sits top-right, next to the close control, which is
     where a reader looks after finishing the page.
 *@
-<dialog id="taskDetailDialog" style="border:none; border-radius:8px; padding:0; max-width:980px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="taskDetailDialog" style="max-width:980px; width:94%;">
     @* The padding lives in CSS, not inline: edit mode needs to tighten it,
        and an inline style beats any selector. Same values as before for
        the read-only view. *@
@@ -87,11 +87,11 @@
 
     #taskEditForm .tef-l {
         display: block; font-size: 12px; font-weight: 600;
-        color: #475569; margin-bottom: 3px;
+        color: var(--fg-secondary); margin-bottom: 3px;
     }
-    #taskEditForm .tef-r { color: #dc2626; font-style: normal; margin-left: 2px; }
+    #taskEditForm .tef-r { color: var(--danger-700); font-style: normal; margin-left: 2px; }
     #taskEditForm .tef-h {
-        display: block; font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.3;
+        display: block; font-size: 11px; color: var(--fg-muted); margin-top: 3px; line-height: 1.3;
     }
 
     /* Control size is NOT reduced to make things fit -- padding and font
@@ -101,9 +101,9 @@
     #taskEditForm input[type="date"],
     #taskEditForm select,
     #taskEditForm textarea {
-        width: 100%; padding: 6px 8px; border: 1px solid #cbd5e1;
-        border-radius: 4px; font: inherit; font-size: 13px;
-        color: #0f172a; background: #fff;
+        width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong);
+        border-radius: var(--radius-sm); font: inherit; font-size: 13px;
+        color: var(--fg-strong); background: var(--bg-surface);
     }
     /* Sized here rather than with a rows attribute so the two textareas
        stay equal and the short-viewport rule below can shrink them. */
@@ -112,14 +112,14 @@
     /* A disabled control here means a governed field the rules do not let
        this task change -- the hint underneath always says which rule. */
     #taskEditForm input:disabled,
-    #taskEditForm select:disabled { background: #f1f5f9; color: #64748b; }
+    #taskEditForm select:disabled { background: var(--bg-subtle); color: var(--fg-muted); }
 
     /* The action row stays put, so Save and Cancel are reachable even on
        a viewport short enough that the fields above have to scroll. */
     #taskEditForm .tef-actions {
-        position: sticky; bottom: 0; background: #fff;
+        position: sticky; bottom: 0; background: var(--bg-surface);
         display: flex; justify-content: flex-end; gap: 8px;
-        margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0;
+        margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
     }
 
     /* Two columns on a narrower window, one on a small screen. Below each
@@ -151,11 +151,11 @@
     Small and confirming, per the requirement: this is a decision, not
     data entry.
 *@
-<dialog id="taskCompleteDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="taskCompleteDialog" style="max-width:520px; width:94%;">
     <form id="taskCompleteForm" method="dialog" style="margin:0; padding:18px 20px;">
         <h2 style="margin:0 0 10px; font-size:16px;">Complete task</h2>
-        <p id="taskCompleteSubject" style="margin:0 0 10px; font-size:13px; color:#334155;"></p>
-        <div id="taskCompleteGate" style="display:none; font-size:12px; border-radius:5px; padding:8px 10px; margin-bottom:10px;"></div>
+        <p id="taskCompleteSubject" style="margin:0 0 10px; font-size:13px; color:var(--neutral-700);"></p>
+        <div id="taskCompleteGate" style="display:none; font-size:12px; border-radius:var(--radius-md); padding:8px 10px; margin-bottom:10px;"></div>
 
         @* Evidence, as part of the completion workflow.
            Shown so the completer can see what is already attached, with
@@ -166,7 +166,7 @@
            blocking completion on a file would be a rule this product does
            not have. *@
         <div style="margin-bottom:10px;">
-            <div style="font-size:12px; font-weight:600; color:#475569; margin-bottom:4px;">Evidence</div>
+            <div style="font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:4px;">Evidence</div>
             <div id="taskCompleteEvidence"></div>
             <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
                 <input type="file" id="taskCompleteFile" style="font-size:12px; flex:1 1 auto; min-width:0;" />
@@ -174,19 +174,19 @@
                     <i class="fa-solid fa-paperclip" aria-hidden="true"></i> Attach
                 </button>
             </div>
-            <span style="display:block; font-size:11px; color:#64748b; margin-top:3px;">
+            <span style="display:block; font-size:11px; color:var(--fg-muted); margin-top:3px;">
                 Optional. Attaching is immediate and append-only &mdash; evidence is never
                 overwritten or deleted, so a newer file is added alongside the old one.
             </span>
         </div>
 
         <label style="display:block;">
-            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">Completion remark</span>
-            <textarea id="taskCompleteRemark" rows="3" maxlength="4000"
-                      style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:13px;"
+            <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">Completion remark</span>
+            <textarea class="pm-input" id="taskCompleteRemark" rows="3" maxlength="4000"
+                      style="width:100%; font-size:13px;"
                       placeholder="What was done? Optional, but it is what the audit trail will carry."></textarea>
         </label>
-        <p id="taskCompleteMsg" style="margin:8px 0 0; font-size:12px; color:#b91c1c;"></p>
+        <p id="taskCompleteMsg" style="margin:8px 0 0; font-size:12px; color:var(--danger-700);"></p>
         <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
             <button type="button" class="pm-button" data-close-task-complete>Cancel</button>
             <button type="submit" class="pm-button primary">
@@ -204,21 +204,21 @@
     relevant" path, and the reason is required here because a closure
     with no completion needs one to be readable later.
 *@
-<dialog id="taskCloseDialog" style="border:none; border-radius:8px; padding:0; max-width:520px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="taskCloseDialog" style="max-width:520px; width:94%;">
     <form id="taskCloseForm" method="dialog" style="margin:0; padding:18px 20px;">
         <h2 style="margin:0 0 10px; font-size:16px;">Close task</h2>
-        <p id="taskCloseSubject" style="margin:0 0 10px; font-size:13px; color:#334155;"></p>
-        <div id="taskCloseWarn" style="display:none; font-size:12px; border-radius:5px; padding:8px 10px; margin-bottom:10px;
-                                      background:#fffaf0; border:1px solid #fbd38d; color:#7b341e;"></div>
+        <p id="taskCloseSubject" style="margin:0 0 10px; font-size:13px; color:var(--neutral-700);"></p>
+        <div id="taskCloseWarn" style="display:none; font-size:12px; border-radius:var(--radius-md); padding:8px 10px; margin-bottom:10px;
+                                      background:var(--warning-50); border:1px solid var(--warning-200); color:var(--danger-700);"></div>
         <label style="display:block;">
-            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">
-                Reason<span style="color:#dc2626;">*</span>
+            <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">
+                Reason<span style="color:var(--danger-700);">*</span>
             </span>
-            <textarea id="taskCloseReason" rows="3" maxlength="1000" required
-                      style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:13px;"
+            <textarea class="pm-input" id="taskCloseReason" rows="3" maxlength="1000" required
+                      style="width:100%; font-size:13px;"
                       placeholder="Why is this being closed without completing it?"></textarea>
         </label>
-        <p id="taskCloseMsg" style="margin:8px 0 0; font-size:12px; color:#b91c1c;"></p>
+        <p id="taskCloseMsg" style="margin:8px 0 0; font-size:12px; color:var(--danger-700);"></p>
         <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
             <button type="button" class="pm-button" data-close-task-close>Cancel</button>
             <button type="submit" class="pm-button primary">
@@ -246,23 +246,23 @@
     remove is not evidence. Attaching a newer file adds it alongside, and
     both keep their own uploader and timestamp.
 *@
-<dialog id="taskEvidenceDialog" style="border:none; border-radius:8px; padding:0; max-width:640px; width:94%; box-shadow:0 10px 40px rgba(15,23,42,.25);">
+<dialog id="taskEvidenceDialog" style="max-width:640px; width:94%;">
     <form id="taskEvidenceForm" method="dialog" style="margin:0; padding:18px 20px;">
         <h2 style="margin:0 0 10px; font-size:16px;">Add evidence</h2>
-        <p id="taskEvidenceSubject" style="margin:0 0 10px; font-size:13px; color:#334155;"></p>
+        <p id="taskEvidenceSubject" style="margin:0 0 10px; font-size:13px; color:var(--neutral-700);"></p>
 
         <div id="taskEvidenceExisting" style="margin-bottom:10px;"></div>
 
         <label style="display:block; margin-bottom:8px;">
-            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">
-                File<span style="color:#dc2626;">*</span>
+            <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">
+                File<span style="color:var(--danger-700);">*</span>
             </span>
             <input type="file" id="taskEvidenceFile" required style="font-size:12px; width:100%;" />
         </label>
         <label style="display:block;">
-            <span style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:3px;">Description</span>
-            <input type="text" id="taskEvidenceDesc" maxlength="1000"
-                   style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:13px;"
+            <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">Description</span>
+            <input class="pm-input" type="text" id="taskEvidenceDesc" maxlength="1000"
+                   style="font-size:13px;"
                    placeholder="What does this file show? Recorded on the task's activity feed." />
         </label>
 

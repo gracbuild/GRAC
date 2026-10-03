@@ -86,7 +86,9 @@ public sealed record TaskListQuery(
     string? SlaStatusCode = null,
     string? SourceTypeCode = null,
     long? SourceRecordId = null,
-    string? Priority = null);
+    string? Priority = null,
+    // Migration 414: management dashboard drill-down (no owner, age band).
+    ListDrillFilter? Drill = null);
 
 public sealed record TaskListRow(
     long TaskId,

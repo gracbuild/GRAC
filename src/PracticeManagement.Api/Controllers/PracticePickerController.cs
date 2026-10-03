@@ -9,6 +9,7 @@
 //   GET /controls?organizationId=&structureNodeId=[&releaseId=]
 //   GET /practices?organizationId=&organizationControlId=[&search=][&excludePracticeIds=]
 //   GET /resolve?organizationId=&practiceId=
+//   GET /instances?organizationId=&practiceId=[&riskRegisterId=]   (387)
 //
 // Every level takes the parent's id, so a caller can only ever fetch the
 // rows under a selection the user has already made. Nothing here returns
@@ -112,6 +113,30 @@ public sealed class PracticePickerController(
         catch (Exception ex)
         {
             logger.LogError(ex, "PracticePicker.Practices failed for control {ControlId}", organizationControlId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // 387 -- Level 5: the active practice INSTANCES of one practice. With a
+    // riskRegisterId the rows already on that risk come back flagged
+    // AlreadyMappedToRisk, so the picker shows them disabled with a reason.
+    [HttpGet("instances")]
+    public async Task<IActionResult> Instances(
+        [FromQuery] long? organizationId, [FromQuery] long? practiceId,
+        [FromQuery] long? riskRegisterId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        if (practiceId is null or <= 0)
+            return BadRequest(new { error = "practiceId is required." });
+        try
+        {
+            return Ok(new { data = await service.ListInstancesAsync(
+                organizationId.Value, practiceId.Value, riskRegisterId, cancellationToken) });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "PracticePicker.Instances failed for practice {PracticeId}", practiceId);
             return StatusCode(500, new { error = ex.Message });
         }
     }

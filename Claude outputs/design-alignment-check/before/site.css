@@ -1,0 +1,164 @@
+/*html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}*/
+
+:root {
+    --grac-row-hover-bg: #eaf4ff;
+    --grac-row-hover-text: #172033;
+    --grac-row-hover-border: #3b82f6;
+    --grac-row-hover-transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+/* Shared grid row hover pattern */
+.cacca-table tbody tr,
+.table-wrap tbody tr,
+.similar-grid tbody tr,
+.obligation-grid tbody tr,
+table.dataTable tbody tr,
+.tree-row,
+.map-tree-row {
+    transition: var(--grac-row-hover-transition);
+}
+
+.cacca-table tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover,
+.cacca-table tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td,
+.table-wrap tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td,
+table.dataTable tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover,
+table.dataTable tbody tr:not(.active):not(.selected):not(.table-active):not(.is-selected):not([aria-selected="true"]):hover td {
+    background-color: var(--grac-row-hover-bg);
+    color: var(--grac-row-hover-text);
+}
+
+.cacca-table tbody tr.clickable,
+.drill-down-row,
+.tree-row.clickable,
+.map-tree-row.clickable,
+tr[data-authority-id],
+tr[data-artifact-id],
+tr[data-release-id],
+tr[data-row-click] {
+    cursor: pointer;
+}
+
+/* HTML: <div class="loader"></div> */
+.div-loader {
+    /*position: absolute;
+    z-index: 999999999;
+    background-color: white;
+    height: 100px;*/
+    display: block;
+    z-index: 9999;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    right: 0;
+    left: 0px;
+    bottom: 0;
+    overflow: auto;
+    background-color: #00000052;
+}
+
+.loader {
+  width: 200px;
+  height: 100px;
+  color: #17a2b8;
+  background-image: url('/css/Images/logo-cacca.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  position: relative;
+  left: 45%;
+  top: 40%;
+}
+
+.loader::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url('/css/Images/logo-cacca.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.4;
+  animation: pulse-logo 1s infinite;
+}
+
+@keyframes pulse-logo {
+  to {
+      transform: scale(1.8);
+      opacity: 0;
+  }
+}
+.div-Center {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 30em;
+    height: 18em;
+    margin-top: -9em; /*set to a negative number 1/2 of your height*/
+    margin-left: -15em; /*set to a negative number 1/2 of your width*/
+    border: 1px solid #ccc;
+    background-color: #f3f3f3;
+}
+
+/* Global select styling now handled in cacca-styles.css */
+
+.moveall {
+    background-color: #e9ecef;
+    border-color: #ced4da;
+}
+.removeall {
+    background-color: #e9ecef;
+    border-color: #ced4da;
+}
+
+/* Risk Level Badge Styles */
+.risk-level-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.risk-level-critical {
+    background-color: #ff6150;
+    color: #ffffff;
+}
+
+.risk-level-high {
+    background-color: #f39c12;
+    color: #ffffff;
+}
+
+.risk-level-medium {
+    background-color: #3498db;
+    color: #ffffff;
+}
+
+.risk-level-low {
+    background-color: #1cc88a;
+    color: #ffffff;
+}

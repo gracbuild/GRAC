@@ -1,5 +1,8 @@
-/* Event Profiles (migrations 329-332).
+/* Event Profiles (migrations 329-332, 407).
    List, create/edit with attribute criteria, and Configure Checklists.
+   407: two profile types -- People (EMPLOYEE) and Asset (ASSET). The list
+   has a Profile Type column and filter; the Add / Edit dialog has the two
+   type tabs; criteria cascade by the master's parentDimensionCode.
    Criteria rows are rendered from /scope/profiles/dimensions, so a new
    dimension seeded in SQL appears here with no change to this file.
    Markup: Views/Practice/Partials/event-profiles.cshtml */
@@ -10,11 +13,22 @@
   else init();
 
   var FEATURE = "screen.event-profiles";
-  var SUBJECT = "EMPLOYEE";
+
+  // 407: subject_entity per profile type, and the words each one uses.
+  // The dimensions themselves still come from the master -- this is only
+  // the vocabulary the screen speaks in. `events` names the checklist
+  // editor's event list an Asset Profile answers.
+  var SUBJECTS = {
+    EMPLOYEE: { type: "People", many: "employees", member: "an employee", events: null },
+    ASSET:    { type: "Asset",  many: "assets",    member: "an asset",    events: "ASSET_CATEGORY" }
+  };
+  function subjectOf(code) { return SUBJECTS[code] ? code : "EMPLOYEE"; }
 
   var orgId = null;
   var pager = null;
-  var dimensions = [];        // from the dimension master
+  var formSubject = "EMPLOYEE";  // the Add / Edit dialog's active type tab
+  var dimensionsBySubject = {};  // subjectEntity -> rows from the dimension master
+  var criteriaSeq = 0;           // guards renderCriteria against a quicker tab switch
   var valueCache = {};        // dimensionCode -> [{id,textValue,name}]
   var editing = null;         // profile being edited, null while adding
   var previewTimer = null;
@@ -63,6 +77,16 @@
     // Filters reset to page 1. Staying on page 3 of a filter that now
     // matches four rows shows an empty grid and reads as a fault.
     el("epStatus").addEventListener("change", function () { resetAndLoad(); });
+    el("epProfileType").addEventListener("change", function () { resetAndLoad(); });
+    document.querySelectorAll("#epTypeTabs [data-ep-type]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        if (tab.disabled || tab.getAttribute("data-ep-type") === formSubject) return;
+        setFormSubject(tab.getAttribute("data-ep-type"), false);
+        formMsg(null);
+        renderCriteria(null);
+        schedulePreview();
+      });
+    });
     el("epSearch").addEventListener("input", debounce(function () { resetAndLoad(); }, 250));
     el("epRefreshBtn").addEventListener("click", function () { valueCache = {}; refreshAll(); });
     el("epAddBtn").addEventListener("click", function () { openForm(null); });
@@ -156,8 +180,8 @@
     orgId = el("epOrganization").value || null;
     valueCache = {};
     if (!orgId) {
-      setBody('<tr><td colspan="6" class="pm-empty">Select an organization.</td></tr>');
-      setEcBody('<tr><td colspan="4" class="pm-empty">Select an organization.</td></tr>');
+      setBody('<tr><td colspan="7" class="pm-empty">Select an organization.</td></tr>');
+      setEcBody('<tr><td colspan="5" class="pm-empty">Select an organization.</td></tr>');
       return;
     }
 
@@ -172,7 +196,6 @@
     el("epUnavailable").hidden = enabled;
     if (!enabled) return;
 
-    await loadDimensions();
     if (activeTab === "checklists") await loadChecklists(); else await refreshAll();
   }
 
@@ -184,18 +207,21 @@
   function setEcBody(html) { el("ecBody").innerHTML = html; }
 
   // ------------------------------------------------------------------
-  // Criterion dimensions. Fetched once per screen load: the master is
-  // global configuration, not per-organization data.
+  // Criterion dimensions. Fetched once per profile type per screen load:
+  // the master is global configuration, not per-organization data.
   // ------------------------------------------------------------------
-  async function loadDimensions() {
+  async function loadDimensions(subject) {
+    if (dimensionsBySubject[subject]) return dimensionsBySubject[subject];
     try {
-      var r = await fetch(U("/practice/api/workflow/scope/profiles/dimensions?subjectEntity=" + SUBJECT),
+      var r = await fetch(U("/practice/api/workflow/scope/profiles/dimensions?subjectEntity=" + encodeURIComponent(subject)),
                           { credentials: "same-origin" });
       var b = r.ok ? await r.json() : {};
-      dimensions = (b && b.rows) || [];
+      // Not cached when the call failed, so the next open retries.
+      if (r.ok) dimensionsBySubject[subject] = (b && b.rows) || [];
+      return (b && b.rows) || [];
     } catch (err) {
-      dimensions = [];
       console.error("event-profiles: dimension list failed", err);
+      return [];
     }
   }
 
@@ -221,12 +247,13 @@
     // The menu lives on <body>; re-rendering the grid would otherwise
     // leave it floating with its trigger gone.
     closeRowMenu();
-    setBody('<tr><td colspan="6" class="pm-empty">Loading...</td></tr>');
+    setBody('<tr><td colspan="7" class="pm-empty">Loading...</td></tr>');
     if (pager) pager.busy(true);
 
     var qs = new URLSearchParams({
       organizationId: orgId,
-      subjectEntity: SUBJECT,
+      // 407: the Profile Type filter -- ALL, EMPLOYEE (People) or ASSET.
+      subjectEntity: el("epProfileType").value || "ALL",
       pageNumber: pager ? pager.page() : 1,
       pageSize: pager ? pager.size() : 25
     });
@@ -241,7 +268,7 @@
       var b = await r.json().catch(function () { return {}; });
       if (!r.ok) {
         if (pager) pager.clear();
-        setBody('<tr><td colspan="6" class="pm-empty">' + esc(b.error || ("Load failed (HTTP " + r.status + ")")) + "</td></tr>");
+        setBody('<tr><td colspan="7" class="pm-empty">' + esc(b.error || ("Load failed (HTTP " + r.status + ")")) + "</td></tr>");
         return;
       }
       var rows = (b && b.rows) || [];
@@ -252,7 +279,7 @@
       renderRows(rows);
     } catch (err) {
       if (pager) pager.clear();
-      setBody('<tr><td colspan="6" class="pm-empty">Failed: ' + esc(err.message) + "</td></tr>");
+      setBody('<tr><td colspan="7" class="pm-empty">Failed: ' + esc(err.message) + "</td></tr>");
     }
   }
 
@@ -261,8 +288,8 @@
     body.innerHTML = "";
 
     if (!rows.length) {
-      setBody('<tr><td colspan="6" class="pm-empty">'
-        + "No profiles yet. Add one to decide which onboarding and offboarding checklists apply to which people."
+      setBody('<tr><td colspan="7" class="pm-empty">'
+        + "No profiles yet. Add one to decide which event checklists apply to which people or assets."
         + "</td></tr>");
       return;
     }
@@ -273,9 +300,10 @@
 
       tr.insertAdjacentHTML("beforeend",
           "<td>" + esc(p.profileName)
-            + '<br><span style="font-size:11px; color:#94a3b8;">' + esc(p.profileCode) + "</span></td>"
+            + '<br><span style="font-size:11px; color:var(--fg-subtle);">' + esc(p.profileCode) + "</span></td>"
+        + "<td>" + esc(profileTypeLabel(p)) + "</td>"
         + "<td>" + esc(p.description || "") + "</td>"
-        + '<td><span style="font-size:12px; color:#475569;">' + esc(p.criteriaSummary || "(none)") + "</span></td>"
+        + '<td><span style="font-size:12px; color:var(--fg-secondary);">' + esc(p.criteriaSummary || "(none)") + "</span></td>"
         + "<td>" + statusBadge(p.status) + "</td>"
         + "<td>" + checklistCell(p) + "</td>");
 
@@ -287,10 +315,16 @@
     });
   }
 
+  // People / Asset. ProfileType is computed in the database from
+  // subject_entity (407); the fallback only covers an API not yet restarted.
+  function profileTypeLabel(p) {
+    return (p && p.profileType) || SUBJECTS[subjectOf(p && p.subjectEntity)].type;
+  }
+
   function statusBadge(status) {
     var on = status === "Active";
     return '<span style="padding:3px 9px; border-radius:10px; font-size:11px; background:'
-      + (on ? "#dcfce7" : "#f1f5f9") + "; color:" + (on ? "#166534" : "#475569") + ';">'
+      + (on ? "var(--success-100)" : "var(--bg-subtle)") + "; color:" + (on ? "var(--success-700)" : "var(--fg-secondary)") + ';">'
       + esc(status) + "</span>";
   }
 
@@ -302,10 +336,10 @@
     var mapped = p.mappedObligationCount || 0;
     var apply = p.applicableObligationCount || 0;
     if (!mapped) {
-      return '<span style="font-size:12px; color:#b45309;">Not configured</span>';
+      return '<span style="font-size:12px; color:var(--warning-700);">Not configured</span>';
     }
-    return '<span style="font-size:12px; color:#334155;">' + apply + " apply"
-      + '<br><span style="color:#94a3b8;">' + mapped + " decided</span></span>";
+    return '<span style="font-size:12px; color:var(--neutral-700);">' + apply + " apply"
+      + '<br><span style="color:var(--fg-subtle);">' + mapped + " decided</span></span>";
   }
 
   // ------------------------------------------------------------------
@@ -434,10 +468,10 @@
       // "Fully triaged but nothing applies" is a real state and must not
       // look identical to "fully applicable".
       var bg, fg;
-      if (pct === 0)      { bg = "#fee2e2"; fg = "#7f1d1d"; }
-      else if (pct < 100) { bg = "#fef3c7"; fg = "#78350f"; }
-      else if (apply === 0) { bg = "#e2e8f0"; fg = "#334155"; }
-      else                { bg = "#dcfce7"; fg = "#166534"; }
+      if (pct === 0)      { bg = "var(--danger-100)"; fg = "var(--danger-700)"; }
+      else if (pct < 100) { bg = "var(--warning-100)"; fg = "var(--warning-700)"; }
+      else if (apply === 0) { bg = "var(--neutral-200)"; fg = "var(--neutral-700)"; }
+      else                { bg = "var(--success-100)"; fg = "var(--success-700)"; }
 
       var chip = document.createElement("span");
       chip.style.cssText = "padding:4px 10px; border-radius:12px; font-size:12px; background:" + bg + "; color:" + fg + ";";
@@ -469,12 +503,33 @@
       // on `editing` and sent back unchanged -- see onSubmit.
     }
 
+    // 407: Add starts on People Profile; Edit opens the saved type and
+    // locks the other tab (the type is fixed once saved -- the procedure
+    // refuses a change too, 67438).
+    setFormSubject(editing ? subjectOf(editing.subjectEntity) : "EMPLOYEE", !!editing);
+
     await renderCriteria(editing);
     schedulePreview();
     showDialog("epFormDialog");
   }
 
   function closeForm() { hideDialog("epFormDialog"); editing = null; }
+
+  // Activates one Profile Type tab of the Add / Edit dialog. lockOthers is
+  // set on Edit, where the saved type is the only one allowed.
+  function setFormSubject(subject, lockOthers) {
+    formSubject = subjectOf(subject);
+    document.querySelectorAll("#epTypeTabs [data-ep-type]").forEach(function (tab) {
+      var on = tab.getAttribute("data-ep-type") === formSubject;
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.disabled = !!lockOthers && !on;
+      tab.title = tab.disabled ? "The Profile Type of a saved profile cannot be changed." : "";
+    });
+    el("epCriteriaSubject").textContent = formSubject === "ASSET"
+      ? "An asset is in this profile when it matches"
+      : "A person is in this profile when they match";
+  }
   function closeView() { hideDialog("epViewDialog"); }
 
   function showDialog(id) {
@@ -497,7 +552,13 @@
   // One row per dimension, built from the master. No dimension code is
   // named here on purpose -- see the note at the top of the .cshtml.
   async function renderCriteria(detail) {
+    var seq = ++criteriaSeq;
     var host = el("epCriteria");
+    host.innerHTML = '<div class="pm-empty">Loading criteria...</div>';
+
+    // 407: the active type tab's dimensions.
+    var dimensions = await loadDimensions(formSubject);
+    if (seq !== criteriaSeq) return;   // a quicker tab switch owns the host now
     host.innerHTML = "";
 
     if (!dimensions.length) {
@@ -520,12 +581,15 @@
       var row = document.createElement("div");
       row.className = "pm-criteria-row";
       row.setAttribute("data-dimension", d.dimensionCode);
+      // 407: the criterion this one cascades under (Category -> Sub
+      // Category -> Type), straight from the dimension master.
+      if (d.parentDimensionCode) row.setAttribute("data-parent-dimension", d.parentDimensionCode);
       row.style.cssText = "display:grid; grid-template-columns:160px 90px 1fr; gap:10px; align-items:start;"
-        + " padding:10px 0; border-bottom:1px solid #f1f5f9;";
+        + " padding:10px 0; border-bottom:1px solid var(--neutral-100);";
 
       row.insertAdjacentHTML("beforeend",
-        '<label style="font-size:13px; color:#334155; padding-top:6px;">' + esc(d.dimensionName) + "</label>"
-        + '<label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569; padding-top:6px;">'
+        '<label style="font-size:13px; color:var(--neutral-700); padding-top:6px;">' + esc(d.dimensionName) + "</label>"
+        + '<label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--fg-secondary); padding-top:6px;">'
         + '<input type="checkbox" data-ep-all ' + (isAll ? "checked" : "") + " /> All</label>"
         + '<div data-ep-values></div>');
 
@@ -535,6 +599,7 @@
       var allBox = row.querySelector("[data-ep-all]");
 
       await renderValuePicker(valuesHost, d, saved, isAll);
+      if (seq !== criteriaSeq) return;
 
       /* eslint-disable no-loop-func */
       (function (vh, allCb) {
@@ -550,11 +615,50 @@
           }
           if (menu && allCb.checked) menu.hidden = true;
           vh.style.opacity = allCb.checked ? ".45" : "1";
+          applyCascade();
           schedulePreview();
         });
       })(valuesHost, allBox);
       /* eslint-enable no-loop-func */
     }
+
+    applyCascade();
+  }
+
+  // 407: cascading criteria (Asset Category -> Sub Category -> Type).
+  // A child only offers values whose ParentId is in its parent's
+  // effective set: the parent's picks when it is constrained, else the
+  // parent's own offered values (so Type still narrows through a Sub
+  // Category left on All). A pick hidden this way is cleared, because
+  // it could never match together with the parent's picks. Rows are in
+  // display_order, so every parent is settled before its children.
+  function applyCascade() {
+    var effective = {};   // dimensionCode -> {id: true} or null (unrestricted)
+    document.querySelectorAll("#epCriteria .pm-criteria-row").forEach(function (row) {
+      var code = row.getAttribute("data-dimension");
+      var parentCode = row.getAttribute("data-parent-dimension");
+      var allowed = parentCode ? (effective[parentCode] || null) : null;
+      var combo = row.querySelector("[data-checkcombo]");
+      var isAll = row.querySelector("[data-ep-all]").checked;
+      var offered = {}, picked = {}, anyPicked = false;
+
+      if (combo) {
+        combo.querySelectorAll("[data-checkcombo-option]").forEach(function (opt) {
+          var cb = opt.querySelector('input[type="checkbox"]');
+          var parentId = cb.getAttribute("data-parent-id");
+          // display, not the hidden attribute: the menu's search box owns
+          // `hidden`, and the two filters must not undo each other.
+          var show = !allowed || (parentId !== "" && allowed[parentId] === true);
+          opt.style.display = show ? "" : "none";
+          if (!show && cb.checked) cb.checked = false;
+          if (show) offered[cb.value] = true;
+          if (show && cb.checked) { picked[cb.value] = true; anyPicked = true; }
+        });
+        paintComboText(combo);
+      }
+
+      effective[code] = (!isAll && anyPicked) ? picked : (allowed ? offered : null);
+    });
   }
 
   // The project's own multi-select: .pm-checkcombo, the same markup
@@ -577,7 +681,7 @@
     var values = await loadValues(dimension.dimensionCode);
 
     if (!values.length) {
-      host.innerHTML = '<div style="font-size:12px; color:#b45309; padding-top:7px;">'
+      host.innerHTML = '<div style="font-size:12px; color:var(--warning-700); padding-top:7px;">'
         + "No " + esc(dimension.dimensionName.toLowerCase()) + " values exist for this organization yet."
         + "</div>";
       host.style.opacity = isAll ? ".45" : "1";
@@ -593,6 +697,7 @@
         + '<input type="checkbox" value="' + esc(key) + '"'
         + ' data-value-id="' + esc(v.id != null ? String(v.id) : "") + '"'
         + ' data-value-text="' + esc(v.textValue || "") + '"'
+        + ' data-parent-id="' + esc(v.parentId != null ? String(v.parentId) : "") + '"'
         + (selected[key] ? " checked" : "") + "> "
         + "<span>" + esc(v.name || key) + "</span></label>";
     }).join("");
@@ -661,6 +766,7 @@
     combo.addEventListener("change", function (ev) {
       if (!ev.target.closest('input[type="checkbox"]')) return;
       paintComboText(combo);
+      applyCascade();
       schedulePreview();
     });
 
@@ -723,32 +829,33 @@
     var host = el("epPreview");
     if (!orgId) return;
 
+    var words = SUBJECTS[formSubject];
     if (!editing || !editing.profileId) {
-      host.innerHTML = "Save the profile to see how many people it matches.";
+      host.innerHTML = "Save the profile to see how many " + (formSubject === "ASSET" ? "assets" : "people") + " it matches.";
       return;
     }
 
-    host.textContent = "Counting matching employees...";
+    host.textContent = "Counting matching " + words.many + "...";
     try {
       var r = await fetch(U("/practice/api/workflow/scope/profiles/preview?organizationId="
               + encodeURIComponent(orgId) + "&profileId=" + encodeURIComponent(editing.profileId)),
               { credentials: "same-origin" });
-      if (!r.ok) { host.textContent = "Could not count matching employees."; return; }
+      if (!r.ok) { host.textContent = "Could not count matching " + words.many + "."; return; }
       var b = await r.json();
 
-      var names = (b.sample || []).map(function (s) { return s.employeeName; }).filter(Boolean);
+      var names = (b.sample || []).map(function (s) { return s.memberName; }).filter(Boolean);
       if (!b.matchedCount) {
-        host.innerHTML = '<strong style="color:#b91c1c;">This profile currently matches nobody.</strong>'
-          + '<br><span style="font-size:12px; color:#64748b;">It will save, but no checklist will ever fire from it '
-          + "until an employee matches every criterion above.</span>";
+        host.innerHTML = '<strong style="color:var(--danger-700);">This profile currently matches nobody.</strong>'
+          + '<br><span style="font-size:12px; color:var(--fg-muted);">It will save, but no checklist will ever fire from it '
+          + "until " + words.member + " matches every criterion above.</span>";
         return;
       }
-      host.innerHTML = "<strong>" + b.matchedCount + "</strong> of " + b.totalActiveEmployees
-        + " active employees match this profile."
-        + (names.length ? '<br><span style="font-size:12px; color:#64748b;">For example: '
+      host.innerHTML = "<strong>" + b.matchedCount + "</strong> of " + b.totalActive
+        + " active " + words.many + " match this profile."
+        + (names.length ? '<br><span style="font-size:12px; color:var(--fg-muted);">For example: '
             + esc(names.slice(0, 5).join(", ")) + "</span>" : "");
     } catch (err) {
-      host.textContent = "Could not count matching employees.";
+      host.textContent = "Could not count matching " + words.many + ".";
     }
   }
 
@@ -766,6 +873,9 @@
       formMsg("\"" + emptyConstrained[0].dimensionCode + "\" is not set to All, so it needs at least one value.", "error");
       return;
     }
+    // 407: an edit always saves as its own type -- the tab is locked, and
+    // the procedure refuses a change anyway.
+    var subject = editing ? subjectOf(editing.subjectEntity) : formSubject;
 
     el("epFormSave").disabled = true;
     try {
@@ -779,7 +889,7 @@
           profileCode: editing ? editing.profileCode : null,
           profileName: name,
           description: (el("epDescription").value || "").trim() || null,
-          subjectEntity: SUBJECT,
+          subjectEntity: subject,
           // A new profile is always Active; an edited one keeps the status
           // it already had. Never read from the form -- there is no status
           // control, and defaulting an edit to "Active" would silently
@@ -834,6 +944,7 @@
     if (!detail) { msg("Could not load that profile.", "error"); return; }
 
     el("epViewTitle").textContent = detail.profileName;
+    var words = SUBJECTS[subjectOf(detail.subjectEntity)];
 
     var criteriaHtml = (detail.criteria || []).map(function (c) {
       var values = c.matchAll
@@ -843,12 +954,12 @@
     }).join("");
 
     el("epViewBody").innerHTML =
-        '<p style="font-size:13px; color:#475569; margin:0 0 12px 0;">' + esc(detail.description || "") + "</p>"
-      + '<p style="font-size:12px; color:#64748b; margin:0 0 12px 0;">Code <code>' + esc(detail.profileCode)
-      + "</code> &middot; " + statusBadge(detail.status) + "</p>"
+        '<p style="font-size:13px; color:var(--fg-secondary); margin:0 0 12px 0;">' + esc(detail.description || "") + "</p>"
+      + '<p style="font-size:12px; color:var(--fg-muted); margin:0 0 12px 0;">Code <code>' + esc(detail.profileCode)
+      + "</code> &middot; " + esc(profileTypeLabel(detail)) + " Profile &middot; " + statusBadge(detail.status) + "</p>"
       + '<div class="pm-table-wrap"><table><thead><tr><th style="width:180px;">Criterion</th><th>Values</th></tr></thead>'
       + "<tbody>" + (criteriaHtml || '<tr><td colspan="2" class="pm-empty">No criteria.</td></tr>') + "</tbody></table></div>"
-      + '<div id="epViewPreview" style="margin-top:12px; font-size:13px; color:#334155;">Counting matching employees...</div>';
+      + '<div id="epViewPreview" style="margin-top:12px; font-size:13px; color:var(--neutral-700);">Counting matching ' + words.many + "...</div>";
 
     showDialog("epViewDialog");
 
@@ -858,11 +969,11 @@
               { credentials: "same-origin" });
       var host = el("epViewPreview");
       if (!host) return;
-      if (!r.ok) { host.textContent = "Could not count matching employees."; return; }
+      if (!r.ok) { host.textContent = "Could not count matching " + words.many + "."; return; }
       var b = await r.json();
       host.innerHTML = b.matchedCount
-        ? "<strong>" + b.matchedCount + "</strong> of " + b.totalActiveEmployees + " active employees match."
-        : '<strong style="color:#b91c1c;">This profile currently matches nobody.</strong>';
+        ? "<strong>" + b.matchedCount + "</strong> of " + b.totalActive + " active " + words.many + " match."
+        : '<strong style="color:var(--danger-700);">This profile currently matches nobody.</strong>';
     } catch (_) { /* the dialog is still useful without the count */ }
   }
 
@@ -879,7 +990,7 @@
   async function loadChecklists() {
     if (!orgId) return;
     closeRowMenu();
-    setEcBody('<tr><td colspan="4" class="pm-empty">Loading...</td></tr>');
+    setEcBody('<tr><td colspan="5" class="pm-empty">Loading...</td></tr>');
     if (ecPager) ecPager.busy(true);
 
     var qs = new URLSearchParams({
@@ -896,7 +1007,7 @@
       var b = await r.json().catch(function () { return {}; });
       if (!r.ok) {
         if (ecPager) ecPager.clear();
-        setEcBody('<tr><td colspan="4" class="pm-empty">' + esc(b.error || ("Load failed (HTTP " + r.status + ")")) + "</td></tr>");
+        setEcBody('<tr><td colspan="5" class="pm-empty">' + esc(b.error || ("Load failed (HTTP " + r.status + ")")) + "</td></tr>");
         return;
       }
       var rows = (b && b.rows) || [];
@@ -904,7 +1015,7 @@
       renderChecklistRows(rows);
     } catch (err) {
       if (ecPager) ecPager.clear();
-      setEcBody('<tr><td colspan="4" class="pm-empty">Failed: ' + esc(err.message) + "</td></tr>");
+      setEcBody('<tr><td colspan="5" class="pm-empty">Failed: ' + esc(err.message) + "</td></tr>");
     }
   }
 
@@ -913,9 +1024,9 @@
     body.innerHTML = "";
 
     if (!rows.length) {
-      setEcBody('<tr><td colspan="4" class="pm-empty">'
-        + "No event-driven checklists yet. Tick an obligation in a Profile's, Role's or Asset "
-        + "Category's Configure Checklists screen to create one."
+      setEcBody('<tr><td colspan="5" class="pm-empty">'
+        + "No event-driven checklists yet. Tick an obligation in a Profile's or Role's "
+        + "Configure Checklists screen to create one."
         + "</td></tr>");
       return;
     }
@@ -931,13 +1042,15 @@
       // on ObligationKind itself.
       tr.insertAdjacentHTML("beforeend",
           "<td>" + esc(row.practiceInstanceDisplay || row.practiceName || "")
-            + (row.practiceCode ? '<br><span style="font-size:11px; color:#94a3b8;">' + esc(row.practiceCode) + "</span>" : "")
+            + (row.practiceCode ? '<br><span style="font-size:11px; color:var(--fg-subtle);">' + esc(row.practiceCode) + "</span>" : "")
             + "</td>"
         + "<td>" + esc(row.obligationName || "(untitled obligation)") + checklistKindBadge(row) + "</td>"
         + "<td>" + esc(row.eventTypeName || "")
             + (row.eventDomainName && row.eventDomainName !== row.eventTypeName
-                 ? '<br><span style="font-size:11px; color:#94a3b8;">' + esc(row.eventDomainName) + "</span>" : "")
-            + "</td>");
+                 ? '<br><span style="font-size:11px; color:var(--fg-subtle);">' + esc(row.eventDomainName) + "</span>" : "")
+            + "</td>"
+        // 408: People / Asset -- same words as the Profiles tab's Profile Type.
+        + "<td>" + esc(row.checklistType || "") + "</td>");
 
       var tdMenu = document.createElement("td");
       tdMenu.appendChild(checklistRowMenu(row));
@@ -1017,9 +1130,9 @@
         + "</tr></thead><tbody>"
         + mapped.map(function (p) {
             return "<tr><td>" + esc(p.profileName)
-              + '<br><span style="font-size:11px; color:#94a3b8;">' + esc(p.profileCode) + "</span></td>"
+              + '<br><span style="font-size:11px; color:var(--fg-subtle);">' + esc(p.profileCode) + "</span></td>"
               + "<td>" + esc(p.description || "") + "</td>"
-              + '<td><span style="font-size:12px; color:#475569;">' + esc(p.criteriaSummary || "(none)") + "</span></td>"
+              + '<td><span style="font-size:12px; color:var(--fg-secondary);">' + esc(p.criteriaSummary || "(none)") + "</span></td>"
               + "<td>" + statusBadge(p.status) + "</td></tr>";
           }).join("")
         + "</tbody></table></div>";
@@ -1049,12 +1162,22 @@
       return;
     }
 
-    window.__scopeChecklistEditor.render(host, {
+    // 407: an Asset Profile is still scoped as PROFILE (its decisions are
+    // profile rows the raise resolves), but it answers the asset events --
+    // the same Commissioning / Decommissioning list the editor already
+    // uses for Asset Category, taken from the editor rather than repeated.
+    var isAsset = subjectOf(p.subjectEntity) === "ASSET";
+    var ed = window.__scopeChecklistEditor;
+    ed.render(host, {
       organizationId: orgId,
       scopeDimension: "PROFILE",
       scopeValueId: p.profileId,
+      events: isAsset && ed.events ? ed.events[SUBJECTS.ASSET.events] : undefined,
       title: "Event Checklists for this Profile",
-      subtitle: "Tick the obligations that apply to everyone in this profile when they join, "
+      subtitle: isAsset
+        ? "Tick the obligations that apply to every asset in this profile when it is commissioned, "
+            + "and when it is decommissioned, then press Save changes."
+        : "Tick the obligations that apply to everyone in this profile when they join, "
             + "and when they leave, then press Save changes."
     });
   }

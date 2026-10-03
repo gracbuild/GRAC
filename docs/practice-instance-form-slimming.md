@@ -261,8 +261,9 @@ or the save will retire every declared category.
 
 Open an instance from **Resolve** (`/Practice/Index/resolve` → a row):
 
-* The header carries a **profile** box — Practice type, Criticality,
-  Business function — under the frequency strip. **Owner** appears only
+* The header carries a **profile** box — Practice type, Criticality
+  (Business function removed 2026-10-03, see below) — under the
+  frequency strip. **Owner** appears only
   for an admin session.
 * Change Practice type, Save profile, reload: the header facts strip and
   the Practice Instances grid both show the new value.
@@ -554,3 +555,22 @@ cannot be bypassed.
   refusal (52682) still fires before any reason is asked for.
 * Try to restore an instance whose parent practice is inactive; the
   52814 refusal still fires before any reason is asked for.
+
+## 2026-10-03 — Business function removed from the Instance Profile
+
+The Operationalize workspace (`resolve-workspace.cshtml`, edit and
+`mode=view`) no longer shows a **Business function** select in the
+Instance Profile. It is recorded through the Dependencies panel's
+**Business Function** category (386); two inputs for one fact drift apart.
+
+* UI only. `saveProfile` no longer sends `businessFunctionId`;
+  `sp_resolve_instance_profile_save` (222) COALESCEs a NULL, so a value
+  stored before this change is **kept**, not cleared.
+* API unchanged: `POST /practice/api/workflow/resolve/profile` still
+  accepts `businessFunctionId` (optional) for any other caller.
+* No migration.
+
+Same change: the header button **Back to Resolve** now reads
+**Back to Operationalize** (the screen was renamed), and the "no instance"
+message says "Open it from the Operationalize list."
+

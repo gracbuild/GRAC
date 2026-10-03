@@ -57,6 +57,7 @@ public sealed class OrganizationAccessService(IConfiguration configuration, ILog
 
         await using var connection = new SqlConnection(connString);
         await connection.OpenAsync(cancellationToken);
+        await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
 
         await using var command = connection.CreateCommand();
         command.CommandType = CommandType.Text;

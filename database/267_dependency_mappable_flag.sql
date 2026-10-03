@@ -118,7 +118,7 @@ UPDATE grac_practice.dependency_type_master
        updated_by = N'seed-267',
        updated_dt = SYSUTCDATETIME()
  WHERE is_dependency_mappable = 1
-   AND dependency_type_name IN (N'Application', N'Tool', N'Process', N'Location');
+   AND dependency_type_name IN (N'Application', N'Tool', N'Process');   -- Location removed by 385 (now an Impact category)
 GO
 
 PRINT '267: categories offered for dependency mapping:';

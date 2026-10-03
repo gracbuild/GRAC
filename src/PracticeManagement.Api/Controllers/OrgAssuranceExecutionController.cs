@@ -62,6 +62,10 @@ public sealed class OrgAssuranceExecutionController(
         [FromQuery] string? search,
         [FromQuery] int page     = 1,
         [FromQuery] int pageSize = 25,
+        // Migration 414 -- management dashboard drill-down (?drillCode=,
+        // statusText=, severityText=, minAgeDays=, maxAgeDays=, noOwner=).
+        // Every value absent = the list exactly as before.
+        [FromQuery] ListDrillQuery? drill = null,
         CancellationToken cancellationToken = default)
     {
         if (organizationId is null or <= 0)
@@ -72,7 +76,7 @@ public sealed class OrgAssuranceExecutionController(
             var result = await service.ListAsync(
                 new OrgAssuranceExecutionListQuery(
                     organizationId.Value, definitionId,
-                    statusCode, originType, search, page, pageSize),
+                    statusCode, originType, search, page, pageSize, drill?.ToFilter()),
                 cancellationToken);
             return Ok(result);
         }

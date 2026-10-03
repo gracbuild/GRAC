@@ -16,7 +16,17 @@ public sealed record PracticeScreen(string Key, string Title, string Description
     // sit alongside future Assurance / Exceptions / Risks screens.
     // Introduced when Task Center's Gaps tab was extracted into its
     // own Gap Center module.
-    public const string OversightGroup = "Oversight";
+    // Displayed as "Issues & Actions" since migration 384 (was "Oversight").
+    // Label only: the constant NAME, menu_key nav-oversight, routes and
+    // permissions are unchanged. Must match menu_master.module_type.
+    public const string OversightGroup = "Issues & Actions";
+    // Migration 384 -- Document Management became the root
+    // "Policies & Documents" (nav-documents) again, and the existing
+    // my-notifications row became the "My Notification" parent that
+    // hosts My Practices / My Approvals / My Acknowledgements. Both
+    // values match the rows' menu_master.module_type (page eyebrow).
+    public const string PoliciesDocumentsGroup = "Policies & Documents";
+    public const string MyNotificationGroup = "My Notification";
     // Sidebar reorganisation (migration 051) — enterprise-GRC grouping.
     // These match module_type values in grac_practice.menu_master; the
     // Group value on each PracticeScreen is used for the page eyebrow
@@ -43,11 +53,12 @@ public sealed record PracticeScreen(string Key, string Title, string Description
     // menu_key and permission row is untouched, so existing audit data
     // and grants are unaffected. The constant is the page eyebrow's
     // source, so it has to match menu_master.module_type.
-    public const string AuditManagementGroup = "Audit Management";
+    // Renamed again by migration 384: displayed as "Audit Assurance".
+    public const string AuditManagementGroup = "Audit Assurance";
 
     public static readonly PracticeScreen[] All =
     [
-        new("dashboard","Dashboard","Practice Management summary dashboard","chart-line",["Id","Message"], DashboardGroup),
+        new("dashboard","Home","Practice Management summary dashboard","chart-line",["Id","Message"], DashboardGroup),
         new("organization-setup","Organization Setup","GRAC Admin module for organization onboarding, metadata, repository subscription, locations, departments, business functions, teams, committees, and employees","building",["Code","Name","Industry","EntityType","Country","Status"], OrganizationOnboardingGroup),
         new("organization-administration","Organization Administration","Organization profile, locations, departments, business functions, teams, committees, and employees for organization users","building-user",["Code","Name","Industry","EntityType","Country","Status"], OrganizationAdministrationGroup),
         new("organizations","Organization Onboarding","Legal entities and organization-level operating context","building",["Code","Name","Industry","EntityType","Country","Status"], OrganizationGroup),
@@ -121,6 +132,14 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Organization selector, leaving the existing Organization+Release toolbar
         // screen above completely untouched for subscribed-framework statements.
         new("custom-source-statements","Add Source Statements","Author Source Structure and Source Statements for a Custom Release -- no Organization selection required.","shield",["Source Structure Node","Statement Reference","Statement Title","Applicability Status"], GovernanceGroup),
+        // repository-updates (migration 395): review / approve the changes
+        // Control Management made to a subscribed release since the
+        // organization copied it. Same no-menu-row convention as
+        // custom-source-statements -- reached from the Standards & Frameworks
+        // release row (and Home), permissioned through organization-controls
+        // (PracticeController.ScreenPermissionArea). Self-contained partial;
+        // the columns below are unused placeholders.
+        new("repository-updates","Repository Updates","Review and approve Control Management changes to a subscribed framework release.","shield",["Item","Change","Release","Detected"], GovernanceGroup),
         // Pre-hydration header and colspan source only: practice.js draws this
         // grid through renderRequirementControlGroups / renderStatementPracticeRows,
         // which write their own <th> row. ImplementationStatus is the practice-level
@@ -180,13 +199,13 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // ===== Workflow Layer (§12.1.3) — feature-flagged OFF by default =====
         // Task Center now lives under Oversight (was PracticeManagementGroup) so
         // it sits alongside Gap Center and future Assurance / Exceptions / Risks.
-        new("tasks","Task Center","Tasks created to address gaps and lifecycle work — Implementation, Assurance, Custom","list-check",["TaskId","Type","Subject","Assignee","Status","Priority","SlaDueAt"], OversightGroup),
+        new("tasks","Task Board","Tasks created to address gaps and lifecycle work — Implementation, Assurance, Custom","list-check",["TaskId","Type","Subject","Assignee","Status","Priority","SlaDueAt"], OversightGroup),
         // Gap Center — identifies work that needs to be done (Implementation
         // gaps today; Assurance / Custom gaps expand later). Kept independent
         // of Task Center because gap sources (assurance findings, exceptions,
         // risk register, audits, repository gaps) can grow well beyond
         // Implementation. See conversation notes for full source list.
-        new("gaps","Gap Center","Unified sources of work — Implementation, Assurance and Custom gaps in one place","triangle-exclamation",["Instance","Practice","Organization","ImplementationStatus","Owner","Criticality","ExistingTasks"], OversightGroup),
+        new("gaps","Gap Register","Unified sources of work — Implementation, Assurance and Custom gaps in one place","triangle-exclamation",["Instance","Practice","Organization","ImplementationStatus","Owner","Criticality","ExistingTasks"], OversightGroup),
         // Document Upload + Acknowledgement module (migrations 146-149).
         // Renamed "Document Library" and moved under Governance by
         // migration 358 (sidebar half in menu_master; Title/Group here
@@ -198,18 +217,18 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Management exactly as 155 left them. Columns are unused (the
         // partial owns its own layout) but kept meaningful so the screen
         // registry stays self-describing.
-        new("document-uploads","Document Library","Register controlled documents, distribute them, and route them through review and approval","file-lines",["Code","Name","Type","Version","Stage","Status","NextReview"], GovernanceGroup),
+        new("document-uploads","Document Library","Register controlled documents, distribute them, and route them through review and approval","file-lines",["Code","Name","Type","Version","Stage","Status","NextReview"], PoliciesDocumentsGroup),
         // Phase 2 companion to Document Library (migrations 150-152) --
         // admin batches for tracking user acknowledgement of published
         // documents. Renders via document-acknowledgements.cshtml.
-        new("document-acknowledgements","Document Acknowledgements","Roll published documents into named batches and track who has acknowledged each","file-signature",["Name","Due","Docs","Users","AckCount","Progress","Status"], OversightGroup),
+        new("document-acknowledgements","Document Acknowledgements","Roll published documents into named batches and track who has acknowledged each","file-signature",["Name","Due","Docs","Users","AckCount","Progress","Status"], PoliciesDocumentsGroup),
         // Phase 3 user-side counterpart (migrations 153-154). Every
         // employee sees their own pending acknowledgements here.
-        new("my-acknowledgements","My Acknowledgements","Documents you are asked to acknowledge -- pick a batch and confirm each one","inbox",["Batch","Due","MyDocs","Acknowledged","Pending","Progress","Status"], OversightGroup),
+        new("my-acknowledgements","My Acknowledgements","Documents you are asked to acknowledge -- pick a batch and confirm each one","inbox",["Batch","Due","MyDocs","Acknowledged","Pending","Progress","Status"], MyNotificationGroup),
         // Personal inbox for SLA task notifications (migrations 201-203).
         // Sits next to My Acknowledgements: both are addressed to the
         // signed-in individual rather than to a role or an organisation.
-        new("my-notifications","My Notifications","Task SLA warnings, breaches and escalations addressed to you","bell",["Event","Task","WhyYou","Due","Received","Status"], OversightGroup),
+        new("my-notifications","My Notifications","Task SLA warnings, breaches and escalations addressed to you","bell",["Event","Task","WhyYou","Due","Received","Status"], MyNotificationGroup),
         // Gap Centre v1.0 (migrations 156-158 / AES) -- lifecycle
         // engine on a single custom_gap row: canonical states, Gap
         // Analysis Engine, Decision Gateway with downstream links.
@@ -217,7 +236,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         new("gap-detail","Gap Details","Gap lifecycle, analysis and downstream link management","route",["State","Severity","Impact"], OversightGroup),
         // Exception Centre (migrations 161-163) -- time-boxed
         // acceptance of gaps. Auto-populated from gap analysis.
-        new("exception-centre","Exception Centre","Approve or reject time-boxed exception requests raised from gap analysis","shield-halved",["Request","Gap","Status","EffectiveUntil"], OversightGroup),
+        new("exception-centre","Exceptions & Waivers","Approve or reject time-boxed exception requests raised from gap analysis","shield-halved",["Request","Gap","Status","EffectiveUntil"], OversightGroup),
         // Exception analysis (migration 257) -- the stage between a raised
         // request and the approval decision. Reached from Exception
         // Centre's 3-dot menu with ?exceptionId=, the same way gap-detail
@@ -249,6 +268,30 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // module: candidates from any GRAC source, the mandatory initial
         // risk analysis, and the Risk Register both entry routes feed.
         new("risk-centre","Risk Centre","Analyse risk candidates raised by Gap, Exception, Assurance and other GRAC sources, then register them; or create a custom risk directly","triangle-exclamation",["Candidate","Source","Rating","Status"], OversightGroup),
+        // Risk Management submenus (migration 383). Each opens the SAME
+        // risk-centre partial locked to one of its tabs (see Manage.cshtml's
+        // risk sub-tab map and risk-centre.js's window.riskCentreInitialTab
+        // handling), so the grids, filters, actions, APIs and business logic
+        // are reused verbatim -- these entries only give each tab its own
+        // route/screen so it can be a standalone submenu page. Their VIEW
+        // permission is shared with 'risk-centre' via ScreenPermissionArea,
+        // and Group 'Risk Management' matches the parent menu's module_type.
+        new("risk-centre-candidates","Risk Candidate","Risk candidates raised by Gap, Exception, Assurance, Obligation and other GRAC sources, assessed before entering the Risk Register.","inbox",["Candidate","Source","Rating","Status"], "Risk Management"),
+        new("risk-centre-register","Risk Register","The authoritative repository of registered risks.","book",["Risk","Source","Rating","Status"], "Risk Management"),
+        new("risk-centre-accept","Accept Risk","Risks ready for an acceptance decision.","circle-check",["Risk","Rating","Owner","Status"], "Risk Management"),
+        new("risk-centre-review","Review Risk","Registered risks due for review.","rotate-left",["Risk","Next Review","Owner","Status"], "Risk Management"),
+        new("risk-centre-calendar","Calendar","Upcoming risk reviews across the selected range.","calendar-days",["Risk","Next Review","Owner"], "Risk Management"),
+        new("risk-centre-dashboard","Dashboard","Risk posture overview for the selected organization.","chart-pie",["Metric","Value"], "Risk Management"),
+        // Management dashboards (migration 414). Since 416 each is the
+        // "Dashboard" submenu (first child) of nav-governance /
+        // nav-oversight / nav-assurance -- its menu row has this key, so the
+        // row's name ("Dashboard") is the page title, as for
+        // risk-centre-dashboard. VIEW: the row's own grant plus a child
+        // screen (ManagementDashboards.CanOpen). Rendered by the shared
+        // Partials/management-dashboard.cshtml.
+        new("governance-dashboard","Governance Dashboard","Standards, practices and practice instances for the selected organization.","landmark",["Metric","Value"], GovernanceGroup),
+        new("issues-actions-dashboard","Issues & Actions Dashboard","Issues, tasks and exceptions for the selected organization.","binoculars",["Metric","Value"], OversightGroup),
+        new("audit-assurance-dashboard","Audit & Assurance Dashboard","Audits, findings and audit plans for the selected organization.","clipboard-check",["Metric","Value"], AuditManagementGroup),
         // =====================================================================
         new("assurance-dashboard","Assurance Dashboard","Operational assurance coverage, overdue activities, findings, and health signals for resolved practice instances","chart-line",["Metric","Value","Severity","Message"], AssuranceManagementGroup),
         new("assurance-generation","Assurance Activity Generation","Generate assurance activities for eligible resolved practice instances based on assurance frequency","calendar-plus",["PracticeInstance","AssuranceFrequency","AssuranceType","EligibilityStatus","NextDueDate","ActionStatus"], AssuranceManagementGroup),

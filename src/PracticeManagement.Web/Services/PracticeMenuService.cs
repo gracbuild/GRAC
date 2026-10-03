@@ -62,7 +62,11 @@ public sealed class PracticeMenuService(SecurePracticeClient client, ILogger<Pra
                     };
                 })
                 .ToArray();
-            var menuItems = BuildMenuItems(parsed.Rows, byKey);
+            // Migration 390: the sidebar tree is built only from rows marked
+            // ShowInSidebar (and not beneath a hidden row). visibleScreens
+            // above deliberately still includes the hidden rows -- they are
+            // Active, permission-bearing screens reached from Home.
+            var menuItems = BuildMenuItems(SidebarRows(parsed.Rows), byKey);
             logger.LogInformation("PracticeManagement menu API returned {ApiRowCount} active rows; {KnownRowCount} matched web screens; {VisibleRowCount} screens will render. Permission filtering is disabled for base menu loading.",
                 parsed.Rows.Count, knownKeys.Count, visibleScreens.Length);
             return new PracticeMenuResult(parsed.Success, parsed.Message, parsed.Rows, knownKeys, allowedKeys, visibleScreens, menuItems);
@@ -72,6 +76,27 @@ public sealed class PracticeMenuService(SecurePracticeClient client, ILogger<Pra
             logger.LogWarning(ex, "Could not load Practice Management menus from the Practice API menu-master endpoint.");
             return new PracticeMenuResult(false, ex.Message, [], new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase), [], []);
         }
+    }
+
+    // Drops rows hidden from navigation (menu_master.show_in_sidebar = 0,
+    // migration 390) together with everything beneath them, so a hidden
+    // parent never leaves orphaned children behind in either the tree or
+    // the flat module-group fallback.
+    private static List<MenuRow> SidebarRows(List<MenuRow> rows)
+    {
+        var hidden = rows.Where(row => row.ShowInSidebar == false).Select(row => row.Id).ToHashSet();
+        if (hidden.Count == 0) return rows;
+
+        bool added;
+        do
+        {
+            added = false;
+            foreach (var row in rows)
+                if (row.ParentMenuId.HasValue && hidden.Contains(row.ParentMenuId.Value) && hidden.Add(row.Id))
+                    added = true;
+        } while (added);
+
+        return rows.Where(row => !hidden.Contains(row.Id)).ToList();
     }
 
     private static IReadOnlyList<PracticeMenuItem> BuildMenuItems(List<MenuRow> rows, Dictionary<string, PracticeScreen> screens)
@@ -220,7 +245,9 @@ public sealed class PracticeMenuService(SecurePracticeClient client, ILogger<Pra
         long? ParentMenuId,
         string? IconClass,
         string? ModuleType,
-        int DisplayOrder);
+        int DisplayOrder,
+        // Migration 390. Null (a pre-390 API) means visible.
+        bool? ShowInSidebar = null);
 
     private sealed record ParsedMenuRows(bool Success, string Message, List<MenuRow> Rows);
 

@@ -1,0 +1,387 @@
+@*
+    Asset Valuation -- Asset & Contract Management, Phase 2.3 (migration 422).
+    Rendered from Manage.cshtml when Model.Key == "asset-valuation-config".
+
+    BRD 5.1.18 / 5.1.18.5: one versioned configuration per organization --
+    CIA scales, valuation method and weights, Asset Value bands and the
+    criticality scale. Draft -> Pending Approval -> Approved -> Active ->
+    Retired. Only a Draft is editable; an Active version is immutable.
+
+    446 (BRD 5.1.18.5.7 / 5.1.18.5.8): Recalculation shows the impact of the
+    Active version on stored Asset Values (affected assets and why,
+    category moves, linked risks, earlier runs) and runs a controlled
+    recalculation with a reason (APPROVE). Activating a version never
+    changes stored values by itself.
+
+    447 (BRD 19.7): Consistency rules -- per-organization rules over CIA,
+    Asset Value, criticality, supported-service criticality and asset
+    fields (conditions in a group all hold; any group may hold), with
+    scope, severity, action, acceptance settings and effective dates;
+    Draft -> Active (another person, APPROVE) -> Retired, new versions as
+    Drafts; Preview lists the assets a rule matches now. Findings are
+    worked on the Asset Register.
+
+    Backend: practice/api/asset-config/valuation... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-valuation-config.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var avcPermissions = ViewBag.Permissions as string[] ?? [];
+    bool avcHas(string action) => avcPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var avcCanEdit = avcHas("ADD") || avcHas("EDIT");
+    var avcCanApprove = avcHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="avcRoot" data-can-edit="@(avcCanEdit ? "1" : "0")" data-can-approve="@(avcCanApprove ? "1" : "0")">
+
+    @* ============================ List view ============================ *@
+    <section class="pm-panel" id="avcListView">
+        <div class="pm-toolbar">
+            <select id="avcOrg" title="Organization"><option value="">Select organization</option></select>
+            @if (avcCanEdit)
+            {
+                <button class="pm-button primary" id="avcNewBtn" type="button">
+                    <i class="fa-solid fa-plus"></i> New Configuration
+                </button>
+            }
+            <button class="pm-button" id="avcRecalcBtn" type="button">
+                <i class="fa-solid fa-calculator"></i> Recalculation
+            </button>
+            <button class="pm-button" id="avcRulesBtn" type="button">
+                <i class="fa-solid fa-scale-balanced"></i> Consistency rules
+            </button>
+            <button class="pm-button icon" id="avcRefresh" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Configuration</th><th>Version</th><th>Method</th><th>Status</th><th>Effective</th><th>Bands</th></tr>
+                </thead>
+                <tbody id="avcListBody"><tr><td colspan="6" class="pm-empty">Select an organization.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    @* ===================== Recalculation view (446) ===================== *@
+    <section id="avcRecalcView" hidden>
+        <div class="pm-panel avc-head">
+            <div class="avc-head-main">
+                <button class="pm-button" id="avcRecalcBack" type="button"><i class="fa-solid fa-arrow-left"></i> Configurations</button>
+                <div>
+                    <div class="avc-head-title">Asset Value recalculation</div>
+                    <div class="avc-head-meta" id="avcRecalcMeta"></div>
+                </div>
+            </div>
+            <div class="avc-head-actions">
+                <button class="pm-button icon" id="avcRecalcRefresh" type="button" title="Refresh impact" aria-label="Refresh impact"><i class="fa-solid fa-arrows-rotate"></i></button>
+                @if (avcCanApprove)
+                {
+                    <button class="pm-button primary" id="avcRecalcRun" type="button"><i class="fa-solid fa-play"></i> Run recalculation</button>
+                }
+            </div>
+        </div>
+        <p class="pm-message" id="avcRecalcMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-panel">
+            <dl class="avc-result" id="avcRecalcSummary"></dl>
+            <h3 class="avc-sub">Category moves</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>From</th><th>To</th><th>Assets</th></tr></thead>
+                    <tbody id="avcRecalcMoves"></tbody>
+                </table>
+            </div>
+            <h3 class="avc-sub">Affected assets <small>(first 500)</small></h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Why</th><th>Stored</th><th>After recalculation</th><th>Linked risks</th></tr></thead>
+                    <tbody id="avcRecalcAssets"></tbody>
+                </table>
+            </div>
+            <h3 class="avc-sub">Runs</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Run</th><th>Started</th><th>Configuration</th><th>Status</th><th>Affected / updated / errors</th><th>By</th><th>Reason</th></tr></thead>
+                    <tbody id="avcRecalcRuns"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    @* ===================== Consistency rules view (447) ===================== *@
+    <section id="avcRulesView" hidden>
+        <div class="pm-panel avc-head">
+            <div class="avc-head-main">
+                <button class="pm-button" id="avcRulesBack" type="button"><i class="fa-solid fa-arrow-left"></i> Configurations</button>
+                <div>
+                    <div class="avc-head-title">CIA and criticality consistency rules</div>
+                    <div class="avc-head-meta">Findings appear on the Asset Register (Valuation tab and Consistency findings).</div>
+                </div>
+            </div>
+            <div class="avc-head-actions">
+                @if (avcCanEdit)
+                {
+                    <button class="pm-button primary" id="avcRuleNew" type="button"><i class="fa-solid fa-plus"></i> New rule</button>
+                }
+            </div>
+        </div>
+        <p class="pm-message" id="avcRulesMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-panel">
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Rule</th><th>Version</th><th>Status</th><th>Scope</th><th>Severity</th><th>Action</th><th>Effective</th><th>Findings</th></tr></thead>
+                    <tbody id="avcRulesBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="pm-panel" id="avcRuleEditor" hidden>
+            <div class="avc-head">
+                <div>
+                    <div class="avc-head-title" id="avcRuleTitle">--</div>
+                    <div class="avc-head-meta" id="avcRuleMeta"></div>
+                </div>
+                <div class="avc-head-actions" id="avcRuleActions"></div>
+            </div>
+            <form id="avcRuleForm" class="pm-form-grid">
+                <label class="full"><span>Rule name *</span><input type="text" id="avcRuleName" maxlength="200" /></label>
+                <label class="full"><span>Description</span><textarea id="avcRuleDesc" rows="2" maxlength="1000"></textarea></label>
+                <label><span>Scope *</span><select id="avcRuleScopeKind"></select></label>
+                <label><span>Applies to</span><select id="avcRuleScopeRef"></select></label>
+                <label><span>Severity *</span><select id="avcRuleSeverity"></select></label>
+                <label><span>Action *</span><select id="avcRuleAction"></select></label>
+                <label class="avc-check"><input type="checkbox" id="avcRuleOverride" /> <span>An inconsistency may be accepted (rationale, owner, review date)</span></label>
+                <label><span>Longest acceptance (days)</span><input type="number" id="avcRuleMaxDays" min="1" max="1095" step="1" /></label>
+                <label><span>Effective from</span><input type="date" id="avcRuleFrom" /></label>
+                <label><span>Effective to</span><input type="date" id="avcRuleTo" /></label>
+                <label class="full"><span>Change reason</span><textarea id="avcRuleReason" rows="2" maxlength="1000"></textarea></label>
+                <div class="full">
+                    <div class="avc-head">
+                        <h3 class="avc-sub">Conditions <small>(conditions in a group must all hold; any group may hold)</small></h3>
+                        <button class="pm-button" type="button" id="avcCondAdd"><i class="fa-solid fa-plus"></i> Add condition</button>
+                    </div>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Group</th><th>Operand</th><th>Operator</th><th>Value</th><th></th></tr></thead>
+                            <tbody id="avcCondBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="avc-note">Example (BRD 19.7): Asset Value Category equals Critical and Criticality (name) equals Low. For "is one of", separate values with |.</p>
+                </div>
+            </form>
+            <h3 class="avc-sub">Preview</h3>
+            <p class="avc-note" id="avcRulePreviewNote">Preview lists the assets the saved rule matches now.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Status</th><th>Values</th><th>Finding</th></tr></thead>
+                    <tbody id="avcRulePreviewBody"></tbody>
+                </table>
+            </div>
+            <h3 class="avc-sub">Versions</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>Status</th><th>Effective</th><th>Reason</th><th>Activated</th></tr></thead>
+                    <tbody id="avcRuleVersions"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    @* =========================== Design view =========================== *@
+    <section id="avcDesignView" hidden>
+        <div class="pm-panel avc-head">
+            <div class="avc-head-main">
+                <button class="pm-button" id="avcBack" type="button"><i class="fa-solid fa-arrow-left"></i> Configurations</button>
+                <div>
+                    <div class="avc-head-title" id="avcTitle">--</div>
+                    <div class="avc-head-meta" id="avcMeta"></div>
+                </div>
+            </div>
+            <div class="avc-head-actions" id="avcActions"></div>
+        </div>
+        <p class="pm-message" id="avcMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-panel">
+            <div class="pm-tabs" role="tablist" aria-label="Valuation configuration">
+                <button role="tab" class="active" data-avc-tab="cia" aria-selected="true">CIA Scales</button>
+                <button role="tab" data-avc-tab="method" aria-selected="false">Valuation Method</button>
+                <button role="tab" data-avc-tab="bands" aria-selected="false">Value Bands</button>
+                <button role="tab" data-avc-tab="criticality" aria-selected="false">Criticality</button>
+                <button role="tab" data-avc-tab="calculator" aria-selected="false">Calculator</button>
+                <button role="tab" data-avc-tab="readiness" aria-selected="false">Readiness</button>
+                <button role="tab" data-avc-tab="history" aria-selected="false">History</button>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="cia">
+                <div class="pm-toolbar">
+                    <button class="pm-button primary avc-edit-only" type="button" data-avc-add="CIA_LEVEL"><i class="fa-solid fa-plus"></i> Add Level</button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Dimension</th><th>Score</th><th>Label</th><th>Impact description</th><th aria-label="Actions"></th></tr></thead>
+                        <tbody id="avcCiaBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="method" hidden>
+                <form id="avcMethodForm" class="pm-form-grid">
+                    <label class="full"><span>Configuration name *</span><input type="text" id="avcName" maxlength="200" required /></label>
+                    <label>
+                        <span>Valuation method</span>
+                        <select id="avcMethodSel">
+                            <option value="MAXIMUM">Maximum -- MAX(C, I, A)</option>
+                            <option value="WEIGHTED_AVERAGE">Weighted Average -- (C x WC + I x WI + A x WA) / 100</option>
+                            <option value="SUMMATION">Summation -- C + I + A</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Rounding</span>
+                        <select id="avcRounding">
+                            <option value="ROUND_HALF_UP">Round half up</option>
+                            <option value="ROUND_DOWN">Round down</option>
+                            <option value="ROUND_UP">Round up</option>
+                        </select>
+                    </label>
+                    <label><span>Confidentiality weight (%)</span><input type="number" id="avcWc" min="0" max="100" step="0.01" /></label>
+                    <label><span>Integrity weight (%)</span><input type="number" id="avcWi" min="0" max="100" step="0.01" /></label>
+                    <label><span>Availability weight (%)</span><input type="number" id="avcWa" min="0" max="100" step="0.01" /></label>
+                    <label><span>Decimal places</span><input type="number" id="avcDp" min="0" max="4" step="1" /></label>
+                    <label class="avc-check"><input type="checkbox" id="avcOverride" /> <span>Allow asset-level method override (authorised role and reason)</span></label>
+                    <label><span>Effective from</span><input type="date" id="avcFrom" /></label>
+                    <label><span>Effective to</span><input type="date" id="avcTo" /></label>
+                    <label class="full"><span>Change reason <small>(required for version 2 onwards)</small></span><textarea id="avcReason" rows="3" maxlength="1000"></textarea></label>
+                    <p class="avc-note full" id="avcWeightNote"></p>
+                    <div class="full avc-edit-only">
+                        <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="bands" hidden>
+                <div class="pm-toolbar">
+                    <button class="pm-button primary avc-edit-only" type="button" data-avc-add="BAND"><i class="fa-solid fa-plus"></i> Add Band</button>
+                    <span class="avc-note" id="avcRangeNote"></span>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>From score</th><th>To score</th><th>Category</th><th>Treatment guidance</th><th aria-label="Actions"></th></tr></thead>
+                        <tbody id="avcBandBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="criticality" hidden>
+                <div class="pm-toolbar">
+                    <button class="pm-button primary avc-edit-only" type="button" data-avc-add="CRITICALITY"><i class="fa-solid fa-plus"></i> Add Level</button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Score</th><th>Label</th><th>Impact description</th><th>Review every (months)</th><th>Maps to Criticality</th><th aria-label="Actions"></th></tr></thead>
+                        <tbody id="avcCritBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="calculator" hidden>
+                <p class="avc-note">Try a combination of ratings against this version. Nothing is saved.</p>
+                <div class="pm-form-grid">
+                    <label><span>Confidentiality</span><select id="avcCalcC"></select></label>
+                    <label><span>Integrity</span><select id="avcCalcI"></select></label>
+                    <label><span>Availability</span><select id="avcCalcA"></select></label>
+                    <div class="full"><button class="pm-button primary" id="avcCalcRun" type="button"><i class="fa-solid fa-calculator"></i> Calculate</button></div>
+                </div>
+                <dl class="avc-result" id="avcCalcResult"></dl>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="readiness" hidden>
+                <div class="pm-toolbar">
+                    <span id="avcReadySummary"></span>
+                    <button class="pm-button icon" id="avcReadyRefresh" type="button" title="Re-run checks" aria-label="Re-run checks"><i class="fa-solid fa-arrows-rotate"></i></button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Severity</th><th>Check</th><th>Detail</th></tr></thead>
+                        <tbody id="avcReadyBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pm-tab-panel" data-avc-panel="history" hidden>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead>
+                        <tbody id="avcHistoryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Item modal (level / band / criticality) ======================= *@
+<div class="pm-modal" id="avcItemModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="avcItemTitle">Item</h2>
+            <button class="pm-modal-close" type="button" data-close-avc aria-label="Close">&times;</button>
+        </header>
+        <form id="avcItemForm" class="pm-form-grid">
+            <label class="full" data-avc-for="CIA_LEVEL">
+                <span>Dimension *</span>
+                <select id="avcItemDim">
+                    <option value="C">Confidentiality</option>
+                    <option value="I">Integrity</option>
+                    <option value="A">Availability</option>
+                </select>
+            </label>
+            <label data-avc-for="CIA_LEVEL CRITICALITY"><span>Score *</span><input type="number" id="avcItemScore" min="0" step="1" /></label>
+            <label data-avc-for="BAND"><span>From score *</span><input type="number" id="avcItemMin" step="0.0001" /></label>
+            <label data-avc-for="BAND"><span>To score *</span><input type="number" id="avcItemMax" step="0.0001" /></label>
+            <label class="full"><span id="avcItemLabelCaption">Label *</span><input type="text" id="avcItemLabel" maxlength="100" required /></label>
+            <label class="full"><span id="avcItemDescCaption">Impact description</span><textarea id="avcItemDesc" rows="3" maxlength="500"></textarea></label>
+            <label data-avc-for="CRITICALITY"><span>Review every (months)</span><input type="number" id="avcItemReview" min="1" step="1" /></label>
+            <label data-avc-for="CRITICALITY"><span>Maps to Criticality</span><select id="avcItemMap"></select></label>
+            <p class="pm-message full" id="avcItemMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-avc>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    #avcRoot .avc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    #avcRoot .avc-head-main { display: flex; align-items: center; gap: 12px; }
+    #avcRoot .avc-head-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); }
+    #avcRoot .avc-head-meta { font-size: 12px; color: var(--fg-secondary); margin-top: 2px; }
+    #avcRoot .avc-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    #avcRoot.avc-locked .avc-edit-only { display: none !important; }
+    .avc-check { flex-direction: row !important; align-items: center; gap: 6px; }
+    .avc-note { color: var(--fg-secondary); font-size: 12px; margin: 0; }
+    .avc-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .avc-result { display: grid; grid-template-columns: 180px 1fr; gap: 6px 14px; margin: 12px 0; font-size: 13px; }
+    .avc-result dt { color: var(--fg-secondary); font-weight: 600; }
+    .avc-result dd { margin: 0; color: var(--fg-default); }
+    .avc-status { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .avc-st-draft    { background: var(--bg-subtle); color: var(--fg-secondary); }
+    .avc-st-pending  { background: var(--warning-50); color: var(--warning-700); }
+    .avc-st-approved { background: var(--primary-100); color: var(--primary-800); }
+    .avc-st-active   { background: var(--success-100); color: var(--success-700); }
+    .avc-st-retired  { background: var(--neutral-200); color: var(--fg-muted); }
+    .avc-sev-error   { background: var(--danger-100); color: var(--danger-700); }
+    .avc-sev-warning { background: var(--warning-50); color: var(--warning-700); }
+    .pm-modal-close { background: transparent; border: 0; padding: 0; font-size: 22px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+</style>
+
+<script src="~/js/AssetConfig/asset-valuation-config.js" asp-append-version="true"></script>

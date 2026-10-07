@@ -148,8 +148,25 @@ public static class PermissionAreaMap
         // "You do not have permission to view committees" on the tab.
         // The screen that shows them governs them instead: VIEW on
         // Organization Administration lists them, its ADD/EDIT/DELETE
-        // govern Add/Edit/Inactive. Users / Employees is NOT here -- its
-        // "users" menu row (User Management) is still Active and grantable.
+        // govern Add/Edit/Inactive.
+        //
+        // 2026-10-06: Users joins them. Its "users" menu row (User
+        // Management) is Active, but its parent 'nav-administration' is
+        // InActive, so it is in neither the sidebar nor the Role Master
+        // permission matrix -- an organization admin could not be granted
+        // it and the Users tab answered "You do not have permission to view
+        // users" while every other tab worked. Same rule as the five above:
+        // the screen that shows the tab governs it.
+        ["users"] = "organization-administration",
+        // The Organization tab of the same screen (read-only by design,
+        // 2026-09-20). Its read used "organization-setup" -- the GRAC
+        // Admin's Organization Setup menu, which an organization admin is
+        // not meant to hold -- so the tab failed the same way. The tab now
+        // reads through this alias: QUERY only, organization-scoped at the
+        // gateway, resolved to organization-setup inside the API
+        // (PracticeRepositoryService.ExecuteAsync), which refuses any
+        // write under this name. Organization Setup itself is unchanged.
+        ["organization-profile"] = "organization-administration",
         ["locations"] = "organization-administration",
         ["departments"] = "organization-administration",
         ["business-functions"] = "organization-administration",

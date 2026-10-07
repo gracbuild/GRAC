@@ -430,7 +430,8 @@
         wireMaterializeDialog();
         wireAuditorDialog();  // 120 -- per-entity auditor
 
-        state.orgId = orgs[0].value;
+        // 2026-10-06: the org last picked on any page, else the lowest id.
+        state.orgId = window.gracOrgPref.preferred(orgs.map(function (o) { return o.value; }), orgSel);
         // 414: the dashboard's organization wins when it is one of these.
         if (EX_DRILL && orgs.some(function (o) { return String(o.value) === EX_DRILL.organizationId; }))
             state.orgId = EX_DRILL.organizationId;

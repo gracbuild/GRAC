@@ -72,15 +72,17 @@
     if (!organizationSelect) return "";
     const result = await postQuery("lookups", { pageNumber: 1, pageSize: 1 });
     if (!result || !(result.success ?? result.Success)) throw new Error(result?.message || result?.Message || "Unable to load organizations.");
-    const organizations = apiData(result)
+    // 2026-10-06: ordered by id; the default is the org last picked on any
+    // page (Shared/org-preference.js), else the lowest id.
+    const organizations = window.gracOrgPref.sort(apiData(result)
       .filter(item => (item.LookupKey || item.lookupKey) === "organizations")
       .map(item => ({ value: item.Value || item.value, label: item.Label || item.label }))
-      .filter(item => item.value);
+      .filter(item => item.value));
     organizationSelect.innerHTML = organizations.length
       ? organizations.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")
       : `<option value="">No organizations available</option>`;
     organizationSelect.disabled = organizations.length <= 1;
-    return organizations[0]?.value || "";
+    return window.gracOrgPref.preferred(organizations.map(o => o.value), organizationSelect) || "";
   }
 
   async function loadDashboard(organizationId) {

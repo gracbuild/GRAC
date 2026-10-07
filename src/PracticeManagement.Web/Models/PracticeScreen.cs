@@ -55,6 +55,9 @@ public sealed record PracticeScreen(string Key, string Title, string Description
     // source, so it has to match menu_master.module_type.
     // Renamed again by migration 384: displayed as "Audit Assurance".
     public const string AuditManagementGroup = "Audit Assurance";
+    // Asset & Contract Management (migration 420). Root menu
+    // nav-asset-contract; must match menu_master.module_type (page eyebrow).
+    public const string AssetContractGroup = "Asset & Contract";
 
     public static readonly PracticeScreen[] All =
     [
@@ -418,7 +421,63 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // rating levels: those come per-organisation from risk_matrix_cell
         // at runtime, so listing them here would be a second, stale copy
         // of a vocabulary that is deliberately not fixed.
-        new("risk-acceptance-authority","Risk Acceptance Approval Authority","Set who may approve accepting a risk at each rating level, separately for the inherent score and the residual score after treatment. Levels not set here fall back to the organization's general risk approver.","user-shield",["Risk Level","Inherent Authority","Same as Inherent","Residual Authority"], OrganizationGroup)
+        new("risk-acceptance-authority","Risk Acceptance Approval Authority","Set who may approve accepting a risk at each rating level, separately for the inherent score and the residual score after treatment. Levels not set here fall back to the organization's general risk approver.","user-shield",["Risk Level","Inherent Authority","Same as Inherent","Residual Authority"], OrganizationGroup),
+        // Asset & Contract Management, Phase 2.1 (migration 420). Field
+        // Dictionary is the read-only BRD 5.1 field library; Asset Form
+        // Templates is the per-organization, versioned form designer.
+        new("asset-field-dictionary","Field Dictionary","The controlled library of asset fields: data type, validation, sensitivity and where each value is stored. Asset form templates select their fields from here.","book",["Field","Group","Data Type","Sensitivity","Baseline"], AssetContractGroup),
+        new("asset-form-templates","Asset Form Templates","Design the registration form for each asset type: choose dictionary fields, arrange sections, set field behaviour, then test, approve and activate a version.","table-list",["Asset Type","Template","Version","Status","Owner"], AssetContractGroup),
+        // Asset & Contract Management, Phase 2.3 (migration 422): versioned,
+        // approval-controlled CIA scales, valuation method, Asset Value bands
+        // and criticality scale for the organization (BRD 5.1.18).
+        new("asset-valuation-config","Asset Valuation","Configure the Confidentiality, Integrity and Availability scales, the valuation method, Asset Value bands and the criticality scale used to value assets. Changes go through approval and create a new version.","scale-balanced",["Version","Method","Status","Effective"], AssetContractGroup),
+        // Phase 2.4 (migration 423): the organization's own values for asset
+        // option lists (sites' buildings, floors, rooms, zones, cost centres,
+        // ...) on top of the global defaults.
+        new("asset-option-lists","Option Lists","Maintain the organization's values for asset drop-down lists: add buildings, floors, rooms, zones and other local values, and relabel or hide a default value for this organization. Templates and the asset form use the resulting list.","list-ul",["List","Scope","Values","Used By"], AssetContractGroup),
+        // Phase 2.5 (migration 424): governance of the global asset taxonomy
+        // (category / L1-L2 subcategory / asset type) plus each
+        // organization's default owner role and support group per type.
+        new("asset-taxonomy","Asset Taxonomy","The shared classification of assets: categories, level-1 and level-2 subcategories and asset types, with sector, owner, standards, default criticality and effective dates. Organizations set the default business owner role and support group for each asset type.","sitemap",["Name","Level","Criticality","Effective","Status"], AssetContractGroup),
+        // Phase 3.1 (migration 425): technology catalogue -- makes and
+        // models with lifecycle dates, lifecycle status and approval.
+        new("asset-tech-catalog","Technology Catalogue","Maintain asset makes and models: manufacturer details, supported asset types, release and support dates, lifecycle status and approval. Shared catalogue entries are maintained by the platform administrator; organizations can add their own.","microchip",["Make","Model","Lifecycle","Approval"], AssetContractGroup),
+        // Phase 4.1 (migration 428): the Asset Register -- registration on
+        // the Active form template of the asset type (dynamic form).
+        new("asset-register","Asset Register","Register and maintain assets on the form designed for their asset type. Fields, sections and rules come from the Active form template; each asset keeps the template version it was registered with.","boxes-stacked",["Asset","Type","Status","Owner","Location"], AssetContractGroup),
+        // Phase 4.4 (migration 431): custodian acknowledgement and periodic
+        // attestation -- profiles, runs / campaigns, responses, approvals.
+        new("asset-attestation","Asset Attestation","Custodians and owners confirm the assets assigned to them: initial acknowledgement on assignment and periodic attestation by profile, with disagreements recorded for investigation.","clipboard-check",["Asset","Assignee","Due","Status","Response"], AssetContractGroup),
+        // Phase 7.3 (migration 442): discovery and reconciliation -- sources,
+        // rules, ingestion, reconciliation queue, data confidence.
+        new("asset-discovery","Asset Discovery","Discovery and reconciliation: source profiles with field precedence and trust, identification rules and thresholds, batch import with per-record results, the reconciliation queue (suggested matches, reviews, new candidates, duplicates, conflicts) and data confidence and freshness per asset.","satellite-dish",["Source","Batch","Outcome","Asset","Confidence"], AssetContractGroup),
+        // Phase 8.3 (migration 448): privacy -- status and gaps per asset,
+        // exceptions, privacy and retention reviews, requirement settings.
+        new("asset-privacy","Asset Privacy","Personal data on assets: DPDP / GDPR applicability, privacy status and gaps against the privacy requirements (assessment, processing details, DPIA / PIA, masking, encryption, retention, third parties, review, sanitization), privacy exceptions with approval and expiry, privacy and retention reviews, and the requirement settings of the organization.","user-shield",["Asset","Privacy status","Gaps","Owner","Review"], AssetContractGroup),
+        // Phase 8.4a (migration 450): governance KPIs -- BRD 19.8 scores
+        // with snapshots, record drill-down, thresholds and weights.
+        new("asset-governance","Asset Governance","Governance KPIs of the asset register (BRD 19.8): attestation compliance, metadata, ownership and relationship completeness, coverage and technology support compliance, exception health, discovery freshness, reconciliation backlog and connector availability -- scores against thresholds, the overall score, trends, snapshot history and the exact numerator, denominator, excluded and failing records of every score.","gauge-high",["KPI","Score","Numerator","Denominator","Rating"], AssetContractGroup),
+        // Phase 8.5a (migration 452): report catalogue -- BRD 13.4 standard
+        // reports with governed CSV export (13.4.1).
+        new("asset-reports","Asset Reports","Standard reports of the asset module (BRD 13.4): asset register, ownership and custody, lifecycle, missing data, movement, disposal; attestation compliance, overdue, exceptions, lost and damaged, SLA; CMDB relationships, orphans, service topology, critical dependencies, data quality; discovery coverage, stale assets, source health, reconciliation queue, merge and split history; contract expiry, renewals, coverage gaps, entitlements, vendor contacts; technology support; CIA, Asset Value and risk; governance scores; privacy, DPIA, masking and encryption, retention and evidence expiry -- each limited to the screens the user may view, with CSV export recorded with report, version, filters, columns, user, organization, time and classification.","file-lines",["Report","Family","Classification","Rows","Exported"], AssetContractGroup),
+        // Phase 8.4b (migration 451): the module dashboard of Asset &
+        // Contract (first child, 416 rule) -- Partials/management-dashboard.
+        new("asset-contract-dashboard","Asset & Contract Dashboard","Governance score, asset register, technology lifecycle, contracts and coverage, attestation, maintenance and calibration, privacy, CMDB quality and discovery, business services, relationships and notification operations for the selected organization.","boxes-stacked",["Metric","Value"], AssetContractGroup),
+        // Phase 7.2 (migration 441): business services -- register, consumers,
+        // supporting items, status rules, conflicts, hierarchy.
+        new("business-services","Business Services","Business services and what they run on: owners, criticality and CIA, RTO / RPO / MTPD, consumers, supporting assets, applications, suppliers, contracts and child services, activation and retirement rules, continuity conflicts and the service hierarchy.","sitemap",["Service","Type","Status","Owner","Support"], AssetContractGroup),
+        // Phase 7.1 (migration 440): CMDB relationships -- types, governed
+        // relationships, impact analysis.
+        new("asset-relationships","Asset Relationships","Effective-dated, governed relationships between assets, applications, processes, vendors and locations: proposals and approvals, disputes and retirement, circular-dependency and cardinality checks, and impact analysis upstream and downstream.","diagram-project",["Source","Relationship","Target","Status","Effective"], AssetContractGroup),
+        // Phase 6.2 (migration 438): recurring asset activities -- templates,
+        // schedules, occurrences with Task Centre tasks, campaigns.
+        new("asset-activities","Asset Activities","Recurring asset activities: calibration, preventive maintenance, statutory inspection and equipment licence renewal. Schedules come from the asset register; the scheduler opens one occurrence per asset and due date and creates its Task Centre task, or records that a contract covers it.","calendar-check",["Asset","Activity","Next due","Status","Task"], AssetContractGroup),
+        // Phase 6.1 (migration 437): notification profiles, escalation
+        // matrix, notification occurrences and log, scheduler runs.
+        new("asset-notifications","Asset Notifications","Reminders and escalations for asset and contract dates: notification profiles by activity with reminder, due and escalation stages, recipients and acknowledgement, the escalation matrix by severity, the occurrences the scheduler is tracking and every notice it recorded.","bell-concierge",["Activity","Subject","Date","Stage","Status"], AssetContractGroup),
+        // Phase 5.1 (migration 434): contracts -- contract register,
+        // immutable versions with approval, vendor contact mapping.
+        new("asset-contracts","Contracts","Maintain contracts with the vendors of the organization: every renewal, amendment, extension or termination is a new version that is reviewed and approved, takes effect on its date and keeps the earlier versions, documents and vendor contacts unchanged.","file-contract",["Contract","Type","Vendor","Status","Version"], AssetContractGroup)
     ];
 }
 

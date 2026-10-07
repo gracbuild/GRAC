@@ -1,0 +1,218 @@
+@*
+    Asset Relationships -- Asset & Contract Management, Phase 7.1 (migration 440).
+    Rendered from Manage.cshtml when Model.Key == "asset-relationships".
+
+    BRD 5.4: effective-dated, directional relationships between assets,
+    applications, processes, vendors and locations (business services
+    follow in 7.2). "Relationships" lists them with their status (Proposed,
+    Active, Disputed, Inactive, Retired), criticality and pending changes; a
+    relationship opens in a window to propose, change, approve, reject,
+    dispute, confirm, retire or accept it for retirement, with its impact
+    preview and history. The type masters decide the permitted kinds,
+    cardinality and loop rule (5.4.2); the procedures block what they
+    forbid. "Impact analysis" walks the active relationships downstream
+    (what is affected when a CI fails) or upstream (what it relies on),
+    each CI once at its nearest level. "Relationship types" shows the rules.
+    441: business services and contracts are items too (Supports Service);
+    a relationship carries an optional role; the impact analysis also lists
+    the business services reached with owners and continuity objectives.
+
+    Backend: practice/api/asset-config/relationships... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-relationships.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var arlPermissions = ViewBag.Permissions as string[] ?? [];
+    bool arlHas(string action) => arlPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var arlCanAdd = arlHas("ADD");
+    var arlCanEdit = arlHas("EDIT");
+    var arlCanApprove = arlHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="arlRoot" data-can-add="@(arlCanAdd ? "1" : "0")" data-can-edit="@(arlCanEdit ? "1" : "0")" data-can-approve="@(arlCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="arlOrg" title="Organization"><option value="">Select organization</option></select>
+            @if (arlCanAdd)
+            {
+                <button class="pm-button primary" id="arlAdd" type="button"><i class="fa-solid fa-plus"></i> Propose relationship</button>
+            }
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset relationships">
+            <button role="tab" class="active" data-arl-main="RELATIONSHIPS" aria-selected="true">Relationships</button>
+            <button role="tab" data-arl-main="IMPACT" aria-selected="false">Impact analysis</button>
+            <button role="tab" data-arl-main="TYPES" aria-selected="false">Relationship types</button>
+        </div>
+        <p class="pm-message" id="arlMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- relationships ---------------- *@
+        <div class="pm-tab-panel" data-arl-mainpanel="RELATIONSHIPS">
+            <div class="pm-toolbar">
+                <select id="arlFltKind" title="Configuration item kind"><option value="">Any item</option></select>
+                <input type="search" id="arlFltCiSearch" placeholder="Find an item" maxlength="200" />
+                <select id="arlFltCi" title="Configuration item"><option value="">--</option></select>
+                <select id="arlFltType" title="Relationship type"><option value="">All types</option></select>
+                <select id="arlFltStatus" title="Status">
+                    <option value="">Current (proposed, active, disputed)</option><option value="PROPOSED">Proposed</option>
+                    <option value="ACTIVE">Active</option><option value="DISPUTED">Disputed</option><option value="INACTIVE">Inactive</option>
+                    <option value="RETIRED">Retired</option><option value="ALL">All</option>
+                </select>
+                <label class="arl-check"><input type="checkbox" id="arlFltCritical" /> Critical only</label>
+                <label class="arl-check"><input type="checkbox" id="arlFltPending" /> Waiting for approval</label>
+                <input type="search" id="arlFltSearch" placeholder="Search source or target" maxlength="200" />
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Source</th><th>Relationship</th><th>Target</th><th>Dependency</th><th>Effective</th><th>Status</th><th>Owner / verifier</th></tr></thead>
+                    <tbody id="arlRelBody"></tbody>
+                </table>
+            </div>
+            <div id="arlRelPager"></div>
+        </div>
+
+        @* ---------------- impact analysis ---------------- *@
+        <div class="pm-tab-panel" data-arl-mainpanel="IMPACT" hidden>
+            <div class="pm-toolbar">
+                <select id="arlImpKind" title="Configuration item kind"></select>
+                <input type="search" id="arlImpCiSearch" placeholder="Find an item" maxlength="200" />
+                <select id="arlImpCi" title="Configuration item"><option value="">--</option></select>
+                <select id="arlImpDirection" title="Direction">
+                    <option value="DOWNSTREAM">Downstream -- affected if it fails</option>
+                    <option value="UPSTREAM">Upstream -- what it relies on</option>
+                </select>
+                <select id="arlImpDepth" title="Depth">
+                    <option value="1">Depth 1</option><option value="2">Depth 2</option><option value="3">Depth 3</option>
+                    <option value="5" selected>Depth 5</option><option value="10">Depth 10</option>
+                </select>
+                <label class="arl-check"><input type="checkbox" id="arlImpCritical" /> Critical dependencies only</label>
+                <button class="pm-button primary" id="arlImpRun" type="button"><i class="fa-solid fa-diagram-project"></i> Analyse</button>
+            </div>
+            <p class="arl-note">Active, currently effective relationships only. Each item appears once, at its nearest level. Connected To, Monitored By and Replaces carry no impact.</p>
+            <p class="arl-note" id="arlImpSummary"></p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Level</th><th>Item</th><th>Kind / class</th><th>Status</th><th>Reached through</th><th>Critical</th></tr></thead>
+                    <tbody id="arlImpBody"></tbody>
+                </table>
+            </div>
+            <h3 class="arl-sub">Business services reached</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Level</th><th>Service</th><th>Status</th><th>Criticality</th><th>RTO / RPO / MTPD (h)</th><th>Owner / manager</th><th>Consumers</th></tr></thead>
+                    <tbody id="arlImpSvcBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- relationship types ---------------- *@
+        <div class="pm-tab-panel" data-arl-mainpanel="TYPES" hidden>
+            <p class="arl-note">BRD 5.4 relationship types. Each type permits the kinds of source and target shown, a cardinality (one target / one source) and a loop rule: Block refuses a circular dependency, Flag allows it and marks the relationship. The dependent side is the one affected when the other fails.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Type</th><th>Inverse</th><th>Source kinds</th><th>Target kinds</th><th>Cardinality</th><th>Loops</th><th>Dependent side</th><th>Status</th></tr></thead>
+                    <tbody id="arlTypeBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Relationship window ======================= *@
+<div class="pm-modal" id="arlRelModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="arlRmTitle">Relationship</h2>
+            <button class="pm-modal-close" type="button" data-close-arl="arlRelModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="arl-info" id="arlRmInfo"></div>
+        <p class="pm-message" id="arlRmMessage" role="status" aria-live="polite" hidden></p>
+        <form id="arlRelForm" class="pm-form-grid">
+            <label class="full"><span>Relationship type *</span><select id="arlRmType"></select></label>
+            <label><span>Source kind *</span><select id="arlRmSrcKind"></select></label>
+            <label><span>Find source</span><input type="search" id="arlRmSrcSearch" maxlength="200" /></label>
+            <label class="full"><span>Source *</span><select id="arlRmSrc"><option value="">--</option></select></label>
+            <label><span>Target kind *</span><select id="arlRmTgtKind"></select></label>
+            <label><span>Find target</span><input type="search" id="arlRmTgtSearch" maxlength="200" /></label>
+            <label class="full"><span>Target *</span><select id="arlRmTgt"><option value="">--</option></select></label>
+            <label class="arl-check"><input type="checkbox" id="arlRmCritical" /> Critical dependency</label>
+            <label><span>Dependency criticality</span>
+                <select id="arlRmCriticality"><option value="">--</option><option value="CRITICAL">Critical</option><option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option><option value="LOW">Low</option></select></label>
+            <label><span>Impact weight (0-100)</span><input type="number" id="arlRmWeight" min="0" max="100" step="0.01" /></label>
+            <label><span>Confidence % (0-100)</span><input type="number" id="arlRmConfidence" min="0" max="100" /></label>
+            <label><span>Effective from *</span><input type="date" id="arlRmFrom" /></label>
+            <label><span>Effective to</span><input type="date" id="arlRmTo" /></label>
+            <label><span>Owner</span><select id="arlRmOwner"></select></label>
+            <label><span>Verifier</span><select id="arlRmVerifier"></select></label>
+            <label><span>Evidence reference</span><input type="text" id="arlRmEvidence" maxlength="400" /></label>
+            <label><span>Change reference</span><input type="text" id="arlRmChange" maxlength="200" /></label>
+            <label class="full"><span>Role (for example "primary database")</span><input type="text" id="arlRmRole" maxlength="100" /></label>
+            <label class="full"><span>Reason (required to change an active relationship)</span><textarea id="arlRmReason" rows="2" maxlength="1000"></textarea></label>
+            <footer class="pm-modal-footer full" id="arlRmSaveBar">
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> <span id="arlRmSaveLabel">Propose</span></button>
+            </footer>
+        </form>
+        <div class="pm-modal-footer" id="arlRmActions"></div>
+
+        <h3 class="arl-sub">Impact preview <span class="arl-note" id="arlRmImpactNote"></span></h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Level</th><th>Affected item</th><th>Kind / class</th><th>Reached through</th></tr></thead>
+                <tbody id="arlRmImpactBody"></tbody>
+            </table>
+        </div>
+
+        <h3 class="arl-sub">History</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Version</th><th>Action</th><th>Status</th><th>Note</th><th>By</th><th>When</th></tr></thead>
+                <tbody id="arlRmHistBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Action note ======================= *@
+<div class="pm-modal" id="arlActionModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="arlAcTitle">Action</h2>
+            <button class="pm-modal-close" type="button" data-close-arl="arlActionModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="arlActionForm" class="pm-form-grid">
+            <p class="arl-note full" id="arlAcInfo"></p>
+            <label class="full"><span id="arlAcNoteLabel">Note</span><textarea id="arlAcNote" rows="3" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="arlAcMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arl="arlActionModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Confirm</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .arl-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .arl-check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .arl-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .arl-st-open    { background: var(--primary-100); color: var(--primary-800); }
+    .arl-st-wait    { background: var(--warning-50); color: var(--warning-700); }
+    .arl-st-active  { background: var(--success-100); color: var(--success-700); }
+    .arl-st-ended   { background: var(--neutral-200); color: var(--fg-muted); }
+    .arl-st-bad     { background: var(--danger-100); color: var(--danger-700); }
+    .arl-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .arl-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .arl-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-relationships.js" asp-append-version="true"></script>

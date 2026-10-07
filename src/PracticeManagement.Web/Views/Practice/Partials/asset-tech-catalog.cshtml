@@ -1,0 +1,436 @@
+@*
+    Technology Catalogue -- Asset & Contract Management, Phase 3.1 (migration 425).
+    Rendered from Manage.cshtml when Model.Key == "asset-tech-catalog".
+
+    Phase 3.2 (migration 426) adds the Firmware tab: products, releases
+    (BRD 4.4 status list), explicit approved compatibility rows, and the
+    model's compatible firmware. Phase 3.3 (migration 427) adds the
+    Operating Systems tab (BRD 4.5) on the SAME product / release /
+    compatibility dialogs: fields marked data-kind="fw" or data-kind="os"
+    are shown for that catalogue only.
+
+    BRD 4.2 Asset Make Master, 4.3 Asset Model Master and Lifecycle, 4.6
+    lifecycle events, 4.8 business rules. Shared catalogue rows are
+    maintained by the platform administrator; an organization can add its
+    own makes and models. Models go Draft -> Pending Approval -> Approved
+    (submitter cannot approve); an approved model's identity is locked and
+    overwriting a lifecycle date needs a reason, which is kept as history.
+
+    Backend: practice/api/asset-config/tech-catalog... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-tech-catalog.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var atcPermissions = ViewBag.Permissions as string[] ?? [];
+    bool atcHas(string action) => atcPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var atcCanEdit = atcHas("ADD") || atcHas("EDIT");
+    var atcCanApprove = atcHas("APPROVE");
+    var atcIsPlatformAdmin = ViewBag.IsSystemAdmin is bool b && b;
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="atcRoot" data-can-edit="@(atcCanEdit ? "1" : "0")" data-can-approve="@(atcCanApprove ? "1" : "0")"
+     data-platform-admin="@(atcIsPlatformAdmin ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="atcOrg" title="Organization"><option value="">Select organization</option></select>
+            <input type="search" id="atcSearch" placeholder="Search makes and models" maxlength="200" />
+            <button class="pm-button icon" id="atcRefresh" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <p class="pm-message" id="atcMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-tabs" role="tablist" aria-label="Technology catalogue">
+            <button role="tab" class="active" data-atc-tab="makes" aria-selected="true">Makes</button>
+            <button role="tab" data-atc-tab="models" aria-selected="false">Models</button>
+            <button role="tab" data-atc-tab="firmware" aria-selected="false">Firmware</button>
+            <button role="tab" data-atc-tab="os" aria-selected="false">Operating Systems</button>
+        </div>
+
+        <div class="pm-tab-panel" data-atc-panel="makes">
+            @if (atcCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" type="button" id="atcAddMake"><i class="fa-solid fa-plus"></i> Add Make</button>
+                </div>
+            }
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Make</th><th>Legal name</th><th>Scope</th><th>Asset types</th><th>Models</th><th>Verified</th><th>Version</th><th>Status</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atcMakeBody"><tr><td colspan="9" class="pm-empty">Select an organization.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-atc-panel="models" hidden>
+            <div class="pm-toolbar">
+                <select id="atcModelMakeFilter" title="Make"><option value="">All makes</option></select>
+                <select id="atcModelLifeFilter" title="Lifecycle status"><option value="">All lifecycle statuses</option></select>
+                <select id="atcModelApprovalFilter" title="Approval">
+                    <option value="">All approval states</option>
+                    <option value="DRAFT">Draft</option>
+                    <option value="PENDING_APPROVAL">Pending Approval</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="WITHDRAWN">Withdrawn</option>
+                </select>
+                @if (atcCanEdit)
+                {
+                    <button class="pm-button primary" type="button" id="atcAddModel"><i class="fa-solid fa-plus"></i> Add Model</button>
+                }
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Model</th><th>Make</th><th>Asset type</th><th>Lifecycle</th><th>Release</th><th>End of support</th><th>End of life</th><th>Approval</th><th>Scope</th></tr></thead>
+                    <tbody id="atcModelBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="pm-tab-panel" data-atc-panel="firmware" hidden>
+            <div class="pm-toolbar">
+                <select id="atcFwProductFilter" title="Firmware product"><option value="">All products</option></select>
+                <select id="atcFwStatusFilter" title="Release status"><option value="">All statuses</option></select>
+                @if (atcCanEdit)
+                {
+                    <button class="pm-button" type="button" id="atcAddProduct"><i class="fa-solid fa-plus"></i> Add Product</button>
+                    <button class="pm-button primary" type="button" id="atcAddRelease"><i class="fa-solid fa-plus"></i> Add Release</button>
+                }
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Product</th><th>Publisher</th><th>Releases</th><th>Scope</th><th>Status</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atcProductBody"></tbody>
+                </table>
+            </div>
+            <div class="pm-table-wrap atc-gap">
+                <table>
+                    <thead><tr><th>Release</th><th>Product</th><th>Release date</th><th>Standard support end</th><th>End of life</th><th>Upgrade urgency</th><th>Compatibility</th><th>Status</th><th>Scope</th></tr></thead>
+                    <tbody id="atcReleaseBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="pm-tab-panel" data-atc-panel="os" hidden>
+            <div class="pm-toolbar">
+                <select id="atcOsProductFilter" title="Operating-system product"><option value="">All products</option></select>
+                <select id="atcOsStatusFilter" title="Release status"><option value="">All statuses</option></select>
+                @if (atcCanEdit)
+                {
+                    <button class="pm-button" type="button" id="atcAddOsProduct"><i class="fa-solid fa-plus"></i> Add Product</button>
+                    <button class="pm-button primary" type="button" id="atcAddOsRelease"><i class="fa-solid fa-plus"></i> Add Release</button>
+                }
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Product</th><th>Publisher</th><th>Releases</th><th>Scope</th><th>Status</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atcOsProductBody"></tbody>
+                </table>
+            </div>
+            <div class="pm-table-wrap atc-gap">
+                <table>
+                    <thead><tr><th>Release</th><th>Product</th><th>Release date</th><th>Mainstream support end</th><th>Extended support end</th><th>End of life</th><th>Baseline</th><th>Compatibility</th><th>Status</th><th>Scope</th></tr></thead>
+                    <tbody id="atcOsReleaseBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Product modal (firmware / OS) ======================= *@
+<div class="pm-modal" id="atcProductModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="atcProductTitle">Firmware product</h2>
+            <button class="pm-modal-close" type="button" data-close-atc="atcProductModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="atcProductForm" class="pm-form-grid">
+            <label><span>Publisher (make) *</span><select id="atcFpMake"></select></label>
+            <label data-kind="os"><span>Family</span><input type="text" id="atcFpFamily" maxlength="120" placeholder="e.g. Windows, Linux" /></label>
+            <label><span>Product name *</span><input type="text" id="atcFpName" maxlength="200" /></label>
+            <label class="full"><span>Description</span><textarea id="atcFpDesc" rows="2" maxlength="1000"></textarea></label>
+            <label><span>Status</span><select id="atcFpStatus"><option value="Active">Active</option><option value="Inactive">Inactive</option></select></label>
+            <label class="atc-check full" id="atcFpSharedWrap"><input type="checkbox" id="atcFpShared" /> <span>Shared catalogue (all organizations)</span></label>
+            <p class="pm-message full" id="atcProductMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-atc="atcProductModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="atcProductSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Release modal (firmware / OS) ======================= *@
+<div class="pm-modal" id="atcReleaseModal" hidden>
+    <div class="pm-modal-panel atc-wide">
+        <header>
+            <h2 id="atcReleaseTitle">Firmware release</h2>
+            <button class="pm-modal-close" type="button" data-close-atc="atcReleaseModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-tabs" role="tablist" aria-label="Release">
+            <button role="tab" class="active" data-atc-rtab="details" aria-selected="true">Details</button>
+            <button role="tab" data-atc-rtab="compat" aria-selected="false">Compatibility</button>
+            <button role="tab" data-atc-rtab="history" aria-selected="false">History</button>
+        </div>
+        <form id="atcReleaseForm" class="pm-form-grid" data-atc-rpanel="details">
+            <p class="atc-note full" id="atcFrMeta"></p>
+            <label><span>Product *</span><select id="atcFrProduct" data-identity></select></label>
+            <label><span>Version *</span><input type="text" id="atcFrVersion" maxlength="100" data-identity /></label>
+            <label><span>Build</span><input type="text" id="atcFrBuild" maxlength="100" data-identity /></label>
+            <label data-kind="fw"><span>Branch / train</span><input type="text" id="atcFrBranch" maxlength="100" data-identity /></label>
+            <label><span>Edition</span><input type="text" id="atcFrEdition" maxlength="100" data-identity /></label>
+            <label data-kind="os"><span>Architecture</span><input type="text" id="atcFrArch" maxlength="60" data-identity placeholder="e.g. x64, ARM64" /></label>
+            <h3 class="atc-section full">Lifecycle</h3>
+            <label><span>Release date</span><input type="date" id="atcFrRelease" /></label>
+            <label data-kind="fw"><span>Engineering support end</span><input type="date" id="atcFrEng" /></label>
+            <label data-kind="fw"><span>Standard support end</span><input type="date" id="atcFrStd" /></label>
+            <label data-kind="fw"><span>Security fix end</span><input type="date" id="atcFrSec" /></label>
+            <label data-kind="os"><span>Mainstream support end</span><input type="date" id="atcFrMain" /></label>
+            <label data-kind="os"><span>Extended support end</span><input type="date" id="atcFrExt" /></label>
+            <label data-kind="os"><span>Security update end</span><input type="date" id="atcFrSecUpd" /></label>
+            <label><span>End of life</span><input type="date" id="atcFrEol" /></label>
+            <h3 class="atc-section full" data-kind="fw">Security</h3>
+            <label class="full" data-kind="fw"><span>Known vulnerabilities</span><textarea id="atcFrVulns" rows="2"></textarea></label>
+            <label data-kind="fw"><span>Minimum safe version</span><input type="text" id="atcFrMinSafe" maxlength="100" /></label>
+            <label data-kind="fw"><span>Upgrade urgency</span><input type="text" id="atcFrUrgency" maxlength="100" /></label>
+            <h3 class="atc-section full" data-kind="fw">Package</h3>
+            <label class="full" data-kind="fw"><span>Reference / download location</span><input type="text" id="atcFrPackage" maxlength="1000" /></label>
+            <label data-kind="fw"><span>Checksum</span><input type="text" id="atcFrChecksum" maxlength="300" /></label>
+            <label data-kind="fw"><span>Signature</span><input type="text" id="atcFrSignature" maxlength="1000" /></label>
+            <label class="full" data-kind="fw"><span>Release notes</span><textarea id="atcFrNotes" rows="2"></textarea></label>
+            <h3 class="atc-section full" data-kind="os">Servicing</h3>
+            <label data-kind="os"><span>Servicing channel</span><input type="text" id="atcFrChannel" maxlength="100" /></label>
+            <label data-kind="os"><span>Feature version</span><input type="text" id="atcFrFeature" maxlength="100" /></label>
+            <label data-kind="os"><span>Patch level</span><input type="text" id="atcFrPatch" maxlength="100" /></label>
+            <label data-kind="os"><span>Latest approved build</span><input type="text" id="atcFrLatestBuild" maxlength="100" /></label>
+            <label data-kind="os"><span>Minimum compliant build</span><input type="text" id="atcFrMinBuild" maxlength="100" /></label>
+            <h3 class="atc-section full">Governance</h3>
+            <label class="full"><span>Source reference <small>(required to approve)</small></span><input type="text" id="atcFrSource" maxlength="500" /></label>
+            <label><span>Verified date</span><input type="date" id="atcFrVerified" /></label>
+            <label data-kind="fw"><span>Reviewer</span><input type="text" id="atcFrReviewer" maxlength="200" /></label>
+            <label data-kind="os"><span>Verified by</span><input type="text" id="atcFrVerifiedBy" maxlength="200" /></label>
+            <label class="atc-check" data-kind="os"><input type="checkbox" id="atcFrBaseline" /> <span>Approved baseline</span></label>
+            <label class="full" data-kind="os"><span>Exception</span><input type="text" id="atcFrException" maxlength="1000" /></label>
+            <label data-kind="os"><span>Replacement release</span><select id="atcFrReplacement"></select></label>
+            <label data-kind="os"><span>Replacement path</span><input type="text" id="atcFrReplacementPath" maxlength="500" /></label>
+            <label class="full" id="atcFrReasonWrap"><span>Change reason <small>(required when a lifecycle date that had a value changes)</small></span><textarea id="atcFrReason" rows="2" maxlength="1000"></textarea></label>
+            <label class="atc-check full" id="atcFrSharedWrap"><input type="checkbox" id="atcFrShared" /> <span>Shared catalogue (all organizations)</span></label>
+            <p class="pm-message full" id="atcReleaseMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <span id="atcFrActions" class="atc-actions"></span>
+                <button type="button" class="pm-button" data-close-atc="atcReleaseModal">Close</button>
+                <button type="submit" class="pm-button primary" id="atcReleaseSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+        <div data-atc-rpanel="compat" hidden>
+            <p class="atc-note">Each row is an explicit mapping. Only approved, active, in-effect rows drive recommendations; editing an approved row returns it to Draft.</p>
+            <div class="pm-toolbar">
+                <button class="pm-button primary" type="button" id="atcAddCompat" hidden><i class="fa-solid fa-plus"></i> Add Compatibility</button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset type</th><th>Make</th><th>Model</th><th>Conditions</th><th>Approval</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atcCompatBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div data-atc-rpanel="history" hidden>
+            <h3 class="atc-section">Lifecycle changes</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>When</th><th>Milestone</th><th>Before</th><th>After</th><th>Reason</th><th>By</th></tr></thead>
+                    <tbody id="atcFrEvents"></tbody>
+                </table>
+            </div>
+            <h3 class="atc-section">Status</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead>
+                    <tbody id="atcFrHistory"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Compatibility modal ======================= *@
+<div class="pm-modal" id="atcCompatModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="atcCompatTitle">Compatibility</h2>
+            <button class="pm-modal-close" type="button" data-close-atc="atcCompatModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="atcCompatForm" class="pm-form-grid">
+            <label class="full"><span>Asset type *</span><select id="atcFcType"></select></label>
+            <label><span>Make <small>(optional restriction)</small></span><select id="atcFcMake"></select></label>
+            <label><span>Model <small>(one per row)</small></span><select id="atcFcModel"></select></label>
+            <label data-kind="fw"><span>Hardware revision</span><input type="text" id="atcFcHw" maxlength="120" /></label>
+            <label data-kind="fw"><span>Status *</span><select id="atcFcStatus"></select></label>
+            <label class="full" data-kind="fw"><span>Upgrade path <small>(prerequisite, intermediate version or bootloader)</small></span><input type="text" id="atcFcPath" maxlength="1000" /></label>
+            <label data-kind="fw"><span>Effective from</span><input type="date" id="atcFcFrom" /></label>
+            <label data-kind="fw"><span>Effective to</span><input type="date" id="atcFcTo" /></label>
+            <label data-kind="os"><span>Processor / architecture</span><input type="text" id="atcFcArch" maxlength="60" /></label>
+            <label data-kind="os"><span>Minimum firmware release</span><select id="atcFcMinFw"></select></label>
+            <label class="full" data-kind="os"><span>Firmware prerequisites</span><input type="text" id="atcFcPrereq" maxlength="500" /></label>
+            <label class="full" data-kind="os"><span>Exclusions</span><input type="text" id="atcFcExclusions" maxlength="1000" /></label>
+            <label class="full"><span>Evidence <small>(required to approve)</small></span><input type="text" id="atcFcEvidence" maxlength="1000" /></label>
+            <label><span>Reviewer</span><input type="text" id="atcFcReviewer" maxlength="200" /></label>
+            <label class="atc-check"><input type="checkbox" id="atcFcActive" /> <span>Active</span></label>
+            <label class="atc-check full" id="atcFcSharedWrap"><input type="checkbox" id="atcFcShared" /> <span>Shared catalogue (all organizations)</span></label>
+            <p class="pm-message full" id="atcCompatMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-atc="atcCompatModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="atcCompatSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Make modal ======================= *@
+<div class="pm-modal" id="atcMakeModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="atcMakeTitle">Make</h2>
+            <button class="pm-modal-close" type="button" data-close-atc="atcMakeModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="atcMakeForm" class="pm-form-grid">
+            <label class="full"><span>Manufacturer / OEM name *</span><input type="text" id="atcMkName" maxlength="200" required /></label>
+            <label><span>Legal name</span><input type="text" id="atcMkLegal" maxlength="300" /></label>
+            <label><span>Aliases <small>(separate with ;)</small></span><input type="text" id="atcMkAliases" maxlength="1000" /></label>
+            <label><span>Support portal</span><input type="text" id="atcMkPortal" maxlength="500" /></label>
+            <label><span>Security advisory portal</span><input type="text" id="atcMkAdvisory" maxlength="500" /></label>
+            <label><span>Support contact</span><input type="text" id="atcMkContact" maxlength="300" /></label>
+            <label><span>Support region</span><input type="text" id="atcMkRegion" maxlength="200" /></label>
+            <label><span>Owner</span><input type="text" id="atcMkOwner" maxlength="200" /></label>
+            <label><span>Authoritative source</span><input type="text" id="atcMkSource" maxlength="500" /></label>
+            <label><span>Verified date</span><input type="date" id="atcMkVerified" /></label>
+            <label><span>Verified by</span><input type="text" id="atcMkVerifier" maxlength="200" /></label>
+            <label><span>Effective date</span><input type="date" id="atcMkEffective" /></label>
+            <label><span>Status</span><select id="atcMkStatus"><option value="Active">Active</option><option value="Inactive">Inactive</option></select></label>
+            <label class="full"><span>Supported asset types</span><select id="atcMkTypes" multiple size="6"></select></label>
+            <label class="atc-check full" id="atcMkSharedWrap"><input type="checkbox" id="atcMkShared" /> <span>Shared catalogue (all organizations)</span></label>
+            <p class="atc-note full" id="atcMkMeta"></p>
+            <p class="pm-message full" id="atcMakeMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-atc="atcMakeModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="atcMakeSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Model modal ======================= *@
+<div class="pm-modal" id="atcModelModal" hidden>
+    <div class="pm-modal-panel atc-wide">
+        <header>
+            <h2 id="atcModelTitle">Model</h2>
+            <button class="pm-modal-close" type="button" data-close-atc="atcModelModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-tabs" role="tablist" aria-label="Model">
+            <button role="tab" class="active" data-atc-mtab="details" aria-selected="true">Details</button>
+            <button role="tab" data-atc-mtab="firmware" aria-selected="false">Firmware</button>
+            <button role="tab" data-atc-mtab="os" aria-selected="false">Operating Systems</button>
+            <button role="tab" data-atc-mtab="history" aria-selected="false">History</button>
+        </div>
+        <form id="atcModelForm" class="pm-form-grid" data-atc-mpanel="details">
+            <p class="atc-note full" id="atcMdMeta"></p>
+            <label><span>Make *</span><select id="atcMdMake" data-identity></select></label>
+            <label><span>Asset type *</span><select id="atcMdType" data-identity></select></label>
+            <label><span>Model name *</span><input type="text" id="atcMdName" maxlength="200" data-identity /></label>
+            <label><span>Model number</span><input type="text" id="atcMdNumber" maxlength="120" data-identity /></label>
+            <label><span>Family / series</span><input type="text" id="atcMdFamily" maxlength="200" /></label>
+            <label><span>Variant</span><input type="text" id="atcMdVariant" maxlength="120" data-identity /></label>
+            <label><span>SKU</span><input type="text" id="atcMdSku" maxlength="120" /></label>
+            <label><span>Lifecycle status *</span><select id="atcMdLife"></select></label>
+            <h3 class="atc-section full">Release and support</h3>
+            <label><span>Announcement</span><input type="date" id="atcMdAnnounce" /></label>
+            <label><span>Release / general availability</span><input type="date" id="atcMdRelease" /></label>
+            <label><span>End of sale</span><input type="date" id="atcMdEos" /></label>
+            <label><span>End of standard support</span><input type="date" id="atcMdEss" /></label>
+            <label><span>End of security support</span><input type="date" id="atcMdSec" /></label>
+            <label><span>End of extended support</span><input type="date" id="atcMdExt" /></label>
+            <label><span>End of life</span><input type="date" id="atcMdEol" /></label>
+            <h3 class="atc-section full">Technical</h3>
+            <label><span>Architecture</span><input type="text" id="atcMdArch" maxlength="120" /></label>
+            <label><span>Hardware revision</span><input type="text" id="atcMdHw" maxlength="120" data-identity /></label>
+            <label class="full"><span>Specifications</span><textarea id="atcMdSpecs" rows="3"></textarea></label>
+            <h3 class="atc-section full">Governance and risk</h3>
+            <label class="full"><span>Source / document reference <small>(required to submit)</small></span><input type="text" id="atcMdSource" maxlength="500" /></label>
+            <label><span>Verified date</span><input type="date" id="atcMdVerified" /></label>
+            <label><span>Verified by</span><input type="text" id="atcMdVerifier" maxlength="200" /></label>
+            <label><span>Criticality</span><select id="atcMdCrit"></select></label>
+            <label><span>Replacement lead time (days)</span><input type="number" id="atcMdLead" min="0" step="1" /></label>
+            <label><span>Lifecycle risk</span><input type="text" id="atcMdRisk" maxlength="200" /></label>
+            <label class="full"><span>Controls</span><textarea id="atcMdControls" rows="2" maxlength="1000"></textarea></label>
+            <label class="full" id="atcMdReasonWrap"><span>Change reason <small>(required when a lifecycle date or status that had a value changes)</small></span><textarea id="atcMdReason" rows="2" maxlength="1000"></textarea></label>
+            <label class="atc-check full" id="atcMdSharedWrap"><input type="checkbox" id="atcMdShared" /> <span>Shared catalogue (all organizations)</span></label>
+            <p class="pm-message full" id="atcModelMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <span id="atcMdActions" class="atc-actions"></span>
+                <button type="button" class="pm-button" data-close-atc="atcModelModal">Close</button>
+                <button type="submit" class="pm-button primary" id="atcModelSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+        <div data-atc-mpanel="firmware" hidden>
+            <p class="atc-note">Approved, active and in-effect compatibility for this model (BRD 4.8). A row counts when it names this model, or this make with no model, or only the asset type.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Firmware</th><th>Release status</th><th>Compatibility</th><th>Matched on</th><th>HW revision</th><th>Upgrade path</th><th>End of life</th></tr></thead>
+                    <tbody id="atcMdFirmware"></tbody>
+                </table>
+            </div>
+        </div>
+        <div data-atc-mpanel="os" hidden>
+            <p class="atc-note">Approved, active operating-system compatibility for this model (BRD 4.5 / 4.8), matched the same way as firmware.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Operating system</th><th>Release status</th><th>Baseline</th><th>Matched on</th><th>Architecture</th><th>Minimum firmware</th><th>Exclusions</th><th>End of life</th></tr></thead>
+                    <tbody id="atcMdOs"></tbody>
+                </table>
+            </div>
+        </div>
+        <div data-atc-mpanel="history" hidden>
+            <h3 class="atc-section">Lifecycle changes</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>When</th><th>Milestone</th><th>Before</th><th>After</th><th>Reason</th><th>By</th></tr></thead>
+                    <tbody id="atcMdEvents"></tbody>
+                </table>
+            </div>
+            <h3 class="atc-section">Approval</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead>
+                    <tbody id="atcMdHistory"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .atc-check { flex-direction: row !important; align-items: center; gap: 6px; display: inline-flex; }
+    .atc-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .atc-code { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--fg-secondary); }
+    .atc-section { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 8px 0 0; }
+    .atc-gap { margin-top: 12px; }
+    #atcCompatBody tr.atc-muted-row td { color: var(--fg-muted); }
+    .atc-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-right: auto; }
+    .pm-modal-panel.atc-wide { max-width: 960px; width: 100%; }
+    .atc-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .atc-ok      { background: var(--success-100); color: var(--success-700); }
+    .atc-info    { background: var(--primary-100); color: var(--primary-800); }
+    .atc-warn    { background: var(--warning-50); color: var(--warning-700); }
+    .atc-bad     { background: var(--danger-100); color: var(--danger-700); }
+    .atc-muted   { background: var(--neutral-200); color: var(--fg-muted); }
+    .atc-plain   { background: var(--bg-subtle); color: var(--fg-secondary); }
+    .pm-modal-close { background: transparent; border: 0; padding: 0; font-size: 22px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+</style>
+
+<script src="~/js/AssetConfig/asset-tech-catalog.js" asp-append-version="true"></script>

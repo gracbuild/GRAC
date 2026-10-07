@@ -48,6 +48,10 @@ GO
 DECLARE @order TABLE(seq INT IDENTITY(1,1) PRIMARY KEY, schema_name SYSNAME, table_name SYSNAME);
 INSERT @order(schema_name, table_name) VALUES
     -- deepest children first
+    (N'grac_practice', N'asset_option_list_master'),      -- 423 (its org rows are tenant data; delete fails if any exist)
+    (N'grac_practice', N'asset_field_definition'),        -- 420 (before its two masters)
+    (N'grac_practice', N'asset_field_group_master'),      -- 420
+    (N'grac_practice', N'asset_field_data_type_master'),  -- 420
     (N'grac_practice', N'dependency_asset_type_master'),
     (N'grac_practice', N'dependency_asset_subcategory_master'),
     (N'grac_practice', N'dependency_type_source_config'),

@@ -1,0 +1,90 @@
+@*
+    Field Dictionary -- Asset & Contract Management, Phase 2.1 (migration 420).
+    Rendered from Manage.cshtml when Model.Key == "asset-field-dictionary".
+
+    Read-only view of the global asset field dictionary (BRD section 5.1):
+    every field an asset form template can select, with its data type,
+    validation rule, sensitivity baseline and storage. Baseline fields
+    (BRD 5.1.17 "All assets") are marked; templates cannot remove or
+    weaken them.
+
+    Backend: GET practice/api/asset-config/field-groups
+             GET practice/api/asset-config/field-definitions (paged)
+    Script : wwwroot/js/AssetConfig/asset-field-dictionary.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="afdRoot">
+    <div class="pm-toolbar">
+        <select id="afdGroup" title="Dictionary group"><option value="">All groups</option></select>
+        <select id="afdDataType" title="Data type"><option value="">All data types</option></select>
+        <select id="afdSensitivity" title="Sensitivity">
+            <option value="">All sensitivities</option>
+            <option value="PUBLIC">Public</option>
+            <option value="INTERNAL">Internal</option>
+            <option value="CONFIDENTIAL">Confidential</option>
+            <option value="RESTRICTED">Restricted</option>
+        </select>
+        <input type="search" id="afdSearch" maxlength="200" placeholder="Search field name, key or description" />
+        <button class="pm-button icon" id="afdRefresh" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table id="afdTable">
+            <thead>
+                <tr>
+                    <th>Field</th>
+                    <th>Key</th>
+                    <th>Group</th>
+                    <th>Data Type</th>
+                    <th>Sensitivity</th>
+                    <th>Stored In</th>
+                    <th>Baseline</th>
+                </tr>
+            </thead>
+            <tbody id="afdBody">
+                <tr><td colspan="7" class="pm-empty">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div id="afdPager"></div>
+</section>
+
+@* Read-only field detail. *@
+<div class="pm-modal" id="afdDetailModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="afdDetailTitle">Field</h2>
+            <button class="pm-modal-close" type="button" data-close-afd aria-label="Close">&times;</button>
+        </header>
+        <dl class="afd-detail" id="afdDetailBody"></dl>
+        <footer class="pm-modal-footer">
+            <button type="button" class="pm-button" data-close-afd>Close</button>
+        </footer>
+    </div>
+</div>
+
+<style>
+    #afdRoot .afd-key { color: var(--fg-muted); font-size: 12px; }
+    .afd-detail { display: grid; grid-template-columns: 180px 1fr; gap: 6px 14px; margin: 12px 0; font-size: 13px; }
+    .afd-detail dt { color: var(--fg-secondary); font-weight: 600; }
+    .afd-detail dd { margin: 0; color: var(--fg-default); }
+    .pm-badge.afd-baseline { background: var(--primary-100); color: var(--primary-700); }
+    .pm-badge.afd-sens-confidential { background: var(--warning-50); color: var(--warning-700); }
+    .pm-badge.afd-sens-restricted { background: var(--danger-100); color: var(--danger-700); }
+    .pm-modal-close { background: transparent; border: 0; padding: 0; font-size: 22px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/AssetConfig/asset-field-dictionary.js" asp-append-version="true"></script>

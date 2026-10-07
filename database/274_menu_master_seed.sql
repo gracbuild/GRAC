@@ -183,6 +183,44 @@
 --     on every other active row; 416 itself grants only VIEW, and only
 --     to roles that can VIEW one of the dashboard's child screens.
 --
+--   420 -- Asset & Contract (2026-10-03): NEW root 'nav-asset-contract'
+--     (350, no url) with children 'asset-field-dictionary' (351) and
+--     'asset-form-templates' (352). Section 3 below grants every role full
+--     rights on them like every other active row; 420 itself grants only
+--     the 'Admin' role VIEW/ADD/EDIT/APPROVE.
+--   422 -- 'asset-valuation-config' (353, Asset Valuation) under
+--     'nav-asset-contract'.
+--   423 -- 'asset-option-lists' (354, Option Lists) under
+--     'nav-asset-contract'.
+--   424 -- 'asset-taxonomy' (355, Asset Taxonomy) under
+--     'nav-asset-contract'.
+--   425 -- 'asset-tech-catalog' (356, Technology Catalogue) under
+--     'nav-asset-contract'.
+--   428 -- 'asset-register' (349, Asset Register -- first in the group)
+--     under 'nav-asset-contract'.
+--   431 -- 'asset-attestation' (357, Asset Attestation) under
+--     'nav-asset-contract'.
+--   434 -- 'asset-contracts' (358, Contracts) under
+--     'nav-asset-contract'.
+--   437 -- 'asset-notifications' (359, Asset Notifications) under
+--     'nav-asset-contract'.
+--   438 -- 'asset-activities' (360, Asset Activities) under
+--     'nav-asset-contract'.
+--   440 -- 'asset-relationships' (361, Asset Relationships) under
+--     'nav-asset-contract'.
+--   441 -- 'business-services' (362, Business Services) under
+--     'nav-asset-contract'.
+--   442 -- 'asset-discovery' (363, Asset Discovery) under
+--     'nav-asset-contract'.
+--   448 -- 'asset-privacy' (364, Asset Privacy) under
+--     'nav-asset-contract'.
+--   450 -- 'asset-governance' (365, Asset Governance) under
+--     'nav-asset-contract'.
+--   451 -- 'asset-contract-dashboard' (348, Dashboard -- first child, 416
+--     rule) under 'nav-asset-contract'.
+--   452 -- 'asset-reports' (366, Asset Reports) under
+--     'nav-asset-contract'.
+--
 -- Re-runnable: yes. A second run makes no changes.
 -- Rollback: database/274_menu_master_seed_rollback.sql
 -- DEPENDS ON: 022 (menu_master, organization_role_menu_permission),
@@ -373,7 +411,28 @@ USING (VALUES
     -- url '#' until sir supplies the real links; set them here AND in the live row.
     (N'my-practices'                  , N'My Practices'                      , N'#'                                          ,   10, N'list-check'            , N'My Notification'            , N'Active'),
     (N'my-approvals'                  , N'My Approvals'                      , N'#'                                          ,   20, N'circle-check'          , N'My Notification'            , N'Active'),
-    (N'risk-acceptance-authority'     , N'Risk Acceptance Approval Authority', N'Practice/Index/risk-acceptance-authority'   ,  260, N'user-shield'           , N'Organization'               , N'Active')
+    (N'risk-acceptance-authority'     , N'Risk Acceptance Approval Authority', N'Practice/Index/risk-acceptance-authority'   ,  260, N'user-shield'           , N'Organization'               , N'Active'),
+    -- Asset & Contract root + configuration screens (420). Root has no url
+    -- (expand only, 416 convention); parents wired in Section 2.
+    (N'nav-asset-contract'            , N'Asset & Contract'                  , NULL                                          ,  350, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),
+    (N'asset-field-dictionary'        , N'Field Dictionary'                  , N'Practice/Index/asset-field-dictionary'      ,  351, N'book'                  , N'Asset & Contract'           , N'Active'),
+    (N'asset-form-templates'          , N'Asset Form Templates'              , N'Practice/Index/asset-form-templates'        ,  352, N'table-list'            , N'Asset & Contract'           , N'Active'),
+    (N'asset-valuation-config'        , N'Asset Valuation'                   , N'Practice/Index/asset-valuation-config'      ,  353, N'scale-balanced'        , N'Asset & Contract'           , N'Active'),  -- 422
+    (N'asset-option-lists'            , N'Option Lists'                      , N'Practice/Index/asset-option-lists'          ,  354, N'list-ul'               , N'Asset & Contract'           , N'Active'),  -- 423
+    (N'asset-taxonomy'                , N'Asset Taxonomy'                    , N'Practice/Index/asset-taxonomy'              ,  355, N'sitemap'               , N'Asset & Contract'           , N'Active'),  -- 424
+    (N'asset-tech-catalog'            , N'Technology Catalogue'              , N'Practice/Index/asset-tech-catalog'          ,  356, N'microchip'             , N'Asset & Contract'           , N'Active'),  -- 425
+    (N'asset-register'                , N'Asset Register'                    , N'Practice/Index/asset-register'              ,  349, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),  -- 428
+    (N'asset-attestation'             , N'Asset Attestation'                 , N'Practice/Index/asset-attestation'           ,  357, N'clipboard-check'       , N'Asset & Contract'           , N'Active'),  -- 431
+    (N'asset-contracts'               , N'Contracts'                         , N'Practice/Index/asset-contracts'             ,  358, N'file-contract'         , N'Asset & Contract'           , N'Active'),  -- 434
+    (N'asset-notifications'           , N'Asset Notifications'               , N'Practice/Index/asset-notifications'         ,  359, N'bell-concierge'        , N'Asset & Contract'           , N'Active'),  -- 437
+    (N'asset-activities'              , N'Asset Activities'                  , N'Practice/Index/asset-activities'            ,  360, N'calendar-check'        , N'Asset & Contract'           , N'Active'),  -- 438
+    (N'asset-relationships'           , N'Asset Relationships'               , N'Practice/Index/asset-relationships'         ,  361, N'diagram-project'       , N'Asset & Contract'           , N'Active'),  -- 440
+    (N'business-services'             , N'Business Services'                 , N'Practice/Index/business-services'           ,  362, N'sitemap'               , N'Asset & Contract'           , N'Active'),  -- 441
+    (N'asset-discovery'               , N'Asset Discovery'                   , N'Practice/Index/asset-discovery'             ,  363, N'satellite-dish'        , N'Asset & Contract'           , N'Active'),  -- 442
+    (N'asset-privacy'                 , N'Asset Privacy'                     , N'Practice/Index/asset-privacy'               ,  364, N'user-shield'           , N'Asset & Contract'           , N'Active'),  -- 448
+    (N'asset-governance'              , N'Asset Governance'                  , N'Practice/Index/asset-governance'            ,  365, N'gauge-high'            , N'Asset & Contract'           , N'Active'),  -- 450
+    (N'asset-contract-dashboard'      , N'Dashboard'                         , N'Practice/Index/asset-contract-dashboard'    ,  348, N'chart-pie'             , N'Asset & Contract'           , N'Active'),  -- 451
+    (N'asset-reports'                 , N'Asset Reports'                     , N'Practice/Index/asset-reports'               ,  366, N'file-lines'            , N'Asset & Contract'           , N'Active')   -- 452
 ) AS s(menu_key, menu_name, menu_url, display_order, icon_class, module_type, status)
 ON t.menu_key = s.menu_key
 WHEN MATCHED AND (
@@ -490,7 +549,26 @@ JOIN  (VALUES
     -- Module Dashboard submenus (416).
     (N'governance-dashboard'          , N'nav-governance'),
     (N'issues-actions-dashboard'      , N'nav-oversight'),
-    (N'audit-assurance-dashboard'     , N'nav-assurance')
+    (N'audit-assurance-dashboard'     , N'nav-assurance'),
+    -- Asset & Contract configuration screens (420).
+    (N'asset-field-dictionary'        , N'nav-asset-contract'),
+    (N'asset-form-templates'          , N'nav-asset-contract'),
+    (N'asset-valuation-config'        , N'nav-asset-contract'),  -- 422
+    (N'asset-option-lists'            , N'nav-asset-contract'),  -- 423
+    (N'asset-taxonomy'                , N'nav-asset-contract'),  -- 424
+    (N'asset-tech-catalog'            , N'nav-asset-contract'),  -- 425
+    (N'asset-register'                , N'nav-asset-contract'),  -- 428
+    (N'asset-attestation'             , N'nav-asset-contract'),  -- 431
+    (N'asset-contracts'               , N'nav-asset-contract'),  -- 434
+    (N'asset-notifications'           , N'nav-asset-contract'),  -- 437
+    (N'asset-activities'              , N'nav-asset-contract'),  -- 438
+    (N'asset-relationships'           , N'nav-asset-contract'),  -- 440
+    (N'business-services'             , N'nav-asset-contract'),  -- 441
+    (N'asset-discovery'               , N'nav-asset-contract'),  -- 442
+    (N'asset-privacy'                 , N'nav-asset-contract'),  -- 448
+    (N'asset-governance'              , N'nav-asset-contract'),  -- 450
+    (N'asset-contract-dashboard'      , N'nav-asset-contract'),  -- 451
+    (N'asset-reports'                 , N'nav-asset-contract')   -- 452
 ) AS x(child_key, parent_key) ON x.child_key = m.menu_key
 JOIN   grac_practice.menu_master p ON p.menu_key = x.parent_key
 WHERE  ISNULL(m.parent_menu_id, -1) <> p.menu_id;
@@ -543,7 +621,8 @@ JOIN  (VALUES
     -- 'nav-documents' removed by 359 -- it is no longer a root, it is
     -- now a child of 'nav-governance' (see the parent-link list above).
     (N'nav-documents'),      -- root again by 384 (Policies & Documents)
-    (N'my-notifications')    -- root by 384 (My Notification parent)
+    (N'my-notifications'),   -- root by 384 (My Notification parent)
+    (N'nav-asset-contract')  -- root added by 420 (Asset & Contract)
 ) AS r(menu_key) ON r.menu_key = m.menu_key
 WHERE  m.parent_menu_id IS NOT NULL;
 

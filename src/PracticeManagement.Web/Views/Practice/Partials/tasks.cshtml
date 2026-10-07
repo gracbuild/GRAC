@@ -74,8 +74,8 @@
            Event Driven Assurance stays its own tab: it is not
            practice_task, it reads the event engine directly. See
            conflict 4 in docs/task-centre-v2.md. *@
-        <button role="tab" data-tab="all" class="active" aria-selected="true">Tasks <span class="pm-badge" id="tabCountAll">0</span></button>
-        <button role="tab" data-tab="event-driven"                  aria-selected="false">Event Driven Assurance <span class="pm-badge" id="tabCountEventDriven">0</span></button>
+        <button role="tab" data-tab="all" class="active" aria-selected="true">Tasks</button>
+        <button role="tab" data-tab="event-driven"                  aria-selected="false">Event Driven Assurance</button>
     </div>
 
     <div class="pm-toolbar">
@@ -88,7 +88,9 @@
 
            The list is ck_pm_practice_task_source_type as widened by
            migration 215, exactly: Gap / Exception / Risk / RiskRegister /
-           ContinuousAssurance / EventAssurance / Custom. An option that
+           ContinuousAssurance / EventAssurance / Custom -- plus Asset
+           (migration 438: recurring asset activities) and Schedule
+           (migration 449: scheduled obligations, raised on the due date). An option that
            is not in that CHECK would be a filter that can never match. *@
         @* Migration 256: options are filled from sp_task_centre_source_counts
            so each carries a count, matching Gap Centre's Source filter.
@@ -104,6 +106,8 @@
             <option value="ContinuousAssurance">Continuous Assurance</option>
             <option value="EventAssurance">Event Assurance</option>
             <option value="Custom">Custom</option>
+            <option value="Asset">Asset activity</option>
+            <option value="Schedule">Scheduled obligation</option>
         </select>
         <input id="taskCenterSearch" type="text" placeholder="Search subject / instance / practice..." />
         <button class="pm-button icon" id="taskRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
@@ -306,10 +310,9 @@
         // selector, so there is one organization control on the screen.
         if (window.__eventAssurance) {
             window.__eventAssurance.init(function () { return selectedOrgId; });
-            document.addEventListener('event-assurance:loaded', function (e) {
-                const badge = document.getElementById('tabCountEventDriven');
-                if (badge) badge.textContent = (e.detail && e.detail.count) || 0;
-            });
+            // 2026-10-06: no count badge on this tab any more (same as the
+            // Tasks tab), so the 'event-assurance:loaded' event is no longer
+            // listened to here.
         }
         applyToolbarForTab();
 
@@ -393,7 +396,8 @@
             opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
             sel.appendChild(opt);
         }
-        if (orgs.length > 0) sel.value = orgs[0].value;
+        // 2026-10-06: the org last picked on any page, else the lowest id.
+        window.gracOrgPref.apply(sel);
         // 414: the dashboard's organization wins when it is one of these.
         if (TASK_DRILL && TASK_DRILL.organizationId) window.__pmDrill.preselect(sel, TASK_DRILL.organizationId);
         sel.disabled = orgs.length <= 1;
@@ -413,47 +417,16 @@
         await reloadCurrentTab();
     }
 
+    // 2026-10-06: the Tasks tab no longer carries a count badge -- its
+    // number (type-bucket sums from sp_task_center_counts, sub tasks
+    // included) never matched the grid and confused readers. The grid's
+    // own total and the Source filter's "All sources (N)" remain. What is
+    // left to refresh is the Source filter's per-source counts; the name
+    // is kept because closing / creating a task and switching org all
+    // already call it.
     async function refreshCounts() {
-        if (!selectedOrgId) { setCounts(null); setCandidateCounts(null); return; }
-        // Migration 256: the Source options carry counts too, so they are
-        // refreshed here rather than at each of refreshCounts' five call
-        // sites -- closing a task, creating one and switching org all
-        // already come through this function.
-        loadTaskSourceFilter();
-        const org = encodeURIComponent(selectedOrgId);
-        // Two independent endpoints (tasks, candidates) — fetched together
-        // so one failing does not blank the other's badge.
-        const [tasks, candidates] = await Promise.all([
-            fetch(U('/practice/api/tasks/counts?organizationId=') + org, { credentials: 'same-origin' })
-                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-            fetch(U('/practice/api/task-candidates/counts?organizationId=') + org, { credentials: 'same-origin' })
-                .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
-        ]);
-        setCounts(tasks);
-        setCandidateCounts(candidates);
-    }
-    function setCounts(c) {
-        // gapsCount intentionally NOT surfaced here — Gap Center owns that
-        // metric now. Task Center only shows counts for actual tasks.
-        //
-        // Migration 255: one badge for the merged list. The counts
-        // procedure still returns the three type buckets separately, so
-        // they are summed here rather than changing the procedure --
-        // Task Center is the only caller that wanted them merged, and
-        // sp_task_center_counts is read by other things.
-        const badge = document.getElementById('tabCountAll');
-        if (badge) {
-            badge.textContent = c
-                ? ((c.implementationCount || 0) + (c.assuranceCount || 0) + (c.customCount || 0))
-                : 0;
-        }
-    }
-    // The Candidates badge counts OPEN candidates (New + Validated) —
-    // approved ones already appear as tasks in the other tabs, and
-    // discarded ones are history.
-    function setCandidateCounts(c) {
-        const badge = document.getElementById('tabCountCandidates');
-        if (badge) badge.textContent = c ? (c.openCount || 0) : 0;
+        if (!selectedOrgId) return;
+        await loadTaskSourceFilter();
     }
 
     function switchTab(tab) {
@@ -647,7 +620,9 @@
         RiskRegister:        'Risk register',
         ContinuousAssurance: 'Continuous Assurance',
         EventAssurance:      'Event Assurance',
-        Custom:              'Custom'
+        Custom:              'Custom',
+        Asset:               'Asset activity',  // 438
+        Schedule:            'Scheduled obligation'   // 449
     };
 
     function renderTaskRows(tabKey, payload) {

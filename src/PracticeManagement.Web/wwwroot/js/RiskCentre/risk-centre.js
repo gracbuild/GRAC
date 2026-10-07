@@ -131,7 +131,7 @@
     await populateOrgFilter();
     const sel = document.getElementById("riskFilterOrganization");
     if (sel && sel.options.length > 1 && !state.organizationId) {
-      sel.selectedIndex = 1;
+      window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
       state.organizationId = Number(sel.value) || null;
       // Mirror the auto-selection onto the other tabs' controls before
       // anything loads, so every tab shows which organisation it is
@@ -706,6 +706,8 @@
       });
       // Placeholder + exactly one org means there is nothing to choose.
       if (sel.options.length === 2) sel.disabled = true;
+      // 2026-10-06: a pick on ANY of these selects is the remembered org.
+      window.gracOrgPref.watch(sel);
     });
   }
 

@@ -335,6 +335,55 @@ public sealed class PracticeAuthenticationService(
               )
             GROUP BY m.menu_key;
             """;
+        // 2026-10-06: a CONTAINER menu (menu_url NULL / '' / '#', e.g. Risk
+        // Management 'risk-centre' since 383/416) has no row of its own in
+        // Role Master's permission matrix -- role-menu-permission-editor.js
+        // draws only its children -- so no role created through the matrix
+        // can hold it. Screens that are governed by their container
+        // (PracticeController.ScreenPermissionArea: risk-centre-* ->
+        // risk-centre, and the Risk Centre API) then refused everyone:
+        // "Your role does not have View permission for Risk Candidate ...
+        // risk-centre". A container now holds, per action, whatever any of
+        // its Active children hold (plus any row it has itself). Applied
+        // only when menu_master.parent_menu_id exists (052).
+        if (await ColumnExistsAsync(connection, "grac_practice.menu_master", "parent_menu_id", cancellationToken))
+        {
+            command.CommandText = """
+                ;WITH granted AS (
+                    SELECT p.menu_id, p.can_view, p.can_add, p.can_edit, p.can_delete, p.can_approve
+                    FROM grac_practice.organization_role_menu_permission p
+                    WHERE p.status = 'Active'
+                      AND p.role_id IN (
+                          SELECT er.role_id
+                          FROM grac_practice.organization_employee_role er
+                          WHERE er.employee_id = @employee_id AND er.status = 'Active'
+                          UNION
+                          SELECT @role_id WHERE @role_id IS NOT NULL
+                      )
+                ), effective AS (
+                    SELECT g.menu_id, g.can_view, g.can_add, g.can_edit, g.can_delete, g.can_approve
+                    FROM granted g
+                    UNION ALL
+                    SELECT child.parent_menu_id, g.can_view, g.can_add, g.can_edit, g.can_delete, g.can_approve
+                    FROM granted g
+                    JOIN grac_practice.menu_master child
+                      ON child.menu_id = g.menu_id AND child.status = 'Active' AND child.parent_menu_id IS NOT NULL
+                    JOIN grac_practice.menu_master container
+                      ON container.menu_id = child.parent_menu_id
+                     AND LTRIM(RTRIM(ISNULL(container.menu_url, ''))) IN ('', '#')
+                )
+                SELECT m.menu_key,
+                       CAST(MAX(CAST(e.can_view AS INT)) AS BIT) can_view,
+                       CAST(MAX(CAST(e.can_add AS INT)) AS BIT) can_add,
+                       CAST(MAX(CAST(e.can_edit AS INT)) AS BIT) can_edit,
+                       CAST(MAX(CAST(e.can_delete AS INT)) AS BIT) can_delete,
+                       CAST(MAX(CAST(e.can_approve AS INT)) AS BIT) can_approve
+                FROM effective e
+                JOIN grac_practice.menu_master m ON m.menu_id = e.menu_id
+                WHERE m.status = 'Active'
+                GROUP BY m.menu_key;
+                """;
+        }
         // Fall back to the single-role query when the multi-role map has
         // not been migrated yet (script 027 not applied).
         if (await TableMissingAsync(connection, "grac_practice.organization_employee_role", cancellationToken))

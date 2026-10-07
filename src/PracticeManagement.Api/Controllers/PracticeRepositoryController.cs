@@ -24,7 +24,13 @@ public sealed class PracticeRepositoryController(
 {
     private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase)
     {
-        "organizations", "organization-setup", "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "locations", "departments", "business-functions", "teams", "committees", "users",
+        "organizations", "organization-setup",
+        // 2026-10-06: Organization Administration's read-only Organization
+        // tab -- an alias of organization-setup's QUERY governed by
+        // organization-administration (PermissionAreaMap). Resolved, and any
+        // write refused, in PracticeRepositoryService.ExecuteAsync.
+        "organization-profile",
+        "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "locations", "departments", "business-functions", "teams", "committees", "users",
         "roles", "role-menu-permissions", "user-role-assignments",
         "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets", "dependency-processes",
         "user-assignments", "owner-mappings", "applicability-discovery", "applicability-results",

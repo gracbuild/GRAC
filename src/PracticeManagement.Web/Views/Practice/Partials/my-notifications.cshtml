@@ -22,6 +22,13 @@
         which takes the recipient from the SESSION. The browser never names
         a recipient: these messages identify overdue work and the people
         accountable for it, so one user must not be able to read another's.
+
+    ASSET & CONTRACT (migration 437)
+        The second section lists the asset and contract reminders and
+        escalations addressed to the user (BRD 9.1) through
+        /practice/api/asset-config/notifications/mine*, scoped the same way.
+        Read, action and manager acknowledgements follow the notification
+        profile. Script: wwwroot/js/AssetConfig/asset-my-notifications.js
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 
@@ -83,6 +90,45 @@
         <span data-pg="total" class="pm-pager-total">0 total</span>
     </div>
 </section>
+
+@* ---------------- Asset & Contract notifications (437, BRD 9.1) ---------------- *@
+<section class="pm-panel" id="amnRoot" hidden>
+    <h2 class="amn-title">Asset &amp; Contract notifications</h2>
+    <div class="pm-toolbar">
+        <select id="amnFilter" title="Show">
+            <option value="UNREAD">Unread</option>
+            <option value="TO_ACKNOWLEDGE">To acknowledge</option>
+            <option value="TO_CONFIRM">To confirm (manager)</option>
+            <option value="READ">Read</option>
+            <option value="ALL">All</option>
+        </select>
+        <span class="amn-counts" id="amnCounts"></span>
+        <button class="pm-button icon" id="amnRefresh" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button" id="amnReadAll" type="button">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i> Mark all read
+        </button>
+    </div>
+    <p class="pm-message" id="amnMessage" role="status" aria-live="polite" hidden></p>
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr><th>Class</th><th>Notice</th><th>Why you</th><th>Date</th><th>Received</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="amnBody"><tr><td colspan="7" class="pm-empty">Loading...</td></tr></tbody>
+        </table>
+    </div>
+    <div id="amnPager"></div>
+</section>
+
+<style>
+    .amn-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); margin: 0 0 8px; }
+    .amn-counts { font-size: 12px; color: var(--fg-secondary); }
+    .amn-note { font-size: 11px; font-weight: 400; color: var(--fg-muted); }
+</style>
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/AssetConfig/asset-my-notifications.js" asp-append-version="true"></script>
 
 <script>
 (function () {

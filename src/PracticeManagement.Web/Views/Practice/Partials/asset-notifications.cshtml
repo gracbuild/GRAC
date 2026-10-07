@@ -1,0 +1,286 @@
+@*
+    Asset Notifications -- Asset & Contract Management, Phase 6.1 (migration 437).
+    Rendered from Manage.cshtml when Model.Key == "asset-notifications".
+
+    BRD 9.1: reminders, acknowledgements and escalations for time-bound
+    asset and contract activities. "Profiles" holds one notification
+    profile per activity (9.1.3 defaults copied in for the organization),
+    optionally overridden for a severity: reminder stages (days before),
+    due, escalation stages (days after, level 1-3), the class of each
+    notice (9.1.2), recipients per stage, channels, acknowledgement (read,
+    action, manager), snooze / reschedule and working days. "Escalation
+    matrix" holds who is added at each level per severity (9.1.8).
+    "Occurrences" are what the scheduler tracks: one per activity, object
+    and date (contract renewal / expiry, model / OS / firmware support end,
+    technology exception expiry, custodian attestation), with the stage
+    last sent and snooze / reschedule. "Notification log" lists every
+    notice recorded (9.1.10: profile version, stage, recipient, channel,
+    delivery result, acknowledgement). "Scheduler" shows the passes run by
+    the background worker and runs one now. Every rule is enforced by the
+    procedures (sp_asset_notification_*, sp_asset_scheduler_run).
+
+    Backend: practice/api/asset-config/notifications... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-notifications.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var antPermissions = ViewBag.Permissions as string[] ?? [];
+    bool antHas(string action) => antPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var antCanAdd = antHas("ADD");
+    var antCanEdit = antHas("EDIT");
+    var antCanApprove = antHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="antRoot" data-can-add="@(antCanAdd ? "1" : "0")" data-can-edit="@(antCanEdit ? "1" : "0")" data-can-approve="@(antCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="antOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset notifications">
+            <button role="tab" class="active" data-ant-main="OCCURRENCES" aria-selected="true">Occurrences</button>
+            <button role="tab" data-ant-main="LOG" aria-selected="false">Notification log</button>
+            <button role="tab" data-ant-main="PROFILES" aria-selected="false">Profiles</button>
+            <button role="tab" data-ant-main="MATRIX" aria-selected="false">Escalation matrix</button>
+            <button role="tab" data-ant-main="SCHEDULER" aria-selected="false">Scheduler</button>
+        </div>
+        <p class="pm-message" id="antMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- occurrences ---------------- *@
+        <div class="pm-tab-panel" data-ant-mainpanel="OCCURRENCES">
+            <div class="pm-toolbar">
+                <select id="antOccStatus" title="Status">
+                    <option value="OPEN">Open</option><option value="COMPLETED">Completed</option>
+                    <option value="SUPERSEDED">Superseded</option><option value="ALL">All</option>
+                </select>
+                <select id="antOccActivity" title="Activity"><option value="">All activities</option></select>
+                <input type="search" id="antOccSearch" placeholder="Search reference or subject" maxlength="200" />
+                <button class="pm-button icon" id="antOccRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Activity</th><th>Subject</th><th>Date</th><th>Severity</th><th>Last notice</th><th>Next notice</th><th>Snoozed until</th><th>Notices</th></tr></thead>
+                    <tbody id="antOccBody"></tbody>
+                </table>
+            </div>
+            <div id="antOccPager"></div>
+        </div>
+
+        @* ---------------- notification log ---------------- *@
+        <div class="pm-tab-panel" data-ant-mainpanel="LOG" hidden>
+            <div class="pm-toolbar">
+                <select id="antLogStatus" title="Delivery">
+                    <option value="">All deliveries</option><option value="Pending">Pending</option><option value="Sent">Sent</option>
+                    <option value="Failed">Failed</option><option value="Suppressed">Suppressed</option>
+                </select>
+                <select id="antLogActivity" title="Activity"><option value="">All activities</option></select>
+                <select id="antLogClass" title="Class">
+                    <option value="">All classes</option><option value="INFORMATIONAL">Informational</option><option value="REMINDER">Reminder</option>
+                    <option value="ESCALATION">Escalation</option><option value="CRITICAL">Critical</option>
+                </select>
+                <input type="search" id="antLogSearch" placeholder="Search reference, subject or recipient" maxlength="200" />
+            </div>
+            <p class="ant-note">Suppressed rows record a stage nobody could be resolved for (an empty role or no owner) -- an audit finding, not a delivery. Failed rows failed three delivery attempts.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Recorded</th><th>Class</th><th>Notice</th><th>Recipient</th><th>Stage</th><th>Channels</th><th>Delivery</th><th>Read / acknowledged</th></tr></thead>
+                    <tbody id="antLogBody"></tbody>
+                </table>
+            </div>
+            <div id="antLogPager"></div>
+        </div>
+
+        @* ---------------- profiles ---------------- *@
+        <div class="pm-tab-panel" data-ant-mainpanel="PROFILES" hidden>
+            <div class="pm-toolbar">
+                @if (antCanAdd)
+                {
+                    <button class="pm-button primary" id="antNewProfile" type="button"><i class="fa-solid fa-plus"></i> New profile</button>
+                }
+            </div>
+            <p class="ant-note">One active default profile per activity, copied from the BRD 9.1.3 defaults; add a profile with a severity to override the default for assets of that criticality. Activities marked "source later" can be configured now; nothing raises them until their phase.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Activity</th><th>Profile</th><th>Severity</th><th>Stages</th><th>Acknowledgement</th><th>Channels</th><th>Status</th><th>Version</th></tr></thead>
+                    <tbody id="antProfileBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- escalation matrix ---------------- *@
+        <div class="pm-tab-panel" data-ant-mainpanel="MATRIX" hidden>
+            <p class="ant-note">Who is added to a notice at each level, by the severity of the asset or contract (BRD 9.1.8). Level 0 is the initial recipient; escalation stages add the entries of their level. Functions such as department or business head, control function, senior management or executive sponsor are organization roles you add here.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Severity</th><th>Initial (0)</th><th>Escalation 1</th><th>Escalation 2</th><th>Escalation 3</th><th></th></tr></thead>
+                    <tbody id="antMatrixBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- scheduler ---------------- *@
+        <div class="pm-tab-panel" data-ant-mainpanel="SCHEDULER" hidden>
+            <div class="pm-toolbar">
+                @if (antCanEdit)
+                {
+                    <button class="pm-button primary" id="antRunNow" type="button"><i class="fa-solid fa-play"></i> Run now</button>
+                }
+                <button class="pm-button icon" id="antRunRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            </div>
+            <p class="ant-note">The background worker runs the scheduler for every organization (about hourly): contract effective dates, renewal occurrences when the reminder window opens, periodic attestation runs, then reminders and escalations. Run now runs it for this organization. Counts of a pass over every organization are not shown here.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Started</th><th>Finished</th><th>Trigger</th><th>Result</th><th>Renewals started</th><th>Attestations</th><th>Occurrences opened / closed</th><th>Activity tasks</th><th>Notices</th><th>Errors</th></tr></thead>
+                    <tbody id="antRunBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Occurrence modal ======================= *@
+<div class="pm-modal" id="antOccModal" hidden>
+    <div class="pm-modal-panel ant-wide">
+        <header>
+            <h2 id="antOccTitle">Occurrence</h2>
+            <button class="pm-modal-close" type="button" data-close-ant="antOccModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="ant-info" id="antOccInfo"></div>
+        <h3 class="ant-sub">Stages of the profile</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Stage</th><th>Class</th><th>Date</th><th>Reached</th><th>Notices</th></tr></thead>
+                <tbody id="antOccStagesBody"></tbody>
+            </table>
+        </div>
+        <h3 class="ant-sub">Notices recorded</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Recorded</th><th>Stage</th><th>Recipient</th><th>Delivery</th><th>Read / acknowledged</th><th>Profile version</th></tr></thead>
+                <tbody id="antOccNoticesBody"></tbody>
+            </table>
+        </div>
+        <form id="antSnoozeForm" class="pm-form-grid" hidden>
+            <h3 class="ant-sub full">Snooze / reschedule</h3>
+            <label><span>Revised date *</span><input type="date" id="antSnoozeDate" /></label>
+            <label class="full"><span>Reason *</span><textarea id="antSnoozeReason" rows="2" maxlength="1000"></textarea></label>
+            <p class="ant-note full">No notice is sent for this occurrence before the revised date; then the latest stage reached is sent. Resume sends from the next pass.</p>
+            <p class="pm-message full" id="antOccMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" id="antResume" hidden>Resume now</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-clock"></i> Snooze / reschedule</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Profile modal (9.1.1) ======================= *@
+<div class="pm-modal" id="antProfileModal" hidden>
+    <div class="pm-modal-panel ant-wide">
+        <header>
+            <h2 id="antProfileTitle">Notification profile</h2>
+            <button class="pm-modal-close" type="button" data-close-ant="antProfileModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="antProfileForm" class="pm-form-grid">
+            <label><span>Activity *</span><select id="antPfActivity"></select></label>
+            <label><span>Profile name *</span><input id="antPfName" maxlength="200" /></label>
+            <label><span>Severity</span><select id="antPfSeverity">
+                <option value="">Default (every severity)</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option><option value="CRITICAL">Critical</option>
+            </select></label>
+            <label><span>Owner</span><select id="antPfOwner"></select></label>
+            <label><span>Effective from</span><input type="date" id="antPfFrom" /></label>
+            <label><span>Effective to</span><input type="date" id="antPfTo" /></label>
+            <label><span>Acknowledgement</span><select id="antPfAck">
+                <option value="NONE">None</option><option value="READ">Read</option>
+                <option value="ACTION">Action (the action taken)</option><option value="MANAGER">Manager confirms</option>
+            </select></label>
+            <div class="full ant-checks">
+                <span class="ant-checks-label">Channels *</span>
+                <label class="ant-check"><input type="checkbox" id="antPfInApp" /> In-application</label>
+                <label class="ant-check"><input type="checkbox" id="antPfEmail" /> Email</label>
+                <label class="ant-check"><input type="checkbox" id="antPfWebhook" /> Teams / webhook</label>
+            </div>
+            <div class="full ant-checks">
+                <label class="ant-check"><input type="checkbox" id="antPfActive" /> Active</label>
+                <label class="ant-check"><input type="checkbox" id="antPfSnooze" /> Snooze / reschedule allowed</label>
+                <label class="ant-check"><input type="checkbox" id="antPfWorkdays" /> Working days only (a weekend date moves to Monday)</label>
+            </div>
+            <p class="ant-note full" id="antPfTrigger"></p>
+            <div class="full">
+                <h3 class="ant-sub">Stages</h3>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Stage</th><th>Days</th><th>Level</th><th>Class</th><th>Recipients</th><th></th></tr></thead>
+                        <tbody id="antPfStagesBody"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="pm-button" id="antPfAddStage"><i class="fa-solid fa-plus"></i> Add stage</button>
+                <p class="ant-note">Reminder: days before the date. Due: on the date. Escalation: days after the date (0 = on the date), with the escalation level whose matrix entries are added. Email and webhook are recorded on every notice for a dispatcher; in-application notices appear in My Notifications.</p>
+            </div>
+            <p class="pm-message full" id="antPfMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-ant="antProfileModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="antPfSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Escalation matrix modal (9.1.8) ======================= *@
+<div class="pm-modal" id="antMatrixModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="antMatrixTitle">Escalation matrix</h2>
+            <button class="pm-modal-close" type="button" data-close-ant="antMatrixModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="antMatrixForm" class="pm-form-grid">
+            <div class="full">
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Level</th><th>Recipient</th><th></th></tr></thead>
+                        <tbody id="antMxBody"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="pm-button" id="antMxAdd"><i class="fa-solid fa-plus"></i> Add entry</button>
+            </div>
+            <p class="pm-message full" id="antMxMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-ant="antMatrixModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .ant-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .ant-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; margin: 0 4px 2px 0; }
+    .ant-st-open    { background: var(--primary-100); color: var(--primary-800); }
+    .ant-st-wait    { background: var(--warning-50); color: var(--warning-700); }
+    .ant-st-active  { background: var(--success-100); color: var(--success-700); }
+    .ant-st-ended   { background: var(--neutral-200); color: var(--fg-muted); }
+    .ant-st-bad     { background: var(--danger-100); color: var(--danger-700); }
+    .ant-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--bg-subtle); font-size: 12px; margin: 0 4px 4px 0; }
+    .ant-tag button { border: 0; background: transparent; cursor: pointer; color: var(--fg-muted); padding: 0; }
+    .pm-modal-panel.ant-wide { max-width: 1100px; width: 100%; }
+    .ant-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .ant-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .ant-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .ant-checks { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; font-size: 13px; }
+    .ant-checks-label { color: var(--fg-secondary); font-size: 12px; }
+    .ant-check { display: inline-flex; gap: 4px; align-items: center; }
+    .ant-stage-input { width: 80px; }
+    tr[data-ant-occ], tr[data-ant-profile] { cursor: pointer; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-notifications.js" asp-append-version="true"></script>

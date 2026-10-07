@@ -113,6 +113,10 @@
             } catch (e) { }
         })();
     </script>
+    @* 2026-10-06: one Organization choice across screens (ordered by id,
+       last pick remembered). In <head> so it exists before any partial's
+       inline script fills its Organization dropdown. *@
+    <script src="~/js/Shared/org-preference.js" asp-append-version="true"></script>
 </head>
 <body class="hold-transition sidebar-mini layout-fixed sidebar-open layout-footer-fixed">
     <nav class="main-header navbar navbar-expand navbar-white navbar-light">

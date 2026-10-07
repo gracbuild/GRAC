@@ -41,6 +41,44 @@
 // Program.cs off-limits without an explicit request):
 //     builder.Services.AddPracticeTaskNotificationService();
 //     builder.Services.AddHostedService<TaskNotificationWorker>();
+//
+// ASSET SCHEDULER (migration 437 -- registered in Program.cs on request)
+// ----------------------------------------------------------------------
+// The same loop also runs the Asset & Contract scheduler pass
+// (IAssetConfigService.RunSchedulerAsync -> grac_practice.sp_asset_scheduler_run):
+// contract effective dates, renewal occurrences, periodic attestation runs
+// and the asset / contract reminders and escalations. It works in dates, so
+// it runs at most every AssetSchedulerIntervalMinutes (default 60), not on
+// every 5-minute tick, and it is guarded by its own try/catch so neither job
+// can stop the other. The procedure takes an application lock: a second API
+// instance, or "Run now" on the screen, skips instead of running twice.
+// 438 adds the recurring asset activities (calibration, maintenance,
+// inspection, licence renewal tasks) to the same pass.
+// AssetSchedulerEnabled=false leaves it to SQL Agent:
+//     EXEC grac_practice.sp_asset_scheduler_run;
+//
+// SCHEDULED OBLIGATION TASKS (migration 449)
+// ------------------------------------------
+// A third pass, same shape as the asset one: every
+// ScheduledObligationTasksIntervalMinutes (default 60) it runs
+// grac_practice.sp_schedule_obligation_tasks_generate, which raises the
+// Task Centre task for each scheduled Execution / Assurance obligation
+// occurrence due TODAY (UTC) -- on the due date, not ahead of it. The
+// procedure claims each rule + date once and takes an application lock,
+// so repeated passes and several API instances never raise twice.
+// ScheduledObligationTasksEnabled=false leaves it to SQL Agent:
+//     EXEC grac_practice.sp_schedule_obligation_tasks_generate;
+//
+// ASSET REPORT DELIVERIES (migration 453)
+// ---------------------------------------
+// A fourth pass: every AssetReportDeliveryIntervalMinutes (default 60) it
+// runs IAssetConfigService.RunReportDeliveriesAsync, which starts the
+// deliveries of the report schedules due today (one per schedule and day),
+// checks every recipient at delivery time and produces the report for each
+// recipient under that recipient permissions and View Data Scope. The rows
+// are produced in the API, so there is no SQL Agent equivalent;
+// AssetReportDeliveryEnabled=false stops scheduled deliveries ("Run now" on
+// the screen still works).
 // =====================================================================
 namespace PracticeManagement.Api.Services;
 
@@ -68,6 +106,26 @@ public sealed class TaskNotificationOptions
     /// <summary>Restrict to one organisation. NULL sweeps every organisation,
     /// which is the normal deployment.</summary>
     public long? OrganizationId { get; set; }
+
+    /// <summary>437: run the Asset & Contract scheduler pass from this worker.</summary>
+    public bool AssetSchedulerEnabled { get; set; } = true;
+
+    /// <summary>437: minutes between asset scheduler passes (reminders are
+    /// date-based; an hour is ample).</summary>
+    public int AssetSchedulerIntervalMinutes { get; set; } = 60;
+
+    /// <summary>449: raise tasks for scheduled obligation occurrences due today.</summary>
+    public bool ScheduledObligationTasksEnabled { get; set; } = true;
+
+    /// <summary>449: minutes between passes. The work is per day; an hour
+    /// means a task appears within the hour after the UTC day starts.</summary>
+    public int ScheduledObligationTasksIntervalMinutes { get; set; } = 60;
+
+    /// <summary>453: deliver the asset report schedules due today.</summary>
+    public bool AssetReportDeliveryEnabled { get; set; } = true;
+
+    /// <summary>453: minutes between delivery passes (schedules are per day).</summary>
+    public int AssetReportDeliveryIntervalMinutes { get; set; } = 60;
 }
 
 public sealed class TaskNotificationWorker(
@@ -80,12 +138,21 @@ public sealed class TaskNotificationWorker(
         var options = new TaskNotificationOptions();
         configuration.GetSection(TaskNotificationOptions.SectionName).Bind(options);
 
-        if (!options.Enabled)
+        if (!options.Enabled && !options.AssetSchedulerEnabled && !options.ScheduledObligationTasksEnabled && !options.AssetReportDeliveryEnabled)
         {
             logger.LogInformation(
                 "TaskNotificationWorker disabled by configuration; SLA notifications must be swept manually via sp_task_notification_sweep.");
             return;
         }
+        if (!options.Enabled)
+            logger.LogInformation("TaskNotificationWorker: task SLA sweep disabled by configuration; only the scheduler passes (asset, scheduled obligations) run.");
+
+        var assetInterval = TimeSpan.FromMinutes(Math.Clamp(options.AssetSchedulerIntervalMinutes, 5, 1440));
+        DateTime? lastAssetRun = null;   // 437
+        var obligationInterval = TimeSpan.FromMinutes(Math.Clamp(options.ScheduledObligationTasksIntervalMinutes, 5, 1440));
+        DateTime? lastObligationRun = null;   // 449
+        var reportInterval = TimeSpan.FromMinutes(Math.Clamp(options.AssetReportDeliveryIntervalMinutes, 5, 1440));
+        DateTime? lastReportRun = null;   // 453
 
         var interval = TimeSpan.FromSeconds(Math.Clamp(options.IntervalSeconds, 30, 86400));
 
@@ -103,6 +170,7 @@ public sealed class TaskNotificationWorker(
 
         do
         {
+            if (options.Enabled)
             try
             {
                 // A new scope per pass: ITaskNotificationService is scoped,
@@ -130,6 +198,91 @@ public sealed class TaskNotificationWorker(
                 // Swallow deliberately: a database blip or a misconfigured
                 // organization must not stop the loop or fault the host.
                 logger.LogError(ex, "TaskNotificationWorker pass failed; will retry on the next interval.");
+            }
+
+            // 437: the Asset & Contract scheduler pass, at most every assetInterval.
+            if (options.AssetSchedulerEnabled && (lastAssetRun is null || DateTime.UtcNow - lastAssetRun.Value >= assetInterval))
+            {
+                lastAssetRun = DateTime.UtcNow;   // also after a failure: retry on the next interval, not every tick
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var assets = scope.ServiceProvider.GetService<IAssetConfigService>();
+                    if (assets is not null)
+                    {
+                        var run = await assets.RunSchedulerAsync(options.OrganizationId, "SCHEDULED", "scheduler", stoppingToken);
+                        run.TryGetValue("result", out var result);
+                        run.TryGetValue("notificationsQueued", out var queued);
+                        run.TryGetValue("renewalsStarted", out var renewals);
+                        run.TryGetValue("errorCount", out var errors);
+                        run.TryGetValue("tasksCreated", out var tasks);   // 438: recurring asset activities
+                        if (Convert.ToInt32(queued ?? 0) > 0 || Convert.ToInt32(renewals ?? 0) > 0 || Convert.ToInt32(errors ?? 0) > 0
+                            || Convert.ToInt32(tasks ?? 0) > 0)
+                            logger.LogInformation(
+                                "Asset scheduler pass {Result}: {Queued} notification(s), {Renewals} renewal(s) started, {Tasks} activity task(s), {Errors} error(s).",
+                                result, queued, renewals, tasks, errors);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Asset scheduler pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 449: scheduled obligation tasks, at most every obligationInterval.
+            if (options.ScheduledObligationTasksEnabled
+                && (lastObligationRun is null || DateTime.UtcNow - lastObligationRun.Value >= obligationInterval))
+            {
+                lastObligationRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var service = scope.ServiceProvider.GetRequiredService<ITaskNotificationService>();
+                    var run = await service.GenerateScheduledObligationTasksAsync(options.OrganizationId, null, stoppingToken);
+                    if (run.TasksCreated > 0 || run.ErrorCount > 0)
+                        logger.LogInformation(
+                            "Scheduled obligation pass {Result} for {RunDate:yyyy-MM-dd}: {Tasks} task(s) raised, {Errors} error(s).",
+                            run.Result, run.RunDate, run.TasksCreated, run.ErrorCount);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Scheduled obligation task pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 453: asset report deliveries, at most every reportInterval.
+            if (options.AssetReportDeliveryEnabled && (lastReportRun is null || DateTime.UtcNow - lastReportRun.Value >= reportInterval))
+            {
+                lastReportRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var assets = scope.ServiceProvider.GetService<IAssetConfigService>();
+                    if (assets is not null)
+                    {
+                        var run = await assets.RunReportDeliveriesAsync(options.OrganizationId, stoppingToken);
+                        if (run.Deliveries > 0)
+                            logger.LogInformation(
+                                "Asset report delivery pass: {Deliveries} delivery(ies), {Delivered} file(s) delivered, {Skipped} recipient(s) skipped, {Failed} failed.",
+                                run.Deliveries, run.Delivered, run.Skipped, run.Failed);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Asset report delivery pass failed; will retry on the next interval.");
+                }
             }
         }
         while (await SafeWaitAsync(timer, stoppingToken));

@@ -1,0 +1,247 @@
+@*
+    Asset Reports -- Asset & Contract Management, Phase 8.5a (migration 452).
+    Rendered from Manage.cshtml when Model.Key == "asset-reports".
+
+    BRD 13.4 (Standard Reporting Catalog) / 13.4.1 (Reporting Controls):
+    "Catalogue" lists the standard reports by family -- only those whose
+    screen the user may VIEW (the same permission as the screen), with the
+    classification, version and whether the user may export it; reports
+    the module cannot produce yet say where the information lives today.
+    "Report" runs one report with the filters it takes (search, status,
+    asset type, dates, days) and pages the rows; every count uses the rule
+    of the screen it comes from. "Export CSV" (when the organization policy
+    allows it -- an approver policy needs Asset Reports APPROVE) records the
+    export first (report and version, organization, filters, columns, row
+    count, classification, user, time) and the file starts with that
+    heading as its watermark. "Export history" lists the recorded exports.
+    "Settings" (EDIT) sets per report whether it is enabled, a higher
+    classification and the export policy.
+
+    453 (BRD 13.4 schedule / retention / distribution, 13.4.1 delivery):
+    "Schedules" lists the report schedules (VIEW) and, with EDIT, creates
+    and changes them -- report, fixed filters (a window of the last N days
+    for date-range reports), frequency, how long delivered files are kept
+    and the distribution list (employees and roles) -- runs one now and
+    shows every delivery with the result per recipient (delivered, skipped
+    with the reason the authorization check gave at delivery time, failed).
+    "My deliveries" lists the files delivered to the user; Download checks
+    again, records the download as an export and writes the CSV with the
+    same watermark heading.
+
+    Backend: practice/api/asset-config/reports... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-reports.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var arpPermissions = ViewBag.Permissions as string[] ?? [];
+    bool arpHas(string action) => arpPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var arpCanEdit = arpHas("EDIT");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="arpRoot" data-can-edit="@(arpCanEdit ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="arpOrg" title="Organization"><option value="">Select organization</option></select>
+            <button class="pm-button icon" id="arpRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i></button>
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset reports">
+            <button role="tab" class="active" data-arp-main="CATALOGUE" aria-selected="true">Catalogue</button>
+            <button role="tab" data-arp-main="REPORT" aria-selected="false">Report</button>
+            <button role="tab" data-arp-main="EXPORTS" aria-selected="false">Export history</button>
+            <button role="tab" data-arp-main="MINE" aria-selected="false">My deliveries</button>
+            <button role="tab" data-arp-main="SCHEDULES" aria-selected="false">Schedules</button>
+            @if (arpCanEdit)
+            {
+                <button role="tab" data-arp-main="SETTINGS" aria-selected="false">Settings</button>
+            }
+        </div>
+        <p class="pm-message" id="arpMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- catalogue ---------------- *@
+        <div class="pm-tab-panel" data-arp-mainpanel="CATALOGUE">
+            <p class="arp-note">Reports of the screens you may view. Each one uses the same rules as its screen; open one to filter, page and export it.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Report</th><th>Description</th><th>Classification</th><th>Version</th><th>Export</th></tr></thead>
+                    <tbody id="arpCatalogue"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- report ---------------- *@
+        <div class="pm-tab-panel" data-arp-mainpanel="REPORT" hidden>
+            <div class="pm-toolbar">
+                <select id="arpReport" title="Report"></select>
+            </div>
+            <p class="arp-note" id="arpReportInfo"></p>
+            <div class="pm-toolbar" id="arpFilters">
+                <input type="search" id="arpSearch" placeholder="Search" maxlength="200" data-arp-filter="SEARCH" hidden />
+                <select id="arpStatus" title="Status" data-arp-filter="STATUS" hidden></select>
+                <select id="arpAssetType" title="Asset type" data-arp-filter="ASSET_TYPE" hidden></select>
+                <label class="arp-field" data-arp-filter="DATE_RANGE" hidden><span id="arpDateLabel">From</span><input type="date" id="arpDateFrom" /></label>
+                <label class="arp-field" data-arp-filter="DATE_RANGE" hidden><span>To</span><input type="date" id="arpDateTo" /></label>
+                <label class="arp-field" data-arp-filter="DAYS" hidden><span>Next / last days</span><input type="number" id="arpDays" min="1" max="3650" step="1" /></label>
+                <button class="pm-button primary" id="arpRun" type="button"><i class="fa-solid fa-play"></i> Run</button>
+                <button class="pm-button" id="arpExport" type="button" hidden><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead id="arpHead"></thead>
+                    <tbody id="arpRows"></tbody>
+                </table>
+            </div>
+            <div id="arpPager"></div>
+        </div>
+
+        @* ---------------- export history ---------------- *@
+        <div class="pm-tab-panel" data-arp-mainpanel="EXPORTS" hidden>
+            <p class="arp-note">Every export is recorded before the file is produced: report and version, filters, columns, row count, classification, who and when (BRD 13.4.1).</p>
+            <div class="pm-toolbar">
+                <select id="arpExportReport" title="Report"><option value="">All reports</option></select>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Exported</th><th>Report</th><th>Version</th><th>Classification</th><th>Rows</th><th>Exported by</th><th>Filters</th></tr></thead>
+                    <tbody id="arpExports"></tbody>
+                </table>
+            </div>
+            <div id="arpExportPager"></div>
+        </div>
+
+        @* ---------------- my deliveries (453) ---------------- *@
+        <div class="pm-tab-panel" data-arp-mainpanel="MINE" hidden>
+            <p class="arp-note">Reports delivered to you by a schedule. A file is kept for the period its schedule sets; downloading checks your permission again and is recorded like an export.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Delivered</th><th>Report</th><th>Classification</th><th>Rows</th><th>Available until</th><th>Downloads</th><th>Filters</th><th></th></tr></thead>
+                    <tbody id="arpMine"></tbody>
+                </table>
+            </div>
+            <div id="arpMinePager"></div>
+        </div>
+
+        @* ---------------- schedules (453) ---------------- *@
+        <div class="pm-tab-panel" data-arp-mainpanel="SCHEDULES" hidden>
+            <p class="arp-note">Each schedule delivers one report to its distribution list on its days. Every recipient is checked when the report is delivered: an active employee of the organization with VIEW on Asset Reports and on the screen the report is based on, and Asset Reports APPROVE when the export policy needs an approver. Each recipient receives the rows their own permissions allow.</p>
+            @if (arpCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="arpSchNew" type="button"><i class="fa-solid fa-plus"></i> New schedule</button>
+                </div>
+            }
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Schedule</th><th>Report</th><th>Frequency</th><th>Recipients</th><th>Next run</th><th>Last run</th><th>Active</th><th></th></tr></thead>
+                    <tbody id="arpSchedules"></tbody>
+                </table>
+            </div>
+
+            @if (arpCanEdit)
+            {
+                <div id="arpSchForm" class="arp-form" hidden>
+                    <h3 class="arp-sub" id="arpSchFormTitle">New schedule</h3>
+                    <div class="pm-toolbar">
+                        <label class="arp-field"><span>Report</span><select id="arpSchReport"></select></label>
+                        <label class="arp-field"><span>Name</span><input type="text" id="arpSchName" maxlength="160" /></label>
+                        <label class="arp-field"><span>Frequency</span>
+                            <select id="arpSchFrequency">
+                                <option value="DAILY">Daily</option>
+                                <option value="WEEKLY">Weekly</option>
+                                <option value="MONTHLY">Monthly</option>
+                            </select>
+                        </label>
+                        <label class="arp-field" id="arpSchDowField"><span>Weekday</span>
+                            <select id="arpSchDow">
+                                <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+                                <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+                                <option value="7">Sunday</option>
+                            </select>
+                        </label>
+                        <label class="arp-field" id="arpSchDomField"><span>Day of month</span><input type="number" id="arpSchDom" min="1" max="28" step="1" /></label>
+                        <label class="arp-field"><span>Keep files (days)</span><input type="number" id="arpSchRetention" min="1" max="3650" step="1" /></label>
+                        <label class="arp-field"><span>Active</span><input type="checkbox" id="arpSchActive" /></label>
+                    </div>
+                    <div class="pm-toolbar">
+                        <label class="arp-field" data-arp-sch-filter="SEARCH"><span>Search</span><input type="text" id="arpSchSearch" maxlength="200" /></label>
+                        <label class="arp-field" data-arp-sch-filter="STATUS"><span id="arpSchStatusLabel">Status</span><select id="arpSchStatus"></select></label>
+                        <label class="arp-field" data-arp-sch-filter="ASSET_TYPE"><span>Asset type</span><select id="arpSchAssetType"></select></label>
+                        <label class="arp-field" data-arp-sch-filter="DAYS"><span>Next / last days</span><input type="number" id="arpSchDays" min="1" max="3650" step="1" /></label>
+                        <label class="arp-field" data-arp-sch-filter="DATE_RANGE"><span id="arpSchWindowLabel">Last days</span><input type="number" id="arpSchWindow" min="1" max="3650" step="1" /></label>
+                    </div>
+                    <div class="pm-toolbar">
+                        <select id="arpSchEmp" title="Employee"></select>
+                        <button class="pm-button" type="button" id="arpSchAddEmp"><i class="fa-solid fa-user-plus"></i> Add employee</button>
+                        <select id="arpSchRole" title="Role"></select>
+                        <button class="pm-button" type="button" id="arpSchAddRole"><i class="fa-solid fa-users"></i> Add role</button>
+                    </div>
+                    <div class="arp-recipients" id="arpSchRecipients"></div>
+                    <div class="pm-toolbar">
+                        <button class="pm-button primary" type="button" id="arpSchSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                        <button class="pm-button" type="button" id="arpSchCancel">Cancel</button>
+                    </div>
+                </div>
+            }
+
+            <div id="arpRunPanel" hidden>
+                <h3 class="arp-sub" id="arpRunTitle">Deliveries</h3>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Started</th><th>Run</th><th>Status</th><th>Delivered</th><th>Skipped</th><th>Failed</th><th>Filters</th><th></th></tr></thead>
+                        <tbody id="arpRuns"></tbody>
+                    </table>
+                </div>
+                <div id="arpRunPager"></div>
+                <h3 class="arp-sub" id="arpRunRecipientsTitle" hidden>Distribution result</h3>
+                <div class="pm-table-wrap" id="arpRunRecipientsWrap" hidden>
+                    <table>
+                        <thead><tr><th>Recipient</th><th>Status</th><th>Reason</th><th>Rows</th><th>Delivered</th><th>Downloads</th><th>File</th></tr></thead>
+                        <tbody id="arpRunRecipients"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- settings ---------------- *@
+        @if (arpCanEdit)
+        {
+            <div class="pm-tab-panel" data-arp-mainpanel="SETTINGS" hidden>
+                <p class="arp-note">Per report for this organization: a disabled report cannot be run or exported; the classification can be raised, never lowered below the default; the export policy decides who may export (Default: an approver for Restricted reports, otherwise anyone who may run it).</p>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Report</th><th>Enabled</th><th>Classification</th><th>Export policy</th><th></th></tr></thead>
+                        <tbody id="arpSettings"></tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    </section>
+</div>
+
+<style>
+    .arp-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .arp-family td { font-size: 13px; font-weight: 600; color: var(--fg-strong); background: var(--neutral-100); }
+    .arp-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .arp-cls-public       { background: var(--neutral-200); color: var(--fg-muted); }
+    .arp-cls-internal     { background: var(--success-100); color: var(--success-700); }
+    .arp-cls-confidential { background: var(--warning-50); color: var(--warning-700); }
+    .arp-cls-restricted   { background: var(--danger-100); color: var(--danger-700); }
+    .arp-field { display: inline-flex; flex-direction: column; font-size: 11px; color: var(--fg-secondary); gap: 2px; }
+    .arp-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .arp-form { border-top: 1px solid var(--neutral-200); margin-top: 12px; padding-top: 4px; }
+    .arp-recipients { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+    .arp-recipient { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--neutral-100); font-size: 12px; }
+    .arp-st-delivered, .arp-st-completed { background: var(--success-100); color: var(--success-700); }
+    .arp-st-skipped, .arp-st-partial, .arp-st-running, .arp-st-pending { background: var(--warning-50); color: var(--warning-700); }
+    .arp-st-failed { background: var(--danger-100); color: var(--danger-700); }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/AssetConfig/asset-reports.js" asp-append-version="true"></script>

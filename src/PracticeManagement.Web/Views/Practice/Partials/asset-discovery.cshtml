@@ -1,0 +1,654 @@
+@*
+    Asset Discovery -- Asset & Contract Management, Phase 7.3 (migration 442).
+    Rendered from Manage.cshtml when Model.Key == "asset-discovery".
+
+    BRD 5.6: discovery and reconciliation. "Sources" holds the source
+    profiles (5.6.1: type, collection mode, scope, mapping version, owner,
+    credential reference, trust, expected interval, retention, health) and
+    the field precedence of each source (golden / contributing / ignored).
+    "Identification rules" lists the matching rules (5.6.2: strong,
+    supporting and weak identifiers with weights). "Import" posts a batch
+    of observations (JSON or CSV) and shows the per-record results; the
+    batch history is below it. "Reconciliation queue" holds suggested
+    matches, manual reviews, new candidates, potential duplicates and
+    conflicts (5.6.3). "Data confidence" shows identity, freshness,
+    conflicts and verification per asset (5.6.4). "Settings" holds the
+    score thresholds and the freshness and verification rules.
+    443: the queue registers a new candidate through the Asset Register form
+    (Register); "Stale assets" lists assets no source has seen for the
+    aging rule and runs the stale review (source confirmation, dependency
+    review, then dismiss or request decommission -- 5.6.3 Retire / Stale).
+    444: "Merges" -- survivor and duplicates, impact, field comparison,
+    plan, blockers, approval (two people for critical CIs), execution with
+    per-object outcomes and recovery (5.6.3 Merge, 19.4); a Potential
+    duplicate in the queue opens a merge of its two assets.
+    445: "Splits" -- a source and its resulting records (new Draft assets),
+    allocation of the source items and field values, impact, blockers,
+    approval, execution and recovery (5.6.3 Split, 19.4).
+
+    Backend: practice/api/asset-config/discovery/... (AssetConfigController);
+             asset picker: practice/api/asset-config/relationships/ci-lookup
+    Script : wwwroot/js/AssetConfig/asset-discovery.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var adcPermissions = ViewBag.Permissions as string[] ?? [];
+    bool adcHas(string action) => adcPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var adcCanEdit = adcHas("EDIT");
+    var adcCanApprove = adcHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="adcRoot" data-can-edit="@(adcCanEdit ? "1" : "0")" data-can-approve="@(adcCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="adcOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset discovery">
+            <button role="tab" class="active" data-adc-main="SOURCES" aria-selected="true">Sources</button>
+            <button role="tab" data-adc-main="RULES" aria-selected="false">Identification rules</button>
+            <button role="tab" data-adc-main="IMPORT" aria-selected="false">Import</button>
+            <button role="tab" data-adc-main="QUEUE" aria-selected="false">Reconciliation queue</button>
+            <button role="tab" data-adc-main="CONFIDENCE" aria-selected="false">Data confidence</button>
+            <button role="tab" data-adc-main="STALE" aria-selected="false">Stale assets</button>
+            <button role="tab" data-adc-main="MERGES" aria-selected="false">Merges</button>
+            <button role="tab" data-adc-main="SPLITS" aria-selected="false">Splits</button>
+            <button role="tab" data-adc-main="SETTINGS" aria-selected="false">Settings</button>
+        </div>
+        <p class="pm-message" id="adcMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- sources ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="SOURCES">
+            @if (adcCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="adcSrcAdd" type="button"><i class="fa-solid fa-plus"></i> New source</button>
+                </div>
+            }
+            <p class="adc-note">Approved systems that report assets (BRD 5.6.1). Health: Success when the last batch completed within the expected interval, Warning when it was partial or the next batch is overdue, Failed when the last batch failed.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Source</th><th>Type / mode</th><th>Trust</th><th>Interval (h)</th><th>Health</th><th>Last run</th><th>Next due</th><th>Linked records</th><th>Owner</th></tr></thead>
+                    <tbody id="adcSrcBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- identification rules ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="RULES" hidden>
+            @if (adcCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="adcRuleAdd" type="button"><i class="fa-solid fa-plus"></i> New rule</button>
+                </div>
+            }
+            <p class="adc-note">A rule matches when every listed field equals the register value after normalization (case, spaces, MAC separators, hostname domain). Score of an asset: the best matched rule weight, plus 5 for each further matched rule, minus 30 for each strong identifier holding a different value, limited to 0-100 and scaled by the source trust. "@@source_key" is the record ID of the source (device / directory ID). Rule-set version: <strong id="adcRuleVersion">--</strong>.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Order</th><th>Rule</th><th>Fields</th><th>Strength</th><th>Weight</th><th>Active</th></tr></thead>
+                    <tbody id="adcRuleBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- import and batches ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="IMPORT" hidden>
+            @if (adcCanEdit)
+            {
+                <form id="adcImpForm" class="pm-form-grid">
+                    <label><span>Source *</span><select id="adcImpSource"></select></label>
+                    <label><span>Batch reference *</span><input type="text" id="adcImpRef" maxlength="100" /></label>
+                    <label><span>Channel</span>
+                        <select id="adcImpChannel"><option value="IMPORT">File import</option><option value="UI">Entered here</option></select></label>
+                    <label><span>Format</span>
+                        <select id="adcImpFormat"><option value="JSON">JSON</option><option value="CSV">CSV</option></select></label>
+                    <label class="full"><span>File</span><input type="file" id="adcImpFile" accept=".json,.csv,.txt" /></label>
+                    <label class="full"><span>Records *</span><textarea id="adcImpText" rows="8" spellcheck="false"></textarea></label>
+                    <p class="adc-note full" id="adcImpHint"></p>
+                    <footer class="pm-modal-footer full">
+                        <button type="submit" class="pm-button primary" id="adcImpRun"><i class="fa-solid fa-file-import"></i> Import batch</button>
+                    </footer>
+                </form>
+                <div id="adcImpResultWrap" hidden>
+                    <h3 class="adc-sub">Result of batch <span id="adcImpResultRef"></span></h3>
+                    <div class="adc-info" id="adcImpSummary"></div>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>#</th><th>Record ID</th><th>Outcome</th><th>Score</th><th>Asset</th><th>Rules</th><th>Result</th></tr></thead>
+                            <tbody id="adcImpResultBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+            <h3 class="adc-sub">Batches</h3>
+            <div class="pm-toolbar">
+                <select id="adcBatSource" title="Source"><option value="">All sources</option></select>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Batch</th><th>Source</th><th>Channel</th><th>Status</th><th>Records</th><th>Updated / no change</th><th>Exceptions / errors</th><th>Rule set</th><th>Received</th></tr></thead>
+                    <tbody id="adcBatBody"></tbody>
+                </table>
+            </div>
+            <div id="adcBatPager"></div>
+        </div>
+
+        @* ---------------- reconciliation queue ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="QUEUE" hidden>
+            <div class="pm-toolbar">
+                <select id="adcQStatus" title="Status"><option value="">Open</option><option value="RESOLVED">Resolved</option><option value="ALL">All</option></select>
+                <select id="adcQKind" title="Exception"><option value="">All exceptions</option></select>
+                <select id="adcQSource" title="Source"><option value="">All sources</option></select>
+                <input type="search" id="adcQSearch" placeholder="Search asset or record ID" maxlength="200" />
+                <button class="pm-button" id="adcQAssetClear" type="button" hidden><i class="fa-solid fa-xmark"></i> <span id="adcQAssetLabel"></span></button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Exception</th><th>Source / record</th><th>Asset</th><th>Field: current / observed</th><th>Score</th><th>Raised</th><th>Task</th><th>Status</th></tr></thead>
+                    <tbody id="adcQBody"></tbody>
+                </table>
+            </div>
+            <div id="adcQPager"></div>
+        </div>
+
+        @* ---------------- data confidence ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="CONFIDENCE" hidden>
+            <div class="pm-toolbar">
+                <select id="adcCStatus" title="Confidence"><option value="">All assets</option></select>
+                <input type="search" id="adcCSearch" placeholder="Search asset or type" maxlength="200" />
+            </div>
+            <p class="adc-note">Conflicting: an open conflict. Stale: linked to sources but no observation within the expected interval times the stale multiplier. Verified: last verified date within the verification window. Probable: a fresh observation matched at or above the auto-match score. Unverified: otherwise (BRD 5.6.4).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Confidence</th><th>Identity score</th><th>Sources (fresh / linked)</th><th>Last observed</th><th>Open conflicts</th><th>Disagreements</th><th>Last verified</th></tr></thead>
+                    <tbody id="adcCBody"></tbody>
+                </table>
+            </div>
+            <div id="adcCPager"></div>
+        </div>
+
+        @* ---------------- stale assets (443) ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="STALE" hidden>
+            <div class="pm-toolbar">
+                <select id="adcStView" title="View"><option value="">Stale and in review</option><option value="CLOSED">Closed reviews</option></select>
+                <input type="search" id="adcStSearch" placeholder="Search asset or type" maxlength="200" />
+                <label class="adc-check">Aging rule (days without observation) <input type="number" id="adcStDays" min="1" max="3650" /></label>
+                @if (adcCanEdit)
+                {
+                    <button class="pm-button" id="adcStDaysSave" type="button"><i class="fa-solid fa-floppy-disk"></i> Save rule</button>
+                }
+            </div>
+            <p class="adc-note">An asset is stale when it has source links, none of them is fresh (expected interval x stale multiplier) and no source has observed it for the aging rule. Retirement needs the source confirmation and the dependency review (BRD 5.6.3); the decommission request then follows the Asset Register lifecycle rules.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Status</th><th>Last observed</th><th>Days unseen</th><th>Sources (fresh / linked)</th><th>Review</th></tr></thead>
+                    <tbody id="adcStBody"></tbody>
+                </table>
+            </div>
+            <div id="adcStPager"></div>
+        </div>
+
+        @* ---------------- merges (444) ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="MERGES" hidden>
+            <div class="pm-toolbar">
+                <select id="adcMgStatus" title="Status">
+                    <option value="">Open</option><option value="EXECUTED">Executed</option><option value="RECOVERED">Recovered</option>
+                    <option value="REJECTED">Rejected</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option>
+                </select>
+                <input type="search" id="adcMgSearch" placeholder="Search asset" maxlength="200" />
+                @if (adcCanEdit)
+                {
+                    <button class="pm-button primary" id="adcMgNew" type="button"><i class="fa-solid fa-code-merge"></i> New merge</button>
+                }
+            </div>
+            <p class="adc-note">A merge keeps the survivor and its ID; the duplicates' current relationships, source links, open items, coverage, risk and practice mappings move to it, their identifiers stay searchable as aliases and the duplicates are archived with their history. Approval by another person (two for critical CIs); execution can be recovered (BRD 5.6.3, 19.4).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Merge</th><th>Survivor</th><th>Duplicates</th><th>Status</th><th>Approvals</th><th>Requested</th></tr></thead>
+                    <tbody id="adcMgBody"></tbody>
+                </table>
+            </div>
+            <div id="adcMgPager"></div>
+        </div>
+
+        @* ---------------- splits (445) ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="SPLITS" hidden>
+            <div class="pm-toolbar">
+                <select id="adcSpStatus" title="Status">
+                    <option value="">Open</option><option value="EXECUTED">Executed</option><option value="RECOVERED">Recovered</option>
+                    <option value="REJECTED">Rejected</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option>
+                </select>
+                <input type="search" id="adcSpSearch" placeholder="Search asset" maxlength="200" />
+                @if (adcCanEdit)
+                {
+                    <button class="pm-button primary" id="adcSpNew" type="button"><i class="fa-solid fa-code-branch"></i> New split</button>
+                }
+            </div>
+            <p class="adc-note">A split keeps the source and its ID; the resulting records are new Draft assets registered on the Asset Register form first. Allocate the source items (relationships, source records, open items, coverage, risk and practice mappings) and field values to them; what is not allocated stays with the source, history stays with the source. Approval by another person (two for critical CIs); execution can be recovered (BRD 5.6.3, 19.4).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Split</th><th>Source</th><th>Resulting records</th><th>Status</th><th>Approvals</th><th>Requested</th></tr></thead>
+                    <tbody id="adcSpBody"></tbody>
+                </table>
+            </div>
+            <div id="adcSpPager"></div>
+        </div>
+
+        @* ---------------- settings ---------------- *@
+        <div class="pm-tab-panel" data-adc-mainpanel="SETTINGS" hidden>
+            <form id="adcSetForm" class="pm-form-grid">
+                <label><span>Auto match score *</span><input type="number" id="adcSetAuto" min="2" max="100" /></label>
+                <label><span>Suggested match score *</span><input type="number" id="adcSetSug" min="2" max="99" /></label>
+                <label><span>Manual review score *</span><input type="number" id="adcSetMan" min="1" max="98" /></label>
+                <label><span>Stale after (expected interval x) *</span><input type="number" id="adcSetStale" min="1" max="100" /></label>
+                <label><span>Verification window (days) *</span><input type="number" id="adcSetVerify" min="1" max="3650" /></label>
+                <label class="adc-check"><input type="checkbox" id="adcSetTasks" /> Open an owner task for each new conflict</label>
+                <p class="adc-note full">Below the manual review score an observation is staged as a new candidate. Changing a threshold or a rule raises the rule-set version recorded on every later observation.</p>
+                @if (adcCanEdit)
+                {
+                    <footer class="pm-modal-footer full"><button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button></footer>
+                }
+            </form>
+        </div>
+    </section>
+</div>
+
+@* ======================= Source window ======================= *@
+<div class="pm-modal" id="adcSrcModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcSmTitle">Discovery source</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcSrcModal" aria-label="Close">&times;</button>
+        </header>
+        <p class="pm-message" id="adcSmMessage" role="status" aria-live="polite" hidden></p>
+        <form id="adcSrcForm" class="pm-form-grid">
+            <label><span>Source ID *</span><input type="text" id="adcSCode" maxlength="40" /></label>
+            <label><span>Source name *</span><input type="text" id="adcSName" maxlength="200" /></label>
+            <label><span>Source type *</span><select id="adcSType"></select></label>
+            <label><span>Collection mode *</span><select id="adcSMode"></select></label>
+            <label class="full"><span>Tenant / scope (accounts, subscriptions, sites, networks)</span><input type="text" id="adcSScope" maxlength="400" /></label>
+            <label><span>Field mapping version</span><input type="text" id="adcSMapping" maxlength="40" /></label>
+            <label><span>Source owner</span><select id="adcSOwner"></select></label>
+            <label class="full"><span>Credential reference (vault reference, never a secret)</span><input type="text" id="adcSCred" maxlength="200" autocomplete="off" /></label>
+            <label><span>Trust level (1-100) *</span><input type="number" id="adcSTrust" min="1" max="100" /></label>
+            <label><span>Expected interval (hours) *</span><input type="number" id="adcSInterval" min="1" max="8760" /></label>
+            <label><span>Raw payload retention (days) *</span><input type="number" id="adcSRaw" min="1" max="3650" /></label>
+            <label><span>Observation retention (days) *</span><input type="number" id="adcSObs" min="1" max="3650" /></label>
+            <label class="adc-check"><input type="checkbox" id="adcSActive" /> Active</label>
+            <footer class="pm-modal-footer full" id="adcSrcSaveBar">
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+
+        <div id="adcPrioWrap">
+            <h3 class="adc-sub">Field precedence</h3>
+            <p class="adc-note">Golden: this source may overwrite the register value. Contributing: it fills empty values; a different value is a conflict. Ignored: the field is recorded only. Without an entry a field is contributing. Each field has at most one golden source.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Field</th><th>Role</th><th>Priority</th><th></th></tr></thead>
+                    <tbody id="adcPrioBody"></tbody>
+                </table>
+            </div>
+            <div class="pm-toolbar" id="adcPrioAddBar">
+                <select id="adcPrioField" title="Field"></select>
+                <select id="adcPrioRole" title="Role"><option value="GOLDEN">Golden</option><option value="CONTRIBUTING" selected>Contributing</option><option value="IGNORED">Ignored</option></select>
+                <input type="number" id="adcPrioPriority" min="1" max="999" value="100" title="Priority" />
+                <button class="pm-button" type="button" id="adcPrioAdd"><i class="fa-solid fa-plus"></i> Add field</button>
+                <button class="pm-button primary" type="button" id="adcPrioSave"><i class="fa-solid fa-floppy-disk"></i> Save precedence</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Rule window ======================= *@
+<div class="pm-modal" id="adcRuleModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="adcRmTitle">Identification rule</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcRuleModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="adcRuleForm" class="pm-form-grid">
+            <label class="full"><span>Rule name *</span><input type="text" id="adcRName" maxlength="120" /></label>
+            <label class="full"><span>Fields * (comma list of field keys)</span><input type="text" id="adcRKeys" maxlength="400" /></label>
+            <label><span>Add field</span><select id="adcRKeyPick"></select></label>
+            <label><span>Strength *</span>
+                <select id="adcRStrength"><option value="STRONG">Strong</option><option value="SUPPORTING">Supporting</option><option value="WEAK">Weak</option></select></label>
+            <label><span>Weight (1-100) *</span><input type="number" id="adcRWeight" min="1" max="100" /></label>
+            <label><span>Order</span><input type="number" id="adcROrder" min="0" max="9999" /></label>
+            <label class="adc-check"><input type="checkbox" id="adcRActive" /> Active</label>
+            <p class="pm-message full" id="adcRmMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-adc="adcRuleModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Batch window ======================= *@
+<div class="pm-modal" id="adcBatModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcBmTitle">Batch</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcBatModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="adc-info" id="adcBmInfo"></div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>#</th><th>Record ID</th><th>Observed</th><th>Outcome</th><th>Score</th><th>Asset</th><th>Rules</th><th>Result</th><th></th></tr></thead>
+                <tbody id="adcBmBody"></tbody>
+            </table>
+        </div>
+        <pre class="adc-payload" id="adcBmPayload" hidden></pre>
+    </div>
+</div>
+
+@* ======================= Resolve window ======================= *@
+<div class="pm-modal" id="adcResModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcRsTitle">Reconciliation exception</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcResModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="adc-info" id="adcRsInfo"></div>
+        <form id="adcResForm" class="pm-form-grid">
+            <label><span>Action *</span><select id="adcRsAction"></select></label>
+            <label id="adcRsPairWrap"><span>Asset to link *</span><select id="adcRsPair"></select></label>
+            <label id="adcRsSearchWrap"><span>Find asset</span><input type="search" id="adcRsSearch" maxlength="200" /></label>
+            <label class="full" id="adcRsAssetWrap"><span>Asset to link *</span><select id="adcRsAsset"><option value="">--</option></select></label>
+            <label class="full"><span id="adcRsNoteLabel">Note</span><textarea id="adcRsNote" rows="2" maxlength="1000"></textarea></label>
+            <p class="adc-note full" id="adcRsHint"></p>
+            <p class="pm-message full" id="adcRsMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full" id="adcRsBar">
+                <button type="button" class="pm-button" data-close-adc="adcResModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Confirm</button>
+            </footer>
+        </form>
+        <h3 class="adc-sub">Observed record</h3>
+        <pre class="adc-payload" id="adcRsPayload"></pre>
+    </div>
+</div>
+
+@* ======================= Merge window (444) ======================= *@
+<div class="pm-modal" id="adcMergeModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcMgTitle">Merge</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcMergeModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="adc-info" id="adcMgInfo"></div>
+        <p class="pm-message" id="adcMgMessage" role="status" aria-live="polite" hidden></p>
+
+        <form id="adcMgForm" class="pm-form-grid">
+            <label><span>Find survivor</span><input type="search" id="adcMgSurvSearch" maxlength="200" /></label>
+            <label><span>Survivor (kept) *</span><select id="adcMgSurv"><option value="">--</option></select></label>
+            <label><span>Find duplicate</span><input type="search" id="adcMgDupSearch" maxlength="200" /></label>
+            <label><span>Duplicate</span><select id="adcMgDupSel"><option value="">--</option></select></label>
+            <div class="full">
+                <button class="pm-button" type="button" id="adcMgDupAdd"><i class="fa-solid fa-plus"></i> Add duplicate</button>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Duplicates (archived after the merge)</th><th></th></tr></thead>
+                        <tbody id="adcMgDupBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <label class="full"><span>Reason *</span><textarea id="adcMgReason" rows="2" maxlength="1000"></textarea></label>
+            <footer class="pm-modal-footer full">
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save draft</button>
+            </footer>
+        </form>
+
+        <div id="adcMgActionWrap" hidden>
+            <label class="full"><span>Note (required to reject, cancel or recover)</span><textarea id="adcMgNote" rows="2" maxlength="1000"></textarea></label>
+            <div class="pm-modal-footer" id="adcMgActions"></div>
+        </div>
+
+        <div id="adcMgDetail" hidden>
+            <h3 class="adc-sub">Blockers</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Duplicate</th><th>Open item</th></tr></thead>
+                    <tbody id="adcMgBlockBody"></tbody>
+                </table>
+            </div>
+            <h3 class="adc-sub">Impact</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead id="adcMgImpactHead"></thead>
+                    <tbody id="adcMgImpactBody"></tbody>
+                </table>
+            </div>
+            <h3 class="adc-sub">Field values</h3>
+            <p class="adc-note">The survivor keeps its values; empty survivor values are filled from the first duplicate holding one. Tick a duplicate value to take it instead (saved with the draft).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Field</th><th>Survivor</th><th>Duplicate value</th><th>Take</th></tr></thead>
+                    <tbody id="adcMgFieldBody"></tbody>
+                </table>
+            </div>
+            <h3 class="adc-sub" id="adcMgPlanTitle">Plan</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Duplicate</th><th>Domain</th><th>Item</th><th>Outcome</th><th>Detail</th></tr></thead>
+                    <tbody id="adcMgPlanBody"></tbody>
+                </table>
+            </div>
+            <h3 class="adc-sub">Approvals</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Decision</th><th>By</th><th>When</th><th>Note</th></tr></thead>
+                    <tbody id="adcMgApprBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Split window (445) ======================= *@
+<div class="pm-modal" id="adcSplitModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcSpTitle">Split</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcSplitModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="adc-info" id="adcSpInfo"></div>
+        <p class="pm-message" id="adcSpMessage" role="status" aria-live="polite" hidden></p>
+
+        <form id="adcSpForm" class="pm-form-grid">
+            <label><span>Find source</span><input type="search" id="adcSpSrcSearch" maxlength="200" /></label>
+            <label><span>Source (keeps its ID) *</span><select id="adcSpSrc"><option value="">--</option></select></label>
+            <label><span>Find resulting record (Draft)</span><input type="search" id="adcSpResSearch" maxlength="200" /></label>
+            <label><span>Resulting record</span><select id="adcSpResSel"><option value="">--</option></select></label>
+            <div class="full">
+                <button class="pm-button" type="button" id="adcSpResAdd"><i class="fa-solid fa-plus"></i> Add resulting record</button>
+                <button class="pm-button" type="button" id="adcSpRegister"><i class="fa-solid fa-up-right-from-square"></i> Register a new asset</button>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Resulting records (new Draft assets)</th><th></th></tr></thead>
+                        <tbody id="adcSpResBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <label class="full"><span>Reason *</span><textarea id="adcSpReason" rows="2" maxlength="1000"></textarea></label>
+            <footer class="pm-modal-footer full">
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save draft</button>
+            </footer>
+        </form>
+
+        <div id="adcSpActionWrap" hidden>
+            <label class="full"><span>Note (required to reject, cancel or recover)</span><textarea id="adcSpNote" rows="2" maxlength="1000"></textarea></label>
+            <div class="pm-modal-footer" id="adcSpActions"></div>
+        </div>
+
+        <div id="adcSpDetail" hidden>
+            <h3 class="adc-sub">Blockers</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Open item</th></tr></thead>
+                    <tbody id="adcSpBlockBody"></tbody>
+                </table>
+            </div>
+            <h3 class="adc-sub">Impact</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead id="adcSpImpactHead"></thead>
+                    <tbody id="adcSpImpactBody"></tbody>
+                </table>
+            </div>
+            <div id="adcSpAllocWrap">
+                <h3 class="adc-sub">Allocation</h3>
+                <p class="adc-note">Choose the resulting record for each item that belongs to it (saved with the draft). Field values: Copy keeps the value on the source too, Move takes it off the source.</p>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Domain</th><th>Item</th><th>Goes to</th><th>Field</th><th>Outcome</th></tr></thead>
+                        <tbody id="adcSpAllocBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="adcSpOutWrap">
+                <h3 class="adc-sub">Outcomes</h3>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>To</th><th>Item</th><th>Outcome</th><th>Detail</th></tr></thead>
+                        <tbody id="adcSpOutBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <h3 class="adc-sub">Approvals</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Decision</th><th>By</th><th>When</th><th>Note</th></tr></thead>
+                    <tbody id="adcSpApprBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Stale review window (443) ======================= *@
+<div class="pm-modal" id="adcStaleModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcSrTitle">Stale asset</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcStaleModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="adc-info" id="adcSrInfo"></div>
+        <p class="pm-message" id="adcSrMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-modal-footer" id="adcSrStartBar" hidden>
+            <button class="pm-button primary" type="button" id="adcSrStart"><i class="fa-solid fa-clipboard-check"></i> Start stale review</button>
+        </div>
+
+        <div id="adcSrSteps" hidden>
+            <h3 class="adc-sub">1. Source confirmation</h3>
+            <p class="adc-note" id="adcSrSourceDone" hidden></p>
+            <form id="adcSrSourceForm" class="pm-form-grid">
+                <label><span>Source owner confirms *</span>
+                    <select id="adcSrOutcome"><option value="">--</option><option value="ABSENT">Absent from the source</option><option value="PRESENT">Still present (connector or scope issue)</option></select></label>
+                <label class="full"><span>Confirmation note *</span><textarea id="adcSrSourceNote" rows="2" maxlength="1000"></textarea></label>
+                <footer class="pm-modal-footer full"><button type="submit" class="pm-button"><i class="fa-solid fa-check"></i> Record confirmation</button></footer>
+            </form>
+
+            <h3 class="adc-sub">2. Dependency review</h3>
+            <p class="adc-note" id="adcSrDepDone" hidden></p>
+            <form id="adcSrDepForm" class="pm-form-grid">
+                <label class="full"><span>Review note * (what was checked and agreed for the items below)</span><textarea id="adcSrDepNote" rows="2" maxlength="1000"></textarea></label>
+                <footer class="pm-modal-footer full"><button type="submit" class="pm-button"><i class="fa-solid fa-check"></i> Record dependency review</button></footer>
+            </form>
+
+            <h3 class="adc-sub">3. Decision</h3>
+            <form id="adcSrDecisionForm" class="pm-form-grid">
+                <label class="full"><span>Reason *</span><textarea id="adcSrDecisionNote" rows="2" maxlength="1000"></textarea></label>
+                <p class="adc-note full">Request decommission moves the asset to Pending Decommission through its lifecycle rules (Asset Register permission needed). Dismiss keeps the asset; it is not listed again for one aging period.</p>
+                <footer class="pm-modal-footer full">
+                    <button type="button" class="pm-button" id="adcSrDismiss"><i class="fa-solid fa-xmark"></i> Dismiss (still in use)</button>
+                    <button type="button" class="pm-button primary" id="adcSrDecom"><i class="fa-solid fa-box-archive"></i> Request decommission</button>
+                </footer>
+            </form>
+        </div>
+
+        <h3 class="adc-sub">Source records</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Source</th><th>Record ID</th><th>Link</th><th>Last seen</th><th>Days unseen</th><th>Source last run</th></tr></thead>
+                <tbody id="adcSrLinkBody"></tbody>
+            </table>
+        </div>
+        <h3 class="adc-sub">Dependencies</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Kind</th><th>Item</th><th>Detail</th><th></th></tr></thead>
+                <tbody id="adcSrDepBody"></tbody>
+            </table>
+        </div>
+        <h3 class="adc-sub">Reviews</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Opened</th><th>Status</th><th>Source</th><th>Dependency review</th><th>Decision</th><th>Closed</th></tr></thead>
+                <tbody id="adcSrHistBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Asset confidence window ======================= *@
+<div class="pm-modal" id="adcAssetModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="adcAmTitle">Asset</h2>
+            <button class="pm-modal-close" type="button" data-close-adc="adcAssetModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="adc-info" id="adcAmInfo"></div>
+        <div class="pm-modal-footer">
+            <button class="pm-button" type="button" id="adcAmQueue"><i class="fa-solid fa-list-check"></i> Show in reconciliation queue</button>
+        </div>
+        <h3 class="adc-sub">Source records</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Source</th><th>Record ID</th><th>Link</th><th>Identity score</th><th>First seen</th><th>Last seen</th><th>Freshness</th></tr></thead>
+                <tbody id="adcAmLinkBody"></tbody>
+            </table>
+        </div>
+        <h3 class="adc-sub">Values reported by source</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Field</th><th>Source</th><th>Role</th><th>Observed</th><th>Register</th><th>Applied</th><th>Observed at</th></tr></thead>
+                <tbody id="adcAmAttrBody"></tbody>
+            </table>
+        </div>
+        <h3 class="adc-sub">Open exceptions</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Exception</th><th>Field</th><th>Current</th><th>Observed</th><th>Score</th><th>Raised</th></tr></thead>
+                <tbody id="adcAmExcBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .adc-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .adc-check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .adc-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .adc-st-open    { background: var(--primary-100); color: var(--primary-800); }
+    .adc-st-wait    { background: var(--warning-50); color: var(--warning-700); }
+    .adc-st-active  { background: var(--success-100); color: var(--success-700); }
+    .adc-st-ended   { background: var(--neutral-200); color: var(--fg-muted); }
+    .adc-st-bad     { background: var(--danger-100); color: var(--danger-700); }
+    .adc-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .adc-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .adc-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .adc-payload { font-size: 12px; background: var(--neutral-100); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto; }
+    #adcImpText { font-family: monospace; font-size: 12px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-discovery.js" asp-append-version="true"></script>

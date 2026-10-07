@@ -1,0 +1,313 @@
+@*
+    Asset Activities -- Asset & Contract Management, Phase 6.2 (migration 438).
+    Rendered from Manage.cshtml when Model.Key == "asset-activities".
+
+    BRD 7.1: recurring calibration, preventive maintenance, statutory
+    inspection and equipment licence renewal. "Schedules" is recalculated
+    from the asset register (the "... required" field, frequency, basis,
+    last date or expiry date) and the contract coverage: next due date and
+    Valid / Due Soon / Overdue / Covered / Not scheduled. The scheduler
+    (background worker, or Run now) opens one occurrence per asset,
+    activity and due date (7.1.5 occurrence key) and creates its Task
+    Centre task -- one task per asset for execution activities, with the
+    covering contract linked (7.1.2); no task for a licence renewal the
+    contract covers (7.1.3). "Occurrences" lists them with their task and
+    the reconciliation flag (a contract mapped after the task, a due date
+    that moved, an activity that no longer applies -- 7.1.5). "Campaigns"
+    groups a month of tasks for templates set to campaigns, each asset
+    keeping its own task. "Templates" holds the organization settings.
+
+    Phase 6.3 (migration 439): an occurrence opens in a detail window with
+    its result (Pass / Fail, Renewed / Not renewed, performed date,
+    certificate, evidence reference -- submitted, then approved or returned
+    by another person when the activity needs a reviewer, 7.1.2 / 7.1.6),
+    reschedule / waive / not applicable / exception requests with reason and
+    approver (7.1.5) and the restrictive-use reviews of the asset.
+    "Restrictive reviews" lists the 9.1.9 reviews (failed or overdue
+    calibration, expired licence, expired insurance / fitness / permit /
+    registration) and records the decision.
+
+    Backend: practice/api/asset-config/activities... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-activities.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var aacPermissions = ViewBag.Permissions as string[] ?? [];
+    bool aacHas(string action) => aacPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var aacCanEdit = aacHas("EDIT");
+    var aacCanApprove = aacHas("APPROVE");   // 439: result review, disposition and restrictive-use decisions
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="aacRoot" data-can-edit="@(aacCanEdit ? "1" : "0")" data-can-approve="@(aacCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="aacOrg" title="Organization"><option value="">Select organization</option></select>
+            <select id="aacTemplate" title="Activity"><option value="">All activities</option></select>
+            @if (aacCanEdit)
+            {
+                <button class="pm-button primary" id="aacRunNow" type="button"><i class="fa-solid fa-play"></i> Run now</button>
+            }
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset activities">
+            <button role="tab" class="active" data-aac-main="SCHEDULES" aria-selected="true">Schedules</button>
+            <button role="tab" data-aac-main="OCCURRENCES" aria-selected="false">Occurrences</button>
+            <button role="tab" data-aac-main="CAMPAIGNS" aria-selected="false">Campaigns</button>
+            <button role="tab" data-aac-main="REVIEWS" aria-selected="false">Restrictive reviews</button>
+            <button role="tab" data-aac-main="TEMPLATES" aria-selected="false">Templates</button>
+        </div>
+        <p class="pm-message" id="aacMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- schedules ---------------- *@
+        <div class="pm-tab-panel" data-aac-mainpanel="SCHEDULES">
+            <div class="pm-toolbar">
+                <select id="aacSchStatus" title="Status">
+                    <option value="">All applicable</option><option value="OVERDUE">Overdue</option><option value="DUE_SOON">Due soon</option>
+                    <option value="VALID">Valid</option><option value="COVERED">Covered by contract</option>
+                    <option value="FAILED">Failed</option><option value="WAIVED">Waived</option>
+                    <option value="NOT_SCHEDULED">Not scheduled</option><option value="ALL">All, including not applicable</option>
+                </select>
+                <input type="search" id="aacSchSearch" placeholder="Search asset or asset type" maxlength="200" />
+                <button class="pm-button icon" id="aacSchRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            </div>
+            <p class="aac-note">Calculated from the asset register: the "... required" field, the frequency (for example "12 months"), the basis and the last date -- or the licence expiry date -- and the contracts covering the asset. An approved result sets the last date (a task completed without a result, for activities that do not need one). A failed result is re-tested after the re-test days; a waiver lasts until its review date.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Activity</th><th>Frequency / basis</th><th>Last done</th><th>Next due</th><th>Status</th><th>Contract</th><th>Open occurrence</th></tr></thead>
+                    <tbody id="aacSchBody"></tbody>
+                </table>
+            </div>
+            <div id="aacSchPager"></div>
+        </div>
+
+        @* ---------------- occurrences ---------------- *@
+        <div class="pm-tab-panel" data-aac-mainpanel="OCCURRENCES" hidden>
+            <div class="pm-toolbar">
+                <select id="aacOccStatus" title="Status">
+                    <option value="OPEN">Open</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option>
+                    <option value="COVERED">Covered by contract</option><option value="WAIVED">Waived</option><option value="ALL">All</option>
+                </select>
+                <label class="aac-check"><input type="checkbox" id="aacOccReconcile" /> Needs reconciliation only</label>
+                <label class="aac-check"><input type="checkbox" id="aacOccAwaiting" /> Awaiting a decision only</label>
+                <input type="search" id="aacOccSearch" placeholder="Search asset or occurrence" maxlength="200" />
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Occurrence</th><th>Asset</th><th>Due</th><th>Decision</th><th>Task</th><th>Status</th><th>Result</th><th>Reconciliation</th></tr></thead>
+                    <tbody id="aacOccBody"></tbody>
+                </table>
+            </div>
+            <div id="aacOccPager"></div>
+        </div>
+
+        @* ---------------- campaigns ---------------- *@
+        <div class="pm-tab-panel" data-aac-mainpanel="CAMPAIGNS" hidden>
+            <p class="aac-note">One campaign per activity and due month for templates set to campaigns. Each asset keeps its own occurrence and task (BRD 7.1.5, 8). Select a campaign to list its items.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Campaign</th><th>Activity</th><th>Month</th><th>Owner</th><th>Items</th><th>Open</th><th>Completed</th><th>Cancelled</th><th>Status</th></tr></thead>
+                    <tbody id="aacCmpBody"></tbody>
+                </table>
+            </div>
+            <div id="aacCmpPager"></div>
+        </div>
+
+        @* ---------------- restrictive-use reviews (439) ---------------- *@
+        <div class="pm-tab-panel" data-aac-mainpanel="REVIEWS" hidden>
+            <div class="pm-toolbar">
+                <select id="aacRevStatus" title="Status">
+                    <option value="">Open and decided</option><option value="OPEN">Open</option><option value="DECIDED">Decided</option>
+                    <option value="RESOLVED">Resolved</option><option value="ALL">All</option>
+                </select>
+                <input type="search" id="aacRevSearch" placeholder="Search asset or review" maxlength="200" />
+            </div>
+            <p class="aac-note">BRD 9.1.9: a failed result, an overdue activity on an asset of the criticality the policy names (calibration: Critical and High), an expired equipment licence, or expired insurance / fitness / permit / registration evidence raises a review. Record the action taken; the asset lifecycle status is changed on the Asset Register (Lifecycle). A review is resolved by itself once the cause clears.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Review</th><th>Asset</th><th>Since</th><th>Severity</th><th>Status</th><th>Decision</th><th></th></tr></thead>
+                    <tbody id="aacRevBody"></tbody>
+                </table>
+            </div>
+            <div id="aacRevPager"></div>
+        </div>
+
+        @* ---------------- templates ---------------- *@
+        <div class="pm-tab-panel" data-aac-mainpanel="TEMPLATES" hidden>
+            <p class="aac-note">The activities and their BRD 7.1 rules. Execution activities always get one task per asset; a licence renewal covered by a licence contract through the expiry gets none. Tasks are created the lead days before the due date. Reminders and escalations follow the notification profile named on each row (Asset Notifications).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Activity</th><th>Rule</th><th>Register fields</th><th>Contract types</th><th>Lead / due soon</th><th>Tasks</th><th>Notification profile</th><th>Status</th></tr></thead>
+                    <tbody id="aacTplBody"></tbody>
+                </table>
+            </div>
+            <h3 class="aac-sub">Evidence expiry</h3>
+            <p class="aac-note">Evidence date fields of the asset register that raise the Evidence / certificate expiry notifications (BRD 9.1.7) and, where marked, a restrictive-use review once expired (9.1.9).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Evidence</th><th>Register field</th><th>Evidence owner</th><th>Restrictive review when expired</th></tr></thead>
+                    <tbody id="aacEvidenceBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Template settings modal ======================= *@
+<div class="pm-modal" id="aacSettingModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aacSettingTitle">Activity settings</h2>
+            <button class="pm-modal-close" type="button" data-close-aac="aacSettingModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aacSettingForm" class="pm-form-grid">
+            <label class="aac-check full"><input type="checkbox" id="aacStActive" /> Active (the scheduler creates occurrences and tasks)</label>
+            <label><span>Task lead days *</span><input type="number" id="aacStLead" min="0" max="365" /></label>
+            <label><span>Due soon days *</span><input type="number" id="aacStSoon" min="0" max="365" /></label>
+            <label><span>Tasks</span><select id="aacStGrouping"><option value="INDIVIDUAL">Individual task per asset</option><option value="CAMPAIGN">Monthly campaign (one task per asset)</option></select></label>
+            <label><span>Campaign owner</span><select id="aacStOwner"></select></label>
+            <label class="aac-check full"><input type="checkbox" id="aacStReview" /> Results need a reviewer (another person approves)</label>
+            <label class="aac-check full"><input type="checkbox" id="aacStApproval" /> Reschedule / waive / not applicable / exception need approval</label>
+            <label><span>Restrictive review when overdue</span>
+                <select id="aacStOverdue">
+                    <option value="NONE">Never</option><option value="CRITICAL">Critical assets</option>
+                    <option value="CRITICAL,HIGH">Critical and High assets</option><option value="CRITICAL,HIGH,MEDIUM">Critical, High and Medium assets</option>
+                    <option value="ALL">Every asset</option>
+                </select></label>
+            <label class="aac-check"><input type="checkbox" id="aacStFail" /> Restrictive review on a failed result</label>
+            <p class="pm-message full" id="aacStMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aac="aacSettingModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Reconcile modal (7.1.5) ======================= *@
+<div class="pm-modal" id="aacReconcileModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aacRecTitle">Reconcile</h2>
+            <button class="pm-modal-close" type="button" data-close-aac="aacReconcileModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aacReconcileForm" class="pm-form-grid">
+            <p class="aac-note full" id="aacRecReason"></p>
+            <label class="full"><span>Decision / note *</span><textarea id="aacRecNote" rows="3" maxlength="1000"></textarea></label>
+            <p class="aac-note full">Record what was decided -- keep, complete or cancel the task (in Task Centre). The occurrence and its task are never deleted.</p>
+            <p class="pm-message full" id="aacRecMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aac="aacReconcileModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Reconciled</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Occurrence detail (439) ======================= *@
+<div class="pm-modal" id="aacOccModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="aacOdTitle">Occurrence</h2>
+            <button class="pm-modal-close" type="button" data-close-aac="aacOccModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="aac-info" id="aacOdInfo"></div>
+        <p class="pm-message" id="aacOdMessage" role="status" aria-live="polite" hidden></p>
+
+        <h3 class="aac-sub">Result <span class="aac-note" id="aacOdResultState"></span></h3>
+        <form id="aacResultForm" class="pm-form-grid">
+            <label><span>Outcome *</span><select id="aacRsOutcome"></select></label>
+            <label><span>Performed date *</span><input type="date" id="aacRsPerformed" /></label>
+            <label data-aac-cert><span>Certificate number</span><input type="text" id="aacRsCertNo" maxlength="100" /></label>
+            <label data-aac-cert><span>Certificate expiry</span><input type="date" id="aacRsCertExp" /></label>
+            <label data-aac-renewal><span>New expiry date</span><input type="date" id="aacRsNewExp" /></label>
+            <label class="full"><span>Evidence reference (report, certificate or document link)</span><input type="text" id="aacRsEvidence" maxlength="400" /></label>
+            <label class="full"><span>Note (required for a failure or not renewed)</span><textarea id="aacRsNote" rows="2" maxlength="2000"></textarea></label>
+            <footer class="pm-modal-footer full" id="aacRsButtons">
+                <button type="button" class="pm-button" id="aacRsDraft"><i class="fa-solid fa-floppy-disk"></i> Save draft</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-paper-plane"></i> Submit result</button>
+            </footer>
+        </form>
+        <div id="aacRsReview" class="pm-form-grid" hidden>
+            <label class="full"><span>Review note (required to return)</span><textarea id="aacRsDecisionNote" rows="2" maxlength="1000"></textarea></label>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-aac-result-decision="RETURN"><i class="fa-solid fa-rotate-left"></i> Return</button>
+                <button type="button" class="pm-button primary" data-aac-result-decision="APPROVE"><i class="fa-solid fa-check"></i> Approve result</button>
+            </footer>
+        </div>
+
+        <h3 class="aac-sub">Reschedule, waive, not applicable or exception</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Request</th><th>Dates</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                <tbody id="aacOdDispBody"></tbody>
+            </table>
+        </div>
+        <form id="aacDispForm" class="pm-form-grid">
+            <label><span>Outcome *</span>
+                <select id="aacDpType">
+                    <option value="RESCHEDULE">Reschedule</option><option value="WAIVE">Waive</option>
+                    <option value="NOT_APPLICABLE">Not applicable</option><option value="EXCEPTION">Exception</option>
+                </select></label>
+            <label id="aacDpRevisedWrap"><span>Revised due date *</span><input type="date" id="aacDpRevised" /></label>
+            <label id="aacDpReviewWrap" hidden><span>Review date *</span><input type="date" id="aacDpReview" /></label>
+            <label class="full"><span>Reason *</span><textarea id="aacDpReason" rows="2" maxlength="1000"></textarea></label>
+            <footer class="pm-modal-footer full">
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-paper-plane"></i> Request</button>
+            </footer>
+        </form>
+
+        <h3 class="aac-sub">Restrictive-use reviews of this asset and activity</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Review</th><th>Since</th><th>Status</th><th>Decision</th></tr></thead>
+                <tbody id="aacOdRevBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Disposition / review decision (439) ======================= *@
+<div class="pm-modal" id="aacDecisionModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aacDcTitle">Decision</h2>
+            <button class="pm-modal-close" type="button" data-close-aac="aacDecisionModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aacDecisionForm" class="pm-form-grid">
+            <p class="aac-note full" id="aacDcInfo"></p>
+            <label class="full"><span>Decision *</span><select id="aacDcDecision"></select></label>
+            <label class="full"><span id="aacDcNoteLabel">Note</span><textarea id="aacDcNote" rows="3" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="aacDcMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aac="aacDecisionModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Record</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .aac-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .aac-check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .aac-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .aac-st-open    { background: var(--primary-100); color: var(--primary-800); }
+    .aac-st-wait    { background: var(--warning-50); color: var(--warning-700); }
+    .aac-st-active  { background: var(--success-100); color: var(--success-700); }
+    .aac-st-ended   { background: var(--neutral-200); color: var(--fg-muted); }
+    .aac-st-bad     { background: var(--danger-100); color: var(--danger-700); }
+    tr[data-aac-campaign] { cursor: pointer; }
+    .aac-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .aac-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .aac-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-activities.js" asp-append-version="true"></script>

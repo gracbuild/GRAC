@@ -70,7 +70,7 @@ public sealed class OrganizationAccessService(IConfiguration configuration, ILog
                        organization_name AS OrganizationName
                 FROM grac_practice.organization
                 WHERE status = 'Active'
-                ORDER BY organization_name;
+                ORDER BY organization_id;   -- 2026-10-06: every Organization dropdown lists by id
                 """;
         }
         else
@@ -94,7 +94,7 @@ public sealed class OrganizationAccessService(IConfiguration configuration, ILog
                 FROM grac_practice.organization o
                 JOIN allowed a ON a.organization_id = o.organization_id
                 WHERE o.status = 'Active'
-                ORDER BY o.organization_name;
+                ORDER BY o.organization_id; -- 2026-10-06: every Organization dropdown lists by id
                 """;
             AddParam(command, "@primary_org",   DbType.Int64,  (object?)query.PrimaryOrganizationId ?? DBNull.Value);
             AddParam(command, "@email",         DbType.String, string.IsNullOrWhiteSpace(query.Email)        ? DBNull.Value : (object)query.Email!,        250);

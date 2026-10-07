@@ -35,7 +35,7 @@ public sealed class PracticeManagementGatewayController(
         // Only Admins (system or org-scoped) may auto-provision another
         // org's admin; the org-scope guard still applies for non-system admins.
         if (!permissionPolicy.IsAllowed(Roles(), "organization-setup", "ADD")
-            && !permissionPolicy.IsAllowed(Roles(), "users", "ADD"))
+            && !permissionPolicy.IsAllowed(Roles(), PermissionArea("users"), "ADD"))   // 2026-10-06: users -> organization-administration
             return PermissionDenied("organization-setup or users", "ADD");
         if (!IsSystemAdmin() && !AllowedOrganizationIds().Contains(request.OrganizationId))
             return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "You do not have access to the selected organization." });
@@ -608,6 +608,7 @@ public sealed class PracticeManagementGatewayController(
     private static readonly HashSet<string> OrganizationScopedEntityTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "organization-metadata", "organization-admin-provision", "organization-admin-mark-emailed", "repository-subscriptions", "repository-subscription-requests", "subscription-owner", "locations", "departments", "business-functions", "teams", "committees",
+        "organization-profile",   // 2026-10-06: Organization tab's read, see PermissionAreaMap
         "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets",
         "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability",
         "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", "dependencies", "evidence-configurations",

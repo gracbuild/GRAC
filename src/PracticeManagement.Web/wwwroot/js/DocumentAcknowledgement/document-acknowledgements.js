@@ -34,7 +34,7 @@
     await populateOrgFilter();
     const sel = document.getElementById("ackFilterOrganization");
     if (sel.options.length > 1 && !state.organizationId) {
-      sel.selectedIndex = 1;
+      window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
       state.organizationId = Number(sel.value) || null;
       if (state.organizationId) await refreshBatches();
     }

@@ -112,7 +112,42 @@
         // Repository Updates (migration 395) -- approve / reject Control
         // Management changes to a subscribed release. Same no-menu-row
         // wiring as custom-source-statements above.
-        "repository-updates"
+        "repository-updates",
+        // Asset & Contract Management, Phase 2.1 (migration 420): field
+        // dictionary + asset form templates. Own partials, own JS, own
+        // proxy (practice/api/asset-config) -- no generic grid entity.
+        "asset-field-dictionary",
+        "asset-form-templates",
+        // Phase 2.3 (migration 422): asset valuation configuration.
+        "asset-valuation-config",
+        // Phase 2.4 (migration 423): organization option lists.
+        "asset-option-lists",
+        // Phase 2.5 (migration 424): asset taxonomy governance.
+        "asset-taxonomy",
+        // Phase 3.1 (migration 425): technology catalogue.
+        "asset-tech-catalog",
+        // Phase 4.1 (migration 428): asset register.
+        "asset-register",
+        // Phase 4.4 (migration 431): asset attestation.
+        "asset-attestation",
+        // Phase 5.1 (migration 434): contracts.
+        "asset-contracts",
+        // Phase 6.1 (migration 437): asset notifications.
+        "asset-notifications",
+        // Phase 6.2 (migration 438): recurring asset activities.
+        "asset-activities",
+        // Phase 7.1 (migration 440): CMDB relationships.
+        "asset-relationships",
+        // Phase 7.2 (migration 441): business services.
+        "business-services",
+        // Phase 7.3 (migration 442): discovery and reconciliation.
+        "asset-discovery",
+        // Phase 8.3 (migration 448): privacy.
+        "asset-privacy",
+        // Phase 8.4a (migration 450): governance KPIs.
+        "asset-governance",
+        // Phase 8.5a (migration 452): report catalogue and exports.
+        "asset-reports"
     };
     // Risk Management submenus (migration 383). Each of these keys is its
     // own route/screen but REUSES the existing risk-centre partial, opened

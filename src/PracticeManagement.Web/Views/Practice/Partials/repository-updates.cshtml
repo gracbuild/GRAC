@@ -89,9 +89,13 @@
 <script>
 (function () {
     "use strict";
-    const base = String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "");
-    const U    = p => base + p;
-    const API  = U("/practice/api/repository-changes");
+    // Published deployments run under a PathBase (e.g. "/Practicemanagement").
+    // The layout sets window.appBasePath in a trailing inline script that runs
+    // AFTER this partial parses (RenderBody precedes it), so the base MUST be
+    // resolved lazily at call time -- capturing it eagerly here leaves it ""
+    // in production and every request 404s. Same pattern as gaps.cshtml.
+    const U    = p => String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p;
+    const API  = () => U("/practice/api/repository-changes");
     const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
     const esc  = v => String(v ?? "").replace(/[&<>"']/g, c =>
         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -120,9 +124,6 @@
     const msgEl     = document.getElementById("ruMessage");
     let records = [];
 
-    document.getElementById("ruBack").href =
-        U(`/Practice/Index/organization-controls?list=1${organizationId ? "&organizationId=" + encodeURIComponent(organizationId) : ""}`);
-
     function setMsg(text, kind) {
         msgEl.className = "ru-msg" + (kind ? " " + kind : "");
         msgEl.textContent = text || "";
@@ -135,7 +136,7 @@
         if (!res.ok) throw new Error((body && (body.error || body.message)) || `Request failed (HTTP ${res.status})`);
         return body;
     }
-    const post = (path, data) => call(`${API}${path}${path.includes("?") ? "&" : "?"}organizationId=${encodeURIComponent(organizationId)}`, {
+    const post = (path, data) => call(`${API()}${path}${path.includes("?") ? "&" : "?"}organizationId=${encodeURIComponent(organizationId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
         body: JSON.stringify(data || {})
@@ -224,7 +225,7 @@
         const qs = new URLSearchParams({ organizationId, status: statusEl.value, pageNumber: "1", pageSize: "200" });
         if (releaseEl.value) qs.set("releaseId", releaseEl.value);
         try {
-            const body = await call(`${API}?${qs}`);
+            const body = await call(`${API()}?${qs}`);
             records = (body && (body.data || body.Data)) || [];
             render();
         } catch (err) {
@@ -291,7 +292,12 @@
     releaseEl.addEventListener("change", load);
     statusEl.addEventListener("change", load);
 
-    (async () => {
+    // Deferred to DOMContentLoaded so window.appBasePath (set by the layout's
+    // trailing inline script, after this partial) is populated before the
+    // first fetch resolves its URL through the lazy U().
+    async function init() {
+        document.getElementById("ruBack").href =
+            U(`/Practice/Index/organization-controls?list=1${organizationId ? "&organizationId=" + encodeURIComponent(organizationId) : ""}`);
         if (!organizationId) {
             rowsEl.innerHTML = `<tr><td colspan="8" class="pm-empty">Open Repository Updates from a release on Standards &amp; Frameworks.</td></tr>`;
             return;
@@ -301,6 +307,8 @@
         // Opening the page counts as reading this organization's notices
         // (they stay on Home until the updates are decided).
         post("/me/notifications/mark-read", {}).catch(() => {});
-    })();
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
 })();
 </script>

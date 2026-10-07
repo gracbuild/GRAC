@@ -15,6 +15,12 @@
 
     Uses the same pm-page-heading / pm-panel primitives as Manage.cshtml
     so it inherits the shell, sidebar and styling with no new CSS.
+
+    The menu named below is the one the check actually used
+    (ScreenPermissionArea), not the screen key: a screen with no menu row
+    of its own (gap-detail, practice-view ...) is governed by its owning
+    screen, and naming a menu that does not exist sent admins looking
+    for a checkbox that is not there.
 *@
 <div class="pm-page-heading compact">
     <div>
@@ -35,7 +41,7 @@
         <p>
             An administrator can grant it from
             <strong>Organization &rsaquo; Role Menu Permissions</strong>
-            by ticking View for the <code>@Model.Key</code> menu against your role.
+            by ticking View for the <code>@PracticeManagement.Web.Controllers.PracticeController.ScreenPermissionArea(Model.Key)</code> menu against your role.
         </p>
     </div>
 </section>

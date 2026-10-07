@@ -1,0 +1,251 @@
+@*
+    Asset Privacy -- Asset & Contract Management, Phase 8.3 (migration 448).
+    Rendered from Manage.cshtml when Model.Key == "asset-privacy".
+
+    BRD 5.1.10 / 5.1.16 / 5.1.17 / 5.2.15 / 9.1.7: "Assets" lists the
+    privacy status of every asset (Not applicable, Undetermined,
+    Non-compliant, Incomplete, Conditional, Compliant -- never Compliant
+    while a required control is incomplete) with its gaps per privacy
+    requirement; an open gap can get an exception (reason, compensating
+    controls, owner, expiry) approved by another person. "Exceptions" is
+    the approval worklist. "Reviews" holds the open privacy reviews (due on
+    the privacy review date) and retention reviews (due when retention
+    ends): Reviewed with the next review date, or Delete / Archive /
+    Legal hold verified / Extend (approver). "Requirements" sets, per
+    organization and asset type, whether each requirement is Off, Warn or
+    Block (Block stops a move to Active; sanitization blocks Disposed /
+    Archived). Every rule is enforced by the procedures. The privacy field
+    values themselves are entered on the Asset Register form.
+
+    Backend: practice/api/asset-config/privacy/... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-privacy.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var apvPermissions = ViewBag.Permissions as string[] ?? [];
+    bool apvHas(string action) => apvPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var apvCanEdit = apvHas("EDIT");
+    var apvCanApprove = apvHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="apvRoot" data-can-edit="@(apvCanEdit ? "1" : "0")" data-can-approve="@(apvCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="apvOrg" title="Organization"><option value="">Select organization</option></select>
+            @if (apvCanEdit)
+            {
+                <button class="pm-button" id="apvRun" type="button"><i class="fa-solid fa-arrows-rotate"></i> Refresh reviews</button>
+            }
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset privacy">
+            <button role="tab" class="active" data-apv-main="ASSETS" aria-selected="true">Assets</button>
+            <button role="tab" data-apv-main="EXCEPTIONS" aria-selected="false">Exceptions</button>
+            <button role="tab" data-apv-main="REVIEWS" aria-selected="false">Reviews</button>
+            <button role="tab" data-apv-main="REQUIREMENTS" aria-selected="false">Requirements</button>
+        </div>
+        <p class="pm-message" id="apvMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- assets ---------------- *@
+        <div class="pm-tab-panel" data-apv-mainpanel="ASSETS">
+            <div class="pm-toolbar">
+                <select id="apvAStatus" title="Privacy status">
+                    <option value="">All with personal data or undetermined</option>
+                    <option value="NON_COMPLIANT">Non-compliant</option>
+                    <option value="INCOMPLETE">Incomplete</option>
+                    <option value="UNDETERMINED">Undetermined</option>
+                    <option value="CONDITIONAL">Conditional</option>
+                    <option value="COMPLIANT">Compliant</option>
+                    <option value="NOT_APPLICABLE">Not applicable</option>
+                    <option value="ALL">All assets</option>
+                </select>
+                <input type="search" id="apvASearch" placeholder="Search asset" maxlength="200" />
+            </div>
+            <p class="apv-note" id="apvACounts"></p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Privacy status</th><th>Gaps</th><th>Privacy owner</th><th>Assessment</th><th>Review date</th><th>Retention end</th><th>Open items</th></tr></thead>
+                    <tbody id="apvABody"></tbody>
+                </table>
+            </div>
+            <div id="apvAPager"></div>
+
+            <div id="apvDetail" hidden>
+                <div class="apv-head">
+                    <h3 class="apv-sub" id="apvDTitle"></h3>
+                    <button class="pm-button" type="button" id="apvDClose"><i class="fa-solid fa-xmark"></i> Close</button>
+                </div>
+                <div class="apv-info" id="apvDInfo"></div>
+                <h3 class="apv-sub">Gaps by requirement</h3>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Requirement</th><th>Gap</th><th>Enforcement</th><th>Exception</th><th></th></tr></thead>
+                        <tbody id="apvDGaps"></tbody>
+                    </table>
+                </div>
+                <h3 class="apv-sub">Exceptions</h3>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Requirement</th><th>Status</th><th>Reason / controls</th><th>Owner</th><th>Expiry</th><th>Decision</th><th></th></tr></thead>
+                        <tbody id="apvDExceptions"></tbody>
+                    </table>
+                </div>
+                <h3 class="apv-sub">Reviews</h3>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Review</th><th>Due</th><th>Status</th><th>Outcome</th><th>Completed</th><th></th></tr></thead>
+                        <tbody id="apvDReviews"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        @* ---------------- exceptions ---------------- *@
+        <div class="pm-tab-panel" data-apv-mainpanel="EXCEPTIONS" hidden>
+            <div class="pm-toolbar">
+                <select id="apvXStatus" title="Status">
+                    <option value="">Awaiting approval and approved</option>
+                    <option value="PENDING_APPROVAL">Awaiting approval</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="EXPIRED">Expired</option>
+                    <option value="REJECTED">Rejected</option>
+                    <option value="WITHDRAWN">Withdrawn</option>
+                    <option value="REVOKED">Revoked</option>
+                    <option value="ALL">All</option>
+                </select>
+            </div>
+            <p class="apv-note">An approved exception marks the gap excepted until its expiry date (the asset is then Conditional); reminders run before the expiry. The requester cannot decide the request.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Requirement</th><th>Status</th><th>Reason / controls</th><th>Owner</th><th>Expiry</th><th>Requested / decided</th><th></th></tr></thead>
+                    <tbody id="apvXBody"></tbody>
+                </table>
+            </div>
+            <div id="apvXPager"></div>
+        </div>
+
+        @* ---------------- reviews ---------------- *@
+        <div class="pm-tab-panel" data-apv-mainpanel="REVIEWS" hidden>
+            <div class="pm-toolbar">
+                <select id="apvRStatus" title="Status">
+                    <option value="">Open</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                    <option value="ALL">All</option>
+                </select>
+                <select id="apvRKind" title="Review">
+                    <option value="">Privacy and retention</option>
+                    <option value="PRIVACY">Privacy / DPIA review</option>
+                    <option value="RETENTION">Retention end</option>
+                </select>
+            </div>
+            <p class="apv-note">A privacy review opens for the privacy review date of each asset with personal data; a retention review opens for the end of retention (period from the trigger: creation, closure or contract end) or the latest extension. Reminders and escalations follow the Privacy / DPIA review and Retention / deletion review notification profiles.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Review</th><th>Due</th><th>Status</th><th>Privacy owner</th><th>Outcome</th><th></th></tr></thead>
+                    <tbody id="apvRBody"></tbody>
+                </table>
+            </div>
+            <div id="apvRPager"></div>
+        </div>
+
+        @* ---------------- requirements ---------------- *@
+        <div class="pm-tab-panel" data-apv-mainpanel="REQUIREMENTS" hidden>
+            <p class="apv-note">Off: the requirement raises nothing. Warn: gaps are shown and warned on save. Block: gaps also stop a move to Active (sanitization: Disposed / Archived). An asset-type setting replaces the organization setting for that type.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Requirement</th><th>Default</th><th>Organization setting</th><th>Exception allowed</th><th>Longest exception (days)</th><th></th></tr></thead>
+                    <tbody id="apvQBody"></tbody>
+                </table>
+            </div>
+            <h3 class="apv-sub">Asset-type settings</h3>
+            @if (apvCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <select id="apvOType" title="Asset type"></select>
+                    <select id="apvOReq" title="Requirement"></select>
+                    <select id="apvOEnf" title="Enforcement"><option value="OFF">Off</option><option value="WARN">Warn</option><option value="BLOCK">Block</option></select>
+                    <label class="apv-check"><input type="checkbox" id="apvOExc" checked /> Exception allowed</label>
+                    <input type="number" id="apvODays" min="1" max="1095" step="1" placeholder="Longest exception (days)" />
+                    <button class="pm-button primary" type="button" id="apvOAdd"><i class="fa-solid fa-plus"></i> Save</button>
+                </div>
+            }
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset type</th><th>Requirement</th><th>Enforcement</th><th>Exception allowed</th><th>Longest exception (days)</th><th></th></tr></thead>
+                    <tbody id="apvOBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Exception request modal ======================= *@
+<div class="pm-modal" id="apvExcModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Request privacy exception</h2>
+            <button class="pm-modal-close" type="button" data-close-apv="apvExcModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="apvExcForm" class="pm-form-grid">
+            <p class="apv-note full" id="apvExcNote"></p>
+            <label class="full"><span>Reason *</span><textarea id="apvExcReason" rows="3" maxlength="1000"></textarea></label>
+            <label class="full"><span>Compensating controls *</span><textarea id="apvExcControls" rows="2" maxlength="1000"></textarea></label>
+            <label><span>Owner *</span><select id="apvExcOwner"></select></label>
+            <label><span>Expiry date *</span><input type="date" id="apvExcExpiry" /></label>
+            <p class="pm-message full" id="apvExcMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-apv="apvExcModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-paper-plane"></i> Request</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Review completion modal ======================= *@
+<div class="pm-modal" id="apvRevModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="apvRevTitle">Complete review</h2>
+            <button class="pm-modal-close" type="button" data-close-apv="apvRevModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="apvRevForm" class="pm-form-grid">
+            <p class="apv-note full" id="apvRevNote"></p>
+            <label class="full"><span>Outcome *</span><select id="apvRevOutcome"></select></label>
+            <label class="full"><span id="apvRevNextLabel">Next date</span><input type="date" id="apvRevNext" /></label>
+            <label class="full"><span id="apvRevNoteLabel">Note</span><textarea id="apvRevText" rows="2" maxlength="1000"></textarea></label>
+            <label class="full"><span id="apvRevEvidenceLabel">Evidence</span><textarea id="apvRevEvidence" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="apvRevMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-apv="apvRevModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Complete</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .apv-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .apv-check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .apv-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .apv-st-ok    { background: var(--success-100); color: var(--success-700); }
+    .apv-st-info  { background: var(--primary-100); color: var(--primary-800); }
+    .apv-st-wait  { background: var(--warning-50); color: var(--warning-700); }
+    .apv-st-bad   { background: var(--danger-100); color: var(--danger-700); }
+    .apv-st-off   { background: var(--neutral-200); color: var(--fg-muted); }
+    .apv-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .apv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+    .apv-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .apv-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-privacy.js" asp-append-version="true"></script>

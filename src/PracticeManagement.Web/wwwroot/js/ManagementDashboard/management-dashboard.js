@@ -11,6 +11,11 @@
 // clickable element into a link to the EXISTING list page, with that
 // page's own filter values (the receiving side is Shared/dashboard-drill.js).
 //
+// 451: also the Asset & Contract dashboard (asset-contract). Its tiles
+// and bars open the asset screens with tab / status / kind / pending, which
+// those screens read through Shared/dashboard-drill.js; an ageing band is a
+// link only where the page filters by age (AGEING_DRILL).
+//
 // Nothing here decides what "open", "overdue" or "pending" means: the
 // drill passes the same bucket code (drill=) the dashboard counted with,
 // and the list procedure filters by the same definition (414 section 3).
@@ -52,7 +57,19 @@
     audits:     (p, l) => link("/Practice/org-assurance-executions", p, l),
     findings:   (p, l) => link("/Practice/org-assurance-observations", p, l),
     plans:      (p, l) => link("/Practice/org-assurance-plans", p, l),
-    instances:  (p, l) => link("/Practice/Index/resolve", p, l)
+    instances:  (p, l) => link("/Practice/Index/resolve", p, l),
+    // 451: Asset & Contract dashboard sections
+    governance:    (p, l) => link("/Practice/Index/asset-governance", p, l),
+    assets:        (p, l) => link("/Practice/Index/asset-register", p, l),
+    technology:    (p, l) => link("/Practice/Index/asset-register", p, l),
+    contracts:     (p, l) => link("/Practice/Index/asset-contracts", p, l),
+    attestation:   (p, l) => link("/Practice/Index/asset-attestation", p, l),
+    activities:    (p, l) => link("/Practice/Index/asset-activities", p, l),
+    privacy:       (p, l) => link("/Practice/Index/asset-privacy", p, l),
+    discovery:     (p, l) => link("/Practice/Index/asset-discovery", p, l),
+    services:      (p, l) => link("/Practice/Index/business-services", p, l),
+    relationships: (p, l) => link("/Practice/Index/asset-relationships", p, l),
+    notifications: (p, l) => link("/Practice/Index/asset-notifications", p, l)
   };
 
   // KPI (section.key) -> list filter. Absent = the tile is not a link.
@@ -92,7 +109,44 @@
     "instances.total":          {},
     "instances.implemented":    { status: "Implemented" },
     "instances.partial":        { status: "Partially Implemented" },
-    "instances.notimplemented": { status: "Not Implemented" }
+    "instances.notimplemented": { status: "Not Implemented" },
+    // 451: Asset & Contract. A tile without an entry counts something its
+    // page cannot filter to (in use, no owner, overdue activities ...), so
+    // it is not a link.
+    "governance.overall":     {},
+    "governance.red":         {},
+    "governance.amber":       {},
+    "governance.green":       {},
+    "governance.failing":     {},
+    "assets.total":           {},
+    "assets.draft":           { status: "DRAFT" },
+    "assets.pending":         { pending: "1" },
+    "contracts.active":       { tab: "CONTRACTS", status: "ACTIVE" },
+    "contracts.expired":      { tab: "CONTRACTS", status: "EXPIRED" },
+    "contracts.renewals":     { tab: "RENEWALS" },
+    "contracts.gaps":         { tab: "GAPS" },
+    "attestation.pending":    { tab: "ALL", status: "PENDING" },
+    "attestation.inprogress": { tab: "ALL", status: "IN_PROGRESS" },
+    "attestation.overdue":    { tab: "ALL", status: "OVERDUE" },
+    "attestation.confirmed":  { tab: "ALL", status: "CONFIRMED" },
+    "attestation.disputed":   { tab: "ALL", status: "DISPUTED" },
+    "attestation.exceptions": { tab: "EXCEPTIONS", status: "OPEN_ALL" },
+    "activities.open":        { tab: "OCCURRENCES", status: "OPEN" },
+    "activities.reviews":     { tab: "REVIEWS", status: "OPEN" },
+    "privacy.noncompliant":   { tab: "ASSETS", status: "NON_COMPLIANT" },
+    "privacy.incomplete":     { tab: "ASSETS", status: "INCOMPLETE" },
+    "privacy.undetermined":   { tab: "ASSETS", status: "UNDETERMINED" },
+    "discovery.open":         { tab: "QUEUE" },
+    "discovery.conflicts":    { tab: "QUEUE", kind: "CONFLICT" },
+    "discovery.duplicates":   { tab: "QUEUE", kind: "DUPLICATE" },
+    "discovery.stale":        { tab: "STALE" },
+    "services.degraded":      { tab: "SERVICES", status: "DEGRADED" },
+    "services.conflicts":     { tab: "CONFLICTS" },
+    "relationships.active":   { tab: "RELATIONSHIPS", status: "ACTIVE" },
+    "relationships.proposed": { tab: "RELATIONSHIPS", status: "PROPOSED" },
+    "relationships.disputed": { tab: "RELATIONSHIPS", status: "DISPUTED" },
+    "notifications.open":     { tab: "OCCURRENCES", status: "OPEN" },
+    "notifications.failed":   { tab: "LOG", status: "Failed" }
     // instances.noowner has no drill: Operationalize has no "no owner"
     // filter, and an unfiltered list under a "No owner" tile would lie.
   };
@@ -117,7 +171,16 @@
     findings_severity: ["findings",   k => ({ drill: "pending", severity: k })],
     findings_status:   ["findings",   k => ({ status: k })],
     plans_status:      ["plans",      k => ({ status: k })],
-    instances_status:  ["instances",  k => ({ status: k })]
+    instances_status:  ["instances",  k => ({ status: k })],
+    // 451: Asset & Contract (groups without an entry are not links)
+    assets_status:        ["assets",        k => ({ status: k })],
+    contracts_status:     ["contracts",     k => ({ tab: "CONTRACTS", status: k })],
+    attestation_status:   ["attestation",   k => ({ tab: "ALL", status: k })],
+    privacy_status:       ["privacy",       k => ({ tab: "ASSETS", status: k })],
+    discovery_kind:       ["discovery",     k => ({ tab: "QUEUE", kind: k })],
+    discovery_confidence: ["discovery",     k => ({ tab: "CONFIDENCE", status: k })],
+    services_status:      ["services",      k => ({ tab: "SERVICES", status: k })],
+    relationships_status: ["relationships", k => ({ tab: "RELATIONSHIPS", status: k })]
   };
 
   const sectionOf = key => String(key || "").split("_")[0];
@@ -191,7 +254,8 @@
         const filter = { ...(AGEING_DRILL[key] || {}), minAge: F(b, "minDays"), maxAge: max >= 100000 ? null : max };
         return {
           label: F(b, "bandName"), count: F(b, "itemCount"),
-          href: TARGET[key] ? TARGET[key](filter, `${g.title} aged ${F(b, "bandName")}`) : null
+          // 451: a band links only where the page filters by age (AGEING_DRILL).
+          href: TARGET[key] && AGEING_DRILL[key] ? TARGET[key](filter, `${g.title} aged ${F(b, "bandName")}`) : null
         };
       })));
     });
@@ -232,6 +296,10 @@
     if (listKey === "gaps_overdue" && id)  return U("/Practice/Index/gap-view") + "?gapId=" + encodeURIComponent(id) + "&orgId=" + encodeURIComponent(orgId);
     if (listKey === "audits_upcoming") return TARGET.audits({ drill: "upcoming" }, "Audits starting in the next 30 days");
     if (listKey === "audits_overdue")  return TARGET.audits({ drill: "overdue" }, "Overdue audits");
+    // 451: an asset opens on the Asset Register (?assetId=, 450).
+    if (listKey === "technology_unsupported" && id)
+      return U("/Practice/Index/asset-register") + "?" + new URLSearchParams({ organizationId: orgId, assetId: id }).toString();
+    if (listKey === "attestation_overdue") return TARGET.attestation({ tab: "ALL", status: "OVERDUE" }, "Overdue attestations");
     return null;
   }
 
@@ -414,7 +482,7 @@
     } catch (_) { /* the message below says what is missing */ }
     const wanted = new URLSearchParams(window.location.search).get("organizationId");
     if (wanted && [...sel.options].some(o => o.value === wanted)) sel.value = wanted;
-    else if (sel.options.length > 1) sel.selectedIndex = 1;
+    else window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
     orgId = sel.value;
     sel.addEventListener("change", () => { orgId = sel.value; load(); });
     document.getElementById("mdRefreshBtn").addEventListener("click", load);

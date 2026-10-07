@@ -664,6 +664,7 @@ manual add can never collide with a generator's.
 | Continuous Assurance | `sp_org_assurance_observation_accept` (superset) | `OBSERVATION_REMEDIATION` |
 | Event Assurance | **not wired** — conflict 4 | — |
 | Exception | **not wired** — conflict 5 | — |
+| Schedule (449) | `sp_schedule_obligation_tasks_generate`, run by `TaskNotificationWorker` on the due date — see [scheduled-obligation-tasks.md](scheduled-obligation-tasks.md) | `schedule_occurrence_task` (rule + date, UNIQUE) |
 
 Every rewrite is a strict superset: same name, same parameters, same
 result-set columns plus additions. **No caller changed anywhere** — in
@@ -1508,3 +1509,18 @@ creates a task *candidate*, not a task — a different record in a
 different table with its own validation gate. It keeps its own small
 modal.
 
+
+### Tasks tab badge removed (2026-10-06)
+
+The "Tasks" tab badge summed `sp_task_center_counts`' Implementation +
+Assurance + Custom/Rectification buckets. That count included sub tasks
+and left out every other type (Risk Driven, Asset Activity, Scheduled
+Obligation ...), while the grid (`sp_task_list`) lists top-level tasks of
+every type -- so the two never matched. On request the badge is removed
+from the tab; the grid's own total and the Source filter's
+"All sources (N)" remain. `refreshCounts()` now only refreshes the Source
+filter counts. UI only (`tasks.cshtml`); `sp_task_center_counts` and
+`GET /practice/api/tasks/counts` are unchanged for their other readers.
+The Event Driven Assurance tab's badge is removed too (it was set from the
+`event-assurance:loaded` event, which is still dispatched but no longer
+listened to by Task Board).

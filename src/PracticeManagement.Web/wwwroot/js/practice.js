@@ -521,10 +521,14 @@
     catch { return ""; }
   }
 
+  // 2026-10-06: the same key is now shared with every other page through
+  // window.gracOrgPref (Shared/org-preference.js). "All organizations"
+  // ("") is not an organization, so it no longer clears the remembered
+  // one -- the next org-scoped page still opens on the last org picked.
   function rememberOrganizationId(value) {
+    if (!value) return;
     try {
-      if (value) window.localStorage?.setItem(lastOrganizationKey, value);
-      else window.localStorage?.removeItem(lastOrganizationKey);
+      window.localStorage?.setItem(lastOrganizationKey, value);
     } catch {
       // Some hardened browser policies block storage access. The filter still works for the current page.
     }
@@ -1196,6 +1200,10 @@
         return all;
       }, { ...staticLookups });
       Object.keys(state.lookups).forEach(key => { state.lookups[key] = dedupeLookupItems(state.lookups[key]); });
+      // 2026-10-06: organizations by id (the lookups query has no ORDER BY),
+      // the same order every other page uses -- so "first" means lowest id.
+      if (state.lookups.organizations && window.gracOrgPref)
+        state.lookups.organizations = window.gracOrgPref.sort(state.lookups.organizations);
     } catch {
       state.lookups = { ...staticLookups };
     }
@@ -1522,18 +1530,17 @@
       const organizations = state.lookups.organizations || [];
       const emptyLabel = organizationScopedScreens.has(screen.Key) ? "Select organization" : "All organizations";
       organizationFilter.innerHTML = `<option value="">${emptyLabel}</option>${organizations.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
-      // source-statements + organization-controls always pick the first org
-      // so the user lands directly on data instead of a "Select organization"
-      // stub. Other org-scoped screens honour the last-selected org from
-      // localStorage first.
-      const skipSavedForFirstPick = ["organization-controls", "control-applicability", "source-statements"].includes(screen.Key);
+      // Org-scoped screens open on the organization last picked on any
+      // page (localStorage), else the lowest id. 2026-10-06: source-statements,
+      // organization-controls and control-applicability no longer skip the
+      // remembered org -- one choice holds on every screen until changed.
       // Control Statements opened from a Standards & Frameworks row carries
       // the release's organization in the URL (2026-09-28); it wins.
       // Management dashboards (414) open Standards & Frameworks and
       // Organization Practices the same way, for the dashboard's organization.
       const urlOrganizationId = ["source-statements", "organization-controls", "organization-requirements"].includes(screen.Key)
         ? String(query.get("organizationId") || "") : "";
-      const savedOrganizationId = urlOrganizationId || (skipSavedForFirstPick ? "" : getSavedOrganizationId());
+      const savedOrganizationId = urlOrganizationId || getSavedOrganizationId();
       if (organizationScopedScreens.has(screen.Key) && !state.navigationCode) {
         const selected = organizations.find(item => String(item.value) === savedOrganizationId) || organizations[0];
         if (selected) {
@@ -1759,7 +1766,11 @@
     setupState.selectedReleases.clear();
     setupState.recommendations.clear();
     setupState.recommendationAutoSelected.clear();
-    const result = await fetchJson(`${api}/organization-setup/query`, {
+    // 2026-10-06: Organization Administration reads through the read-only
+    // organization-profile alias, governed by that screen's own permission
+    // (see PermissionAreaMap); Organization Setup keeps organization-setup.
+    const setupReadEntity = isOrganizationAdministration ? "organization-profile" : "organization-setup";
+    const result = await fetchJson(`${api}/${setupReadEntity}/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
       body: JSON.stringify({ data: { organizationId: orgId ? Number(orgId) : null, pageSize: 200 } })
@@ -2536,25 +2547,12 @@
           logListTrace("fallback-response", { reason: "practice-instances-status", rowCount: records.length, tableCount: tables.length, result });
         }
       }
-      if (!records.length && ["organization-controls", "control-applicability", "practice-operationalization"].includes(screen.Key) && !state.navigationCode && organizationFilter) {
-        const currentOrganizationId = String(organizationFilter.value || "");
-        const organizations = (state.lookups.organizations || []).filter(item => String(item.value) !== currentOrganizationId);
-        for (const organization of organizations) {
-          const fallbackPayload = { ...payload, organizationId: Number(organization.value) };
-          const fallbackResult = await queryRows(fallbackPayload);
-          const fallbackRecords = apiData(fallbackResult);
-          if (fallbackRecords.length) {
-            organizationFilter.value = String(organization.value);
-            rememberOrganizationId(organizationFilter.value);
-            payload.organizationId = fallbackPayload.organizationId;
-            result = fallbackResult;
-            tables = apiTables(fallbackResult);
-            records = fallbackRecords;
-            logListTrace("fallback-response", { reason: "alternate-organization", organizationId: fallbackPayload.organizationId, rowCount: records.length, tableCount: tables.length, result });
-            break;
-          }
-        }
-      }
+      // 2026-10-06: removed -- an empty list on organization-controls /
+      // control-applicability / practice-operationalization used to switch
+      // the Organization filter to the first OTHER organization that had
+      // rows, and remember it. The organization now stays what the user
+      // picked (Shared/org-preference.js) until they pick another; an
+      // empty grid for that organization is the honest answer.
       state.records = records;
       if (screen.Key === "organization-requirements") {
         console.info("PracticeManagement Organization Practices payload", payload);

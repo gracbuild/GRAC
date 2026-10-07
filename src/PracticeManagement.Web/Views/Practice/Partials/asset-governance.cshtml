@@ -1,0 +1,174 @@
+@*
+    Asset Governance -- Asset & Contract Management, Phase 8.4a (migration 450).
+    Rendered from Manage.cshtml when Model.Key == "asset-governance".
+
+    BRD 19.8 / 13.5 (Governance) / 19.10 (Governance KPI Detail):
+    "Scorecard" shows the overall score and the ten governance KPIs of a
+    snapshot -- score, rating against the target and warning thresholds,
+    numerator / denominator, failing and excluded records, the change from
+    the previous date, the threshold breaches and the trend. "KPI detail"
+    gives the definition of a KPI (formula, numerator, denominator,
+    population, as-of, exclusions, zero-denominator behaviour, rounding,
+    thresholds, authorization) and the exact records behind its score
+    (failing, passing, excluded). "History" lists every snapshot; a later
+    snapshot of the same date whose results differ supersedes it and the
+    prior one stays openable. "Settings" holds, per organization, which KPIs
+    are scored, their weight, thresholds and period, the overall
+    thresholds, how long record detail is kept, and the relationships an
+    asset type requires. Snapshots are taken daily by the asset scheduler
+    and on demand ("Take snapshot", EDIT). Every number is computed by the
+    procedures.
+
+    Backend: practice/api/asset-config/governance... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-governance.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var agvPermissions = ViewBag.Permissions as string[] ?? [];
+    bool agvHas(string action) => agvPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var agvCanEdit = agvHas("EDIT");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="agvRoot" data-can-edit="@(agvCanEdit ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="agvOrg" title="Organization"><option value="">Select organization</option></select>
+            <button class="pm-button icon" id="agvRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i></button>
+            @if (agvCanEdit)
+            {
+                <button class="pm-button primary" id="agvTake" type="button"><i class="fa-solid fa-camera"></i> Take snapshot</button>
+            }
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset governance">
+            <button role="tab" class="active" data-agv-main="SCORECARD" aria-selected="true">Scorecard</button>
+            <button role="tab" data-agv-main="DETAIL" aria-selected="false">KPI detail</button>
+            <button role="tab" data-agv-main="HISTORY" aria-selected="false">History</button>
+            <button role="tab" data-agv-main="SETTINGS" aria-selected="false">Settings</button>
+        </div>
+        <p class="pm-message" id="agvMessage" role="status" aria-live="polite" hidden></p>
+        <p class="agv-note" id="agvSnapshotInfo"></p>
+
+        @* ---------------- scorecard ---------------- *@
+        <div class="pm-tab-panel" data-agv-mainpanel="SCORECARD">
+            <h3 class="pm-dash-subhead">Overall and component scores</h3>
+            <div class="pm-dash-tiles" id="agvTiles"></div>
+            <h3 class="pm-dash-subhead">Threshold breaches</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>KPI</th><th>Score</th><th>Rating</th><th>Target / warning</th><th>Numerator / denominator</th><th>Failing</th><th>Change</th></tr></thead>
+                    <tbody id="agvBreaches"></tbody>
+                </table>
+            </div>
+            <h3 class="pm-dash-subhead">Trend <span class="pm-hint">(current snapshot of each date)</span></h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead id="agvTrendHead"></thead>
+                    <tbody id="agvTrendBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- KPI detail ---------------- *@
+        <div class="pm-tab-panel" data-agv-mainpanel="DETAIL" hidden>
+            <div class="pm-toolbar">
+                <select id="agvKpi" title="KPI"></select>
+            </div>
+            <div class="agv-info" id="agvDefinition"></div>
+            <p class="agv-note" id="agvTotals"></p>
+            <div class="pm-toolbar">
+                <select id="agvOutcome" title="Records">
+                    <option value="FAIL">Failing</option>
+                    <option value="PASS">Passing</option>
+                    <option value="EXCLUDED">Excluded</option>
+                    <option value="">All records</option>
+                </select>
+                <input type="search" id="agvSearch" placeholder="Search record or reason" maxlength="200" />
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Record</th><th>Result</th><th>Numerator</th><th>Denominator</th><th>Reason</th></tr></thead>
+                    <tbody id="agvItems"></tbody>
+                </table>
+            </div>
+            <div id="agvItemPager"></div>
+        </div>
+
+        @* ---------------- history ---------------- *@
+        <div class="pm-tab-panel" data-agv-mainpanel="HISTORY" hidden>
+            <p class="agv-note">The asset scheduler takes one snapshot per day; Take snapshot adds a new version of today only when a result changed (late-arriving data). A superseded version is kept and can be opened. Record detail is kept for the retention set in Settings; the scores stay.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>As of</th><th>Version</th><th>Overall</th><th>Ratings</th><th>Records</th><th>Taken</th><th>Source</th><th></th></tr></thead>
+                    <tbody id="agvHistory"></tbody>
+                </table>
+            </div>
+            <div id="agvHistoryPager"></div>
+        </div>
+
+        @* ---------------- settings ---------------- *@
+        <div class="pm-tab-panel" data-agv-mainpanel="SETTINGS" hidden>
+            <h3 class="agv-sub">Overall score</h3>
+            <p class="agv-note">The overall score is the weighted mean of the enabled KPIs that have a score (a lower-is-better KPI counts as 100 minus its rate). A KPI with no records to score (zero denominator) shows Not applicable and is left out.</p>
+            <div class="pm-toolbar">
+                <label class="agv-field"><span>Target</span><input type="number" id="agvOTarget" min="0" max="100" step="0.1" /></label>
+                <label class="agv-field"><span>Warning</span><input type="number" id="agvOWarning" min="0" max="100" step="0.1" /></label>
+                <label class="agv-field"><span>Keep record detail (days)</span><input type="number" id="agvORetention" min="7" max="3650" step="1" /></label>
+                @if (agvCanEdit)
+                {
+                    <button class="pm-button primary" type="button" id="agvOSave"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                }
+            </div>
+            <h3 class="agv-sub">KPIs</h3>
+            <p class="agv-note">Higher is better: green at or above the target, amber at or above the warning, red below. Lower is better (Reconciliation Backlog Rate): green at or below the target, amber at or below the warning. Changes apply from the next snapshot.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>KPI</th><th>Better</th><th>Scored</th><th>Weight</th><th>Target</th><th>Warning</th><th>Period (days)</th><th>Default</th><th></th></tr></thead>
+                    <tbody id="agvSettings"></tbody>
+                </table>
+            </div>
+            <h3 class="agv-sub">Relationship requirements</h3>
+            <p class="agv-note" id="agvRelNote"></p>
+            @if (agvCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <select id="agvRType" title="Asset type"></select>
+                    <select id="agvRRel" title="Relationship"></select>
+                    <select id="agvRSide" title="The asset is"></select>
+                    <input type="number" id="agvRMin" min="1" max="50" step="1" value="1" title="Minimum active relationships" />
+                    <button class="pm-button primary" type="button" id="agvRAdd"><i class="fa-solid fa-plus"></i> Add</button>
+                </div>
+            }
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset type</th><th>Requires</th><th>Minimum</th><th>Active</th><th>Changed</th><th></th></tr></thead>
+                    <tbody id="agvRules"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+<style>
+    .agv-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .agv-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .agv-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .agv-rag-green { background: var(--success-100); color: var(--success-700); }
+    .agv-rag-amber { background: var(--warning-50); color: var(--warning-700); }
+    .agv-rag-red   { background: var(--danger-100); color: var(--danger-700); }
+    .agv-rag-na    { background: var(--neutral-200); color: var(--fg-muted); }
+    .agv-tile-meta { font-size: 11px; color: var(--fg-secondary); margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .agv-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 16px; font-size: 13px; margin: 12px 0; }
+    .agv-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .agv-field { display: inline-flex; flex-direction: column; font-size: 11px; color: var(--fg-secondary); gap: 2px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/AssetConfig/asset-governance.js" asp-append-version="true"></script>

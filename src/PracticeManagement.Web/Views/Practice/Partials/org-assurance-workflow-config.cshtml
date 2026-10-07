@@ -320,7 +320,8 @@
 
         wireStaticButtons();
 
-        state.orgId = orgs[0].value;
+        // 2026-10-06: the org last picked on any page, else the lowest id.
+        state.orgId = window.gracOrgPref.preferred(orgs.map(function (o) { return o.value; }), orgSel);
         orgSel.value = state.orgId;
         await Promise.all([loadOrgRoles(state.orgId), loadEmployees(state.orgId)]);
         await populateDefinitionPicker();

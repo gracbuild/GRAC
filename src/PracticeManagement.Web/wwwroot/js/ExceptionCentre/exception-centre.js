@@ -74,7 +74,7 @@
     if (EXC_DRILL) applyDrill(sel);
     if (sel.options.length > 1 && !state.organizationId) {
       if (!(EXC_DRILL && window.__pmDrill.preselect(sel, EXC_DRILL.organizationId)))
-        sel.selectedIndex = 1;
+        window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
       state.organizationId = Number(sel.value) || null;
       if (state.organizationId) await refresh();
     }

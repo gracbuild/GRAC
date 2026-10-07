@@ -398,7 +398,8 @@
             opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
             sel.appendChild(opt);
         }
-        if (orgs.length > 0) sel.value = orgs[0].value;
+        // 2026-10-06: the org last picked on any page, else the lowest id.
+        window.gracOrgPref.apply(sel);
         // 414: the dashboard's organization wins when it is one of these.
         if (GAP_DRILL && GAP_DRILL.organizationId) window.__pmDrill.preselect(sel, GAP_DRILL.organizationId);
         sel.disabled = orgs.length <= 1;

@@ -1,0 +1,145 @@
+@*
+    Option Lists -- Asset & Contract Management, Phase 2.4 (migration 423).
+    Rendered from Manage.cshtml when Model.Key == "asset-option-lists".
+
+    BRD 5.1.2 / 5.1.6 / 5.1.10 / 5.2.5: building, floor, room, zone, cost
+    centre and similar lists are the organization's own active values.
+    Each OPTION: list of the field dictionary has a scope:
+      ORG_ONLY        the organization maintains every value;
+      ORG_EXTENSIBLE  global defaults (421) + organization values; a default
+                      can be relabelled, reordered or hidden for this
+                      organization and reset later;
+      GLOBAL_ONLY     fixed for every organization (read-only here).
+    Dependent lists (building -> site, floor -> building, room -> floor,
+    zone -> site) require a parent value. Values are never deleted: retiring
+    sets Inactive, and a value with active children cannot be retired.
+
+    Backend: practice/api/asset-config/option-lists... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-option-lists.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var aolPermissions = ViewBag.Permissions as string[] ?? [];
+    bool aolHas(string action) => aolPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var aolCanEdit = aolHas("ADD") || aolHas("EDIT");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="aolRoot" data-can-edit="@(aolCanEdit ? "1" : "0")">
+
+    @* ============================ Catalogue ============================ *@
+    <section class="pm-panel" id="aolListView">
+        <div class="pm-toolbar">
+            <select id="aolOrg" title="Organization"><option value="">Select organization</option></select>
+            <input type="search" id="aolSearch" placeholder="Search lists" maxlength="200" />
+            <select id="aolScope" title="Scope">
+                <option value="">All scopes</option>
+                <option value="ORG_ONLY">Organization values</option>
+                <option value="ORG_EXTENSIBLE">Defaults + organization</option>
+                <option value="GLOBAL_ONLY">Fixed</option>
+            </select>
+            <button class="pm-button icon" id="aolRefresh" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr><th>List</th><th>Scope</th><th>Depends on</th><th>Values</th><th>Organization values</th><th>Used by</th></tr>
+                </thead>
+                <tbody id="aolListBody"><tr><td colspan="6" class="pm-empty">Select an organization.</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    @* ============================ List detail ============================ *@
+    <section id="aolDetailView" hidden>
+        <div class="pm-panel aol-head">
+            <div class="aol-head-main">
+                <button class="pm-button" id="aolBack" type="button"><i class="fa-solid fa-arrow-left"></i> Option Lists</button>
+                <div>
+                    <div class="aol-head-title" id="aolTitle">--</div>
+                    <div class="aol-head-meta" id="aolMeta"></div>
+                </div>
+            </div>
+            <div class="aol-head-actions">
+                @if (aolCanEdit)
+                {
+                    <button class="pm-button primary" id="aolAddBtn" type="button" hidden>
+                        <i class="fa-solid fa-plus"></i> Add Value
+                    </button>
+                }
+            </div>
+        </div>
+        <p class="pm-message" id="aolMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-panel">
+            <p class="aol-note" id="aolScopeNote"></p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>Label</th><th>Code</th><th id="aolParentHead">Parent</th><th>Order</th><th>Source</th><th>Status</th><th aria-label="Actions"></th></tr>
+                    </thead>
+                    <tbody id="aolValueBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Value modal (organization value / default override) ======================= *@
+<div class="pm-modal" id="aolModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aolModalTitle">Value</h2>
+            <button class="pm-modal-close" type="button" data-close-aol aria-label="Close">&times;</button>
+        </header>
+        <form id="aolForm" class="pm-form-grid">
+            <label class="full"><span>Label *</span><input type="text" id="aolLabel" maxlength="200" required /></label>
+            <label class="full" id="aolCodeWrap">
+                <span>Code <small>(optional -- derived from the label when blank; cannot be changed later)</small></span>
+                <input type="text" id="aolCode" maxlength="160" />
+            </label>
+            <label class="full" id="aolParentWrap"><span id="aolParentCaption">Parent *</span><select id="aolParent"></select></label>
+            <label><span>Display order</span><input type="number" id="aolOrder" min="0" step="1" /></label>
+            <p class="aol-note full" id="aolGlobalNote"></p>
+            <p class="pm-message full" id="aolModalMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aol>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    #aolRoot .aol-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    #aolRoot .aol-head-main { display: flex; align-items: center; gap: 12px; }
+    #aolRoot .aol-head-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); }
+    #aolRoot .aol-head-meta { font-size: 12px; color: var(--fg-secondary); margin-top: 2px; }
+    #aolRoot .aol-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .aol-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .aol-code { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--fg-secondary); }
+    .aol-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .aol-src-global   { background: var(--bg-subtle); color: var(--fg-secondary); }
+    .aol-src-override { background: var(--primary-100); color: var(--primary-800); }
+    .aol-src-hidden   { background: var(--neutral-200); color: var(--fg-muted); }
+    .aol-src-org      { background: var(--success-100); color: var(--success-700); }
+    .aol-sc-org       { background: var(--success-100); color: var(--success-700); }
+    .aol-sc-ext       { background: var(--primary-100); color: var(--primary-800); }
+    .aol-sc-fixed     { background: var(--neutral-200); color: var(--fg-muted); }
+    .aol-st-inactive  { background: var(--neutral-200); color: var(--fg-muted); }
+    .aol-st-active    { background: var(--success-100); color: var(--success-700); }
+    #aolValueBody tr.aol-off td { color: var(--fg-muted); }
+    .pm-modal-close { background: transparent; border: 0; padding: 0; font-size: 22px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+</style>
+
+<script src="~/js/AssetConfig/asset-option-lists.js" asp-append-version="true"></script>

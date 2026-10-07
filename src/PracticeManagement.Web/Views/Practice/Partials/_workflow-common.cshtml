@@ -45,12 +45,14 @@
             if (!r.ok) return [];
             const b = await r.json();
             const rows = (b && (b.data || b.Data)) || [];
-            return rows.map(function (row) {
+            // 2026-10-06: ordered by organization id (gracOrgPref), so
+            // every page lists -- and defaults among -- orgs the same way.
+            return window.gracOrgPref.sort(rows.map(function (row) {
                 return {
                     value: String(row.organizationId || row.OrganizationId || ''),
                     label: String(row.organizationName || row.OrganizationName || '')
                 };
-            }).filter(function (o) { return o.value; });
+            }).filter(function (o) { return o.value; }));
         } catch (_) { return []; }
     }
 
@@ -62,7 +64,8 @@
             opt.value = o.value; opt.textContent = o.label || ('Organization ' + o.value);
             sel.appendChild(opt);
         }
-        if (orgs.length > 0) sel.value = orgs[0].value;
+        // 2026-10-06: the org last picked on any page, else the lowest id.
+        window.gracOrgPref.apply(sel);
         sel.disabled = orgs.length <= 1;
     }
 

@@ -1,0 +1,413 @@
+@*
+    Asset Form Templates -- Asset & Contract Management, Phase 2.1 (migration 420).
+    Rendered from Manage.cshtml when Model.Key == "asset-form-templates".
+
+    BRD section 5.2 (Asset Type Form Designer). One template per asset type
+    per organization, versioned:
+        Draft -> Testing -> Pending Approval -> Approved -> Active -> Retired
+    Only a Draft can be edited. Baseline dictionary fields (5.1.17) are
+    seeded into every new template and cannot be removed or weakened.
+    Submitter cannot approve (segregation of duties). Activating a version
+    retires the previous Active one.
+
+    List view   : templates of the selected organization, 3-dot actions.
+    Design view : Fields / Sections / Settings / Readiness / History tabs.
+
+    Backend: practice/api/asset-config/templates... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-form-templates.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var aftPermissions = ViewBag.Permissions as string[] ?? [];
+    bool aftHas(string action) => aftPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var aftCanEdit = aftHas("ADD") || aftHas("EDIT");
+    var aftCanApprove = aftHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="aftHeading">@Model.Title</h1>
+        <p id="aftSubtitle">@Model.Description</p>
+    </div>
+</div>
+
+<div id="aftRoot" data-can-edit="@(aftCanEdit ? "1" : "0")" data-can-approve="@(aftCanApprove ? "1" : "0")">
+
+    @* ============================ List view ============================ *@
+    <section class="pm-panel" id="aftListView">
+        <div class="pm-toolbar">
+            <select id="aftOrg" title="Organization"><option value="">Select organization</option></select>
+            <select id="aftStatus" title="Status">
+                <option value="">All statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="TESTING">Testing</option>
+                <option value="PENDING_APPROVAL">Pending Approval</option>
+                <option value="APPROVED">Approved</option>
+                <option value="ACTIVE">Active</option>
+                <option value="RETIRED">Retired</option>
+            </select>
+            <input type="search" id="aftSearch" maxlength="200" placeholder="Search asset type or template" />
+            @if (aftCanEdit)
+            {
+                <button class="pm-button primary" id="aftNewBtn" type="button">
+                    <i class="fa-solid fa-plus"></i> New Template
+                </button>
+            }
+            <button class="pm-button icon" id="aftRefresh" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Asset Type</th>
+                        <th>Template</th>
+                        <th>Version</th>
+                        <th>Status</th>
+                        <th>Effective</th>
+                        <th>Owner</th>
+                        <th>Fields</th>
+                        <th aria-label="Actions"></th>
+                    </tr>
+                </thead>
+                <tbody id="aftListBody">
+                    <tr><td colspan="8" class="pm-empty">Select an organization.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="aftPager"></div>
+    </section>
+
+    @* =========================== Design view =========================== *@
+    <section id="aftDesignView" hidden>
+        <div class="pm-panel aft-head">
+            <div class="aft-head-main">
+                <button class="pm-button" id="aftBack" type="button"><i class="fa-solid fa-arrow-left"></i> Templates</button>
+                <div>
+                    <div class="aft-head-title" id="aftDesignTitle">--</div>
+                    <div class="aft-head-meta" id="aftDesignMeta"></div>
+                </div>
+            </div>
+            <div class="aft-head-actions" id="aftDesignActions"></div>
+        </div>
+        <p class="pm-message" id="aftDesignMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-panel">
+            <div class="pm-tabs" role="tablist" aria-label="Template designer">
+                <button role="tab" class="active" data-aft-tab="fields" aria-selected="true">Fields</button>
+                <button role="tab" data-aft-tab="sections" aria-selected="false">Sections</button>
+                <button role="tab" data-aft-tab="rules" aria-selected="false">Rules</button>
+                <button role="tab" data-aft-tab="preview" aria-selected="false">Preview</button>
+                <button role="tab" data-aft-tab="settings" aria-selected="false">Settings</button>
+                <button role="tab" data-aft-tab="readiness" aria-selected="false">Readiness</button>
+                <button role="tab" data-aft-tab="history" aria-selected="false">History</button>
+            </div>
+
+            <div class="pm-tab-panel" data-aft-panel="fields">
+                <div class="pm-toolbar">
+                    <button class="pm-button primary aft-edit-only" id="aftAddFieldsBtn" type="button">
+                        <i class="fa-solid fa-plus"></i> Add Fields
+                    </button>
+                </div>
+                <div id="aftFieldSections"></div>
+            </div>
+
+            <div class="pm-tab-panel" data-aft-panel="sections" hidden>
+                <div class="pm-toolbar">
+                    <button class="pm-button primary aft-edit-only" id="aftAddSectionBtn" type="button">
+                        <i class="fa-solid fa-plus"></i> Add Section
+                    </button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Section</th><th>Tab</th><th>Layout</th><th>Order</th><th>Fields</th><th>Status</th><th aria-label="Actions"></th></tr>
+                        </thead>
+                        <tbody id="aftSectionBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            @* 421: conditional visibility / mandatory rules (BRD 5.2.7). *@
+            <div class="pm-tab-panel" data-aft-panel="rules" hidden>
+                <div class="pm-toolbar">
+                    <button class="pm-button primary aft-edit-only" id="aftAddRuleBtn" type="button">
+                        <i class="fa-solid fa-plus"></i> Add Rule
+                    </button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Rule</th><th>When</th><th>Then</th><th>Status</th><th aria-label="Actions"></th></tr>
+                        </thead>
+                        <tbody id="aftRuleBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            @* 421: preview and test with sample values (BRD 5.2.17). Calls the
+               same evaluation procedure the Asset Register will use. *@
+            <div class="pm-tab-panel" data-aft-panel="preview" hidden>
+                <p class="aft-note">Enter sample values for the fields that drive rules, then run the preview. Nothing is saved.</p>
+                <div class="pm-form-grid" id="aftPreviewInputs"></div>
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="aftPreviewRun" type="button"><i class="fa-solid fa-play"></i> Run Preview</button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Field</th><th>Section</th><th>Visible</th><th>Mandatory</th><th>Rules that applied</th></tr></thead>
+                        <tbody id="aftPreviewBody"><tr><td colspan="5" class="pm-empty">Run the preview to see the form's behaviour.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pm-tab-panel" data-aft-panel="settings" hidden>
+                <form id="aftSettingsForm" class="pm-form-grid">
+                    <label class="full">
+                        <span>Template name *</span>
+                        <input type="text" id="aftSetName" maxlength="200" required />
+                    </label>
+                    <label>
+                        <span>Template owner *</span>
+                        <select id="aftSetOwner"><option value="">-- select --</option></select>
+                    </label>
+                    <label>
+                        <span>Approval required</span>
+                        <select id="aftSetApproval">
+                            <option value="true">Yes -- publish through Pending Approval</option>
+                            <option value="false">No -- Testing can approve directly</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Effective from</span>
+                        <input type="date" id="aftSetFrom" />
+                    </label>
+                    <label>
+                        <span>Effective to</span>
+                        <input type="date" id="aftSetTo" />
+                    </label>
+                    <label class="full">
+                        <span>Change reason <small>(required for version 2 onwards)</small></span>
+                        <textarea id="aftSetReason" rows="3" maxlength="1000"></textarea>
+                    </label>
+                    <div class="full aft-edit-only">
+                        <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save Settings</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="pm-tab-panel" data-aft-panel="readiness" hidden>
+                <div class="pm-toolbar">
+                    <span id="aftReadySummary"></span>
+                    <button class="pm-button icon" id="aftReadyRefresh" type="button" title="Re-run checks" aria-label="Re-run checks">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                    </button>
+                </div>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Severity</th><th>Check</th><th>Detail</th></tr></thead>
+                        <tbody id="aftReadyBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pm-tab-panel" data-aft-panel="history" hidden>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead>
+                        <tbody id="aftHistoryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= New Template modal ======================= *@
+<div class="pm-modal" id="aftNewModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>New Asset Form Template</h2>
+            <button class="pm-modal-close" type="button" data-close-aft="aftNewModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aftNewForm" class="pm-form-grid">
+            <label class="full"><span>Category *</span><select id="aftNewCategory" required></select></label>
+            <label class="full"><span>Sub category *</span><select id="aftNewSubcategory" required></select></label>
+            <label class="full"><span>Asset type *</span><select id="aftNewType" required></select></label>
+            <label class="full"><span>Template name *</span><input type="text" id="aftNewName" maxlength="200" required /></label>
+            <label class="full"><span>Template owner</span><select id="aftNewOwner"><option value="">-- me --</option></select></label>
+            <p class="pm-message full" id="aftNewMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aft="aftNewModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-plus"></i> Create Draft</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Field library modal ======================= *@
+<div class="pm-modal" id="aftLibModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2>Add Fields from the Dictionary</h2>
+            <button class="pm-modal-close" type="button" data-close-aft="aftLibModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-toolbar">
+            <select id="aftLibGroup"><option value="">All groups</option></select>
+            <input type="search" id="aftLibSearch" maxlength="200" placeholder="Search fields" />
+            <label class="aft-inline">Into section <select id="aftLibSection"></select></label>
+        </div>
+        <div class="pm-table-wrap aft-lib-wrap">
+            <table>
+                <thead><tr><th style="width:36px;"><input type="checkbox" id="aftLibAll" aria-label="Select all" /></th><th>Field</th><th>Group</th><th>Data Type</th><th>Rule</th></tr></thead>
+                <tbody id="aftLibBody"></tbody>
+            </table>
+        </div>
+        <div id="aftLibPager"></div>
+        <p class="pm-message" id="aftLibMessage" role="status" aria-live="polite" hidden></p>
+        <footer class="pm-modal-footer">
+            <button type="button" class="pm-button" data-close-aft="aftLibModal">Close</button>
+            <button type="button" class="pm-button primary" id="aftLibAdd"><i class="fa-solid fa-plus"></i> Add Selected</button>
+        </footer>
+    </div>
+</div>
+
+@* ======================= Field properties modal ======================= *@
+<div class="pm-modal" id="aftFieldModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="aftFieldTitle">Field</h2>
+            <button class="pm-modal-close" type="button" data-close-aft="aftFieldModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aftFieldForm" class="pm-form-grid">
+            <p class="full aft-note" id="aftFieldNote"></p>
+            <label><span>Section</span><select id="aftFldSection"></select></label>
+            <label><span>Display order</span><input type="number" id="aftFldOrder" min="0" step="10" /></label>
+            <label class="aft-check"><input type="checkbox" id="aftFldVisible" /> <span>Visible</span></label>
+            <label class="aft-check"><input type="checkbox" id="aftFldMandatory" /> <span>Mandatory</span></label>
+            <label class="aft-check"><input type="checkbox" id="aftFldReadOnly" /> <span>Read only</span></label>
+            <label class="aft-check"><input type="checkbox" id="aftFldEvidence" /> <span>Evidence required</span></label>
+            <label class="aft-check"><input type="checkbox" id="aftFldImport" /> <span>Include in import / export</span></label>
+            <label class="aft-check"><input type="checkbox" id="aftFldSearchable" /> <span>Searchable in reports</span></label>
+            <label>
+                <span>When hidden with a stored value</span>
+                <select id="aftFldHidden">
+                    <option value="RETAIN">Retain the value</option>
+                    <option value="CLEAR">Clear the value</option>
+                    <option value="MIGRATE">Migrate the value</option>
+                </select>
+            </label>
+            <label>
+                <span>Sensitivity (can only be raised)</span>
+                <select id="aftFldSensitivity">
+                    <option value="">Dictionary baseline</option>
+                    <option value="PUBLIC">Public</option>
+                    <option value="INTERNAL">Internal</option>
+                    <option value="CONFIDENTIAL">Confidential</option>
+                    <option value="RESTRICTED">Restricted</option>
+                </select>
+            </label>
+            <label class="full"><span>Default value</span><input type="text" id="aftFldDefault" maxlength="400" /></label>
+            <label class="full"><span>Help text</span><input type="text" id="aftFldHelp" maxlength="500" /></label>
+            <label class="full"><span>Placeholder / example</span><input type="text" id="aftFldPlaceholder" maxlength="200" /></label>
+            <p class="pm-message full" id="aftFieldMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aft="aftFieldModal">Cancel</button>
+                <button type="submit" class="pm-button primary aft-edit-only"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Section modal ======================= *@
+<div class="pm-modal" id="aftSectionModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aftSectionTitle">Section</h2>
+            <button class="pm-modal-close" type="button" data-close-aft="aftSectionModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aftSectionForm" class="pm-form-grid">
+            <label class="full"><span>Section label *</span><input type="text" id="aftSecLabel" maxlength="150" required /></label>
+            <label class="full"><span>Tab (optional)</span><input type="text" id="aftSecTab" maxlength="150" placeholder="Group sections under a tab" /></label>
+            <label><span>Layout</span><select id="aftSecCols"><option value="2">Two columns</option><option value="1">One column</option></select></label>
+            <label><span>Display order</span><input type="number" id="aftSecOrder" min="0" step="10" /></label>
+            <label class="aft-check full"><input type="checkbox" id="aftSecActive" checked /> <span>Active</span></label>
+            <p class="pm-message full" id="aftSectionMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aft="aftSectionModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Rule modal (421) ======================= *@
+<div class="pm-modal" id="aftRuleModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="aftRuleTitle">Rule</h2>
+            <button class="pm-modal-close" type="button" data-close-aft="aftRuleModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aftRuleForm" class="pm-form-grid">
+            <label class="full"><span>Rule name</span><input type="text" id="aftRuleName" maxlength="200" placeholder="Generated from the target when left blank" /></label>
+            <label><span>Then *</span>
+                <select id="aftRuleAction">
+                    <option value="SHOW_AND_REQUIRE">Show and require</option>
+                    <option value="SHOW">Show</option>
+                    <option value="REQUIRE">Require</option>
+                </select>
+            </label>
+            <label><span>Target field *</span><select id="aftRuleTarget"></select></label>
+            <label class="aft-check full"><input type="checkbox" id="aftRuleActive" checked /> <span>Active</span></label>
+            <div class="full">
+                <p class="aft-note">Conditions in the same group must all be true; the rule applies when any group is true.</p>
+                <div id="aftRuleConditions"></div>
+                <div class="pm-toolbar">
+                    <button type="button" class="pm-button" id="aftRuleAddCond"><i class="fa-solid fa-plus"></i> Add Condition</button>
+                    <button type="button" class="pm-button" id="aftRuleAddGroup"><i class="fa-solid fa-code-branch"></i> Add OR Group</button>
+                </div>
+            </div>
+            <p class="pm-message full" id="aftRuleMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aft="aftRuleModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .aft-cond { display: grid; grid-template-columns: 70px 1.4fr 1fr 1.2fr 36px; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .aft-cond-group { font-size: 12px; color: var(--fg-secondary); }
+    #aftRoot .aft-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    #aftRoot .aft-head-main { display: flex; align-items: center; gap: 12px; }
+    #aftRoot .aft-head-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); }
+    #aftRoot .aft-head-meta { font-size: 12px; color: var(--fg-secondary); margin-top: 2px; }
+    #aftRoot .aft-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    #aftRoot .aft-section + .aft-section { margin-top: 14px; }
+    #aftRoot .aft-section-title { font-size: 13px; font-weight: 600; color: var(--fg-default); margin: 8px 0 6px; }
+    #aftRoot .aft-section-title small { color: var(--fg-muted); font-weight: 400; margin-left: 6px; }
+    #aftRoot .aft-sub { display: block; color: var(--fg-muted); font-size: 12px; }
+    #aftRoot .aft-locked .aft-edit-only { display: none !important; }
+    .aft-check { flex-direction: row !important; align-items: center; gap: 6px; }
+    .aft-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg-secondary); }
+    .aft-note { color: var(--fg-secondary); font-size: 12px; margin: 0; }
+    .aft-lib-wrap { max-height: 50vh; }
+    .aft-status { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .aft-st-draft     { background: var(--bg-subtle); color: var(--fg-secondary); }
+    .aft-st-testing   { background: var(--primary-50); color: var(--primary-700); }
+    .aft-st-pending   { background: var(--warning-50); color: var(--warning-700); }
+    .aft-st-approved  { background: var(--primary-100); color: var(--primary-800); }
+    .aft-st-active    { background: var(--success-100); color: var(--success-700); }
+    .aft-st-retired   { background: var(--neutral-200); color: var(--fg-muted); }
+    .aft-sev-error    { background: var(--danger-100); color: var(--danger-700); }
+    .aft-sev-warning  { background: var(--warning-50); color: var(--warning-700); }
+    .pm-badge.aft-baseline { background: var(--primary-100); color: var(--primary-700); }
+    .pm-modal-close { background: transparent; border: 0; padding: 0; font-size: 22px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/AssetConfig/asset-form-templates.js" asp-append-version="true"></script>

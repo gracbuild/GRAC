@@ -183,7 +183,11 @@
 
   function populateOrganizationDropdowns() {
     orgFilter.innerHTML = '<option value="">All organizations</option>';
-    organizations.forEach(o => {
+    // 2026-10-06: ordered by id like every other page. This is a FILTER that
+    // opens on "All organizations", so the remembered org is not forced on
+    // it -- but a pick made here is remembered for the other pages.
+    window.gracOrgPref.watch(orgFilter);
+    window.gracOrgPref.sort(organizations, o => o.Id || o.id || o.organization_id).forEach(o => {
       const id = o.Id || o.id || o.organization_id;
       const name = o.Name || o.name || o.organization_name || `Org ${id}`;
       orgFilter.insertAdjacentHTML("beforeend", `<option value="${id}">${name}</option>`);

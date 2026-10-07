@@ -1,0 +1,177 @@
+@*
+    Asset Taxonomy -- Asset & Contract Management, Phase 2.5 (migration 424).
+    Rendered from Manage.cshtml when Model.Key == "asset-taxonomy".
+
+    BRD 4.1 / 5.2.3: Main Category -> Subcategory L1 / L2 -> Asset Type.
+    The three masters are global (one taxonomy for every organization), so
+    only the platform administrator edits them; every organization sets
+    its own Default Business Owner Role and Support Group per asset type.
+    Nothing is deleted: a node is deactivated or given an Effective To
+    date, after which it and everything below it can no longer be chosen
+    for new assets or templates (existing ones keep it).
+
+    Backend: practice/api/asset-config/taxonomy... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-taxonomy.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var atxPermissions = ViewBag.Permissions as string[] ?? [];
+    bool atxHas(string action) => atxPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var atxIsPlatformAdmin = ViewBag.IsSystemAdmin is bool b && b;
+    var atxCanEditGlobal = atxIsPlatformAdmin && (atxHas("ADD") || atxHas("EDIT"));
+    var atxCanEditOrg = atxHas("EDIT");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="atxRoot" data-can-edit-global="@(atxCanEditGlobal ? "1" : "0")" data-can-edit-org="@(atxCanEditOrg ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="atxOrg" title="Organization"><option value="">Select organization</option></select>
+            <input type="search" id="atxSearch" placeholder="Search names" maxlength="200" />
+            <label class="atx-check"><input type="checkbox" id="atxShowInactive" /> <span>Show inactive</span></label>
+            <button class="pm-button icon" id="atxRefresh" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <p class="atx-note" id="atxScopeNote">
+            @if (atxCanEditGlobal)
+            {
+                <text>The taxonomy is shared by every organization. Changes here apply to all of them.</text>
+            }
+            else
+            {
+                <text>The taxonomy is shared by every organization and maintained by the platform administrator.@(atxCanEditOrg ? " You can set this organization's default owner role and support group on each asset type." : "")</text>
+            }
+        </p>
+        <p class="pm-message" id="atxMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-tabs" role="tablist" aria-label="Asset taxonomy">
+            <button role="tab" class="active" data-atx-tab="categories" aria-selected="true">Categories</button>
+            <button role="tab" data-atx-tab="subcategories" aria-selected="false">Subcategories</button>
+            <button role="tab" data-atx-tab="types" aria-selected="false">Asset Types</button>
+        </div>
+
+        <div class="pm-tab-panel" data-atx-panel="categories">
+            @if (atxCanEditGlobal)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" type="button" data-atx-add="CATEGORY"><i class="fa-solid fa-plus"></i> Add Category</button>
+                </div>
+            }
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Category</th><th>Sector</th><th>Owner</th><th>Default criticality</th><th>Effective</th><th>Status</th><th>Subcategories</th><th>Assets</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atxCatBody"><tr><td colspan="9" class="pm-empty">Select an organization.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-atx-panel="subcategories" hidden>
+            <div class="pm-toolbar">
+                <select id="atxSubCatFilter" title="Category"><option value="">All categories</option></select>
+                @if (atxCanEditGlobal)
+                {
+                    <button class="pm-button primary" type="button" data-atx-add="SUBCATEGORY"><i class="fa-solid fa-plus"></i> Add Subcategory</button>
+                }
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Subcategory</th><th>Level</th><th>Category</th><th>Effective</th><th>Status</th><th>Asset types</th><th>Assets</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atxSubBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-atx-panel="types" hidden>
+            <div class="pm-toolbar">
+                <select id="atxTypeCatFilter" title="Category"><option value="">All categories</option></select>
+                <select id="atxTypeSubFilter" title="Subcategory"><option value="">All subcategories</option></select>
+                @if (atxCanEditGlobal)
+                {
+                    <button class="pm-button primary" type="button" data-atx-add="TYPE"><i class="fa-solid fa-plus"></i> Add Asset Type</button>
+                }
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset type</th><th>Subcategory</th><th>Criticality</th><th>Business owner role</th><th>Support group</th><th>Effective</th><th>Status</th><th>Templates</th><th>Assets</th><th aria-label="Actions"></th></tr></thead>
+                    <tbody id="atxTypeBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Node modal (category / subcategory / asset type) ======================= *@
+<div class="pm-modal" id="atxModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="atxModalTitle">Edit</h2>
+            <button class="pm-modal-close" type="button" data-close-atx aria-label="Close">&times;</button>
+        </header>
+        <form id="atxForm" class="pm-form-grid">
+            <label class="full"><span>Name *</span><input type="text" id="atxName" maxlength="200" required /></label>
+            <p class="atx-note full" id="atxCode"></p>
+            <label data-atx-for="SUBCATEGORY"><span>Category *</span><select id="atxCategory"></select></label>
+            <label data-atx-for="SUBCATEGORY"><span>Parent subcategory <small>(level 2 only)</small></span><select id="atxParent"></select></label>
+            <label data-atx-for="TYPE"><span>Category *</span><select id="atxTypeCategory"></select></label>
+            <label data-atx-for="TYPE"><span>Subcategory *</span><select id="atxTypeSub"></select></label>
+            <label data-atx-for="CATEGORY"><span>Sector</span><input type="text" id="atxSector" maxlength="120" /></label>
+            <label data-atx-for="CATEGORY"><span>Owner</span><input type="text" id="atxOwner" maxlength="200" /></label>
+            <label class="full" data-atx-for="CATEGORY"><span>Standards</span><input type="text" id="atxStandards" maxlength="1000" placeholder="e.g. ISO/IEC 27001, IEC 62353" /></label>
+            <label data-atx-for="CATEGORY TYPE"><span>Default criticality</span><select id="atxCriticality"></select></label>
+            <label><span>Display order</span><input type="number" id="atxOrder" min="0" step="1" /></label>
+            <label><span>Effective from</span><input type="date" id="atxFrom" /></label>
+            <label><span>Effective to</span><input type="date" id="atxTo" /></label>
+            <label class="full"><span>Description</span><textarea id="atxDesc" rows="3" maxlength="1000"></textarea></label>
+            <label class="atx-check full"><input type="checkbox" id="atxActive" /> <span>Active</span></label>
+            <p class="pm-message full" id="atxModalMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-atx>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Organization defaults modal (asset type) ======================= *@
+<div class="pm-modal" id="atxOrgModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="atxOrgModalTitle">Organization defaults</h2>
+            <button class="pm-modal-close" type="button" data-close-atx-org aria-label="Close">&times;</button>
+        </header>
+        <form id="atxOrgForm" class="pm-form-grid">
+            <p class="atx-note full">These defaults apply to this organization only.</p>
+            <label class="full"><span>Default business owner role</span><select id="atxOrgRole"></select></label>
+            <label class="full"><span>Default technical / support group</span><select id="atxOrgTeam"></select></label>
+            <p class="pm-message full" id="atxOrgMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-atx-org>Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .atx-check { flex-direction: row !important; align-items: center; gap: 6px; display: inline-flex; }
+    .atx-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .atx-code { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--fg-secondary); }
+    .atx-l2 { padding-left: 18px; }
+    .atx-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .atx-st-active   { background: var(--success-100); color: var(--success-700); }
+    .atx-st-pending  { background: var(--warning-50); color: var(--warning-700); }
+    .atx-st-inactive { background: var(--neutral-200); color: var(--fg-muted); }
+    #atxRoot tr.atx-off td { color: var(--fg-muted); }
+    .pm-modal-close { background: transparent; border: 0; padding: 0; font-size: 22px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
+    .pm-modal-close:hover { color: var(--danger-700); }
+</style>
+
+<script src="~/js/AssetConfig/asset-taxonomy.js" asp-append-version="true"></script>

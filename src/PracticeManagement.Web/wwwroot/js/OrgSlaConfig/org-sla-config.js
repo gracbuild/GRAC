@@ -52,7 +52,7 @@
     await populateOrgs();
     const sel = document.getElementById("oaSlaPickOrg");
     if (sel && sel.options.length > 1) {
-      sel.selectedIndex = 1;
+      window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
       state.orgId = Number(sel.value) || null;
       await Promise.all([loadRoles(), loadGrid()]);
     }

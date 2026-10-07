@@ -70,6 +70,14 @@ Plan / Plan Item / Execution / Practice Instance events have no Task Centre
 source wired at all, so nothing is looked up for them -- the "Task" badge
 and detail row simply don't appear.
 
+**Schedule-rule occurrences (449).** An Execution / Assurance occurrence
+whose due date has come gets its task from
+`sp_schedule_obligation_tasks_generate`; the calendar finds it through
+`schedule_occurrence_task` keyed on (rule, date) and fills the same four
+`LinkedTask*` keys, so the side panel shows "Task" and "Open Task" for it.
+Future occurrences have no task yet -- by design, tasks are raised on the
+due date. See [scheduled-obligation-tasks.md](scheduled-obligation-tasks.md).
+
 Both cases key on exactly the id already used as `SourceRefId`, so no new
 identifier scheme was needed. `QueryCalendarEventsAsync`
 (`PracticeManagement.Api/Services/PracticeRepositoryService.cs`) collects

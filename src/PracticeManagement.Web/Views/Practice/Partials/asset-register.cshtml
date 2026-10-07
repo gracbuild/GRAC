@@ -1,0 +1,684 @@
+@*
+    Asset Register -- Asset & Contract Management, Phase 4.1 (migration 428).
+    Rendered from Manage.cshtml when Model.Key == "asset-register".
+
+    BRD 5 / 5.1.14 / 5.1.16 / 5.2.1: assets are registered on the Active
+    form template of their asset type; the form's sections, fields and
+    conditional rules come from the template (420 / 421), pickers from
+    the organization's option lists (423) and masters, and every save runs
+    the same validation as the API (sp_asset_register_save). An asset keeps
+    the template version it was registered with. New assets start as Draft.
+
+    429 (BRD 19.9 / 5.4.3 / 11 / 5.3.10): the Lifecycle tab offers only the
+    configured moves from the asset's status, shows each move's BRD gate
+    and asks for the reason / reference / evidence it requires; moves with
+    an approval gate wait for a different person with APPROVE. "Transition
+    rules" shows the whole matrix (decision D16). Every gate is enforced by
+    sp_asset_lifecycle_transition / sp_asset_lifecycle_decide.
+
+    430 (BRD 4.6 / 4.7 / 4.8): the Technology tab shows the current firmware
+    and OS with release status, recommended target and classification
+    (Current / Due Soon / Unsupported / Exception / Unknown), records
+    installations (history with previous version, result, rollback,
+    licence, evidence) and manages technology exceptions (requested,
+    approved by another person, withdrawn, revoked; active until expiry).
+
+    435 (BRD 5.1.11 / 5.2.14): the Coverage tab shows the calculated
+    coverage status overall and per coverage type, the coverage the asset
+    type requires with any gap, and every coverage line of approved
+    contract versions (maintained on the Contracts screen).
+
+    431 (BRD 5.3): the Custody tab shows the verification status, last /
+    next attestation dates, the applicable attestation profile, the
+    effective-dated owner / custodian / location history and the asset's
+    acknowledgements and attestations (answered on Asset Attestation).
+    432: plus the asset's verification exceptions (worked on Asset Attestation
+    -> Exceptions).
+
+    433 (BRD 11): the Workflows tab starts and runs owner change, location
+    transfer, breakdown and disposal cases step by step (worker steps,
+    approvals, owner confirmations), each step moving the asset through the
+    lifecycle matrix; "Workflow cases" in the list toolbar shows the
+    organization's open cases and those waiting for the signed-in person.
+
+    446 (BRD 5.1.18 / 5.1.18.5.7 / 5.1.18.5.8): the Valuation tab shows the
+    stored Asset Value (score, category, configuration version, method,
+    validation status) next to what the Active configuration gives now,
+    the calculation history, Recalculate (EDIT; a reason when a newer
+    configuration version applies) and Override method (APPROVE; only when
+    the configuration permits it; reason required). Asset Value Score and
+    Category on the form are read-only and come from the stored result.
+
+    447 (BRD 19.7 / 5.1.18.3): the Valuation tab also lists the asset's CIA /
+    criticality consistency findings -- accept with rationale, evidence,
+    owner and review date (EDIT), approve / reject / revoke (APPROVE, not
+    the requester), withdraw, re-evaluate -- and the risks linked to the
+    asset with the Asset Value the risk module reads and a review flag.
+    "Consistency findings" in the list toolbar is the organization worklist.
+
+    448 (BRD 5.1.10 / 5.1.15 / 5.1.16 / 5.1.17 / 5.2.15 / 5.2.16): the
+    Privacy tab shows the asset's privacy status, open privacy requirement
+    gaps, exceptions and privacy / retention reviews (read-only). Exceptions
+    and reviews are acted on in Asset Privacy ("Open in Asset Privacy").
+
+    450: opened with ?organizationId=&assetId= (Asset Governance KPI
+    drill-down) the screen opens that asset.
+
+    Backend: practice/api/asset-config/register... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-register.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var argPermissions = ViewBag.Permissions as string[] ?? [];
+    bool argHas(string action) => argPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var argCanAdd = argHas("ADD");
+    var argCanEdit = argHas("EDIT");
+    var argCanApprove = argHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="argRoot" data-can-add="@(argCanAdd ? "1" : "0")" data-can-edit="@(argCanEdit ? "1" : "0")" data-can-approve="@(argCanApprove ? "1" : "0")">
+
+    @* ============================ List ============================ *@
+    <section class="pm-panel" id="argListView">
+        <div class="pm-toolbar">
+            <select id="argOrg" title="Organization"><option value="">Select organization</option></select>
+            <input type="search" id="argSearch" placeholder="Search name or ID" maxlength="200" />
+            <select id="argTypeFilter" title="Asset type"><option value="">All asset types</option></select>
+            <select id="argStatusFilter" title="Status"><option value="">All statuses</option></select>
+            <label class="arg-check"><input type="checkbox" id="argPendingOnly" /> Pending approval only</label>
+            <button class="pm-button" id="argMatrixBtn" type="button"><i class="fa-solid fa-diagram-project"></i> Transition rules</button>
+            <button class="pm-button" id="argWfListBtn" type="button"><i class="fa-solid fa-list-check"></i> Workflow cases</button>
+            <button class="pm-button" id="argConsListBtn" type="button"><i class="fa-solid fa-scale-balanced"></i> Consistency findings</button>
+            @if (argCanAdd)
+            {
+                <button class="pm-button primary" id="argNewBtn" type="button"><i class="fa-solid fa-plus"></i> New Asset</button>
+            }
+            <button class="pm-button icon" id="argRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Asset</th><th>Asset type</th><th>Status</th><th>Owner</th><th>Location</th><th>Criticality</th><th>Form</th><th>Last changed</th></tr></thead>
+                <tbody id="argListBody"><tr><td colspan="8" class="pm-empty">Select an organization.</td></tr></tbody>
+            </table>
+        </div>
+        <div id="argPager"></div>
+    </section>
+
+    @* ============================ Asset ============================ *@
+    <section id="argAssetView" hidden>
+        <div class="pm-panel arg-head">
+            <div class="arg-head-main">
+                <button class="pm-button" id="argBack" type="button"><i class="fa-solid fa-arrow-left"></i> Asset Register</button>
+                <div>
+                    <div class="arg-head-title" id="argTitle">--</div>
+                    <div class="arg-head-meta" id="argMeta"></div>
+                </div>
+            </div>
+            <div class="arg-head-actions">
+                <button class="pm-button primary" id="argSave" type="button" hidden><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </div>
+        </div>
+        <p class="pm-message" id="argMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-panel arg-issues" id="argIssues" hidden></div>
+
+        @* Asset type selection for a new asset (or an existing one without a type) *@
+        <div class="pm-panel" id="argTypeStep" hidden>
+            <p class="arg-note">Choose the asset type. The form designed for it (its Active form template) opens next.</p>
+            <div class="pm-form-grid">
+                <label><span>Main category *</span><select id="argCat"></select></label>
+                <label><span>Subcategory *</span><select id="argSub"></select></label>
+                <label><span>Asset type *</span><select id="argType"></select></label>
+                <div class="full"><button class="pm-button primary" id="argTypeGo" type="button"><i class="fa-solid fa-arrow-right"></i> Open form</button></div>
+            </div>
+        </div>
+
+        <div class="pm-panel" id="argFormPanel" hidden>
+            <div class="pm-tabs" role="tablist" aria-label="Asset">
+                <button role="tab" class="active" data-arg-tab="details" aria-selected="true">Details</button>
+                <button role="tab" data-arg-tab="lifecycle" aria-selected="false" id="argLifecycleTab" hidden>Lifecycle</button>
+                <button role="tab" data-arg-tab="technology" aria-selected="false" id="argTechTab" hidden>Technology</button>
+                <button role="tab" data-arg-tab="custody" aria-selected="false" id="argCustodyTab" hidden>Custody</button>
+                <button role="tab" data-arg-tab="coverage" aria-selected="false" id="argCoverageTab" hidden>Coverage</button>
+                <button role="tab" data-arg-tab="valuation" aria-selected="false" id="argValTab" hidden>Valuation</button>
+                <button role="tab" data-arg-tab="privacy" aria-selected="false" id="argPrivTab" hidden>Privacy</button>
+                <button role="tab" data-arg-tab="workflows" aria-selected="false" id="argWorkflowTab" hidden>Workflows</button>
+                <button role="tab" data-arg-tab="history" aria-selected="false">History</button>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="details">
+                <form id="argForm" autocomplete="off"></form>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="lifecycle" hidden>
+                <div class="arg-pending" id="argPending" hidden></div>
+                <div class="arg-section">
+                    <h3>Moves from the current status</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Move to</th><th>Minimum gate (BRD)</th><th>Needs</th><th></th></tr></thead>
+                            <tbody id="argMoves"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Lifecycle changes</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Requested</th><th>From</th><th>To</th><th>Outcome</th><th>Requested by</th><th>Decided by</th><th>Reason / reference / evidence</th></tr></thead>
+                            <tbody id="argChanges"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="technology" hidden id="argTechPanel">
+                <div class="arg-section">
+                    <div class="arg-tech-head">
+                        <h3>Installed technology</h3>
+                        @if (argCanEdit)
+                        {
+                            <div class="arg-head-actions">
+                                <button class="pm-button" type="button" data-arg-install="FIRMWARE"><i class="fa-solid fa-microchip"></i> Record firmware installation</button>
+                                <button class="pm-button" type="button" data-arg-install="OS"><i class="fa-solid fa-desktop"></i> Record OS installation</button>
+                                <button class="pm-button" type="button" data-arg-exc-new="1"><i class="fa-solid fa-shield-halved"></i> Request exception</button>
+                            </div>
+                        }
+                    </div>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Technology</th><th>Current</th><th>Release status</th><th>Classification</th><th>Recommended target</th><th>Support end / EOL</th><th>Exception</th></tr></thead>
+                            <tbody id="argTechStatus"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Firmware installations</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Installed</th><th>Release</th><th>Previous</th><th>Source</th><th>Result</th><th>Rollback</th><th>Evidence</th><th>Recorded</th></tr></thead>
+                            <tbody id="argFwHistory"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Operating-system installations</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Installed</th><th>Release</th><th>Build / patch</th><th>Previous</th><th>Source</th><th>Licence</th><th>Evidence</th><th>Recorded</th></tr></thead>
+                            <tbody id="argOsHistory"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Technology exceptions</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Version</th><th>Applies to</th><th>Reason / controls</th><th>Owner</th><th>Expiry / review</th><th>Status</th><th></th></tr></thead>
+                            <tbody id="argTechExceptions"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="custody" hidden>
+                <p class="arg-note" id="argCustodyState"></p>
+                <div class="arg-section">
+                    <h3>Ownership, custody and location history</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>From</th><th>To</th><th>Asset owner</th><th>Custodian</th><th>Department</th><th>Location</th><th>Source</th></tr></thead>
+                            <tbody id="argAssignments"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Acknowledgements and attestations</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Type</th><th>Assignee</th><th>Due</th><th>Status</th><th>Response</th><th>Answered</th></tr></thead>
+                            <tbody id="argAttestations"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Verification exceptions</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Exception</th><th>Category</th><th>Severity</th><th>Investigator</th><th>Status</th><th>Resolution due</th><th>Outcome</th></tr></thead>
+                            <tbody id="argVerExceptions"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="coverage" hidden>
+                <p class="arg-note" id="argCoverageState"></p>
+                <div class="arg-section">
+                    <h3>Coverage by type</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Coverage type</th><th>Status</th><th>Contract</th><th>Effective</th><th>Expiring from</th></tr></thead>
+                            <tbody id="argCoverageTypes"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Coverage required for the asset type</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Coverage type</th><th>Requirement</th><th>Minimum period</th><th>Licence handling</th><th>On a gap</th><th>Gap</th></tr></thead>
+                            <tbody id="argCoverageReqs"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Coverage lines (approved contract versions)</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Contract</th><th>Version</th><th>Coverage type</th><th>State</th><th>Status</th><th>Effective</th><th>Entitlement</th><th>Service level</th><th>Vendor reference</th></tr></thead>
+                            <tbody id="argCoverageLines"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="privacy" hidden id="argPrivPanel">
+                <div class="arg-tech-head">
+                    <p class="arg-note" id="argPrivState"></p>
+                    <div class="arg-pending-actions">
+                        <button class="pm-button" type="button" id="argPrivOpen"><i class="fa-solid fa-user-shield"></i> Open in Asset Privacy</button>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Requirement gaps</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Requirement</th><th>Gap</th><th>Enforcement</th><th>Exception</th></tr></thead>
+                            <tbody id="argPrivGaps"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Exceptions</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Requirement</th><th>Status</th><th>Reason / controls</th><th>Owner</th><th>Expiry</th></tr></thead>
+                            <tbody id="argPrivExceptions"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Reviews</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Review</th><th>Due</th><th>Status</th><th>Outcome</th></tr></thead>
+                            <tbody id="argPrivReviews"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="valuation" hidden id="argValPanel">
+                <div class="arg-tech-head">
+                    <p class="arg-note" id="argValState"></p>
+                    <div class="arg-pending-actions">
+                        @if (argCanEdit)
+                        {
+                            <button class="pm-button" type="button" id="argValRecalc" hidden><i class="fa-solid fa-arrows-rotate"></i> Recalculate</button>
+                        }
+                        @if (argCanApprove)
+                        {
+                            <button class="pm-button" type="button" id="argValOverride" hidden><i class="fa-solid fa-sliders"></i> Override method</button>
+                        }
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Asset Value</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Item</th><th>Active configuration now</th><th>Stored</th></tr></thead>
+                            <tbody id="argValCompare"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <div class="arg-tech-head">
+                        <h3>Consistency findings</h3>
+                        @if (argCanEdit)
+                        {
+                            <button class="pm-button" type="button" id="argConsRun"><i class="fa-solid fa-arrows-rotate"></i> Re-evaluate</button>
+                        }
+                    </div>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Rule</th><th>Severity</th><th>Status</th><th>Detected</th><th>Acceptance</th><th></th></tr></thead>
+                            <tbody id="argConsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Linked risks</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Risk</th><th>Status</th><th>Inherent / residual</th><th>Asset Value used</th><th>Last assessed</th><th>Review</th></tr></thead>
+                            <tbody id="argValRisks"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Calculation history</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>When</th><th>Source</th><th>Configuration</th><th>C / I / A</th><th>Method</th><th>Score</th><th>Category</th><th>Status</th><th>By</th><th>Reason / message</th></tr></thead>
+                            <tbody id="argValHistory"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="workflows" hidden id="argWfPanel">
+                @if (argCanEdit)
+                {
+                    <div class="pm-toolbar" id="argWfStartBar">
+                        <select id="argWfType" title="Workflow"></select>
+                        <button class="pm-button primary" id="argWfStartBtn" type="button"><i class="fa-solid fa-play"></i> Start workflow</button>
+                    </div>
+                }
+                <div class="arg-pending" id="argWfCase" hidden>
+                    <strong id="argWfCaseTitle"></strong>
+                    <div class="arg-note" id="argWfCaseInfo"></div>
+                    <ol class="arg-wf-steps" id="argWfSteps"></ol>
+                    <div id="argWfCurrent" class="pm-form-grid">
+                        <p class="arg-note full" id="argWfGuidance"></p>
+                        <label class="full" id="argWfChoiceWrap" hidden><span>Containment *</span><select id="argWfChoice"><option value="">Select</option><option value="QUARANTINE">Quarantine</option><option value="CONTROLLED_USE">Controlled use</option></select></label>
+                        <label class="full"><span id="argWfNoteLabel">Note</span><textarea id="argWfNote" rows="2" maxlength="1000"></textarea></label>
+                        <label class="full" id="argWfRefWrap" hidden><span>Reference *</span><input type="text" id="argWfRef" maxlength="400" /></label>
+                        <label class="full" id="argWfEvWrap"><span id="argWfEvLabel">Evidence</span><textarea id="argWfEv" rows="2" maxlength="1000"></textarea></label>
+                        <p class="pm-message full" id="argWfMessage" role="status" aria-live="polite" hidden></p>
+                        <div class="full arg-pending-actions" id="argWfActions"></div>
+                    </div>
+                    <h3 class="arg-wf-sub">Case history</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>When</th><th>Step</th><th>Outcome</th><th>By</th><th>Note / evidence / reference</th><th>Lifecycle</th></tr></thead>
+                            <tbody id="argWfHistory"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="arg-section">
+                    <h3>Workflow cases of this asset</h3>
+                    <div class="pm-table-wrap">
+                        <table>
+                            <thead><tr><th>Case</th><th>Workflow</th><th>Status</th><th>Step</th><th>Started</th><th>Closed</th></tr></thead>
+                            <tbody id="argWfCases"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="pm-tab-panel" data-arg-panel="history" hidden>
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead>
+                        <tbody id="argHistory"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Lifecycle move modal (429) ======================= *@
+<div class="pm-modal" id="argMoveModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="argMoveTitle">Move asset</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argMoveModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="argMoveForm" class="pm-form-grid">
+            <p class="arg-note full" id="argMoveGate"></p>
+            <label class="full"><span id="argMoveReasonLabel">Reason</span><textarea id="argMoveReason" rows="3" maxlength="1000"></textarea></label>
+            <label class="full" id="argMoveRefWrap"><span id="argMoveRefLabel">Reference *</span><input type="text" id="argMoveRef" maxlength="400" /></label>
+            <label class="full" id="argMoveEvWrap"><span>Evidence * <small>(document number, report or link)</small></span><textarea id="argMoveEv" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="argMoveMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arg="argMoveModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="argMoveSave"><i class="fa-solid fa-arrow-right"></i> Move</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Installation modal (430) ======================= *@
+<div class="pm-modal" id="argInstallModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="argInstallTitle">Record installation</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argInstallModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="argInstallForm" class="pm-form-grid">
+            <label class="full"><span>Release *</span><select id="argInstRelease"></select></label>
+            <label><span>Installed date *</span><input type="date" id="argInstDate" /></label>
+            <label><span>Source *</span><input type="text" id="argInstSource" maxlength="100" list="argInstSourceList" /></label>
+            <datalist id="argInstSourceList"><option value="Manual"></option><option value="Discovery"></option><option value="Import"></option><option value="Vendor service"></option><option value="ERP"></option><option value="API"></option></datalist>
+            <label id="argInstResultWrap"><span>Result *</span><select id="argInstResult"><option value="SUCCESSFUL">Successful</option><option value="FAILED">Failed</option></select></label>
+            <label id="argInstBuildWrap"><span>Build / patch level</span><input type="text" id="argInstBuild" maxlength="100" /></label>
+            <label id="argInstLicenceWrap"><span>Licence</span><input type="text" id="argInstLicence" maxlength="400" /></label>
+            <label class="full" id="argInstRollbackWrap"><span>Rollback</span><textarea id="argInstRollback" rows="2" maxlength="1000"></textarea></label>
+            <label class="full"><span>Evidence <small>(document number, report or link)</small></span><textarea id="argInstEvidence" rows="2" maxlength="1000"></textarea></label>
+            <p class="arg-note full">A successful installation becomes the asset's current version and needs an approved compatibility record for its model or an active technology exception.</p>
+            <p class="pm-message full" id="argInstMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arg="argInstallModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Technology exception modal (430) ======================= *@
+<div class="pm-modal" id="argExcModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Request technology exception</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argExcModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="argExcForm" class="pm-form-grid">
+            <label><span>Technology *</span><select id="argExcKind"><option value="FIRMWARE">Firmware</option><option value="OS">Operating system</option></select></label>
+            <label><span>Applies to *</span><select id="argExcScope"><option value="ASSET">This asset</option><option value="MODEL">Every asset of this model</option></select></label>
+            <label class="full"><span>Version *</span><select id="argExcRelease"></select></label>
+            <label class="full"><span>Reason *</span><textarea id="argExcReason" rows="2" maxlength="1000"></textarea></label>
+            <label class="full"><span>Compensating controls *</span><textarea id="argExcControls" rows="2" maxlength="1000"></textarea></label>
+            <label><span>Owner *</span><select id="argExcOwner"></select></label>
+            <label><span>Expiry date *</span><input type="date" id="argExcExpiry" /></label>
+            <label><span>Review date</span><input type="date" id="argExcReview" /></label>
+            <p class="arg-note full">The exception is active once another person with approval rights approves it, until the expiry date.</p>
+            <p class="pm-message full" id="argExcMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arg="argExcModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-paper-plane"></i> Request</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Valuation method override modal (446) ======================= *@
+<div class="pm-modal" id="argValModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Override valuation method</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argValModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="argValForm" class="pm-form-grid">
+            <p class="arg-note full" id="argValModalNote"></p>
+            <label class="full"><span>Method</span><select id="argValMethod"></select></label>
+            <label class="full"><span>Reason *</span><textarea id="argValReason" rows="3" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="argValMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arg="argValModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Accept consistency finding modal (447) ======================= *@
+<div class="pm-modal" id="argConsModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Accept inconsistency</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argConsModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="argConsForm" class="pm-form-grid">
+            <p class="arg-note full" id="argConsNote"></p>
+            <label class="full"><span>Rationale *</span><textarea id="argConsRationale" rows="3" maxlength="1000"></textarea></label>
+            <label class="full"><span id="argConsEvidenceLabel">Evidence</span><textarea id="argConsEvidence" rows="2" maxlength="1000"></textarea></label>
+            <label><span>Owner *</span><select id="argConsOwner"></select></label>
+            <label><span>Review date *</span><input type="date" id="argConsReview" /></label>
+            <p class="pm-message full" id="argConsMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arg="argConsModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-paper-plane"></i> Accept</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Consistency findings list (447) ======================= *@
+<div class="pm-modal" id="argConsListModal" hidden>
+    <div class="pm-modal-panel arg-wide">
+        <header>
+            <h2>Consistency findings</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argConsListModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-toolbar">
+            <select id="argConsStatus" title="Status">
+                <option value="">Open and awaiting approval</option>
+                <option value="PENDING_APPROVAL">Awaiting approval</option>
+                <option value="OPEN">Open</option>
+                <option value="ACCEPTED">Accepted</option>
+                <option value="RESOLVED">Resolved</option>
+                <option value="ALL">All</option>
+            </select>
+            <select id="argConsSeverity" title="Severity">
+                <option value="">All severities</option>
+                <option value="APPROVAL_REQUIRED">Approval Required</option>
+                <option value="ERROR">Error</option>
+                <option value="WARNING">Warning</option>
+                <option value="INFO">Information</option>
+            </select>
+            <input type="search" id="argConsSearch" placeholder="Search asset or rule" maxlength="200" />
+            @if (argCanEdit)
+            {
+                <button class="pm-button" type="button" id="argConsRunAll"><i class="fa-solid fa-arrows-rotate"></i> Re-evaluate all</button>
+            }
+        </div>
+        <p class="arg-note" id="argConsCounts"></p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Asset</th><th>Rule</th><th>Severity</th><th>Status</th><th>Detected</th><th>Acceptance</th><th></th></tr></thead>
+                <tbody id="argConsListBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Start workflow modal (433) ======================= *@
+<div class="pm-modal" id="argWfModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="argWfModalTitle">Start workflow</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argWfModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="argWfForm" class="pm-form-grid">
+            <p class="arg-note full" id="argWfSteplist"></p>
+            <label class="full" id="argWfOwnerWrap" hidden><span>New owner *</span><select id="argWfOwner"></select></label>
+            <label id="argWfSiteWrap" hidden><span>Destination site *</span><select id="argWfSite"></select></label>
+            <label id="argWfBuildingWrap" hidden><span>Building</span><select id="argWfBuilding"></select></label>
+            <label id="argWfFloorWrap" hidden><span>Floor</span><select id="argWfFloor"></select></label>
+            <label id="argWfRoomWrap" hidden><span>Room</span><select id="argWfRoom"></select></label>
+            <label class="full"><span>Reason *</span><textarea id="argWfReason" rows="2" maxlength="1000"></textarea></label>
+            <label class="full" id="argWfStartRefWrap" hidden><span id="argWfStartRefLabel">Reference *</span><input type="text" id="argWfStartRef" maxlength="400" /></label>
+            <p class="pm-message full" id="argWfModalMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-arg="argWfModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-play"></i> Start</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Workflow cases modal (433) ======================= *@
+<div class="pm-modal" id="argWfListModal" hidden>
+    <div class="pm-modal-panel arg-wide">
+        <header>
+            <h2>Open workflow cases</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argWfListModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Case</th><th>Asset</th><th>Workflow</th><th>Current step</th><th>Started</th><th></th></tr></thead>
+                <tbody id="argWfListBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Transition rules modal (429, D16) ======================= *@
+<div class="pm-modal" id="argMatrixModal" hidden>
+    <div class="pm-modal-panel arg-wide">
+        <header>
+            <h2>Asset transition rules</h2>
+            <button class="pm-modal-close" type="button" data-close-arg="argMatrixModal" aria-label="Close">&times;</button>
+        </header>
+        <p class="arg-note">BRD 19.9 / 5.4.3 / 11 / 5.3.10 rows come from the specification; PROPOSED rows cover statuses the specification lists without a transition and are awaiting confirmation.</p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>From</th><th>To</th><th>Source</th><th>Minimum gate</th><th>Needs</th><th>Active</th></tr></thead>
+                <tbody id="argMatrixBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    #argRoot .arg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    #argRoot .arg-head-main { display: flex; align-items: center; gap: 12px; }
+    #argRoot .arg-head-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); }
+    #argRoot .arg-head-meta { font-size: 12px; color: var(--fg-secondary); margin-top: 2px; }
+    #argRoot .arg-head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .arg-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .arg-section { margin-bottom: 16px; }
+    .arg-section h3 { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 0 0 8px; }
+    .arg-field small.arg-help { color: var(--fg-muted); font-size: 11px; }
+    .arg-field.arg-invalid input, .arg-field.arg-invalid select, .arg-field.arg-invalid textarea { border-color: var(--danger-700); }
+    .arg-req { color: var(--danger-700); }
+    .arg-qty { display: flex; gap: 6px; }
+    .arg-qty input:first-child { flex: 0 0 40%; }
+    .arg-issues ul { margin: 0; padding-left: 18px; font-size: 13px; }
+    .arg-issues li.arg-error { color: var(--danger-700); }
+    .arg-issues li.arg-warning { color: var(--warning-700); }
+    .arg-check { display: inline-flex; gap: 4px; align-items: center; }
+    .arg-decision { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+    .arg-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .arg-ph-acquisition { background: var(--bg-subtle); color: var(--fg-secondary); }
+    .arg-ph-readiness   { background: var(--primary-100); color: var(--primary-800); }
+    .arg-ph-operation   { background: var(--success-100); color: var(--success-700); }
+    .arg-ph-movement    { background: var(--primary-100); color: var(--primary-800); }
+    .arg-ph-exception   { background: var(--danger-100); color: var(--danger-700); }
+    .arg-ph-retirement  { background: var(--neutral-200); color: var(--fg-muted); }
+    .arg-pending { background: var(--warning-50); border: 1px solid var(--warning-700); border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px; }
+    .arg-pending-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .pm-modal-panel.arg-wide { max-width: 1100px; width: 100%; }
+    .arg-tech-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .arg-tech-head h3 { margin: 0; }
+    .arg-tc-warn { background: var(--warning-50); color: var(--warning-700); }
+    .arg-wf-steps { margin: 8px 0 12px; padding-left: 20px; font-size: 13px; }
+    .arg-wf-steps li.arg-wf-done { color: var(--success-700); }
+    .arg-wf-steps li.arg-wf-current { font-weight: 600; color: var(--fg-strong); }
+    .arg-wf-steps li.arg-wf-todo { color: var(--fg-muted); }
+    .arg-wf-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-register.js" asp-append-version="true"></script>

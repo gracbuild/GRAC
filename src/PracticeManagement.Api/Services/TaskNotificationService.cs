@@ -30,6 +30,11 @@ public interface ITaskNotificationService
     /// recorded — the sweep is idempotent, so a steady state returns 0.</summary>
     Task<TaskNotificationSweepResult> SweepAsync(long? organizationId, int batchSize, CancellationToken cancellationToken);
 
+    /// <summary>449: raises the Task Centre task for every scheduled
+    /// obligation occurrence due on <paramref name="runDate"/> (default:
+    /// today, UTC). Idempotent -- an occurrence is claimed once.</summary>
+    Task<ScheduledObligationTaskRunResult> GenerateScheduledObligationTasksAsync(long? organizationId, DateTime? runDate, CancellationToken cancellationToken);
+
     Task<TaskNotificationListResult> ListAsync(TaskNotificationListQuery query, CancellationToken cancellationToken);
     Task<TaskNotificationCounts> CountsAsync(long? organizationId, long? recipientEmployeeId, CancellationToken cancellationToken);
     Task<TaskNotificationCommandResult> MarkAsync(TaskNotificationMarkRequest request, CancellationToken cancellationToken);
@@ -72,6 +77,39 @@ public sealed class TaskNotificationService(IConfiguration configuration, ILogge
         return new TaskNotificationSweepResult(
             Enqueued:     enqueued.Value == DBNull.Value ? 0 : Convert.ToInt32(enqueued.Value),
             TasksScanned: scanned.Value  == DBNull.Value ? 0 : Convert.ToInt32(scanned.Value));
+    }
+
+    public async Task<ScheduledObligationTaskRunResult> GenerateScheduledObligationTasksAsync(
+        long? organizationId, DateTime? runDate, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_schedule_obligation_tasks_generate";
+        // A daily pass over every rule; generous, but bounded.
+        command.CommandTimeout = 300;
+
+        AddParam(command, "@organization_id", DbType.Int64,  (object?)organizationId ?? DBNull.Value);
+        AddParam(command, "@run_date",        DbType.Date,   (object?)runDate?.Date ?? DBNull.Value);
+        AddParam(command, "@actor",           DbType.String, "scheduler", 100);
+
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return new ScheduledObligationTaskRunResult(runDate?.Date, "OK", 0, 0);
+            return new ScheduledObligationTaskRunResult(
+                reader["RunDate"] is DateTime d ? d : runDate?.Date,
+                reader["Result"]?.ToString() ?? "OK",
+                reader["TasksCreated"] is int t ? t : Convert.ToInt32(reader["TasksCreated"] ?? 0),
+                reader["ErrorCount"]   is int e ? e : Convert.ToInt32(reader["ErrorCount"] ?? 0));
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            // Api deployed ahead of migration 449: report, do not fail the worker.
+            logger.LogWarning("sp_schedule_obligation_tasks_generate is missing -- run migration 449.");
+            return new ScheduledObligationTaskRunResult(runDate?.Date, "NOT_INSTALLED", 0, 0);
+        }
     }
 
     public async Task<TaskNotificationListResult> ListAsync(TaskNotificationListQuery query, CancellationToken cancellationToken)

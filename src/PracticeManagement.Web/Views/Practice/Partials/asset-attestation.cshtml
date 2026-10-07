@@ -1,0 +1,356 @@
+@*
+    Asset Attestation -- Asset & Contract Management, Phase 4.4 (migration 431).
+    Rendered from Manage.cshtml when Model.Key == "asset-attestation".
+
+    BRD 5.3: custodians / asset owners acknowledge newly assigned assets
+    (raised automatically when the Asset Register changes the custodian or
+    owner) and attest them periodically by profile (5.3.1). "My
+    attestations" lists what the signed-in person must answer; "My
+    approvals" what waits for them as manager; "All occurrences" the
+    organization's register. Runs / campaigns generate the due occurrences
+    (idempotent); Profiles configure applicability by category,
+    subcategory or asset type. Every rule is enforced by the procedures
+    (sp_asset_attestation_*): only the assignee may respond, only the
+    manager may approve.
+
+    432 (BRD 5.3.5-5.3.10): a disagreement opens one Asset Verification
+    Exception. "Exceptions" lists them (mine = where I am the investigator)
+    with SLA due dates and escalation level; the detail dialog runs the
+    investigation (start, await evidence / resume, resolve, approve /
+    reject, close, reassign, cancel). "Exception settings" holds the asset
+    administrator, fallback team, escalation levels and the per-category
+    assignment / SLA rules (BRD 5.3.8 defaults, organization overrides).
+
+    Backend: practice/api/asset-config/attestation... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-attestation.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var aatPermissions = ViewBag.Permissions as string[] ?? [];
+    bool aatHas(string action) => aatPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var aatCanAdd = aatHas("ADD");
+    var aatCanEdit = aatHas("EDIT");
+    var aatCanApprove = aatHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="aatRoot" data-can-add="@(aatCanAdd ? "1" : "0")" data-can-edit="@(aatCanEdit ? "1" : "0")" data-can-approve="@(aatCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="aatOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Asset attestation">
+            <button role="tab" class="active" data-aat-tab="MINE" aria-selected="true">My attestations</button>
+            <button role="tab" data-aat-tab="APPROVALS" aria-selected="false">My approvals</button>
+            <button role="tab" data-aat-tab="ALL" aria-selected="false">All occurrences</button>
+            <button role="tab" data-aat-tab="RUNS" aria-selected="false">Runs and campaigns</button>
+            <button role="tab" data-aat-tab="PROFILES" aria-selected="false">Profiles</button>
+            <button role="tab" data-aat-tab="EXCEPTIONS" aria-selected="false">Exceptions</button>
+            <button role="tab" data-aat-tab="EXCSETTINGS" aria-selected="false">Exception settings</button>
+        </div>
+        <p class="pm-message" id="aatMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- occurrences (MINE / APPROVALS / ALL) ---------------- *@
+        <div class="pm-tab-panel" data-aat-panel="LIST">
+            <div class="pm-toolbar">
+                <input type="search" id="aatSearch" placeholder="Search asset name or ID" maxlength="200" />
+                <select id="aatStatus" title="Status">
+                    <option value="">All statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="IN_PROGRESS">In progress</option>
+                    <option value="OVERDUE">Overdue</option>
+                    <option value="CONFIRMED">Confirmed (awaiting approval)</option>
+                    <option value="DISPUTED">Disputed</option>
+                    <option value="EXCEPTION">Exception</option>
+                    <option value="RESOLVED">Resolved</option>
+                    <option value="CLOSED">Closed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                </select>
+                <button class="pm-button icon" id="aatRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Type</th><th>Assignee</th><th>Due</th><th>Status</th><th>Response</th><th>Run / campaign</th><th></th></tr></thead>
+                    <tbody id="aatListBody"></tbody>
+                </table>
+            </div>
+            <div id="aatPager"></div>
+        </div>
+
+        @* ---------------- runs and campaigns ---------------- *@
+        <div class="pm-tab-panel" data-aat-panel="RUNS" hidden>
+            @if (aatCanAdd)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="aatRunBtn" type="button"><i class="fa-solid fa-play"></i> Run periodic attestation</button>
+                    <button class="pm-button" id="aatCampaignBtn" type="button"><i class="fa-solid fa-plus"></i> New campaign</button>
+                </div>
+            }
+            <p class="aat-note">A run marks overdue occurrences and creates one occurrence per applicable asset, participant and due period; running it again creates nothing twice.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Run / campaign</th><th>Type</th><th>Asset type</th><th>Due</th><th>Generated</th><th>Skipped</th><th>Closed</th><th>Marked overdue</th><th>By / when</th></tr></thead>
+                    <tbody id="aatRunsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- profiles ---------------- *@
+        <div class="pm-tab-panel" data-aat-panel="PROFILES" hidden>
+            @if (aatCanAdd || aatCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="aatProfileNew" type="button"><i class="fa-solid fa-plus"></i> Add profile</button>
+                </div>
+            }
+            <p class="aat-note">The most specific active profile applies: asset type, then subcategory, then category.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Applies to</th><th>Required</th><th>Participant</th><th>Frequency</th><th>Due window</th><th>Evidence</th><th>Manager approval</th><th>Active</th><th>Version</th></tr></thead>
+                    <tbody id="aatProfilesBody"></tbody>
+                </table>
+            </div>
+        </div>
+        @* ---------------- verification exceptions (432) ---------------- *@
+        <div class="pm-tab-panel" data-aat-panel="EXCEPTIONS" hidden>
+            <div class="pm-toolbar">
+                <select id="aatExcScope" title="Scope"><option value="MINE">Assigned to me</option><option value="ALL">All exceptions</option></select>
+                <select id="aatExcStatus" title="Status">
+                    <option value="OPEN_ALL">All open</option><option value="">All statuses</option>
+                    <option value="OPEN">Open</option><option value="ASSIGNED">Assigned</option><option value="UNDER_REVIEW">Under review</option>
+                    <option value="AWAITING_EVIDENCE">Awaiting evidence</option><option value="AWAITING_APPROVAL">Awaiting approval</option>
+                    <option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option><option value="CANCELLED">Cancelled</option>
+                </select>
+                <input type="search" id="aatExcSearch" placeholder="Search asset, asset ID or exception ID" maxlength="200" />
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Exception</th><th>Asset</th><th>Category</th><th>Severity</th><th>Investigator</th><th>Status</th><th>Resolution due</th><th>Escalation</th></tr></thead>
+                    <tbody id="aatExcBody"></tbody>
+                </table>
+            </div>
+            <div id="aatExcPager"></div>
+        </div>
+
+        @* ---------------- exception settings (432) ---------------- *@
+        <div class="pm-tab-panel" data-aat-panel="EXCSETTINGS" hidden>
+            <div class="pm-form-grid">
+                <label><span>Asset administrator</span><select id="aatVsAdmin"></select></label>
+                <label><span>Fallback team</span><select id="aatVsTeam"></select></label>
+                <label><span>Escalation level 1 (overdue days)</span><input type="number" id="aatVsL1" min="1" /></label>
+                <label><span>Escalation level 2 (overdue days)</span><input type="number" id="aatVsL2" min="2" /></label>
+                <label><span>Escalation level 3 (overdue days)</span><input type="number" id="aatVsL3" min="3" /></label>
+                @if (aatCanEdit)
+                {
+                    <div class="full"><button class="pm-button primary" id="aatVsSave" type="button"><i class="fa-solid fa-floppy-disk"></i> Save settings</button></div>
+                }
+            </div>
+            <p class="aat-note">Assignment and SLA by disagreement category. Defaults are the BRD 5.3.8 matrix (calendar days until a business calendar exists); select a row to override it for this organization.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Category</th><th>Primary assignment</th><th>Supporting</th><th>Start SLA</th><th>Resolution SLA</th><th>Closure approval</th><th>Closure evidence</th><th>Source</th></tr></thead>
+                    <tbody id="aatVrBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Exception detail modal (432) ======================= *@
+<div class="pm-modal" id="aatExcModal" hidden>
+    <div class="pm-modal-panel aat-wide">
+        <header>
+            <h2 id="aatExcTitle">Verification exception</h2>
+            <button class="pm-modal-close" type="button" data-close-aat="aatExcModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="aat-exc-info" id="aatExcInfo"></div>
+        <form id="aatExcForm" class="pm-form-grid">
+            <div class="full" id="aatExcResolveWrap" hidden>
+                <div class="pm-form-grid">
+                    <label><span>Outcome *</span><select id="aatExcOutcome">
+                        <option value="">Select</option><option value="NO_CHANGE">No change (record correct)</option>
+                        <option value="RECORD_CORRECTION">Record corrected</option><option value="LOST_CONFIRMED">Loss confirmed</option>
+                        <option value="DAMAGE_CONFIRMED">Damage confirmed</option><option value="RETIREMENT_CONFIRMED">Retirement confirmed</option>
+                        <option value="DUPLICATE_CONFIRMED">Duplicate confirmed</option><option value="OTHER">Other</option>
+                    </select></label>
+                    <label class="full"><span>Resolution *</span><textarea id="aatExcNarrative" rows="3" maxlength="2000"></textarea></label>
+                    <label class="full"><span id="aatExcEvidenceLabel">Closure evidence</span><textarea id="aatExcEvidence" rows="2" maxlength="1000"></textarea></label>
+                    <div class="full" id="aatExcSecWrap" hidden>
+                        <p class="aat-note">Lost-asset security review (BRD 5.3.10) -- each item Done or Not applicable.</p>
+                        <div class="pm-form-grid">
+                            <label><span>Remote lock / wipe assessment *</span><select data-aat-sec="secRemoteLockWipe"><option value="">Select</option><option value="DONE">Done</option><option value="NA">Not applicable</option></select></label>
+                            <label><span>Credential and token exposure *</span><select data-aat-sec="secCredentialReview"><option value="">Select</option><option value="DONE">Done</option><option value="NA">Not applicable</option></select></label>
+                            <label><span>Data-loss / privacy assessment *</span><select data-aat-sec="secPrivacyAssessment"><option value="">Select</option><option value="DONE">Done</option><option value="NA">Not applicable</option></select></label>
+                            <label><span>Access revocation review *</span><select data-aat-sec="secAccessRevocation"><option value="">Select</option><option value="DONE">Done</option><option value="NA">Not applicable</option></select></label>
+                            <label><span>Monitoring action *</span><select data-aat-sec="secMonitoring"><option value="">Select</option><option value="DONE">Done</option><option value="NA">Not applicable</option></select></label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="full aat-actions" id="aatExcReassignWrap" hidden>
+                <select id="aatExcReassign" title="New investigator"></select>
+                <button class="pm-button" type="button" data-aat-exc-act="REASSIGN">Reassign</button>
+            </div>
+            <p class="pm-message full" id="aatExcMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full aat-actions" id="aatExcActions"></footer>
+        </form>
+        <h3 class="aat-sub">History</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Action / note</th></tr></thead>
+                <tbody id="aatExcHistory"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Exception rule modal (432) ======================= *@
+<div class="pm-modal" id="aatRuleModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aatRuleTitle">Assignment and SLA</h2>
+            <button class="pm-modal-close" type="button" data-close-aat="aatRuleModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aatRuleForm" class="pm-form-grid">
+            <label><span>Primary assignment *</span><select id="aatVrPrimary">
+                <option value="ASSET_OWNER">Asset owner</option><option value="ASSET_ADMINISTRATOR">Asset administrator</option>
+                <option value="MAINTENANCE_TEAM">Maintenance / support team</option><option value="SECURITY">Security (information security owner)</option>
+                <option value="FALLBACK_TEAM">Fallback team</option>
+            </select></label>
+            <label><span>Supporting assignment</span><input type="text" id="aatVrSupporting" maxlength="200" /></label>
+            <label><span>Start SLA (days) *</span><input type="number" id="aatVrStart" min="0" max="365" /></label>
+            <label><span>Resolution SLA (days) *</span><input type="number" id="aatVrResolution" min="1" max="365" /></label>
+            <label class="aat-check"><input type="checkbox" id="aatVrImmediate" /> Start immediately</label>
+            <label class="aat-check"><input type="checkbox" id="aatVrApproval" /> Closure approval required</label>
+            <label class="aat-check"><input type="checkbox" id="aatVrEvidence" /> Closure evidence required</label>
+            <p class="pm-message full" id="aatRuleMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" id="aatVrReset">Reset to default</button>
+                <button type="button" class="pm-button" data-close-aat="aatRuleModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Respond modal ======================= *@
+<div class="pm-modal" id="aatRespondModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aatRespondTitle">Attest asset</h2>
+            <button class="pm-modal-close" type="button" data-close-aat="aatRespondModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aatRespondForm" class="pm-form-grid">
+            <p class="aat-note full" id="aatRespondInfo"></p>
+            <div class="full aat-checks">
+                <label class="aat-check"><input type="checkbox" data-aat-check="assetExists" /> Asset exists</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="custodyConfirmed" /> Custody confirmed</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="locationVerified" /> Location verified</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="tagVerified" /> Tag verified</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="serialVerified" /> Serial verified</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="assignedUserVerified" /> Assigned user verified</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="informationCorrect" /> Information correct</label>
+                <label class="aat-check"><input type="checkbox" data-aat-check="businessUseConfirmed" /> Business use confirmed</label>
+            </div>
+            <label><span>Condition *</span><select id="aatCondition">
+                <option value="">Select</option><option value="GOOD">Good</option><option value="FAIR">Fair</option><option value="POOR">Poor</option>
+                <option value="DAMAGED">Damaged</option><option value="LOST">Lost</option><option value="NOT_FOUND">Not found</option>
+                <option value="RETURNED">Returned</option><option value="REPLACED">Replaced</option><option value="RETIRED">Retired</option>
+            </select></label>
+            <label><span>Response *</span><select id="aatResponse"><option value="CONFIRM">Confirm</option><option value="DISAGREE">Disagree</option></select></label>
+            <label class="full" id="aatCategoryWrap" hidden><span>Disagreement category *</span><select id="aatCategory">
+                <option value="">Select</option><option value="ASSET_NOT_FOUND">Asset not found</option><option value="WRONG_CUSTODIAN">Wrong custodian</option>
+                <option value="ASSET_RETURNED">Asset returned</option><option value="ASSET_REPLACED">Asset replaced</option>
+                <option value="ASSET_DAMAGED">Asset damaged</option><option value="ASSET_LOST">Asset lost</option>
+                <option value="LOCATION_INCORRECT">Location incorrect</option><option value="INFORMATION_INCORRECT">Asset information incorrect</option>
+                <option value="DUPLICATE_RECORD">Duplicate asset record</option><option value="ASSET_RETIRED">Asset retired</option><option value="OTHER">Other</option>
+            </select></label>
+            <label class="full"><span id="aatCommentsLabel">Comments</span><textarea id="aatComments" rows="3" maxlength="2000"></textarea></label>
+            <label class="full"><span id="aatEvidenceLabel">Evidence</span><textarea id="aatEvidence" rows="2" maxlength="1000" placeholder="Photo, barcode / QR scan, document, location proof, report or incident reference"></textarea></label>
+            <p class="pm-message full" id="aatRespondMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aat="aatRespondModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-paper-plane"></i> Submit</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Campaign modal ======================= *@
+<div class="pm-modal" id="aatCampaignModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>New attestation campaign</h2>
+            <button class="pm-modal-close" type="button" data-close-aat="aatCampaignModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aatCampaignForm" class="pm-form-grid">
+            <label class="full"><span>Campaign name *</span><input type="text" id="aatCmpName" maxlength="200" /></label>
+            <label><span>Asset type</span><select id="aatCmpType"></select></label>
+            <label><span>Due date *</span><input type="date" id="aatCmpDue" /></label>
+            <p class="aat-note full">One occurrence per asset with an attestation profile (and the asset type, if chosen); each asset keeps its own response and history.</p>
+            <p class="pm-message full" id="aatCampaignMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aat="aatCampaignModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-play"></i> Generate</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Profile modal ======================= *@
+<div class="pm-modal" id="aatProfileModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="aatProfileTitle">Attestation profile</h2>
+            <button class="pm-modal-close" type="button" data-close-aat="aatProfileModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="aatProfileForm" class="pm-form-grid">
+            <label><span>Applies to *</span><select id="aatPfKind"><option value="ASSET_TYPE">Asset type</option><option value="SUBCATEGORY">Subcategory</option><option value="CATEGORY">Category</option></select></label>
+            <label><span>&nbsp;</span><select id="aatPfScope"></select></label>
+            <label><span>Participant *</span><select id="aatPfParticipant"><option value="CUSTODIAN">Custodian</option><option value="OWNER">Asset owner</option><option value="BOTH">Both</option></select></label>
+            <label><span>Frequency *</span><select id="aatPfFrequency"><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="HALF_YEARLY">Half-yearly</option><option value="ANNUAL">Annual</option><option value="CUSTOM">Custom</option></select></label>
+            <label id="aatPfCustomWrap" hidden><span>Every (days) *</span><input type="number" id="aatPfCustom" min="1" max="3660" /></label>
+            <label><span>Due window (calendar days) *</span><input type="number" id="aatPfWindow" min="1" max="365" /></label>
+            <label><span>Evidence *</span><select id="aatPfEvidence"><option value="NONE">None</option><option value="OPTIONAL">Optional</option><option value="MANDATORY">Mandatory</option></select></label>
+            <label class="aat-check"><input type="checkbox" id="aatPfRequired" /> Attestation required</label>
+            <label class="aat-check"><input type="checkbox" id="aatPfManager" /> Manager approval</label>
+            <label class="aat-check"><input type="checkbox" id="aatPfActive" /> Active</label>
+            <p class="pm-message full" id="aatProfileMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aat="aatProfileModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .aat-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .aat-check { display: inline-flex; gap: 4px; align-items: center; }
+    .aat-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 12px; }
+    .aat-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .aat-st-open     { background: var(--primary-100); color: var(--primary-800); }
+    .aat-st-overdue  { background: var(--danger-100); color: var(--danger-700); }
+    .aat-st-wait     { background: var(--warning-50); color: var(--warning-700); }
+    .aat-st-disputed { background: var(--danger-100); color: var(--danger-700); }
+    .aat-st-closed   { background: var(--success-100); color: var(--success-700); }
+    .aat-st-cancel   { background: var(--neutral-200); color: var(--fg-muted); }
+    .aat-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pm-modal-panel.aat-wide { max-width: 1000px; width: 100%; }
+    .aat-exc-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .aat-exc-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .aat-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .aat-esc-1 { background: var(--warning-50); color: var(--warning-700); }
+    .aat-esc-2, .aat-esc-3 { background: var(--danger-100); color: var(--danger-700); }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-attestation.js" asp-append-version="true"></script>

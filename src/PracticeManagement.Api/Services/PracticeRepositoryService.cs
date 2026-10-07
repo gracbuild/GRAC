@@ -143,11 +143,16 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         else if (isQuery && entityType.Equals("time-zones", StringComparison.OrdinalIgnoreCase))
             shim = "grac_practice.sp_get_time_zone_lookup";
         // Migration 241: asset save has to write the new asset_subcategory_id
-        // and asset_type_id columns, and the monolith predates them. There
-        // is no _get shim -- list/query stays on the monolith, which already
-        // returns the two new columns transparently.
-        else if (isManage && entityType.Equals("dependency-assets", StringComparison.OrdinalIgnoreCase))
-            shim = "grac_practice.sp_org_dependency_assets_repository_manage";
+        // and asset_type_id columns, and the monolith predates them.
+        // Migration 419: the list moves to a _get shim as well. The monolith's
+        // projection never returned asset_subcategory_id / asset_type_id, so
+        // the Edit form opened with both blank and Save wrote NULL over them.
+        // The save shim now hands RETIRE back to the monolith (it used to
+        // treat RETIRE as a save and fail with "Organization is required").
+        else if (entityType.Equals("dependency-assets", StringComparison.OrdinalIgnoreCase))
+            shim = isManage
+                ? "grac_practice.sp_org_dependency_assets_repository_manage"
+                : "grac_practice.sp_org_dependency_assets_repository_get";
         // Migration 241: the Add Asset form needs the whole 3-level taxonomy
         // for its cascade. Rather than extending the master-lookup UNION on
         // the monolith, entity 'asset-taxonomy' routes to a small dedicated
@@ -294,6 +299,21 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         {
             var requestedEntityType = entityType;
             if (entityType.Equals("resolve", StringComparison.OrdinalIgnoreCase)) entityType = "practice-operationalization";
+            // 2026-10-06: organization-profile is the Organization
+            // Administration screen's read-only Organization tab. It reads
+            // exactly what organization-setup reads, for ONE organization
+            // (the access check below then applies to it), and can never
+            // write: an organization-setup SAVE rewrites the organization's
+            // subscriptions from its releaseIds, which is Organization
+            // Setup's job, not an organization admin's.
+            if (entityType.Equals("organization-profile", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!procedure.Equals("dbo.pm_get_practice_repository", StringComparison.OrdinalIgnoreCase))
+                    return new(false, "The organization profile is read-only.");
+                if (!JsonInt(payload, "organizationId").HasValue)
+                    return new(false, "organizationId is required.");
+                entityType = "organization-setup";
+            }
             var provider = configuration["Database:Provider"] ?? "Microsoft.Data.SqlClient";
             var connectionString = GetConnectionString();
             if (string.IsNullOrWhiteSpace(connectionString))
@@ -918,6 +938,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             51133 => "ownerId",
             51134 => "locationId",
             51135 => "criticalityId",
+            // 419: taxonomy-chain checks of the save shim (241).
+            52726 => "assetSubcategoryId",
+            52727 => "assetTypeId",
             _ => null
         },
         "dependency-processes" => sqlErrorNumber switch
@@ -5505,6 +5528,65 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Calendar: Linked Task Centre lookup failed (org={OrgId}). Skipping -- events still render without it.", organizationId);
+        }
+
+        // 4h. Migration 449: schedule-rule occurrences that already raised
+        // their task (sp_schedule_obligation_tasks_generate, on the due date)
+        // carry it the same way Gap / Observation events do above -- same
+        // four keys, so the side panel's "Task" row and "Open Task" link
+        // need no change. Keyed on (rule, date) through
+        // schedule_occurrence_task; a database without 449 has no table,
+        // so the lookup is skipped and the calendar renders as before.
+        try
+        {
+            var ruleIds = events
+                .Where(e => "AssuranceScheduleRule".Equals(e.GetValueOrDefault("SourceRefType") as string, StringComparison.OrdinalIgnoreCase)
+                            && e.TryGetValue("SourceRefId", out var r) && r is not null)
+                .Select(e => Convert.ToInt64(e["SourceRefId"]))
+                .Distinct().ToList();
+
+            if (ruleIds.Count > 0)
+            {
+                await using var occCmd = connection.CreateCommand();
+                occCmd.CommandText = $"""
+                    IF OBJECT_ID('grac_practice.schedule_occurrence_task','U') IS NOT NULL
+                    SELECT x.schedule_rule_id, x.occurrence_date, v.task_id, v.task_number, v.current_status_name
+                    FROM grac_practice.schedule_occurrence_task x
+                    JOIN grac_practice.vw_pm_practice_task v ON v.task_id = x.task_id
+                    WHERE x.schedule_rule_id IN ({string.Join(",", ruleIds)})
+                      AND x.occurrence_date BETWEEN @range_from AND @range_to
+                    """;
+                Add(occCmd, "@range_from", rangeFrom.Date);
+                Add(occCmd, "@range_to", rangeTo.Date);
+                var occTasks = new Dictionary<(long RuleId, DateTime Date), (long TaskId, string TaskNumber, string StatusName)>();
+                await using (var occReader = await occCmd.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await occReader.ReadAsync(cancellationToken))
+                    {
+                        occTasks[(occReader.GetInt64(0), occReader.GetDateTime(1).Date)] = (
+                            occReader.GetInt64(2),
+                            occReader.IsDBNull(3) ? "" : occReader.GetString(3),
+                            occReader.IsDBNull(4) ? "" : occReader.GetString(4));
+                    }
+                }
+
+                foreach (var ev in events)
+                {
+                    if (!"AssuranceScheduleRule".Equals(ev.GetValueOrDefault("SourceRefType") as string, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (ev.GetValueOrDefault("SourceRefId") is not { } rid || ev.GetValueOrDefault("StartDate") is not DateTime day) continue;
+                    if (occTasks.TryGetValue((Convert.ToInt64(rid), day.Date), out var linked))
+                    {
+                        ev["LinkedTaskId"]       = linked.TaskId;
+                        ev["LinkedTaskNumber"]   = linked.TaskNumber;
+                        ev["LinkedTaskStatus"]   = linked.StatusName;
+                        ev["LinkedTaskDeepLink"] = $"/Practice/Index/tasks#taskId={linked.TaskId}";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Calendar: scheduled obligation task lookup failed (org={OrgId}). Skipping -- events still render without it.", organizationId);
         }
 
         // 5. Fetch calendar config

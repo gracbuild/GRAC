@@ -348,6 +348,26 @@ public sealed class PracticeController(
         if (screenKey.StartsWith("risk-centre-", StringComparison.OrdinalIgnoreCase))
             return "risk-centre";
 
+        // Issues & Actions "route" screens (2026-10-03). None has a
+        // menu_master row -- each is always about one record and is opened
+        // from its centre's grid/menu or another view -- so
+        // pm_grant_organization_default_access (217), which grants an
+        // organisation's Admin every ACTIVE menu row, had nothing to grant
+        // and every role but PM_ADMIN got "No permission" (e.g. a new
+        // organisation's Admin opening Gap Details). Each follows the
+        // centre it belongs to, same rule as practice-view above:
+        //   gap-detail, gap-view            -> gaps (Gap Register)
+        //   task-view                       -> tasks (Task Board)
+        //   exception-analysis, -view       -> exception-centre
+        if (screenKey.Equals("gap-detail", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("gap-view", StringComparison.OrdinalIgnoreCase))
+            return "gaps";
+        if (screenKey.Equals("task-view", StringComparison.OrdinalIgnoreCase))
+            return "tasks";
+        if (screenKey.Equals("exception-analysis", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("exception-view", StringComparison.OrdinalIgnoreCase))
+            return "exception-centre";
+
         return screenKey;
     }
 

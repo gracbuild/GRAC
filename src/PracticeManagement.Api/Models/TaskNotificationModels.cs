@@ -99,3 +99,15 @@ public sealed record TaskNotificationCommandResult(
 public sealed record TaskNotificationSweepResult(
     int Enqueued,
     int TasksScanned);
+
+/// <summary>
+/// 449: one pass of grac_practice.sp_schedule_obligation_tasks_generate --
+/// tasks raised for scheduled obligation occurrences due on <see cref="RunDate"/>.
+/// <see cref="Result"/> is OK, SKIPPED (another instance holds the lock) or
+/// NOT_INSTALLED (migration 449 not applied).
+/// </summary>
+public sealed record ScheduledObligationTaskRunResult(
+    DateTime? RunDate,
+    string Result,
+    int TasksCreated,
+    int ErrorCount);

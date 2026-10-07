@@ -1,0 +1,707 @@
+@*
+    Contracts -- Asset & Contract Management, Phase 5.1 (migration 434).
+    Rendered from Manage.cshtml when Model.Key == "asset-contracts".
+
+    BRD 7: one contract record per agreement (contract ID, name, type from
+    the organization coverage type list, parent agreement, vendor from the
+    Vendor Module). BRD 7.2: every revision is a ContractVersion -- Draft,
+    In Review, Pending Approval, Approved, Active, Superseded, Expired,
+    Terminated, Rejected; only a Draft is editable, an approved version is
+    immutable, a new version replaces the previous one on its effective
+    date. The contract dialog shows the 7.2.3 subsections: current summary,
+    version history (open any version read-only, compare two versions),
+    vendor contacts, documents, approval history and vendor contact
+    history. BRD 7.4: vendor contacts are the vendor users (third-party
+    people of the vendor), mapped by role with effective dates; another
+    person validates a mapping; ending keeps it. Every rule is enforced by
+    the procedures (sp_asset_contract_*); this screen mirrors them.
+
+    435 (BRD 7 Coverage, 5.1.11, 5.2.14): a version also holds its
+    entitlements (product / SKU, quantity, dates, exclusions) and its asset
+    coverage (one line per asset and coverage type: Covered, Excluded with
+    a reason, or Suspended), edited while the version is a Draft and frozen
+    with it. "Coverage gaps" lists assets missing coverage their asset type
+    requires; "Coverage requirements" sets per asset type which coverage is
+    Not applicable / Optional / Required and whether a gap blocks
+    activation, plus the expiring window. The contract dialog shows the
+    current coverage posture and the coverage history per version; the
+    comparison lists asset coverage and entitlement differences.
+
+    436 (BRD 7.3): "Renewals" lists the contracts reaching their renewal
+    date (earliest of notice date, decision date and end minus the expiring
+    window) and the renewal occurrences. A renewal records the decision
+    (renewal, extension, rebid, replacement, non-renewal), new expiry,
+    value and quotation / PO / invoice references; another person approves
+    the decision; the resulting version is created (renewal / extension)
+    or linked (rebid / replacement) and approved as usual; completing the
+    renewal freezes the coverage reconciliation (covered, added, removed,
+    excluded, unresolved) and derives the outcome. Unresolved assets are
+    resolved one by one. The contract dialog shows the Renewal history.
+
+    Backend: practice/api/asset-config/contracts... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/asset-contracts.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var acoPermissions = ViewBag.Permissions as string[] ?? [];
+    bool acoHas(string action) => acoPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var acoCanAdd = acoHas("ADD");
+    var acoCanEdit = acoHas("EDIT");
+    var acoCanApprove = acoHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="acoRoot" data-can-add="@(acoCanAdd ? "1" : "0")" data-can-edit="@(acoCanEdit ? "1" : "0")" data-can-approve="@(acoCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="acoOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Contracts">
+            <button role="tab" class="active" data-aco-main="CONTRACTS" aria-selected="true">Contracts</button>
+            <button role="tab" data-aco-main="RENEWALS" aria-selected="false">Renewals</button>
+            <button role="tab" data-aco-main="GAPS" aria-selected="false">Coverage gaps</button>
+            <button role="tab" data-aco-main="REQUIREMENTS" aria-selected="false">Coverage requirements</button>
+        </div>
+        <p class="pm-message" id="acoMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-tab-panel" data-aco-mainpanel="CONTRACTS">
+        <div class="pm-toolbar">
+            <input type="search" id="acoSearch" placeholder="Search contract ID, name or vendor" maxlength="200" />
+            <select id="acoStatus" title="Status">
+                <option value="">All statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="APPROVED">Approved (not yet effective)</option>
+                <option value="ACTIVE">Active</option>
+                <option value="EXPIRED">Expired</option>
+                <option value="TERMINATED">Terminated</option>
+            </select>
+            <select id="acoVendorFilter" title="Vendor"><option value="">All vendors</option></select>
+            <select id="acoTypeFilter" title="Contract type"><option value="">All types</option></select>
+            <button class="pm-button icon" id="acoRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            @if (acoCanAdd)
+            {
+                <button class="pm-button primary" id="acoNew" type="button"><i class="fa-solid fa-plus"></i> New contract</button>
+            }
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Contract</th><th>Type</th><th>Vendor</th><th>Status</th><th>Current version</th><th>Effective</th><th>Value</th><th>Owner</th><th>In progress</th></tr></thead>
+                <tbody id="acoListBody"></tbody>
+            </table>
+        </div>
+        <div id="acoPager"></div>
+        </div>
+
+        @* ---------------- renewals (436) ---------------- *@
+        <div class="pm-tab-panel" data-aco-mainpanel="RENEWALS" hidden>
+            <h3 class="aco-sub">Due for renewal</h3>
+            <div class="pm-toolbar">
+                <select id="acoDueWithin" title="Due within">
+                    <option value="30">Due within 30 days</option><option value="60">Due within 60 days</option>
+                    <option value="90" selected>Due within 90 days</option><option value="180">Due within 180 days</option>
+                    <option value="365">Due within a year</option>
+                </select>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Contract</th><th>Vendor</th><th>Status</th><th>Version in force</th><th>Ends</th><th>Renewal due</th><th>Owner</th><th></th></tr></thead>
+                    <tbody id="acoDueBody"></tbody>
+                </table>
+            </div>
+            <h3 class="aco-sub">Renewal occurrences</h3>
+            <div class="pm-toolbar">
+                <select id="acoRenStatus" title="Status">
+                    <option value="OPEN_ALL">Open</option><option value="">All</option>
+                    <option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option>
+                </select>
+                <input type="search" id="acoRenSearch" placeholder="Search occurrence, contract or vendor" maxlength="200" />
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Occurrence</th><th>Contract</th><th>Type</th><th>Status</th><th>Due</th><th>Old / new expiry</th><th>Value</th><th>Outcome</th></tr></thead>
+                    <tbody id="acoRenBody"></tbody>
+                </table>
+            </div>
+            <div id="acoRenPager"></div>
+        </div>
+
+        @* ---------------- coverage gaps (435) ---------------- *@
+        <div class="pm-tab-panel" data-aco-mainpanel="GAPS" hidden>
+            <div class="pm-toolbar">
+                <input type="search" id="acoGapSearch" placeholder="Search asset or asset type" maxlength="200" />
+                <select id="acoGapType" title="Coverage type"><option value="">All coverage types</option></select>
+            </div>
+            <p class="aco-note">Active assets whose asset type requires a coverage type that is not covered (or is covered for less than the minimum period). Map them on a contract version, or change the requirement.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Asset</th><th>Asset type</th><th>Coverage type</th><th>Status</th><th>Gap</th><th>On a gap</th><th>Contract</th></tr></thead>
+                    <tbody id="acoGapBody"></tbody>
+                </table>
+            </div>
+            <div id="acoGapPager"></div>
+        </div>
+
+        @* ---------------- coverage requirements (435) ---------------- *@
+        <div class="pm-tab-panel" data-aco-mainpanel="REQUIREMENTS" hidden>
+            <div class="pm-form-grid">
+                <label><span>Expiring window (days before coverage end)</span><input type="number" id="acoSetWindow" min="1" max="365" /></label>
+                @if (acoCanEdit)
+                {
+                    <div><span>&nbsp;</span><button class="pm-button" id="acoSetSave" type="button"><i class="fa-solid fa-floppy-disk"></i> Save window</button></div>
+                }
+            </div>
+            <p class="aco-note">Coverage shows Expiring from the earliest of the contract notice date, the decision date and the coverage end minus this window.</p>
+            <div class="pm-toolbar">
+                <select id="acoReqType" title="Asset type"></select>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Coverage type</th><th>Requirement</th><th>Minimum period (months)</th><th>Licence handling</th><th>On a gap</th><th>Notes</th><th></th></tr></thead>
+                    <tbody id="acoReqBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Contract dialog (7.2.3) ======================= *@
+<div class="pm-modal" id="acoModal" hidden>
+    <div class="pm-modal-panel aco-wide">
+        <header>
+            <h2 id="acoTitle">Contract</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-tabs" role="tablist" aria-label="Contract">
+            <button role="tab" class="active" data-aco-tab="SUMMARY" aria-selected="true">Current summary</button>
+            <button role="tab" data-aco-tab="VERSIONS" aria-selected="false">Version history</button>
+            <button role="tab" data-aco-tab="CONTACTS" aria-selected="false">Vendor contacts</button>
+            <button role="tab" data-aco-tab="DOCUMENTS" aria-selected="false">Documents</button>
+            <button role="tab" data-aco-tab="APPROVALS" aria-selected="false">Approval history</button>
+            <button role="tab" data-aco-tab="CONTACTHISTORY" aria-selected="false">Vendor contact history</button>
+            <button role="tab" data-aco-tab="COVERAGEHISTORY" aria-selected="false">Coverage history</button>
+            <button role="tab" data-aco-tab="RENEWALHISTORY" aria-selected="false">Renewal history</button>
+        </div>
+        <p class="pm-message" id="acoDetailMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-tab-panel" data-aco-panel="SUMMARY">
+            <div class="aco-info" id="acoSummary"></div>
+            <h3 class="aco-sub">Current coverage posture</h3>
+            <div class="aco-actions" id="acoPosture"></div>
+            <div id="acoWarnings" hidden>
+                <h3 class="aco-sub">Before approval</h3>
+                <ul class="aco-warnings" id="acoWarningList"></ul>
+            </div>
+            <div class="aco-actions">
+                @if (acoCanEdit)
+                {
+                    <button class="pm-button" id="acoEditBtn" type="button"><i class="fa-solid fa-pen"></i> Edit contract</button>
+                    <button class="pm-button" id="acoNewVersionBtn" type="button"><i class="fa-solid fa-code-branch"></i> New version</button>
+                    <button class="pm-button" id="acoStartRenewalBtn" type="button"><i class="fa-solid fa-rotate"></i> Start renewal</button>
+                }
+                <button class="pm-button primary" id="acoOpenVersionBtn" type="button" hidden><i class="fa-solid fa-folder-open"></i> Open version in progress</button>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="VERSIONS" hidden>
+            <div class="pm-toolbar">
+                <select id="acoCmpA" title="Version A"></select>
+                <select id="acoCmpB" title="Version B"></select>
+                <button class="pm-button" id="acoCompareBtn" type="button"><i class="fa-solid fa-code-compare"></i> Compare</button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>Type</th><th>Status</th><th>Effective</th><th>Value</th><th>Created</th><th>Approved</th><th>Replaces / replaced by</th></tr></thead>
+                    <tbody id="acoVersionsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="CONTACTS" hidden>
+            @if (acoCanEdit)
+            {
+                <div class="pm-toolbar">
+                    <button class="pm-button primary" id="acoContactNew" type="button"><i class="fa-solid fa-user-plus"></i> Add vendor contact</button>
+                </div>
+            }
+            <p class="aco-note">Vendor users are the third-party people linked to the vendor (Settings -> People). A new mapping is validated by another person; ending a mapping keeps it in the history.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Role</th><th>Contact</th><th>Primary</th><th>Effective</th><th>Status</th><th>Channel</th><th>Notifications</th><th>Applies to</th><th></th></tr></thead>
+                    <tbody id="acoContactsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="DOCUMENTS" hidden>
+            <div class="pm-toolbar">
+                <select id="acoDocVersion" title="Version"><option value="">All versions</option></select>
+                <select id="acoDocType" title="Document type">
+                    <option value="">All document types</option>
+                    <option value="SIGNED_AGREEMENT">Signed agreement</option><option value="SCHEDULE">Schedule</option>
+                    <option value="AMENDMENT">Amendment</option><option value="QUOTATION">Quotation</option>
+                    <option value="PURCHASE_ORDER">Purchase order</option><option value="INVOICE">Invoice</option>
+                    <option value="SUPPORTING_EVIDENCE">Supporting evidence</option><option value="OTHER">Other</option>
+                </select>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>Type</th><th>Title</th><th>Reference</th><th>Status</th><th>Added</th></tr></thead>
+                    <tbody id="acoDocsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="APPROVALS" hidden>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>When</th><th>Version</th><th>From</th><th>To</th><th>By</th><th>Action / reason</th></tr></thead>
+                    <tbody id="acoApprovalsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="COVERAGEHISTORY" hidden>
+            <p class="aco-note">Assets and entitlements in each version; open a version for its lines.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>Status</th><th>Effective</th><th>Covered assets</th><th>Excluded</th><th>Suspended</th><th>Entitlements</th><th>Quantity</th></tr></thead>
+                    <tbody id="acoCoverageHistoryBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="RENEWALHISTORY" hidden>
+            <p class="aco-note">Renewal occurrences of this contract (separate from the version history); open one for its decision, approval and coverage reconciliation.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Occurrence</th><th>Type</th><th>Status</th><th>Old / new expiry</th><th>Value</th><th>Quotation / PO / invoice</th><th>Resulting version</th><th>Outcome</th></tr></thead>
+                    <tbody id="acoRenewalHistoryBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pm-tab-panel" data-aco-panel="CONTACTHISTORY" hidden>
+            <p class="aco-note">The vendor contacts frozen with each approved version.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>Role</th><th>Contact</th><th>Vendor</th><th>Primary</th><th>Effective</th><th>Channel</th></tr></thead>
+                    <tbody id="acoContactHistoryBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Contract header modal ======================= *@
+<div class="pm-modal" id="acoEditModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="acoEditTitle">New contract</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoEditModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoEditForm" class="pm-form-grid">
+            <label><span>Contract ID *</span><input type="text" id="acoEdNumber" maxlength="60" /></label>
+            <label><span>Contract name *</span><input type="text" id="acoEdName" maxlength="250" /></label>
+            <label><span>Contract type *</span><select id="acoEdType"></select></label>
+            <label><span>Vendor *</span><select id="acoEdVendor"></select></label>
+            <label class="full"><span>Parent agreement</span><select id="acoEdParent"></select></label>
+            <label class="full"><span>Description</span><textarea id="acoEdDescription" rows="3" maxlength="2000"></textarea></label>
+            <p class="aco-note full" id="acoEdLockNote" hidden>The vendor and contract type are fixed once a version has been approved.</p>
+            <p class="aco-note full" id="acoEdNewNote">Version 1 (Initial) is created as a Draft; fill its dates, value and owners next.</p>
+            <p class="pm-message full" id="acoEditMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoEditModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= New version modal ======================= *@
+<div class="pm-modal" id="acoNewVersionModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>New contract version</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoNewVersionModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoNewVersionForm" class="pm-form-grid">
+            <label class="full"><span>Version type *</span><select id="acoNvType">
+                <option value="RENEWAL">Renewal</option><option value="AMENDMENT">Amendment</option><option value="EXTENSION">Extension</option>
+                <option value="VARIATION">Variation</option><option value="CORRECTION">Correction</option><option value="TERMINATION">Termination</option>
+                <option value="INITIAL">Initial (no approved version yet)</option>
+            </select></label>
+            <label class="full"><span>Change summary / reason *</span><textarea id="acoNvSummary" rows="3" maxlength="2000"></textarea></label>
+            <p class="aco-note full">The draft starts as a copy of the version in force; that version stays in force until the new one is approved and reaches its effective date.</p>
+            <p class="pm-message full" id="acoNewVersionMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoNewVersionModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-code-branch"></i> Create draft</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Version details modal (7.2.1 / 7.2.3) ======================= *@
+<div class="pm-modal" id="acoVersionModal" hidden>
+    <div class="pm-modal-panel aco-wide">
+        <header>
+            <h2 id="acoVersionTitle">Contract version</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoVersionModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="aco-info" id="acoVersionInfo"></div>
+        <form id="acoVersionForm" class="pm-form-grid">
+            <h3 class="aco-sub full">Dates</h3>
+            <label><span>Effective start *</span><input type="date" id="acoVfStart" /></label>
+            <label><span>Effective end *</span><input type="date" id="acoVfEnd" /></label>
+            <label><span>Notice date</span><input type="date" id="acoVfNotice" /></label>
+            <label><span>Decision date</span><input type="date" id="acoVfDecision" /></label>
+            <label><span id="acoVfTerminationLabel">Termination date</span><input type="date" id="acoVfTermination" /></label>
+            <label><span>Version label</span><input type="text" id="acoVfLabel" maxlength="40" /></label>
+            <h3 class="aco-sub full">Parties</h3>
+            <label><span>Contract owner *</span><select id="acoVfOwner"></select></label>
+            <label><span>Procurement owner</span><select id="acoVfProcurement"></select></label>
+            <h3 class="aco-sub full">Commercial</h3>
+            <label><span>Contract value</span><input type="number" id="acoVfValue" min="0" step="0.01" /></label>
+            <label><span>Currency</span><input type="text" id="acoVfCurrency" maxlength="3" placeholder="INR" /></label>
+            <label><span>Tax</span><input type="text" id="acoVfTax" maxlength="200" /></label>
+            <label><span>Payment terms</span><input type="text" id="acoVfPayment" maxlength="400" /></label>
+            <label><span>PO reference</span><input type="text" id="acoVfPo" maxlength="100" /></label>
+            <label><span>Invoice reference</span><input type="text" id="acoVfInvoice" maxlength="100" /></label>
+            <label class="full"><span>Cost allocation</span><input type="text" id="acoVfCost" maxlength="400" /></label>
+            <label class="full"><span>Renewal terms</span><textarea id="acoVfRenewal" rows="2" maxlength="1000"></textarea></label>
+            <h3 class="aco-sub full">Service</h3>
+            <label class="full"><span>Service scope</span><textarea id="acoVfScope" rows="2" maxlength="2000"></textarea></label>
+            <label class="full"><span>SLA</span><textarea id="acoVfSla" rows="2" maxlength="2000"></textarea></label>
+            <label><span>Support hours</span><input type="text" id="acoVfHours" maxlength="200" /></label>
+            <label><span>Response time</span><input type="text" id="acoVfResponse" maxlength="100" /></label>
+            <label><span>Resolution time</span><input type="text" id="acoVfResolution" maxlength="100" /></label>
+            <label><span>Visits</span><input type="text" id="acoVfVisits" maxlength="100" /></label>
+            <label class="full"><span id="acoVfSummaryLabel">Change summary / reason</span><textarea id="acoVfSummary" rows="2" maxlength="2000"></textarea></label>
+            <div class="full" id="acoVfWarnings" hidden>
+                <h3 class="aco-sub">Before approval</h3>
+                <ul class="aco-warnings" id="acoVfWarningList"></ul>
+            </div>
+            <p class="pm-message full" id="acoVersionMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full aco-actions" id="acoVersionActions"></footer>
+        </form>
+        <h3 class="aco-sub">Entitlements</h3>
+        <div class="pm-form-grid" id="acoEntForm" hidden>
+            <label><span>Product / SKU *</span><input type="text" id="acoEfSku" maxlength="160" /></label>
+            <label><span>Coverage type *</span><select id="acoEfType"></select></label>
+            <label><span>Quantity</span><input type="number" id="acoEfQty" min="0" step="0.01" /></label>
+            <label><span>Unit</span><input type="text" id="acoEfUnit" maxlength="40" placeholder="devices, users, visits" /></label>
+            <label><span>Service level</span><input type="text" id="acoEfLevel" maxlength="160" /></label>
+            <label><span>Support hours</span><input type="text" id="acoEfHours" maxlength="200" /></label>
+            <label><span>Start (blank = version dates)</span><input type="date" id="acoEfStart" /></label>
+            <label><span>End (blank = version dates)</span><input type="date" id="acoEfEnd" /></label>
+            <label class="full"><span>Description</span><input type="text" id="acoEfDesc" maxlength="400" /></label>
+            <label class="full"><span>Exclusions</span><input type="text" id="acoEfExcl" maxlength="1000" /></label>
+            <div class="full aco-actions">
+                <button class="pm-button" id="acoEfSave" type="button"><i class="fa-solid fa-floppy-disk"></i> <span id="acoEfSaveLabel">Add entitlement</span></button>
+                <button class="pm-button" id="acoEfCancel" type="button" hidden>Cancel edit</button>
+            </div>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Product / SKU</th><th>Coverage type</th><th>Quantity</th><th>Covered assets</th><th>Service level</th><th>Dates</th><th>Exclusions</th><th></th></tr></thead>
+                <tbody id="acoVersionEnts"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Asset coverage</h3>
+        <div id="acoCovForm" hidden>
+            <div class="pm-toolbar">
+                <input type="search" id="acoCfAssetSearch" placeholder="Search assets by name or ID" maxlength="200" />
+                <select id="acoCfAssetType" title="Asset type"><option value="">All asset types</option></select>
+                <select id="acoCfEnt" title="Entitlement"><option value="">No entitlement</option></select>
+                <select id="acoCfCovType" title="Coverage type"></select>
+                <button class="pm-button" id="acoCfFind" type="button"><i class="fa-solid fa-magnifying-glass"></i> Find</button>
+                <button class="pm-button primary" id="acoCfAddSel" type="button"><i class="fa-solid fa-plus"></i> Cover selected</button>
+            </div>
+            <div class="pm-table-wrap aco-pick">
+                <table>
+                    <thead><tr><th><input type="checkbox" id="acoCfPickAll" title="Select all" /></th><th>Asset</th><th>Asset type</th><th>Status</th><th></th></tr></thead>
+                    <tbody id="acoCfPickBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Asset</th><th>Coverage type</th><th>State</th><th>Entitlement</th><th>Dates</th><th>Service level</th><th>Vendor reference</th><th>Status</th><th></th></tr></thead>
+                <tbody id="acoVersionCov"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Documents</h3>
+        <div class="pm-form-grid" id="acoDocForm" hidden>
+            <label><span>Document type *</span><select id="acoDfType">
+                <option value="SIGNED_AGREEMENT">Signed agreement</option><option value="SCHEDULE">Schedule</option>
+                <option value="AMENDMENT">Amendment</option><option value="QUOTATION">Quotation</option>
+                <option value="PURCHASE_ORDER">Purchase order</option><option value="INVOICE">Invoice</option>
+                <option value="SUPPORTING_EVIDENCE">Supporting evidence</option><option value="OTHER">Other</option>
+            </select></label>
+            <label><span>Title *</span><input type="text" id="acoDfTitle" maxlength="250" /></label>
+            <label class="full"><span>Reference (document number or link) *</span><input type="text" id="acoDfReference" maxlength="1000" /></label>
+            <div class="full"><button class="pm-button" id="acoDfAdd" type="button"><i class="fa-solid fa-paperclip"></i> Add document</button></div>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Type</th><th>Title</th><th>Reference</th><th>Status</th><th>Added</th><th></th></tr></thead>
+                <tbody id="acoVersionDocs"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Vendor contacts <span class="aco-note" id="acoVersionContactSource"></span></h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Role</th><th>Contact</th><th>Primary</th><th>Effective</th><th>Channel</th><th>Status</th></tr></thead>
+                <tbody id="acoVersionContacts"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Status history</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Action / reason</th></tr></thead>
+                <tbody id="acoVersionHistory"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Compare modal (7.2.4) ======================= *@
+<div class="pm-modal" id="acoCompareModal" hidden>
+    <div class="pm-modal-panel aco-wide">
+        <header>
+            <h2 id="acoCompareTitle">Compare versions</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoCompareModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-toolbar">
+            <label class="aco-check"><input type="checkbox" id="acoCmpChangedOnly" /> Changes only</label>
+            <button class="pm-button" id="acoCmpExport" type="button"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+        </div>
+        <p class="aco-note" id="acoCompareHeading"></p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Field</th><th id="acoCmpHeadA">Version A</th><th id="acoCmpHeadB">Version B</th></tr></thead>
+                <tbody id="acoCompareFields"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Vendor contact roles</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Role</th><th>Contact</th><th>Change</th><th>Primary (A / B)</th></tr></thead>
+                <tbody id="acoCompareContacts"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Asset coverage</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Asset</th><th>Coverage type</th><th>Change</th><th id="acoCmpCovA">Version A</th><th id="acoCmpCovB">Version B</th></tr></thead>
+                <tbody id="acoCompareCoverage"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Entitlements</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Product / SKU</th><th>Change</th><th id="acoCmpEntA">Version A</th><th id="acoCmpEntB">Version B</th></tr></thead>
+                <tbody id="acoCompareEntitlements"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Contact mapping modal (7.4.2) ======================= *@
+<div class="pm-modal" id="acoContactModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="acoContactTitle">Vendor contact</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoContactModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoContactForm" class="pm-form-grid">
+            <label><span>Vendor user *</span><select id="acoCfUser"></select></label>
+            <label><span>Contact role *</span><select id="acoCfRole"></select></label>
+            <label><span>Applies to *</span><select id="acoCfScope"></select></label>
+            <label><span>Preferred channel *</span><select id="acoCfChannel">
+                <option value="EMAIL">Email</option><option value="PHONE">Phone</option><option value="PORTAL">Portal</option><option value="OTHER">Other</option>
+            </select></label>
+            <label><span>Effective start *</span><input type="date" id="acoCfStart" /></label>
+            <label><span>Effective end</span><input type="date" id="acoCfEnd" /></label>
+            <label class="aco-check"><input type="checkbox" id="acoCfPrimary" /> Primary for role</label>
+            <label class="aco-check"><input type="checkbox" id="acoCfNotify" /> Notification participation</label>
+            <label class="full"><span>Notes / scope</span><textarea id="acoCfNotes" rows="2" maxlength="1000"></textarea></label>
+            <p class="aco-note full" id="acoCfRoleUse"></p>
+            <p class="pm-message full" id="acoContactMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoContactModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= End contact modal ======================= *@
+<div class="pm-modal" id="acoEndModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>End vendor contact assignment</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoEndModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoEndForm" class="pm-form-grid">
+            <label><span>End date *</span><input type="date" id="acoEndDate" /></label>
+            <label class="full"><span>Reason *</span><textarea id="acoEndReason" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="acoEndMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoEndModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-calendar-xmark"></i> End assignment</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Start renewal modal (436) ======================= *@
+<div class="pm-modal" id="acoStartRenewalModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="acoSrTitle">Start renewal</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoStartRenewalModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoStartRenewalForm" class="pm-form-grid">
+            <label class="full"><span>Renewal type *</span><select id="acoSrType">
+                <option value="RENEWAL">Renewal</option><option value="EXTENSION">Extension</option><option value="REBID">Rebid</option>
+                <option value="REPLACEMENT">Replacement</option><option value="NON_RENEWAL">Non-renewal</option>
+            </select></label>
+            <label class="full"><span>Notes</span><textarea id="acoSrNotes" rows="2" maxlength="2000"></textarea></label>
+            <p class="aco-note full">One open renewal per contract. The renewal starts from the version in force (or the last one that ended); that version is never changed.</p>
+            <p class="pm-message full" id="acoSrMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoStartRenewalModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-rotate"></i> Start</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Renewal modal (436, 7.3) ======================= *@
+<div class="pm-modal" id="acoRenewalModal" hidden>
+    <div class="pm-modal-panel aco-wide">
+        <header>
+            <h2 id="acoRenTitle">Renewal</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoRenewalModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="aco-info" id="acoRenInfo"></div>
+        <form id="acoRenForm" class="pm-form-grid">
+            <label><span>Renewal type (decision) *</span><select id="acoRfType">
+                <option value="RENEWAL">Renewal</option><option value="EXTENSION">Extension</option><option value="REBID">Rebid</option>
+                <option value="REPLACEMENT">Replacement</option><option value="NON_RENEWAL">Non-renewal</option>
+            </select></label>
+            <label><span>New expiry date</span><input type="date" id="acoRfExpiry" /></label>
+            <label><span>Renewal value</span><input type="number" id="acoRfValue" min="0" step="0.01" /></label>
+            <label><span>Currency</span><input type="text" id="acoRfCurrency" maxlength="3" placeholder="INR" /></label>
+            <label><span>Quotation reference</span><input type="text" id="acoRfQuote" maxlength="200" /></label>
+            <label><span>PO reference</span><input type="text" id="acoRfPo" maxlength="100" /></label>
+            <label><span>Invoice reference</span><input type="text" id="acoRfInvoice" maxlength="100" /></label>
+            <label class="full"><span>Decision comments *</span><textarea id="acoRfDecision" rows="2" maxlength="2000"></textarea></label>
+            <label class="full"><span>Notes</span><textarea id="acoRfNotes" rows="2" maxlength="2000"></textarea></label>
+            <div class="full" id="acoRenResultWrap">
+                <h3 class="aco-sub">Resulting version</h3>
+                <p class="aco-note" id="acoRenResult"></p>
+                <div class="aco-actions" id="acoRenLinkWrap" hidden>
+                    <select id="acoRfLink" title="Version to link"></select>
+                    <button class="pm-button" type="button" data-aco-ract="LINK_VERSION">Link version</button>
+                </div>
+            </div>
+            <p class="pm-message full" id="acoRenMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full aco-actions" id="acoRenActions"></footer>
+        </form>
+        <h3 class="aco-sub">Coverage reconciliation <span class="aco-note" id="acoRenReconNote"></span></h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Item</th><th>Coverage type</th><th>Prior</th><th>Resulting</th><th>Result</th><th>Resolution</th><th></th></tr></thead>
+                <tbody id="acoRenRecon"></tbody>
+            </table>
+        </div>
+        <h3 class="aco-sub">Status history</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>When</th><th>From</th><th>To</th><th>By</th><th>Action / reason</th></tr></thead>
+                <tbody id="acoRenHistory"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= Resolve reconciliation item modal (436, 9.1.5) ======================= *@
+<div class="pm-modal" id="acoResolveModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="acoRsTitle">Resolve item</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoResolveModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoResolveForm" class="pm-form-grid">
+            <label class="full"><span>Resolution *</span><select id="acoRsCode">
+                <option value="MAPPED">Mapped to a contract</option><option value="SEPARATELY_RENEWED">Separately renewed</option>
+                <option value="REPLACED">Replaced</option><option value="UNINSTALLED">Uninstalled</option>
+                <option value="EXEMPTED">Exempted</option><option value="RETIRED">Retired</option>
+            </select></label>
+            <label class="full"><span>Reason *</span><textarea id="acoRsNote" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="acoRsMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoResolveModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Resolve</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Coverage line modal (435, 5.1.11) ======================= *@
+<div class="pm-modal" id="acoLineModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="acoLineTitle">Asset coverage</h2>
+            <button class="pm-modal-close" type="button" data-close-aco="acoLineModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="acoLineForm" class="pm-form-grid">
+            <label><span>Coverage type *</span><select id="acoLfType"></select></label>
+            <label><span>State *</span><select id="acoLfState"><option value="COVERED">Covered</option><option value="EXCLUDED">Excluded</option><option value="SUSPENDED">Suspended</option></select></label>
+            <label><span>Entitlement</span><select id="acoLfEnt"></select></label>
+            <label><span>Service level</span><input type="text" id="acoLfLevel" maxlength="160" /></label>
+            <label><span>Coverage start (blank = entitlement / version)</span><input type="date" id="acoLfStart" /></label>
+            <label><span>Coverage end (blank = entitlement / version)</span><input type="date" id="acoLfEnd" /></label>
+            <label><span>Support hours</span><input type="text" id="acoLfHours" maxlength="200" /></label>
+            <label><span>Vendor support reference</span><input type="text" id="acoLfRef" maxlength="400" /></label>
+            <label class="full" id="acoLfReasonWrap" hidden><span>Exclusion reason *</span><textarea id="acoLfReason" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="acoLineMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-aco="acoLineModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .aco-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .aco-check { display: inline-flex; gap: 4px; align-items: center; }
+    .aco-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .aco-st-open    { background: var(--primary-100); color: var(--primary-800); }
+    .aco-st-wait    { background: var(--warning-50); color: var(--warning-700); }
+    .aco-st-active  { background: var(--success-100); color: var(--success-700); }
+    .aco-st-ended   { background: var(--neutral-200); color: var(--fg-muted); }
+    .aco-st-bad     { background: var(--danger-100); color: var(--danger-700); }
+    .aco-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pm-modal-panel.aco-wide { max-width: 1100px; width: 100%; }
+    .aco-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .aco-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .aco-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .aco-warnings { margin: 0 0 12px; padding-left: 18px; color: var(--warning-700); font-size: 13px; }
+    .aco-changed td { background: var(--warning-50); }
+    tr[data-aco-contract], tr[data-aco-version], tr[data-aco-renewal] { cursor: pointer; }
+    .aco-pick { max-height: 260px; overflow-y: auto; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/asset-contracts.js" asp-append-version="true"></script>

@@ -20,6 +20,9 @@
 //     overdue         1 = the page's own overdue filter (Task Board)
 //     priority        the page's own priority filter (Task Board)
 //     requestType     the page's own request-type filter (Exceptions)
+//     tab             451: the tab of an asset screen holding the list
+//     kind            451: a kind filter (reconciliation exception kind)
+//     pending         451: 1 = only records awaiting approval
 //     drillLabel      the words the banner shows
 //     from            the dashboard screen key the user came from
 //
@@ -34,7 +37,7 @@
   const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[ch]);
   // Everything a dashboard link may add; Clear filter removes all of it.
   const DRILL_KEYS = ["drill", "statusText", "severity", "minAge", "maxAge", "noOwner", "drillLabel", "from",
-                      "status", "overdue", "priority", "requestType"];
+                      "status", "overdue", "priority", "requestType", "tab", "kind", "pending"];   // 451: tab, kind, pending
 
   function read() {
     const q = new URLSearchParams(window.location.search);
@@ -54,8 +57,11 @@
     d.overdue     = q.get("overdue") === "1";
     d.priority    = q.get("priority") || "";
     d.requestType = q.get("requestType");   // null = not given; "" = all types
+    d.tab     = q.get("tab") || "";           // 451
+    d.kind    = q.get("kind") || "";          // 451
+    d.pending = q.get("pending") === "1";     // 451
     d.active = !!(d.drill || d.statusText || d.severity || d.minAge !== null || d.maxAge !== null
-                  || d.noOwner || d.label || d.status || d.overdue || d.priority);
+                  || d.noOwner || d.label || d.status || d.overdue || d.priority || d.tab || d.kind || d.pending);
     return d;
   }
 
@@ -111,5 +117,41 @@
     return true;
   }
 
-  window.__pmDrill = { read, apiParams, appendTo, banner, preselect };
+  // 451: Asset & Contract screens (their lists filter in the page, not in
+  // the API). Before the page loads its organization: the drill's
+  // organization, then the page's own filter controls for the drill's tab
+  // -- map = { TAB: { status | kind | pending: elementId } } ("" = no tab).
+  function preselectFor(d, orgSelect, map) {
+    if (!d) return;
+    if (d.organizationId) preselect(orgSelect, d.organizationId);
+    if (!d.active) return;
+    const m = (map && (map[d.tab] || (!d.tab ? map[""] : null))) || {};
+    Object.entries(m).forEach(([param, id]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === "checkbox") { if (param === "pending" && d.pending) el.checked = true; return; }
+      preselect(el, d[param]);
+    });
+  }
+
+  // 451: after the page loaded -- the banner above the page root and the
+  // drill's tab (a button whose tabAttr equals d.tab), which reloads that
+  // list with the preselected filter.
+  function showOnPage(rootOrId, tabAttr, d) {
+    const root = typeof rootOrId === "string" ? document.getElementById(rootOrId) : rootOrId;
+    if (!root || !d || !d.active) return;
+    let host = document.getElementById("pmDrillBanner");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "pmDrillBanner";
+      root.parentNode.insertBefore(host, root);
+    }
+    banner(host, d);
+    if (tabAttr && d.tab) {
+      const btn = [...document.querySelectorAll(`[${tabAttr}]`)].find(b => b.getAttribute(tabAttr) === d.tab);
+      if (btn) btn.click();
+    }
+  }
+
+  window.__pmDrill = { read, apiParams, appendTo, banner, preselect, preselectFor, showOnPage };
 })();

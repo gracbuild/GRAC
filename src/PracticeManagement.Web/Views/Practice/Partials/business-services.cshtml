@@ -1,0 +1,278 @@
+@*
+    Business Services -- Asset & Contract Management, Phase 7.2 (migration 441).
+    Rendered from Manage.cshtml when Model.Key == "business-services".
+
+    BRD 5.5: the governed business-service register. "Services" lists the
+    services with their status (Draft, Design, Active, Degraded, Suspended,
+    Retiring, Retired), owner, support and conflicts; a service opens in a
+    window with its fields, consumers, status changes (activation needs an
+    owner and the minimum supporting relationships; retirement needs no
+    remaining critical dependants, a consumer review, a contract assessment
+    and approval), its supporting items -- assets, applications, processes,
+    suppliers, contracts and child services, mapped as Supports Service
+    relationships (Asset Relationships rules) -- the services it supports,
+    its conflicts and history. "Hierarchy" draws the service tree,
+    "Conflicts" lists the 5.5.1 validation warnings, "Service impact" lists
+    the services an item failure reaches, "Settings" holds the organization
+    rules.
+
+    Backend: practice/api/asset-config/business-services... and
+             practice/api/asset-config/relationships... (AssetConfigController)
+    Script : wwwroot/js/AssetConfig/business-services.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var bsvPermissions = ViewBag.Permissions as string[] ?? [];
+    bool bsvHas(string action) => bsvPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var bsvCanAdd = bsvHas("ADD");
+    var bsvCanEdit = bsvHas("EDIT");
+    var bsvCanApprove = bsvHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="bsvRoot" data-can-add="@(bsvCanAdd ? "1" : "0")" data-can-edit="@(bsvCanEdit ? "1" : "0")" data-can-approve="@(bsvCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="bsvOrg" title="Organization"><option value="">Select organization</option></select>
+            @if (bsvCanAdd)
+            {
+                <button class="pm-button primary" id="bsvAdd" type="button"><i class="fa-solid fa-plus"></i> New service</button>
+            }
+        </div>
+        <div class="pm-tabs" role="tablist" aria-label="Business services">
+            <button role="tab" class="active" data-bsv-main="SERVICES" aria-selected="true">Services</button>
+            <button role="tab" data-bsv-main="TREE" aria-selected="false">Hierarchy</button>
+            <button role="tab" data-bsv-main="CONFLICTS" aria-selected="false">Conflicts</button>
+            <button role="tab" data-bsv-main="IMPACT" aria-selected="false">Service impact</button>
+            <button role="tab" data-bsv-main="SETTINGS" aria-selected="false">Settings</button>
+        </div>
+        <p class="pm-message" id="bsvMessage" role="status" aria-live="polite" hidden></p>
+
+        @* ---------------- services ---------------- *@
+        <div class="pm-tab-panel" data-bsv-mainpanel="SERVICES">
+            <div class="pm-toolbar">
+                <select id="bsvFltStatus" title="Status">
+                    <option value="">All but retired</option><option value="DRAFT">Draft</option><option value="DESIGN">Design</option>
+                    <option value="ACTIVE">Active</option><option value="DEGRADED">Degraded</option><option value="SUSPENDED">Suspended</option>
+                    <option value="RETIRING">Retiring</option><option value="RETIRED">Retired</option><option value="ALL">All</option>
+                </select>
+                <select id="bsvFltType" title="Service type"><option value="">All types</option></select>
+                <input type="search" id="bsvFltSearch" placeholder="Search service ID or name" maxlength="200" />
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Service</th><th>Type</th><th>Status</th><th>Criticality</th><th>RTO / RPO / MTPD (h)</th><th>Owner / manager</th><th>Support</th><th>Conflicts</th></tr></thead>
+                    <tbody id="bsvBody"></tbody>
+                </table>
+            </div>
+            <div id="bsvPager"></div>
+        </div>
+
+        @* ---------------- hierarchy ---------------- *@
+        <div class="pm-tab-panel" data-bsv-mainpanel="TREE" hidden>
+            <p class="bsv-note">Child services support their parent through Supports Service relationships (5.5.1). A service supporting several parents appears under each of them.</p>
+            <div id="bsvTree" class="bsv-tree"></div>
+        </div>
+
+        @* ---------------- conflicts ---------------- *@
+        <div class="pm-tab-panel" data-bsv-mainpanel="CONFLICTS" hidden>
+            <div class="pm-toolbar">
+                <input type="search" id="bsvConfSearch" placeholder="Search service or item" maxlength="200" />
+            </div>
+            <p class="bsv-note">Validation warnings (BRD 5.5.1): supporting items rated less critical than the service, supporting asset RPO longer than the service RPO, child services with longer objectives, supporting items no longer in use, disputed mappings, services in operation without owner or support, review dates passed.</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Service</th><th>Conflict</th><th>Item</th><th>Detail</th></tr></thead>
+                    <tbody id="bsvConfBody"></tbody>
+                </table>
+            </div>
+            <div id="bsvConfPager"></div>
+        </div>
+
+        @* ---------------- service impact ---------------- *@
+        <div class="pm-tab-panel" data-bsv-mainpanel="IMPACT" hidden>
+            <div class="pm-toolbar">
+                <select id="bsvImpKind" title="Item kind"></select>
+                <input type="search" id="bsvImpSearch" placeholder="Find an item" maxlength="200" />
+                <select id="bsvImpCi" title="Item"><option value="">--</option></select>
+                <button class="pm-button primary" id="bsvImpRun" type="button"><i class="fa-solid fa-diagram-project"></i> Services affected</button>
+            </div>
+            <p class="bsv-note">The business services reached, directly or through other items, when the selected item fails (active relationships, depth 10).</p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Level</th><th>Service</th><th>Status</th><th>Criticality</th><th>RTO / RPO / MTPD (h)</th><th>Owner / manager</th><th>Consumers</th></tr></thead>
+                    <tbody id="bsvImpBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        @* ---------------- settings ---------------- *@
+        <div class="pm-tab-panel" data-bsv-mainpanel="SETTINGS" hidden>
+            <form id="bsvSettingForm" class="pm-form-grid">
+                <label><span>Minimum active supporting relationships to activate *</span><input type="number" id="bsvStMin" min="0" max="50" /></label>
+                <label class="bsv-check"><input type="checkbox" id="bsvStApproval" /> Retirement approved by another person</label>
+                @if (bsvCanEdit)
+                {
+                    <footer class="pm-modal-footer full"><button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button></footer>
+                }
+            </form>
+        </div>
+    </section>
+</div>
+
+@* ======================= Service window ======================= *@
+<div class="pm-modal" id="bsvModal" hidden>
+    <div class="pm-modal-panel pm-modal-wide">
+        <header>
+            <h2 id="bsvMdTitle">Business service</h2>
+            <button class="pm-modal-close" type="button" data-close-bsv="bsvModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="bsv-info" id="bsvMdInfo"></div>
+        <p class="pm-message" id="bsvMdMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-modal-footer" id="bsvMdStatusBar"></div>
+
+        <form id="bsvForm" class="pm-form-grid">
+            <label><span>Service ID *</span><input type="text" id="bsvFCode" maxlength="40" /></label>
+            <label><span>Service name *</span><input type="text" id="bsvFName" maxlength="200" /></label>
+            <label><span>Service type *</span><select id="bsvFType"></select></label>
+            <label><span>Criticality</span><select id="bsvFCrit"></select></label>
+            <label class="full"><span>Description / scope</span><textarea id="bsvFDesc" rows="2" maxlength="2000"></textarea></label>
+            <label class="full"><span>Customer outcome / purpose</span><textarea id="bsvFOutcome" rows="2" maxlength="1000"></textarea></label>
+            <label><span>Business owner</span><select id="bsvFOwner"></select></label>
+            <label><span>Service manager</span><select id="bsvFManager"></select></label>
+            <label><span>Accountable department</span><select id="bsvFDept"></select></label>
+            <label><span>Review date</span><input type="date" id="bsvFReview" /></label>
+            <label><span>Confidentiality (1-5)</span><select id="bsvFC" data-bsv-rating></select></label>
+            <label><span>Integrity (1-5)</span><select id="bsvFI" data-bsv-rating></select></label>
+            <label><span>Availability (1-5)</span><select id="bsvFA" data-bsv-rating></select></label>
+            <label><span>RTO (hours)</span><input type="number" id="bsvFRto" min="0" step="0.25" /></label>
+            <label><span>RPO (hours)</span><input type="number" id="bsvFRpo" min="0" step="0.25" /></label>
+            <label><span>MTPD (hours)</span><input type="number" id="bsvFMtpd" min="0" step="0.25" /></label>
+            <label><span>Service hours</span><input type="text" id="bsvFHours" maxlength="200" /></label>
+            <label><span>Data classification</span><input type="text" id="bsvFData" maxlength="100" /></label>
+            <label><span>Privacy classification</span><input type="text" id="bsvFPrivacy" maxlength="100" /></label>
+            <label class="full"><span>SLA / performance commitments</span><textarea id="bsvFSla" rows="2" maxlength="1000"></textarea></label>
+
+            <h3 class="bsv-sub full">Consumers</h3>
+            <div class="full">
+                <div class="pm-table-wrap">
+                    <table>
+                        <thead><tr><th>Kind</th><th>Consumer</th><th>Note</th><th></th></tr></thead>
+                        <tbody id="bsvConsBody"></tbody>
+                    </table>
+                </div>
+                <div class="pm-toolbar" id="bsvConsAddBar">
+                    <select id="bsvConsKind" title="Consumer kind">
+                        <option value="DEPARTMENT">Department</option><option value="BUSINESS_FUNCTION">Business function</option>
+                        <option value="LOCATION">Location</option><option value="EXTERNAL">External (customer / partner)</option>
+                    </select>
+                    <select id="bsvConsRef" title="Consumer"></select>
+                    <input type="text" id="bsvConsName" maxlength="200" placeholder="External consumer name" hidden />
+                    <input type="text" id="bsvConsNote" maxlength="400" placeholder="Note" />
+                    <button class="pm-button" type="button" id="bsvConsAdd"><i class="fa-solid fa-plus"></i> Add consumer</button>
+                </div>
+            </div>
+            <footer class="pm-modal-footer full" id="bsvSaveBar">
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+
+        <div id="bsvDetail">
+            <h3 class="bsv-sub">Supporting items</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Item</th><th>Role</th><th>Dependency</th><th>Effective</th><th>Status</th></tr></thead>
+                    <tbody id="bsvSupBody"></tbody>
+                </table>
+            </div>
+            <form id="bsvSupForm" class="pm-form-grid">
+                <label><span>Item kind</span><select id="bsvSupKind"></select></label>
+                <label><span>Find item</span><input type="search" id="bsvSupSearch" maxlength="200" /></label>
+                <label class="full"><span>Item *</span><select id="bsvSupCi"><option value="">--</option></select></label>
+                <label><span>Role</span><input type="text" id="bsvSupRole" maxlength="100" /></label>
+                <label><span>Effective from</span><input type="date" id="bsvSupFrom" /></label>
+                <label class="bsv-check"><input type="checkbox" id="bsvSupCritical" /> Critical dependency</label>
+                <label><span>Dependency criticality</span>
+                    <select id="bsvSupCriticality"><option value="">--</option><option value="CRITICAL">Critical</option><option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option><option value="LOW">Low</option></select></label>
+                <footer class="pm-modal-footer full">
+                    <span class="bsv-note">Proposed as a Supports Service relationship; it counts once approved in Asset Relationships.</span>
+                    <button type="submit" class="pm-button"><i class="fa-solid fa-link"></i> Propose supporting item</button>
+                </footer>
+            </form>
+
+            <h3 class="bsv-sub">Services this service supports</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Service</th><th>Role</th><th>Critical</th><th>Status</th></tr></thead>
+                    <tbody id="bsvSupportsBody"></tbody>
+                </table>
+            </div>
+
+            <h3 class="bsv-sub">Conflicts</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Conflict</th><th>Item</th><th>Detail</th></tr></thead>
+                    <tbody id="bsvMdConfBody"></tbody>
+                </table>
+            </div>
+
+            <h3 class="bsv-sub">History</h3>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>Action</th><th>Status</th><th>Note</th><th>By</th><th>When</th></tr></thead>
+                    <tbody id="bsvHistBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Status change / retirement decision ======================= *@
+<div class="pm-modal" id="bsvStatusModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="bsvSmTitle">Status</h2>
+            <button class="pm-modal-close" type="button" data-close-bsv="bsvStatusModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="bsvStatusForm" class="pm-form-grid">
+            <p class="bsv-note full" id="bsvSmInfo"></p>
+            <label class="full"><span id="bsvSmNoteLabel">Note</span><textarea id="bsvSmNote" rows="2" maxlength="1000"></textarea></label>
+            <label class="full" id="bsvSmConsumerWrap"><span>Consumer review *</span><textarea id="bsvSmConsumer" rows="2" maxlength="1000"></textarea></label>
+            <label class="full" id="bsvSmContractWrap"><span>Contract assessment *</span><textarea id="bsvSmContract" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="bsvSmMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-bsv="bsvStatusModal">Cancel</button>
+                <button type="submit" class="pm-button primary"><i class="fa-solid fa-check"></i> Confirm</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .bsv-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .bsv-check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .bsv-chip { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .bsv-st-open    { background: var(--primary-100); color: var(--primary-800); }
+    .bsv-st-wait    { background: var(--warning-50); color: var(--warning-700); }
+    .bsv-st-active  { background: var(--success-100); color: var(--success-700); }
+    .bsv-st-ended   { background: var(--neutral-200); color: var(--fg-muted); }
+    .bsv-st-bad     { background: var(--danger-100); color: var(--danger-700); }
+    .bsv-sub { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin: 16px 0 8px; }
+    .bsv-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .bsv-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .bsv-tree ul { list-style: none; margin: 0; padding-left: 20px; border-left: 1px solid var(--border); }
+    .bsv-tree > ul { padding-left: 0; border-left: 0; }
+    .bsv-tree li { margin: 6px 0; font-size: 13px; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 451: Asset & Contract dashboard drill-down *@
+<script src="~/js/AssetConfig/business-services.js" asp-append-version="true"></script>

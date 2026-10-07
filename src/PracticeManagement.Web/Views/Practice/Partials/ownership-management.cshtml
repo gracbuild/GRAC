@@ -78,9 +78,12 @@
 (function () {
     "use strict";
     // ---- tiny self-contained helpers (no external deps) ----------------
-    const base = String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "");
-    const U    = p => base + p;
-    const api  = U("/practice-management-gateway");
+    // Resolve the PathBase lazily: published builds set window.appBasePath in
+    // a layout inline script that runs AFTER this partial parses, so capturing
+    // it eagerly leaves it "" and every request 404s in production (served
+    // under e.g. /Practicemanagement). Same pattern as gaps.cshtml.
+    const U    = p => String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p;
+    const api  = () => U("/practice-management-gateway");
     const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
     const esc  = v => String(v ?? "").replace(/[&<>"']/g, c =>
         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -114,12 +117,12 @@
         }
         return body;
     }
-    const postQuery = (entity, data) => getJson(`${api}/${entity}/query`, {
+    const postQuery = (entity, data) => getJson(`${api()}/${entity}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
         body: JSON.stringify({ data: data || {} })
     });
-    const postSave = (entity, data) => getJson(`${api}/${entity}`, {
+    const postSave = (entity, data) => getJson(`${api()}/${entity}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
         body: JSON.stringify({ data: data || {} })
@@ -295,6 +298,10 @@
         }
     }
 
-    init();
+    // Deferred to DOMContentLoaded so window.appBasePath (set by the layout's
+    // trailing inline script) is populated before the first fetch builds its
+    // URL through the lazy U().
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
 })();
 </script>

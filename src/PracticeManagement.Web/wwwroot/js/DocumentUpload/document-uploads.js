@@ -48,7 +48,7 @@
     // initial page render -- matches Task Center / Gap Center behaviour.
     const sel = document.getElementById("docFilterOrganization");
     if (sel.options.length > 1 && !state.organizationId) {
-      sel.selectedIndex = 1; // skip the "Select organization" placeholder
+      window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
       state.organizationId = Number(sel.value) || null;
       if (state.organizationId) {
         await loadOrgScopedLookups();

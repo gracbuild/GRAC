@@ -94,6 +94,17 @@ builder.Services.AddPracticeManagementDashboardService();
 // Menu Permission section. Enforcement is the row-level security policy,
 // applied per connection by Infrastructure.ViewScopeSession.
 builder.Services.AddPracticeRoleViewDataScopeService();
+// Asset & Contract Management, Phase 2.1 (migration 420): field
+// dictionary + versioned asset form templates. Rules live in the procs.
+builder.Services.AddPracticeAssetConfigService();
+// Task Centre SLA notifications (201-203) and, in the same existing
+// worker, the Asset & Contract scheduler pass (migration 437 -- reminders,
+// escalations, renewal occurrences, periodic attestation runs). The worker
+// was built in Task Centre v2 Phase 3 but never registered; registered on
+// request (2026-10-05: "use existing background worker").
+// TaskNotification:Enabled / AssetSchedulerEnabled switch either job off.
+builder.Services.AddPracticeTaskNotificationService();
+builder.Services.AddPracticeTaskNotificationWorker();
 // Gap Center is served by the pre-existing CustomGapService -- the
 // parallel OrgAssuranceGapService was retired in migration 113 in
 // favour of the unified custom_gap table. See

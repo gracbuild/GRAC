@@ -39,7 +39,8 @@
   };
   const SOURCE_LABEL = {
     Gap: "Gap", Exception: "Exception", Risk: "Risk", RiskRegister: "Risk",
-    ContinuousAssurance: "Continuous Assurance", EventAssurance: "Event Assurance", Custom: "Source"
+    ContinuousAssurance: "Continuous Assurance", EventAssurance: "Event Assurance", Custom: "Source",
+    Schedule: "Scheduled obligation"   // 449: no full view of its own; plain text
   };
 
   const state = { taskId: null, detail: null };

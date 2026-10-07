@@ -37,6 +37,21 @@ public static class ManagementDashboards
                 ("audits",   "org-assurance-executions"),
                 ("findings", "org-assurance-observations"),
                 ("plans",    "org-assurance-plans")
+            ],
+            // 451: Asset & Contract dashboard (sp_dashboard_asset_contract).
+            ["asset-contract-dashboard"] =
+            [
+                ("governance",    "asset-governance"),
+                ("assets",        "asset-register"),
+                ("technology",    "asset-register"),
+                ("contracts",     "asset-contracts"),
+                ("attestation",   "asset-attestation"),
+                ("activities",    "asset-activities"),
+                ("privacy",       "asset-privacy"),
+                ("discovery",     "asset-discovery"),
+                ("services",      "business-services"),
+                ("relationships", "asset-relationships"),
+                ("notifications", "asset-notifications")
             ]
         };
 

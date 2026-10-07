@@ -43,7 +43,7 @@
       // Auto-select the first org so the page shows data on landing.
       const sel = document.getElementById("myAckFilterOrganization");
       if (sel.options.length > 1 && !state.organizationId) {
-        sel.selectedIndex   = 1;
+        window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
         state.organizationId = Number(sel.value) || null;
       }
     }

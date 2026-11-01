@@ -220,6 +220,13 @@
 --     rule) under 'nav-asset-contract'.
 --   452 -- 'asset-reports' (366, Asset Reports) under
 --     'nav-asset-contract'.
+--   476 -- 'evidence-center' (15, Evidence Center) under
+--     'nav-documents' (Policies & Documents).
+--   490 -- Third-Party Risk (2026-10-24): NEW root 'nav-tprm' (370, no
+--     url) with children 'tprm-dashboard' (369, first child, 416 rule),
+--     'tprm-third-parties' (371), 'tprm-engagements' (372),
+--     'tprm-reviews' (373) and 'tprm-configuration' (374). 490 itself
+--     grants only the 'Admin' role VIEW/ADD/EDIT/APPROVE (420 rule).
 --
 -- Re-runnable: yes. A second run makes no changes.
 -- Rollback: database/274_menu_master_seed_rollback.sql
@@ -387,6 +394,7 @@ USING (VALUES
     (N'event-profiles'                , N'Event Profiles'                    , N'Practice/Index/event-profiles'              ,  317, N'users-gear'            , N'Organization'               , N'Active'),
     (N'document-uploads'              , N'Document Library'                  , N'Practice/Index/document-uploads'            ,   10, N'file-lines'            , N'Policies & Documents'       , N'Active'),   -- renamed by 358, re-nested by 359, module_type by 384
     (N'document-acknowledgements'     , N'Document Acknowledgements'         , N'Practice/Index/document-acknowledgements'   ,   20, N'file-signature'        , N'Policies & Documents'       , N'Active'),   -- module_type by 384
+    (N'evidence-center'               , N'Evidence Center'                   , N'Practice/Index/evidence-center'             ,   15, N'box-archive'           , N'Policies & Documents'       , N'Active'),   -- 476
     (N'my-acknowledgements'           , N'My Acknowledgements'               , N'Practice/Index/my-acknowledgements'         ,   30, N'inbox'                 , N'My Notification'            , N'Active'),   -- moved under my-notifications by 384
     (N'nav-documents'                 , N'Policies & Documents'              , NULL                                          ,  400, N'folder-open'           , N'Policies & Documents'       , N'Active'),   -- moved by 359; renamed + root again by 384
     (N'exception-centre'              , N'Exceptions & Waivers'              , N'Practice/Index/exception-centre'            ,  270, N'shield-halved'         , N'Issues & Actions'           , N'Active'),   -- renamed by 384
@@ -412,6 +420,7 @@ USING (VALUES
     (N'my-practices'                  , N'My Practices'                      , N'#'                                          ,   10, N'list-check'            , N'My Notification'            , N'Active'),
     (N'my-approvals'                  , N'My Approvals'                      , N'#'                                          ,   20, N'circle-check'          , N'My Notification'            , N'Active'),
     (N'risk-acceptance-authority'     , N'Risk Acceptance Approval Authority', N'Practice/Index/risk-acceptance-authority'   ,  260, N'user-shield'           , N'Organization'               , N'Active'),
+    (N'risk-settings'                 , N'Risk Settings'                     , N'Practice/Index/risk-settings'               ,  265, N'sliders'               , N'Organization'               , N'Active'),   -- 458
     -- Asset & Contract root + configuration screens (420). Root has no url
     -- (expand only, 416 convention); parents wired in Section 2.
     (N'nav-asset-contract'            , N'Asset & Contract'                  , NULL                                          ,  350, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),
@@ -432,7 +441,15 @@ USING (VALUES
     (N'asset-privacy'                 , N'Asset Privacy'                     , N'Practice/Index/asset-privacy'               ,  364, N'user-shield'           , N'Asset & Contract'           , N'Active'),  -- 448
     (N'asset-governance'              , N'Asset Governance'                  , N'Practice/Index/asset-governance'            ,  365, N'gauge-high'            , N'Asset & Contract'           , N'Active'),  -- 450
     (N'asset-contract-dashboard'      , N'Dashboard'                         , N'Practice/Index/asset-contract-dashboard'    ,  348, N'chart-pie'             , N'Asset & Contract'           , N'Active'),  -- 451
-    (N'asset-reports'                 , N'Asset Reports'                     , N'Practice/Index/asset-reports'               ,  366, N'file-lines'            , N'Asset & Contract'           , N'Active')   -- 452
+    (N'asset-reports'                 , N'Asset Reports'                     , N'Practice/Index/asset-reports'               ,  366, N'file-lines'            , N'Asset & Contract'           , N'Active'),  -- 452
+    -- Third-Party Risk root + screens (490). Root has no url (416
+    -- convention); parents wired in Section 2.
+    (N'nav-tprm'                      , N'Third-Party Risk'                  , NULL                                          ,  370, N'handshake'             , N'Third-Party Risk'           , N'Active'),  -- 490
+    (N'tprm-dashboard'                , N'Dashboard'                         , N'Practice/Index/tprm-dashboard'              ,  369, N'chart-pie'             , N'Third-Party Risk'           , N'Active'),  -- 490
+    (N'tprm-third-parties'            , N'Third Parties'                     , N'Practice/Index/tprm-third-parties'          ,  371, N'building'              , N'Third-Party Risk'           , N'Active'),  -- 490
+    (N'tprm-engagements'              , N'Engagements'                       , N'Practice/Index/tprm-engagements'            ,  372, N'file-signature'        , N'Third-Party Risk'           , N'Active'),  -- 490
+    (N'tprm-reviews'                  , N'Reviews'                           , N'Practice/Index/tprm-reviews'                ,  373, N'calendar-check'        , N'Third-Party Risk'           , N'Active'),  -- 490
+    (N'tprm-configuration'            , N'TPRM Configuration'                , N'Practice/Index/tprm-configuration'          ,  374, N'sliders'               , N'Third-Party Risk'           , N'Active')   -- 490
 ) AS s(menu_key, menu_name, menu_url, display_order, icon_class, module_type, status)
 ON t.menu_key = s.menu_key
 WHEN MATCHED AND (
@@ -532,6 +549,7 @@ JOIN  (VALUES
     (N'event-profiles'                , N'nav-organization'),   -- added by 332
     (N'document-uploads'              , N'nav-documents'),   -- renamed by 358, re-nested by 359
     (N'document-acknowledgements'     , N'nav-documents'),
+    (N'evidence-center'               , N'nav-documents'),   -- 476
     (N'my-acknowledgements'           , N'my-notifications'),   -- moved by 384
     (N'exception-centre'              , N'nav-oversight'),
     (N'org-sla-config'                , N'nav-governance'),
@@ -546,6 +564,7 @@ JOIN  (VALUES
     (N'risk-centre-calendar'          , N'risk-centre'),
     (N'risk-centre-dashboard'         , N'risk-centre'),
     (N'risk-acceptance-authority'     , N'nav-organization'),
+    (N'risk-settings'                 , N'nav-organization'),   -- 458
     -- Module Dashboard submenus (416).
     (N'governance-dashboard'          , N'nav-governance'),
     (N'issues-actions-dashboard'      , N'nav-oversight'),
@@ -568,7 +587,13 @@ JOIN  (VALUES
     (N'asset-privacy'                 , N'nav-asset-contract'),  -- 448
     (N'asset-governance'              , N'nav-asset-contract'),  -- 450
     (N'asset-contract-dashboard'      , N'nav-asset-contract'),  -- 451
-    (N'asset-reports'                 , N'nav-asset-contract')   -- 452
+    (N'asset-reports'                 , N'nav-asset-contract'),  -- 452
+    -- Third-Party Risk screens (490).
+    (N'tprm-dashboard'                , N'nav-tprm'),            -- 490
+    (N'tprm-third-parties'            , N'nav-tprm'),            -- 490
+    (N'tprm-engagements'              , N'nav-tprm'),            -- 490
+    (N'tprm-reviews'                  , N'nav-tprm'),            -- 490
+    (N'tprm-configuration'            , N'nav-tprm')             -- 490
 ) AS x(child_key, parent_key) ON x.child_key = m.menu_key
 JOIN   grac_practice.menu_master p ON p.menu_key = x.parent_key
 WHERE  ISNULL(m.parent_menu_id, -1) <> p.menu_id;
@@ -622,7 +647,8 @@ JOIN  (VALUES
     -- now a child of 'nav-governance' (see the parent-link list above).
     (N'nav-documents'),      -- root again by 384 (Policies & Documents)
     (N'my-notifications'),   -- root by 384 (My Notification parent)
-    (N'nav-asset-contract')  -- root added by 420 (Asset & Contract)
+    (N'nav-asset-contract'), -- root added by 420 (Asset & Contract)
+    (N'nav-tprm')            -- root added by 490 (Third-Party Risk)
 ) AS r(menu_key) ON r.menu_key = m.menu_key
 WHERE  m.parent_menu_id IS NOT NULL;
 

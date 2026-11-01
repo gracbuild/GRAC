@@ -13,6 +13,10 @@
     var loginAction = isOrgMgmt && string.IsNullOrEmpty(pathBase)
         ? "/OrganizationManagement/Login"
         : $"{pathBase}/Login";
+    // Single sign-on (2026-10-12): one button per configured provider
+    // (Sso:* in appsettings). None configured = the page is unchanged.
+    var ssoProviders = PracticeManagement.Web.Services.SsoProviders.Enabled(Configuration);
+    var ssoReturn = Url.IsLocalUrl(Model?.ReturnUrl) ? "&returnUrl=" + Uri.EscapeDataString(Model!.ReturnUrl!) : "";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -38,13 +42,10 @@
 
     <div class="login-wrapper">
         <div class="split-card">
-            <div class="brand-panel">
-                <div class="brand-inner">
-                    <div class="brand-logo">
-                        <img src="~/css/Images/Logo.png" alt="GRAC Logo" loading="lazy" />
-                    </div>
-                </div>
-            </div>
+            @* 2026-10-29: the brand panel moved to Login/_BrandPanel.cshtml.
+               Both login screens rendered identical markup, and the restyle
+               would otherwise have been pasted into each. *@
+            <partial name="_BrandPanel" />
 
             <div class="form-panel">
                 <div class="form-card">
@@ -73,6 +74,19 @@
 
                         <button type="submit" id="btnLogin" class="btn btn-primary btn-signin mt-4" tabindex="3">Sign In</button>
                     </form>
+
+                    @if (ssoProviders.Count > 0)
+                    {
+                        <div class="sso-divider" role="separator"><span>or</span></div>
+                        <div class="sso-buttons">
+                            @foreach (var sso in ssoProviders)
+                            {
+                                <a class="btn btn-sso" href="@($"{loginAction}/External?provider={Uri.EscapeDataString(sso.Scheme)}{ssoReturn}")">
+                                    <i class="@sso.Icon" aria-hidden="true"></i> Sign in with @sso.DisplayName
+                                </a>
+                            }
+                        </div>
+                    }
                 </div>
             </div>
         </div>

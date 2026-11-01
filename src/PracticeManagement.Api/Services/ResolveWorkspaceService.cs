@@ -43,6 +43,28 @@ public interface IResolveWorkspaceService
     Task<ResolveDependencyTypeSaveResult> SaveDependencyTypesAsync(ResolveDependencyTypeSaveRequest request, long? callerEmployeeId, bool isAdmin, CancellationToken cancellationToken);
     Task<ResolveEvidenceResult>        ListEvidenceAsync(long practiceInstanceId, long? obligationId, CancellationToken cancellationToken);
     Task<ResolveCommandResult>         SaveEvidenceAsync(ResolveEvidenceSaveRequest request, CancellationToken cancellationToken);
+    // Migration 473: files attached to one-time evidence at implementation.
+    // organizationId: the organisation the Web tier checked the caller
+    // against; when given, the instance must belong to it (null = no check).
+    Task<ResolveEvidenceAttachmentResult>   ListEvidenceAttachmentsAsync(long practiceInstanceId, long? organizationId, CancellationToken cancellationToken);
+    // Migration 499: metadata is the Evidence Center description the
+    // shared upload dialog captured. Optional and last, so every existing
+    // caller is unchanged.
+    Task<ResolveCommandResult>              AddEvidenceAttachmentAsync(long practiceInstanceId, long evidenceId, string fileName, string? contentType,
+                                                                       byte[] fileData, string? description, long? uploadedByEmployeeId,
+                                                                       long? organizationId, string? actor, bool callerIsAdmin, CancellationToken cancellationToken,
+                                                                       EvidenceUploadMetadata? metadata = null);
+    Task<ResolveEvidenceAttachmentContent?> GetEvidenceAttachmentAsync(long practiceInstanceId, long evidenceAttachmentId, long? organizationId, CancellationToken cancellationToken);
+    Task<ResolveCommandResult>              RemoveEvidenceAttachmentAsync(ResolveEvidenceAttachmentRemoveRequest request, CancellationToken cancellationToken);
+    // Migration 476: Select from Evidence Center / newer version.
+    Task<ResolveEvidenceLinkCandidateResult> ListEvidenceLinkCandidatesAsync(long practiceInstanceId, long evidenceId, long organizationId,
+                                                                        long? callerEmployeeId, bool callerIsAdmin, string? search,
+                                                                        int? evidenceTypeId, int pageNumber, int pageSize,
+                                                                        CancellationToken cancellationToken);
+    Task<ResolveCommandResult>              LinkEvidenceItemAsync(ResolveEvidenceLinkRequest request, long? callerEmployeeId, bool callerIsAdmin,
+                                                                  string actor, CancellationToken cancellationToken);
+    Task<ResolveCommandResult>              RefreshEvidenceLinkAsync(ResolveEvidenceLinkRefreshRequest request, string actor,
+                                                                     CancellationToken cancellationToken);
 }
 
 public sealed class ResolveWorkspaceService(
@@ -91,6 +113,12 @@ public sealed class ResolveWorkspaceService(
                      query.OwnerEmployeeId is > 0 ? query.OwnerEmployeeId : DBNull.Value);
             AddParam(command, "@implementation_status", DbType.String,
                      string.IsNullOrWhiteSpace(query.ImplementationStatus) ? DBNull.Value : query.ImplementationStatus, 100);
+            // 465. Operationalize Framework filter. Sent unconditionally like
+            // every other optional filter above. SIGNED (negative = Custom
+            // release, -1 * subscription_id), so 0/NULL -- not "<= 0" -- is
+            // the "no opinion" sentinel; a real negative value must pass.
+            AddParam(command, "@release_id", DbType.Int64,
+                     query.ReleaseId is not null && query.ReleaseId != 0 ? query.ReleaseId : DBNull.Value);
 
             var rows = new List<ResolveInstanceRow>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -352,8 +380,29 @@ public sealed class ResolveWorkspaceService(
                     // Migration 396. Optional: absent column = not retired.
                     RepositoryLifecycleStatus: OptionalString(reader, "RepositoryLifecycleStatus"),
                     // Migration 412. Optional so a database without 412
-                    // still loads (the Owner picker then shows Not set).
-                    OwnerEmployeeId:           OptionalInt64(reader, "OwnerEmployeeId")));
+                    // still loads (the Owner picker then shows Unassigned).
+                    OwnerEmployeeId:           OptionalInt64(reader, "OwnerEmployeeId"),
+                    // Migration 457. Optional: absent column = no date shown.
+                    FirstOccurrenceDate:       HasColumn(reader, "FirstOccurrenceDate")
+                                               && reader["FirstOccurrenceDate"] is DateTime firstOcc
+                                                   ? firstOcc.ToString("yyyy-MM-dd")
+                                                   : null,
+                    // Migration 473. Optional: absent column = the card
+                    // shows the description read-only, as before.
+                    PublishedObligationDescription: OptionalString(reader, "PublishedObligationDescription"),
+                    IsDescriptionOverridden:   HasColumn(reader, "IsDescriptionOverridden")
+                                               && reader["IsDescriptionOverridden"] is bool dov && dov));
+
+            // "Adopted by" shows the employee's NAME (2026-10-15). adopted_by
+            // stores the actor stamp the controller passes ("employee:37");
+            // the stored value is unchanged, only what the card receives.
+            await reader.CloseAsync();
+            var names = await ResolveActorNamesAsync(connection, rows.Select(r => r.AdoptedBy), cancellationToken);
+            // An id with no employee row shows no line rather than the id.
+            rows = rows.Select(r => ActorEmployeeId(r.AdoptedBy) is { } id
+                    ? r with { AdoptedBy = names.TryGetValue(id, out var name) ? name : null }
+                    : r)
+                .ToList();
 
             return new ResolveObligationResult(true, rows);
         }
@@ -465,6 +514,45 @@ public sealed class ResolveWorkspaceService(
                         UnmappedEvidenceTypes: ToInt(reader["UnmappedEvidenceTypes"])));
             }
 
+            // Migration 473: the description edits, for the obligations this
+            // request adopts or keeps adopted. NOT best-effort like the two
+            // syncs below: the operator typed this text, so a failure is
+            // reported. The adopt itself is already committed, and saying so
+            // lets the operator press Save again without redoing anything.
+            var descriptions = decisions
+                .Where(d => d.IsAdopted && d.ObligationDescription is not null)
+                .Select(d => new { obligationId = d.ObligationId, description = d.ObligationDescription })
+                .ToArray();
+            string? descriptionError = null;
+            if (descriptions.Length > 0)
+            {
+                try
+                {
+                    await using var descCommand = connection.CreateCommand();
+                    descCommand.CommandType = CommandType.StoredProcedure;
+                    descCommand.CommandText = "grac_practice.sp_resolve_obligation_description_save";
+                    AddParam(descCommand, "@practice_instance_id", DbType.Int64,  request.PracticeInstanceId);
+                    AddParam(descCommand, "@payload_json",         DbType.String, JsonSerializer.Serialize(descriptions));
+                    AddParam(descCommand, "@actor",                DbType.String,
+                             string.IsNullOrWhiteSpace(request.Actor) ? "system" : request.Actor, 100);
+                    var saved = descCommand.CreateParameter();
+                    saved.ParameterName = "@saved";
+                    saved.DbType        = DbType.Int32;
+                    saved.Direction     = ParameterDirection.Output;
+                    descCommand.Parameters.Add(saved);
+                    await descCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    // Reported AFTER the two syncs below: the adopt is
+                    // committed, so the gap tables and the schedule streams
+                    // (with this request's first-occurrence anchors) must
+                    // still follow it.
+                    logger.LogError(ex, "sp_resolve_obligation_description_save failed for instance {InstanceId}.", request.PracticeInstanceId);
+                    descriptionError = "The obligation was saved, but its description could not be: " + ex.Message;
+                }
+            }
+
             // Migration 245: reconcile the persistent gap tables against
             // whatever the obligation rows now say. Best-effort -- a sync
             // failure does not undo the save (the obligation update is
@@ -483,7 +571,9 @@ public sealed class ResolveWorkspaceService(
             await SyncScheduleRulesForInstanceAsync(connection, request.PracticeInstanceId,
                 request.Actor, anchorsJson, cancellationToken);
 
-            return new ResolveObligationAdoptResult(true, outcomes);
+            return descriptionError is null
+                ? new ResolveObligationAdoptResult(true, outcomes)
+                : new ResolveObligationAdoptResult(false, outcomes, descriptionError);
         }
         catch (Exception ex)
         {
@@ -867,7 +957,7 @@ public sealed class ResolveWorkspaceService(
             var mode  = reader["AssuranceMode"] as string;
             var crit  = reader["Criticality"] as string;
             return new ResolveCommandResult(true,
-                $"Saved. {mode ?? "Practice type not set"}, {crit ?? "criticality not set"}, owner {owner ?? "not set"}.");
+                $"Saved. {mode ?? "Practice type not set"}, {crit ?? "criticality not set"}, owner {owner ?? "unassigned"}.");
         }
         catch (Exception ex)
         {
@@ -1438,7 +1528,15 @@ public sealed class ResolveWorkspaceService(
                     AlignmentStatus:         reader["AlignmentStatus"] as string,
                     InheritedFromRepository: reader["InheritedFromRepository"] is bool i && i,
                     OrganizationModified:    reader["OrganizationModified"] is bool om && om,
-                    IsResolved:              reader["IsResolved"] is bool r && r));
+                    IsResolved:              reader["IsResolved"] is bool r && r,
+                    // 473 -- defensive like the others: null / 0 on a
+                    // database without it, and the row shows no cadence.
+                    EvidenceCadence:         OptionalString(reader, "EvidenceCadence"),
+                    EvidenceCadenceLabel:    OptionalString(reader, "EvidenceCadenceLabel"),
+                    EvidenceCadenceSource:   OptionalString(reader, "EvidenceCadenceSource"),
+                    AttachmentCount:         OptionalInt32(reader, "AttachmentCount") ?? 0,
+                    // 481 -- null on a database without it.
+                    EvidenceSource:          OptionalString(reader, "EvidenceSource")));
 
             return new ResolveEvidenceResult(true, rows);
         }
@@ -1485,6 +1583,21 @@ public sealed class ResolveWorkspaceService(
             AddParam(command, "@evidence_name",           DbType.String,  OrNull(request.EvidenceName), 300);
             AddParam(command, "@actor",                   DbType.String,
                      string.IsNullOrWhiteSpace(request.Actor) ? "system" : request.Actor, 100);
+            // Migration 473. Bound only when asked for AND declared, so a
+            // database without 473 still saves (the clear is then lost,
+            // which is the pre-473 behaviour) instead of failing with
+            // "too many arguments".
+            if (request.ClearEvidenceDescription
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       connection, "sp_resolve_evidence_save", "@clear_evidence_description", cancellationToken))
+                AddParam(command, "@clear_evidence_description", DbType.Boolean, true);
+            // Migration 481: Direct Upload / Evidence Center Reference /
+            // External Evidence Reference. Same "bound only when declared"
+            // rule, so the API still saves against a database without 481.
+            if (!string.IsNullOrWhiteSpace(request.EvidenceSource)
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       connection, "sp_resolve_evidence_save", "@evidence_source", cancellationToken))
+                AddParam(command, "@evidence_source", DbType.String, request.EvidenceSource.Trim(), 30);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -1492,14 +1605,352 @@ public sealed class ResolveWorkspaceService(
 
             var resolved = reader["IsResolved"] is bool r && r;
             var onInstance = ToInt(reader["ResolvedOnInstance"]);
+            // 481: what is still missing depends on the option chosen.
+            var source = OptionalString(reader, "EvidenceSource");
+            var missing = source switch
+            {
+                "External"       => "Saved. A location and a locator are both needed before it counts as resolved.",
+                "DirectUpload"   => "Saved. Attach a file before it counts as resolved.",
+                "EvidenceCenter" => "Saved. Select evidence from the Evidence Center before it counts as resolved.",
+                _                => "Saved. Attach a file, or enter a location and a locator, before it counts as resolved."
+            };
             return new ResolveCommandResult(true,
                 resolved
                     ? $"Evidence resolved; {onInstance} resolved on this instance."
-                    : "Saved. A location and a locator are both needed before it counts as resolved.");
+                    : missing);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "sp_resolve_evidence_save failed for evidence {EvidenceId}.", request.EvidenceId);
+            return new ResolveCommandResult(false, null, ex.Message);
+        }
+    }
+
+    // ==============================================================
+    // Evidence attachments (migration 473) -- a file attached to a
+    // ONE-TIME evidence row at implementation. Same contract shape as
+    // the Task Centre evidence (TaskService.AddAttachmentAsync /
+    // GetAttachmentAsync); the procedures scope every call to the
+    // practice instance.
+    // ==============================================================
+    public async Task<ResolveEvidenceAttachmentResult> ListEvidenceAttachmentsAsync(
+        long practiceInstanceId, long? organizationId, CancellationToken cancellationToken)
+    {
+        if (practiceInstanceId <= 0)
+            return new ResolveEvidenceAttachmentResult(false, [], "PracticeInstanceId is required.");
+
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_resolve_evidence_attachment_list";
+            AddParam(command, "@practice_instance_id", DbType.Int64, practiceInstanceId);
+            AddParam(command, "@organization_id",      DbType.Int64, organizationId is > 0 ? organizationId : DBNull.Value);
+
+            var rows = new List<ResolveEvidenceAttachmentRow>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add(new ResolveEvidenceAttachmentRow(
+                    EvidenceAttachmentId:  Convert.ToInt64(reader["EvidenceAttachmentId"]),
+                    EvidenceId:            Convert.ToInt64(reader["EvidenceId"]),
+                    FileName:              reader["FileName"]?.ToString() ?? "",
+                    ContentType:           reader["ContentType"] as string,
+                    FileSizeBytes:         reader["FileSizeBytes"] is { } sz && sz != DBNull.Value ? Convert.ToInt64(sz) : 0L,
+                    AttachmentDescription: reader["AttachmentDescription"] as string,
+                    UploadedByEmployeeId:  reader["UploadedByEmployeeId"] as long?,
+                    UploadedByName:        reader["UploadedByName"] as string,
+                    UploadedDt:            reader["UploadedDt"] as DateTime?,
+                    // 476 -- absent before the migration.
+                    EvidenceItemId:        OptionalInt64(reader, "EvidenceItemId"),
+                    EvidenceTitle:         OptionalString(reader, "EvidenceTitle"),
+                    EvidenceItemStatus:    OptionalString(reader, "EvidenceItemStatus"),
+                    VersionNo:             OptionalInt32(reader, "VersionNo"),
+                    CurrentVersionNo:      OptionalInt32(reader, "CurrentVersionNo"),
+                    NewerVersionAvailable: HasColumn(reader, "NewerVersionAvailable") && reader["NewerVersionAvailable"] is bool nv && nv,
+                    ValidTo:               HasColumn(reader, "ValidTo") ? reader["ValidTo"] as DateTime? : null,
+                    ValidityState:         OptionalString(reader, "ValidityState"),
+                    LinkedByName:          OptionalString(reader, "LinkedByName"),
+                    LinkedDt:              HasColumn(reader, "LinkedDt") ? reader["LinkedDt"] as DateTime? : null));
+
+            return new ResolveEvidenceAttachmentResult(true, rows);
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            // A database without 473: no attachments, not a broken workspace.
+            logger.LogWarning(ex, "sp_resolve_evidence_attachment_list is not installed (run 473).");
+            return new ResolveEvidenceAttachmentResult(true, []);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "sp_resolve_evidence_attachment_list failed for instance {InstanceId}.", practiceInstanceId);
+            return new ResolveEvidenceAttachmentResult(false, [], ex.Message);
+        }
+    }
+
+    public async Task<ResolveCommandResult> AddEvidenceAttachmentAsync(
+        long practiceInstanceId, long evidenceId, string fileName, string? contentType,
+        byte[] fileData, string? description, long? uploadedByEmployeeId,
+        long? organizationId, string? actor, bool callerIsAdmin, CancellationToken cancellationToken,
+        EvidenceUploadMetadata? metadata = null)
+    {
+        if (practiceInstanceId <= 0 || evidenceId <= 0)
+            return new ResolveCommandResult(false, null, "Practice instance and evidence row are both required.");
+        if (string.IsNullOrWhiteSpace(fileName))
+            return new ResolveCommandResult(false, null, "A file name is required.");
+        if (fileData is null || fileData.Length == 0)
+            return new ResolveCommandResult(false, null, "The file is empty.");
+
+        try
+        {
+            // 476: the file becomes an Evidence Center item, or links the
+            // identical one the uploader can already see. "Can see" reads
+            // practice_instance under View Data Scope, so this POST runs
+            // with the uploader as the reader (the middleware only sets
+            // one for GETs).
+            Infrastructure.CallerViewScope.BeginRead(uploadedByEmployeeId);
+
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_resolve_evidence_attachment_add";
+
+            AddParam(command, "@practice_instance_id",    DbType.Int64,  practiceInstanceId);
+            AddParam(command, "@evidence_id",             DbType.Int64,  evidenceId);
+            AddParam(command, "@file_name",               DbType.String, fileName, 500);
+            AddParam(command, "@content_type",            DbType.String, Text(contentType), 200);
+            AddParam(command, "@file_data",               DbType.Binary, fileData, -1);
+            AddParam(command, "@attachment_description",  DbType.String, Text(description), 1000);
+            AddParam(command, "@uploaded_by_employee_id", DbType.Int64,  uploadedByEmployeeId is > 0 ? uploadedByEmployeeId : DBNull.Value);
+            AddParam(command, "@actor",                   DbType.String,
+                     string.IsNullOrWhiteSpace(actor) ? "system" : actor, 100);
+            AddParam(command, "@organization_id",         DbType.Int64,  organizationId is > 0 ? organizationId : DBNull.Value);
+            // Migration 476. Bound only when declared, so a database
+            // without 476 still attaches (the 473 way).
+            if (await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                    connection, "sp_resolve_evidence_attachment_add", "@caller_is_admin", cancellationToken))
+                AddParam(command, "@caller_is_admin",     DbType.Boolean, callerIsAdmin);
+
+            // Migration 499: the Evidence Center metadata the upload dialog
+            // captured. 499 adds all eight parameters together, so one probe
+            // answers for the set -- the same "bound only when declared"
+            // guard 476 applies above, so this Api still attaches against a
+            // database where 499 has not been run.
+            if (metadata is not null
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       connection, "sp_resolve_evidence_attachment_add", "@evidence_title", cancellationToken))
+            {
+                AddParam(command, "@evidence_title",       DbType.String, Text(metadata.EvidenceTitle), 300);
+                AddParam(command, "@evidence_type_id",     DbType.Int32,
+                         metadata.EvidenceTypeId is > 0 ? metadata.EvidenceTypeId : DBNull.Value);
+                AddParam(command, "@evidence_description", DbType.String, Text(metadata.EvidenceDescription), 2000);
+                AddParam(command, "@owner_employee_id",    DbType.Int64,
+                         metadata.OwnerEmployeeId is > 0 ? metadata.OwnerEmployeeId : DBNull.Value);
+                AddParam(command, "@valid_from",           DbType.Date, (object?)metadata.ValidFrom ?? DBNull.Value);
+                AddParam(command, "@valid_to",             DbType.Date, (object?)metadata.ValidTo ?? DBNull.Value);
+                AddParam(command, "@classification",       DbType.String, Text(metadata.Classification), 30);
+                AddParam(command, "@tags",                 DbType.String, Text(metadata.Tags), 500);
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            long? id = null;
+            string? message = null;
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                if (HasColumn(reader, "EvidenceAttachmentId"))
+                    id = Convert.ToInt64(reader["EvidenceAttachmentId"]);
+                message = OptionalString(reader, "Message");   // 476
+            }
+
+            return new ResolveCommandResult(true, message ?? "Evidence attached.", null, id);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "sp_resolve_evidence_attachment_add failed for evidence {EvidenceId}.", evidenceId);
+            return new ResolveCommandResult(false, null, ex.Message);
+        }
+    }
+
+    public async Task<ResolveEvidenceAttachmentContent?> GetEvidenceAttachmentAsync(
+        long practiceInstanceId, long evidenceAttachmentId, long? organizationId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_resolve_evidence_attachment_get";
+        AddParam(command, "@practice_instance_id",   DbType.Int64, practiceInstanceId);
+        AddParam(command, "@evidence_attachment_id", DbType.Int64, evidenceAttachmentId);
+        AddParam(command, "@organization_id",        DbType.Int64, organizationId is > 0 ? organizationId : DBNull.Value);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+
+        return new ResolveEvidenceAttachmentContent(
+            EvidenceAttachmentId: Convert.ToInt64(reader["EvidenceAttachmentId"]),
+            EvidenceId:           Convert.ToInt64(reader["EvidenceId"]),
+            FileName:             reader["FileName"]?.ToString() ?? "download",
+            ContentType:          reader["ContentType"] as string,
+            FileSizeBytes:        Convert.ToInt64(reader["FileSizeBytes"]),
+            FileData:             (byte[])reader["FileData"]);
+    }
+
+    public async Task<ResolveCommandResult> RemoveEvidenceAttachmentAsync(
+        ResolveEvidenceAttachmentRemoveRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.PracticeInstanceId <= 0 || request.EvidenceAttachmentId <= 0)
+            return new ResolveCommandResult(false, null, "Practice instance and attachment are both required.");
+
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_resolve_evidence_attachment_remove";
+            AddParam(command, "@practice_instance_id",   DbType.Int64,  request.PracticeInstanceId);
+            AddParam(command, "@evidence_attachment_id", DbType.Int64,  request.EvidenceAttachmentId);
+            AddParam(command, "@actor",                  DbType.String,
+                     string.IsNullOrWhiteSpace(request.Actor) ? "system" : request.Actor, 100);
+            AddParam(command, "@organization_id",        DbType.Int64,
+                     request.OrganizationId is > 0 ? request.OrganizationId : DBNull.Value);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var message = await reader.ReadAsync(cancellationToken) && HasColumn(reader, "Message")
+                ? reader["Message"] as string
+                : null;
+            return new ResolveCommandResult(true, message ?? "Attachment removed.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "sp_resolve_evidence_attachment_remove failed for attachment {AttachmentId}.", request.EvidenceAttachmentId);
+            return new ResolveCommandResult(false, null, ex.Message);
+        }
+    }
+
+    // ==============================================================
+    // Migration 476 -- Select from Evidence Center. The procedures check
+    // the evidence row (one-time, on this instance, this organisation),
+    // the item (Active, unexpired, visible to the caller) and pin the
+    // current version; refresh moves a link to the latest version.
+    // ==============================================================
+    public async Task<ResolveEvidenceLinkCandidateResult> ListEvidenceLinkCandidatesAsync(
+        long practiceInstanceId, long evidenceId, long organizationId,
+        long? callerEmployeeId, bool callerIsAdmin, string? search,
+        int? evidenceTypeId, int pageNumber, int pageSize,
+        CancellationToken cancellationToken)
+    {
+        if (practiceInstanceId <= 0 || evidenceId <= 0 || organizationId <= 0)
+            return new ResolveEvidenceLinkCandidateResult(false, [], 0, "Organization, practice instance and evidence row are all required.");
+
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_evidence_link_candidates";
+            AddParam(command, "@organization_id",      DbType.Int64,   organizationId);
+            AddParam(command, "@practice_instance_id", DbType.Int64,   practiceInstanceId);
+            AddParam(command, "@evidence_id",          DbType.Int64,   evidenceId);
+            AddParam(command, "@caller_employee_id",   DbType.Int64,   callerEmployeeId is > 0 ? callerEmployeeId : DBNull.Value);
+            AddParam(command, "@caller_is_admin",      DbType.Boolean, callerIsAdmin);
+            AddParam(command, "@search",               DbType.String,  Text(search), 200);
+            AddParam(command, "@evidence_type_id",     DbType.Int32,   evidenceTypeId is > 0 ? evidenceTypeId : DBNull.Value);
+            AddParam(command, "@page_number",          DbType.Int32,   pageNumber);
+            AddParam(command, "@page_size",            DbType.Int32,   pageSize);
+
+            var rows = new List<Dictionary<string, object?>>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                for (var i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                rows.Add(row);
+            }
+            var total = rows.Count > 0 && rows[0]["TotalRows"] is { } t ? Convert.ToInt32(t) : 0;
+            return new ResolveEvidenceLinkCandidateResult(true, rows, total);
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            logger.LogWarning(ex, "sp_evidence_link_candidates is not installed (run 476).");
+            return new ResolveEvidenceLinkCandidateResult(false, [], 0, "The Evidence Center is not installed yet (database migration 476).");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "sp_evidence_link_candidates failed for evidence {EvidenceId}.", evidenceId);
+            return new ResolveEvidenceLinkCandidateResult(false, [], 0, ex.Message);
+        }
+    }
+
+    public async Task<ResolveCommandResult> LinkEvidenceItemAsync(
+        ResolveEvidenceLinkRequest request, long? callerEmployeeId, bool callerIsAdmin, string actor,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.PracticeInstanceId <= 0 || request.EvidenceId <= 0 || request.EvidenceItemId <= 0
+            || request.OrganizationId is not > 0)
+            return new ResolveCommandResult(false, null, "Organization, practice instance, evidence row and evidence item are all required.");
+
+        try
+        {
+            // Visibility of the item is part of the rule (see AddEvidenceAttachmentAsync).
+            Infrastructure.CallerViewScope.BeginRead(callerEmployeeId);
+
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_evidence_link_add";
+            AddParam(command, "@organization_id",      DbType.Int64,   request.OrganizationId);
+            AddParam(command, "@practice_instance_id", DbType.Int64,   request.PracticeInstanceId);
+            AddParam(command, "@evidence_id",          DbType.Int64,   request.EvidenceId);
+            AddParam(command, "@evidence_item_id",     DbType.Int64,   request.EvidenceItemId);
+            AddParam(command, "@link_note",            DbType.String,  Text(request.LinkNote), 1000);
+            AddParam(command, "@caller_employee_id",   DbType.Int64,   callerEmployeeId is > 0 ? callerEmployeeId : DBNull.Value);
+            AddParam(command, "@caller_is_admin",      DbType.Boolean, callerIsAdmin);
+            AddParam(command, "@actor",                DbType.String,  string.IsNullOrWhiteSpace(actor) ? "system" : actor, 100);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            long? id = null;
+            string? message = null;
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                id      = OptionalInt64(reader, "EvidenceAttachmentId");
+                message = OptionalString(reader, "Message");
+            }
+            return new ResolveCommandResult(true, message ?? "Evidence linked.", null, id);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "sp_evidence_link_add failed for evidence {EvidenceId}.", request.EvidenceId);
+            return new ResolveCommandResult(false, null, ex.Message);
+        }
+    }
+
+    public async Task<ResolveCommandResult> RefreshEvidenceLinkAsync(
+        ResolveEvidenceLinkRefreshRequest request, string actor, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.PracticeInstanceId <= 0 || request.EvidenceAttachmentId <= 0 || request.OrganizationId is not > 0)
+            return new ResolveCommandResult(false, null, "Organization, practice instance and attachment are all required.");
+
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_evidence_link_refresh";
+            AddParam(command, "@organization_id",      DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@practice_instance_id", DbType.Int64,  request.PracticeInstanceId);
+            AddParam(command, "@evidence_link_id",     DbType.Int64,  request.EvidenceAttachmentId);
+            AddParam(command, "@actor",                DbType.String, string.IsNullOrWhiteSpace(actor) ? "system" : actor, 100);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var message = await reader.ReadAsync(cancellationToken) ? OptionalString(reader, "Message") : null;
+            return new ResolveCommandResult(true, message ?? "Updated to the latest version.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "sp_evidence_link_refresh failed for link {LinkId}.", request.EvidenceAttachmentId);
             return new ResolveCommandResult(false, null, ex.Message);
         }
     }
@@ -1516,6 +1967,41 @@ public sealed class ResolveWorkspaceService(
         await connection.OpenAsync(cancellationToken);
         await Infrastructure.ViewScopeSession.ApplyAsync(connection, cancellationToken);   // 415: View Data Scope
         return connection;
+    }
+
+    // ==============================================================
+    // Actor stamps. The controllers stamp writes as "employee:{id}"
+    // (ResolveWorkspaceController.Actor); a screen should show the person.
+    // ActorEmployeeId parses the stamp (null for "system" or anything
+    // else); ResolveActorNamesAsync looks the ids up in one query.
+    // ==============================================================
+    private static long? ActorEmployeeId(string? actor) =>
+        actor is not null
+        && actor.StartsWith("employee:", StringComparison.OrdinalIgnoreCase)
+        && long.TryParse(actor["employee:".Length..], out var id) && id > 0
+            ? id : null;
+
+    private static async Task<Dictionary<long, string>> ResolveActorNamesAsync(
+        DbConnection connection, IEnumerable<string?> actors, CancellationToken cancellationToken)
+    {
+        var ids = actors.Select(ActorEmployeeId).OfType<long>().Distinct().ToList();
+        var names = new Dictionary<long, string>();
+        if (ids.Count == 0) return names;
+
+        await using var command = connection.CreateCommand();
+        var placeholders = new List<string>();
+        for (var i = 0; i < ids.Count; i++)
+        {
+            placeholders.Add("@id" + i);
+            AddParam(command, "@id" + i, DbType.Int64, ids[i]);
+        }
+        command.CommandText =
+            "SELECT employee_id, employee_name FROM grac_practice.organization_employee WHERE employee_id IN ("
+            + string.Join(",", placeholders) + ");";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            names[Convert.ToInt64(reader["employee_id"])] = Convert.ToString(reader["employee_name"]) ?? "";
+        return names;
     }
 
     private static void AddParam(DbCommand command, string name, DbType type, object? value, int? size = null)

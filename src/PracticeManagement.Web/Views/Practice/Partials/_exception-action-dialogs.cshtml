@@ -17,6 +17,30 @@
     file's own header comment for what it drives.
 *@
 
+@* ---------------------------------------------------------------------
+   The caller's own employee id, for the 498 designated-approver gate.
+
+   exception-actions.js shows Approve only when the request's
+   designatedApproverEmployeeId matches window.pmEmployeeId. Manage.cshtml
+   emits that global ONLY inside its "section Scripts" block -- and every
+   screen that includes this partial is a workflowScreens entry, whose
+   branch renders its partial and RETURNS before that block is ever
+   reached, so the section is never defined and the global never existed
+   on these pages. String(designated) === "" is always false, which hid
+   Approve on every request that names an approver -- i.e. on everything
+   submitted since 498.
+
+   Emitted inline here, in the one partial both approve-capable screens
+   already include, for exactly the reason exception-centre.cshtml and
+   exception-view.cshtml set window.pmCanApprove inline: a workflow screen
+   cannot rely on the layout's script section. One definition, no copy per
+   screen.
+
+   The "||" keeps a value a page has already set (any screen that does get
+   the script section) rather than overwriting it.
+   --------------------------------------------------------------------- *@
+<script>window.pmEmployeeId = window.pmEmployeeId || "@(ViewBag.EmployeeId ?? "")";</script>
+
 @* Approve modal *@
 <div class="pm-modal" id="excApproveModal" hidden>
     <div class="pm-modal-panel pm-modal-wide">

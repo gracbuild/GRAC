@@ -190,7 +190,7 @@
     // correction), but the page does not invite them -- an analysis that
     // changes under the approver's feet is worse than a re-submission.
     const editable = isPending;
-    ["exaType", "exaOwner", "exaJustification", "exaRiskImpact",
+    ["exaType", "exaOwner", "exaApprover", "exaJustification", "exaRiskImpact",
      "exaEffectiveFrom", "exaEffectiveTo"]
       .forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !editable; });
     document.getElementById("exaSaveBtn").hidden    = !editable;
@@ -209,6 +209,7 @@
     const d = state.detail || {};
     setVal("exaType",          d.exceptionTypeCode || "");
     setVal("exaOwner",         d.ownerEmployeeId ? String(d.ownerEmployeeId) : "");
+    setVal("exaApprover",      d.designatedApproverEmployeeId ? String(d.designatedApproverEmployeeId) : "");
     setVal("exaJustification", d.justification || "");
     setVal("exaRiskImpact",    d.riskImpact || "");
     // <input type="date"> only accepts yyyy-mm-dd; fmtDate already
@@ -231,6 +232,12 @@
     state.employees = (res.data && (res.data.data || res.data)) || [];
     fillSelect("exaOwner",       state.employees, "employeeId", "employeeName", "-- unassigned --");
     fillSelect("exaNtAssignee",  state.employees, "employeeId", "employeeName", "-- unassigned --");
+    // 498: eligible approvers (role has Approve on Exceptions & Waivers).
+    const appRes = await getJson(`${base}/lookups/approver-candidates?organizationId=${orgId}`);
+    const approvers = (appRes && appRes.data && (appRes.data.data || appRes.data)) || [];
+    fillSelect("exaApprover", approvers, "employeeId", "employeeName", "-- select approver --");
+    if (state.detail && state.detail.designatedApproverEmployeeId)
+        setVal("exaApprover", String(state.detail.designatedApproverEmployeeId));
   }
 
   // Resolves linked_practice_id to a name via the module's own practices
@@ -373,7 +380,9 @@
     // submit that follows it.
     await onSaveAnalysis();
 
-    const res = await postJson(`${base}/${state.id}/submit-for-approval`, {});
+    const approverId = numOrNull("exaApprover");
+    if (!approverId) { alert("Select a designated approver before submitting for approval."); return; }
+    const res = await postJson(`${base}/${state.id}/submit-for-approval`, { designatedApproverEmployeeId: approverId });
     if (!res.ok) { alert(res.error || "Could not submit for approval."); return; }
     await loadDetail();
     await loadTasks();

@@ -35,6 +35,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using PracticeManagement.Web.Security;
+using ControlManagement.Security;
 
 namespace PracticeManagement.Web.Controllers;
 
@@ -43,8 +44,27 @@ namespace PracticeManagement.Web.Controllers;
 public sealed class TaskController(
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
+    PermissionPolicy permissionPolicy,
     ILogger<TaskController> logger) : ControllerBase
 {
+    // The task-governance approvals (priority reduction / SLA extension) are
+    // decided from Exceptions & Waivers, so they require the APPROVE grant on
+    // the exception-centre menu (Role Master -> Approve checkbox) -- the same
+    // permission that gates the Approve button in the grid.
+    private string[] Roles() =>
+        (HttpContext.Session.GetString(PracticeSessionIdentity.RolesKey) ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+    private bool CanApprove() =>
+        permissionPolicy.IsAllowed(Roles(), PermissionAreaMap.For("exception-centre"), "APPROVE");
+
+    private IActionResult? ApprovePermissionGuard() =>
+        HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null
+            ? Unauthorized(new { error = "Session expired. Please sign in again." })
+            : CanApprove() ? null
+            : StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "You do not have Approve permission for Exceptions & Waivers." });
+
     // Uses the same ApiBaseUrl config key SecurePracticeClient already reads
     // (default localhost:5045). Zero appsettings changes needed.
     private const string ApiBaseKey = "ApiBaseUrl";
@@ -212,6 +232,16 @@ public sealed class TaskController(
     public Task<IActionResult> Close(long id, CancellationToken cancellationToken)
         => ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/{id}/close", cancellationToken);
 
+    // Reopen (479). Unlike Close, the Api gate here is admin-OR-owner, so
+    // the Api must learn whether the caller is an organisation admin. That
+    // flag is opt-in (CallerIdentityHandler.StampAdminFlag), so this proxy
+    // must ask ForwardBodyAsync to stamp it -- otherwise every caller,
+    // admins included, reaches sp_task_reopen as a non-admin and only the
+    // owner can reopen (403 REOPEN_FORBIDDEN for an admin who is not it).
+    [HttpPost("{id:long}/reopen")]
+    public Task<IActionResult> Reopen(long id, CancellationToken cancellationToken)
+        => ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/{id}/reopen", cancellationToken, stampAdmin: true);
+
     // =================================================================
     // Task Centre v2  (migrations 192-196)
     // =================================================================
@@ -308,17 +338,33 @@ public sealed class TaskController(
 
     [HttpPost("requests/{exceptionRequestId:long}/approve-sla-extension")]
     public Task<IActionResult> ApproveSlaExtension(long exceptionRequestId, CancellationToken cancellationToken)
-        => ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/requests/{exceptionRequestId}/approve-sla-extension", cancellationToken);
+    {
+        var guard = ApprovePermissionGuard();
+        if (guard is not null) return Task.FromResult(guard);
+        return ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/requests/{exceptionRequestId}/approve-sla-extension", cancellationToken);
+    }
 
     [HttpPost("requests/{exceptionRequestId:long}/approve-priority-reduction")]
     public Task<IActionResult> ApprovePriorityReduction(long exceptionRequestId, CancellationToken cancellationToken)
-        => ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/requests/{exceptionRequestId}/approve-priority-reduction", cancellationToken);
+    {
+        var guard = ApprovePermissionGuard();
+        if (guard is not null) return Task.FromResult(guard);
+        return ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/requests/{exceptionRequestId}/approve-priority-reduction", cancellationToken);
+    }
 
     /// <summary>
-    /// Evidence upload (BRD §16). Streams the multipart body straight
-    /// through rather than re-parsing it: the Web tier has no business
-    /// inspecting file content, and buffering a 50 MB upload twice is
-    /// wasteful.
+    /// Evidence upload (BRD §16).
+    ///
+    /// 2026-10-10: ReadFormAsync + rebuild, the pattern Document Upload and
+    /// Exception Centre already use. This used to stream Request.Body
+    /// straight into a StreamContent, which races with [ApiController]'s
+    /// input-formatter probing (see DocumentUploadController
+    /// .ForwardMultipartAsync): the Api received a truncated/empty multipart
+    /// body, its [FromForm] binding failed, and it answered 400 with a
+    /// ProblemDetails body that has no "error" field -- so the browser could
+    /// only say "Upload failed (HTTP 400)". Rebuilding also stamps the
+    /// uploader from the session (uploadedByEmployeeId), which the browser
+    /// never sent and must not be trusted to send.
     /// </summary>
     [HttpPost("{id:long}/attachments")]
     [RequestSizeLimit(52_428_800)] // 50 MB — matches the Api-side limit
@@ -326,6 +372,8 @@ public sealed class TaskController(
     {
         if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
             return Unauthorized(new { error = "Session expired. Please sign in again." });
+        if (!Request.HasFormContentType)
+            return BadRequest(new { error = "Request is not multipart/form-data." });
 
         var client = BuildClient();
         if (client.BaseAddress is null)
@@ -334,15 +382,37 @@ public sealed class TaskController(
 
         try
         {
-            using var content = new StreamContent(Request.Body);
-            if (!string.IsNullOrWhiteSpace(Request.ContentType)
-                && MediaTypeHeaderValue.TryParse(Request.ContentType, out var mediaType))
-                content.Headers.ContentType = mediaType;
+            var form = await Request.ReadFormAsync(cancellationToken);
+            using var mp = new MultipartFormDataContent("----pmboundary-" + Guid.NewGuid().ToString("N"));
+
+            // Text fields the browser sent (evidenceDescription), except the
+            // uploader -- that comes from the session below.
+            foreach (var kv in form)
+            {
+                if (kv.Key.Equals("uploadedByEmployeeId", StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var v in kv.Value)
+                    if (v is not null) mp.Add(new StringContent(v), kv.Key);
+            }
+            if (long.TryParse(HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey), out var callerId)
+                && callerId > 0)
+                mp.Add(new StringContent(callerId.ToString()), "uploadedByEmployeeId");
+
+            foreach (var file in form.Files)
+            {
+                if (file.Length == 0) continue;
+                var sc = new StreamContent(file.OpenReadStream());
+                if (!string.IsNullOrWhiteSpace(file.ContentType))
+                    sc.Headers.ContentType = MediaTypeHeaderValue.Parse(file.ContentType);
+                mp.Add(sc, file.Name, file.FileName);
+            }
 
             using var req = new HttpRequestMessage(HttpMethod.Post, $"api/practice/tasks/{id}/attachments")
             {
-                Content = content
+                Content = mp
             };
+            // 477: the identical-file check honours the Evidence Center
+            // visibility rule, which needs the admin flag.
+            CallerIdentityHandler.StampAdminFlag(HttpContext, req);
 
             var resp = await client.SendAsync(req, cancellationToken);
             return await ForwardAsync(resp, cancellationToken);
@@ -350,6 +420,98 @@ public sealed class TaskController(
         catch (Exception ex)
         {
             logger.LogError(ex, "TaskController.UploadAttachment proxy failed for task {TaskId}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
+    // ---- 477: Select from Evidence Center on a task ------------------
+    // organizationId is REQUIRED and checked against the session (the
+    // list is the organisation's evidence); the API checks the task
+    // belongs to it. The admin flag feeds the visibility rule.
+    [HttpGet("{id:long}/evidence-center")]
+    public Task<IActionResult> EvidenceCandidates(long id, CancellationToken cancellationToken)
+        => ForwardOrgScopedGetAsync(id, "evidence-center", nameof(EvidenceCandidates), cancellationToken);
+
+    [HttpPost("{id:long}/evidence-links")]
+    public Task<IActionResult> LinkEvidence(long id, CancellationToken cancellationToken)
+        => ForwardOrgScopedPostAsync(id, "evidence-links", nameof(LinkEvidence), cancellationToken);
+
+    // ---- 482: recurring evidence on Complete Task -------------------
+    // Same organisation rule as the two 477 routes above.
+    [HttpGet("{id:long}/recurring-evidence")]
+    public Task<IActionResult> RecurringEvidence(long id, CancellationToken cancellationToken)
+        => ForwardOrgScopedGetAsync(id, "recurring-evidence", nameof(RecurringEvidence), cancellationToken);
+
+    [HttpPost("{id:long}/recurring-evidence")]
+    public Task<IActionResult> SaveRecurringEvidence(long id, CancellationToken cancellationToken)
+        => ForwardOrgScopedPostAsync(id, "recurring-evidence", nameof(SaveRecurringEvidence), cancellationToken);
+
+    // 477 / 482: a task route whose organizationId (query string) is
+    // REQUIRED and checked against the session. The admin flag feeds the
+    // Evidence Center visibility rule.
+    private async Task<IActionResult> ForwardOrgScopedGetAsync(
+        long id, string route, string operation, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+        if (!long.TryParse(Request.Query["organizationId"], out var orgId) || orgId <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        if (!HttpContext.IsOrganizationAllowed(orgId))
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Caller is not authorised for the requested organization." });
+
+        var client = BuildClient();
+        try
+        {
+            var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"api/practice/tasks/{id}/{route}{qs}");
+            CallerIdentityHandler.StampAdminFlag(HttpContext, req);
+            var resp = await client.SendAsync(req, cancellationToken);
+            return await ForwardAsync(resp, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "TaskController.{Operation} proxy failed for task {TaskId}", operation, id);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
+    // The JSON body's organizationId is REQUIRED and checked the same way.
+    private async Task<IActionResult> ForwardOrgScopedPostAsync(
+        long id, string route, string operation, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+
+        string bodyJson;
+        using (var reader = new StreamReader(Request.Body, Encoding.UTF8))
+            bodyJson = await reader.ReadToEndAsync(cancellationToken);
+        long orgId = 0;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(bodyJson) ? "{}" : bodyJson);
+            if (doc.RootElement.TryGetProperty("organizationId", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.Number)
+                p.TryGetInt64(out orgId);
+        }
+        catch (System.Text.Json.JsonException) { /* treated as missing */ }
+        if (orgId <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        if (!HttpContext.IsOrganizationAllowed(orgId))
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Caller is not authorised for the requested organization." });
+
+        var client = BuildClient();
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"api/practice/tasks/{id}/{route}")
+            {
+                Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
+            };
+            CallerIdentityHandler.StampAdminFlag(HttpContext, req);
+            var resp = await client.SendAsync(req, cancellationToken);
+            return await ForwardAsync(resp, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "TaskController.{Operation} proxy failed for task {TaskId}", operation, id);
             return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
         }
     }
@@ -414,7 +576,7 @@ public sealed class TaskController(
         }
     }
 
-    private async Task<IActionResult> ForwardBodyAsync(HttpMethod method, string upstreamPath, CancellationToken cancellationToken)
+    private async Task<IActionResult> ForwardBodyAsync(HttpMethod method, string upstreamPath, CancellationToken cancellationToken, bool stampAdmin = false)
     {
         var client = BuildClient();
         if (client.BaseAddress is null)
@@ -430,6 +592,10 @@ public sealed class TaskController(
         {
             Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
+        // The caller's employee id is stamped automatically on every call by
+        // CallerIdentityHandler; the admin flag is opt-in and stamped only
+        // when a route (e.g. reopen) needs the Api to authorize by it.
+        if (stampAdmin) CallerIdentityHandler.StampAdminFlag(HttpContext, req);
         try
         {
             var resp = await client.SendAsync(req, cancellationToken);

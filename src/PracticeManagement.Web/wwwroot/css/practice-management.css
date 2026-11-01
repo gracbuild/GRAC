@@ -506,6 +506,17 @@ textarea.pm-input {
     border-radius: var(--radius-md);
     max-height: var(--pm-grid-max-h);
     overflow: auto;
+    /* 2026-10-08: the containing block for anything absolutely
+       positioned inside the grid. The screen-reader labels in each row
+       (.visually-hidden, "Actions" / "Show sub tasks") are
+       position:absolute; with no positioned ancestor their containing
+       block was the PAGE, so they escaped the wrap's overflow and stayed
+       at each row's natural position far below the capped grid -- a long
+       Control Statements list made the document ~7000px tall (a large
+       white area and a tiny page scrollbar). Positioned, the wrap clips
+       and scrolls them with the rows. Menus are portaled to <body>
+       (.pm-action-menu, position:fixed), so they are unaffected. */
+    position: relative;
 }
 
 /* Sticky grid header (2026-10-01). The column header row stays frozen
@@ -650,6 +661,26 @@ textarea.pm-input {
 .pm-table-wrap td:last-child {
     text-align: center;
     width: 58px;
+}
+
+/* .pm-cell-title -- a long title cell: capped width, wrapping onto further
+   lines instead of widening the whole grid (every other cell stays nowrap).
+   Was defined for the statement tree only (below, which keeps its own 420px);
+   made generic 2026-10-26 for Task Board's Task Name.
+
+   .pm-cell-text -- 2026-10-27, Role Master's Description. Same behaviour, so
+   it shares this block rather than repeating the five declarations; a separate
+   name only because a description is not a title and the two will want
+   different caps if that ever changes. Class-based, not nth-child: the
+   positional rules further down had to be re-commented every time a column
+   order moved. */
+.pm-table-wrap td.pm-cell-title,
+.pm-table-wrap td.pm-cell-text {
+    max-width: 360px;
+    min-width: 200px;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* Bulk-applicability select column. Narrow and centred like the Actions
@@ -998,15 +1029,22 @@ textarea.pm-input {
     color: var(--fg-muted);
     display: grid;
     gap: 4px 12px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* Responsive (2026-10-08): at most two columns, but a column never gets
+       narrower than 110px -- in a narrow card (laptop at 125% scaling) the
+       metrics drop to one column instead of the labels running into the
+       next column ("Applicable0 Not Updated"). */
+    grid-template-columns: repeat(auto-fit, minmax(max(110px, calc((100% - 12px) / 2)), 1fr));
     font-size: 12px;
 }
 
 .pm-mini-metrics span {
     align-items: baseline;
     display: inline-flex;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 2px 6px;
     line-height: 1.3;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .pm-mini-metrics b {
@@ -1096,7 +1134,7 @@ textarea.pm-input {
      ageing -- see .pm-dash-side); the title column may wrap so the table
      does not scroll sideways. */
 .pm-dash-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
-.pm-dash-split .pm-dash-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.pm-dash-split .pm-dash-tiles { grid-template-columns: repeat(auto-fit, minmax(max(120px, calc((100% - 50px) / 6)), 1fr)); } /* at most 6 (5 x 10px gaps), fewer when the half is narrow */
 .pm-dash-split .pm-dash-grid-ageing { grid-template-columns: repeat(var(--pm-dash-cols, 3), minmax(0, 1fr)); }
 .pm-dash-split .pm-dash-bar-row { grid-template-columns: minmax(64px, 100px) minmax(0, 1fr) 32px; }
 /* Right half (2026-10-02): ageing, then the lists filling what is left.
@@ -1208,8 +1246,11 @@ textarea.pm-input {
 }
 
 @media (min-width: 1181px) {
+    /* Responsive (2026-10-08): at most three cards a row, never narrower
+       than 210px -- so the overview drops to two or one column by its own
+       width (laptop / Windows display scaling) rather than squeezing. */
     .pm-home-work:not(.org-collapsed) .pm-home-org .pm-dashboard-kpi-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(max(210px, calc((100% - 28px) / 3)), 1fr));
     }
 
     .pm-home-work.org-collapsed .pm-home-org .pm-dashboard-kpi-grid {
@@ -3747,6 +3788,13 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     padding: 1px 7px;
     white-space: nowrap;
 }
+/* "Retired in repository" (395/396/493): an approved Control Management
+   retirement -- danger colours, the same tokens as the Expired chips
+   (.ec-valid-expired / .gep-expired). */
+.pm-badge.pm-badge-repo-retired {
+    background: var(--danger-100);
+    color: var(--danger-700);
+}
 /* ------------------------------------------------------------------
    Tag Picker (wwwroot/js/tag-picker.js, migrations 285/286)
    Multi-select with chips and inline create. Shaped to match
@@ -4225,10 +4273,11 @@ dialog.pm-dialog-fullpage #recordFields {
    partial locked to a single tab (risk-centre.js adds body.risk-single-tab
    when window.riskCentreInitialTab is set). On those standalone pages the tab
    strip is no longer navigation, so hide the tab buttons -- the page heading
-   names the page instead. The settings gear (.risk-tab-action) is kept so the
-   Risk Centre configuration stays reachable from every risk page. The legacy
+   names the page instead. The settings gear was the strip's only other
+   item; it moved to Settings -> Risk Settings (458), so the whole strip is
+   hidden rather than left as an empty bar with a bottom border. The legacy
    combined risk-centre page sets no single-tab class and is unaffected. */
-body.risk-single-tab .risk-tabs .risk-tab { display: none; }
+body.risk-single-tab .risk-tabs { display: none; }
 
 /* ------------------------------------------------------------------
    Task Board -- sub task tree (the caret beside a task number)
@@ -4460,4 +4509,23 @@ body.risk-single-tab .risk-tabs .risk-tab { display: none; }
     font-size: 12px;
     font-weight: 650;
     margin: 6px 0 0;
+}
+
+/* Form controls read at normal weight (2026-10-26).
+   AdminLTE sets every <label> to font-weight 700, and the form labels here
+   are 600/650. A control written with the `font: inherit` shorthand -- the
+   repository multi-select trigger and the obligation toolbar search below,
+   and any input placed inside its <label> -- took that weight and rendered
+   bold. (.pm-checkcombo-trigger already sets its own 500 and is left alone.)
+   Last in the file so it follows the rules it corrects (.pm-obligation-
+   toolbar input) at equal specificity; the dialog
+   partials that style their controls by id/class (Edit Task, New Task,
+   Impact Details) set the same weight in their own rules. */
+label input:not([type="checkbox"]):not([type="radio"]),
+label select,
+label textarea,
+.checkbox-combo-trigger,
+.pm-obligation-toolbar input,
+.pm-obligation-toolbar select {
+    font-weight: 400;
 }

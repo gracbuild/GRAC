@@ -199,6 +199,8 @@
         width: 100%; padding: 6px 8px;
         border: 1px solid var(--border); border-radius: var(--radius-sm);
         font: inherit; font-size: 13px; color: var(--fg-default);
+        /* Normal weight: AdminLTE makes every <label> bold (700) and `font: inherit` carried that weight into the control inside it (2026-10-26). */
+        font-weight: 400;
         background: var(--bg-surface);
     }
     .gid-field textarea { resize: vertical; }

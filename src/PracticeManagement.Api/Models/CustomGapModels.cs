@@ -45,7 +45,31 @@ public sealed record CustomGapOpenRequest(
     // Migration 388: the practice INSTANCES chosen in the picker (one per
     // mapped chip). Saved by sp_custom_gap_practice_instance_set straight
     // after the create; PracticeIds still carries their practices.
-    IReadOnlyList<long>? PracticeInstanceIds = null);
+    IReadOnlyList<long>? PracticeInstanceIds = null,
+    // Migration 491: the Add Gap narrative. Optional and last; bound only
+    // when sp_custom_gap_open declares them (a database without 491
+    // still opens the gap, without them).
+    string? CurrentState = null,
+    string? GapFinding   = null);
+
+// Migration 495: edit a Custom gap -- the fields the Add Custom Gap page
+// captures (sp_custom_gap_edit). Status is not here: it moves through the
+// lifecycle actions. PracticeInstanceIds replaces the mapped set (at
+// least one). Priority is not sent: the procedure keeps it equal to
+// SeverityCode, as Add does.
+public sealed record CustomGapEditRequest(
+    long    OrganizationId,
+    string  Title,
+    string? Description,
+    string? CurrentState,
+    string? GapFinding,
+    string? Remarks,
+    string? SeverityCode,
+    long?   OwnerEmployeeId,
+    DateTime? DueDate,
+    string? DetectionMethodCode,
+    string? DetectionMethodName,
+    IReadOnlyList<long>? PracticeInstanceIds);
 
 // Migration 382: one practice mapped to a Custom Gap (read model for the
 // read-only display on the Gap view / detail).
@@ -59,7 +83,9 @@ public sealed record CustomGapPracticeRow(
     // Migration 388: the mapped instance (null on a practice-level row).
     long?   PracticeInstanceId   = null,
     string? PracticeInstanceName = null,
-    string? PracticeInstanceCode = null);
+    string? PracticeInstanceCode = null,
+    // Migration 496: the instance's description (its practice's).
+    string? PracticeInstanceDescription = null);
 
 public sealed record CustomGapCloseRequest(
     long   CustomGapId,
@@ -204,7 +230,12 @@ public sealed record GapCentreListRow(
     /// <summary>Migration 371: the most recently linked Exception's
     /// exception_request.status_code. NULL when the Gap has no linked
     /// Exception.</summary>
-    string?   ExceptionStatusText = null);
+    string?   ExceptionStatusText = null,
+    /// <summary>Migration 469/471: the Gap's per-organization sequential id
+    /// (G-001), from custom_gap.gap_number. NULL on the practice_gap arm
+    /// (an un-materialized row has no gap record yet). Trailing/optional so
+    /// the one existing call site keeps compiling.</summary>
+    string?   GapNumber = null);
 
 public sealed record GapCentreListQuery(
     long?   OrganizationId,

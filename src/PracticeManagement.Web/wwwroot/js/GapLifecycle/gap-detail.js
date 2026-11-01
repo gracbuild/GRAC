@@ -55,7 +55,13 @@
     // down to only the Not Set / Not Started ones, which is what
     // isBlockedByUnresolvedObligations() actually gates on -- the strip
     // itself keeps showing all of them, unchanged.
-    failedObligations: []
+    failedObligations: [],
+    // Migration 501: the analyst has deliberately chosen Re-analyse on a
+    // gap that is already Analysed. Unlocks the form client-side and is
+    // sent as `reanalyse` on save, which is what lets the procedure skip
+    // its 55143 guard. Reset after every successful save, so the form
+    // locks itself again and a second re-analysis is a second decision.
+    reanalyse: false
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
@@ -68,6 +74,12 @@
     state.orgId = Number(params.get("orgId")) || 0;
     state.initialTitle = params.get("title") || "";
     state.currentStateCode = params.get("state") || "New";
+    // Migration 501: Gap Centre's row menu opens this page with
+    // reanalyse=1 for an already-analysed gap, so the analyst does not
+    // have to click Re-analyse again after arriving. Harmless on a gap
+    // that has never been analysed: the guard it skips would not have
+    // fired, and the banner that carries the flag stays hidden.
+    state.reanalyse = params.get("reanalyse") === "1";
 
     if (!state.gapId) {
       document.getElementById("gapDetailTitle").textContent = "Gap not selected";
@@ -194,6 +206,9 @@
     document.getElementById("gapActionForm").addEventListener("submit", onActionConfirmSubmit);
     document.querySelectorAll("[data-close-gap-action]").forEach(el =>
       el.addEventListener("click", () => hide("gapActionModal")));
+    // Migration 501.
+    const reanalyseBtn = document.getElementById("gapReanalyseBtn");
+    if (reanalyseBtn) reanalyseBtn.addEventListener("click", onReanalyseClick);
   }
 
   // -------------------- stepper --------------------
@@ -292,12 +307,15 @@
       row("Gap ID",          h.customGapId) +
       row("Title",           h.title) +
       row("Description",     h.description) +
+      // 491: the Add Gap narrative.
+      row("Current State / As-Is",          h.currentState) +
+      row("Gap Identified / Finding",       h.gapFinding) +
+      row("Comments / Management Response", h.remarks) +
       row("Source module",   h.sourceModuleCode) +
       row("Lifecycle state", h.lifecycleStateName || h.lifecycleStateCode) +
       row("Duplicate of",    duplicateOfDisplay) +
       row("Invalid reason",  h.invalidReason) +
       row("Legacy status",   h.statusCode) +
-      row("Priority",        h.priority) +
       row("Severity",        h.severityName || h.severityCode) +
       row("Owner",           h.ownerName) +
       row("Owner emp id",    h.ownerEmployeeId) +
@@ -309,22 +327,19 @@
     renderGapMappedPractices();
   }
 
-  // Migration 382: read-only list of practices mapped to this Custom Gap
-  // (captured on the Add Custom Gap form). Appended to the header metadata.
+  // Migration 382/388, reworked 2026-10-27 (496): the Practice
+  // Instance(s) this gap concerns -- the one it was materialized from and
+  // those mapped to it on the Add / Edit Custom Gap page -- each name a
+  // link to the instance's view page (new tab), its description beneath.
+  // Shared with Gap View: Shared/gap-practice-instances.js.
   async function renderGapMappedPractices() {
     const dl = document.getElementById("gapDetailMetadata");
-    if (!dl) return;
-    let rows = [];
-    try {
-      const url = U(`/practice/api/gaps/custom/${state.gapId}/practices?organizationId=${encodeURIComponent(state.orgId || 0)}`);
-      const r = await fetch(url, { credentials: "same-origin" });
-      if (r.ok) { const b = await r.json(); rows = (b && (b.data || b.Data)) || []; }
-    } catch (err) { console.warn("gap mapped practices load failed", err); return; }
-    // 388: show the mapped practice instance next to its practice.
-    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId)))
-      + ((x.practiceInstanceName || x.PracticeInstanceName)
-          ? " - " + escapeHtml(x.practiceInstanceName || x.PracticeInstanceName) : ""));
-    dl.innerHTML += `<dt>Mapped practices</dt><dd>${names.length ? names.join(", ") : "None"}</dd>`;
+    if (!dl || !window.gracGapPracticeInstances) return;
+    const orgId = state.orgId || (state.gapHeader && state.gapHeader.organizationId) || 0;
+    const list = await window.gracGapPracticeInstances.load(state.gapId, orgId, state.gapHeader);
+    dl.insertAdjacentHTML("beforeend",
+      `<dt>Practice Instance${list.length === 1 ? "" : "s"}</dt>`
+      + `<dd>${window.gracGapPracticeInstances.renderHtml(list, orgId)}</dd>`);
   }
 
   // -------------------- Practice Instance link (migration 321) --------
@@ -433,7 +448,12 @@
 
   function applyTerminalInvalidMode() {
     const invalidLocked      = isTerminalInvalid();
-    const analysedLocked     = isAlreadyAnalysed();
+    // Migration 501: an already-analysed gap is still locked -- unless
+    // the analyst asked to re-analyse it. isAlreadyAnalysed() itself is
+    // unchanged: it answers "has this been analysed", which the banner
+    // below still needs either way.
+    const analysed           = isAlreadyAnalysed();
+    const analysedLocked     = analysed && !state.reanalyse;
     // Migration 367: only meaningful when neither of the two locks above
     // already applies -- an Invalid/Duplicate/Delegated gap is locked for
     // its own reason regardless of obligation/Operationalization state.
@@ -466,8 +486,18 @@
     // Reuses the exact same read-only-lock mechanism just below; only
     // the messaging differs, since being Analysed is the successful
     // outcome, not a problem.
+    // Migration 501: the banner stays up while re-analysing -- it is how
+    // the analyst knows the editable form is a re-analysis and not a
+    // first pass -- with its second paragraph shown and the Re-analyse
+    // button gone.
     const analysedBanner = document.getElementById("gapAlreadyAnalysedBanner");
-    if (analysedBanner) analysedBanner.hidden = !analysedLocked;
+    if (analysedBanner) analysedBanner.hidden = !analysed || invalidLocked;
+    const analysedTextEl  = document.getElementById("gapAlreadyAnalysedText");
+    const reanalyseTextEl = document.getElementById("gapReanalyseModeText");
+    const reanalyseBtn    = document.getElementById("gapReanalyseBtn");
+    if (analysedTextEl)  analysedTextEl.hidden  = state.reanalyse;
+    if (reanalyseTextEl) reanalyseTextEl.hidden = !state.reanalyse;
+    if (reanalyseBtn)    reanalyseBtn.hidden    = state.reanalyse;
 
     // Migration 367: amber banner explaining WHY analysis is blocked --
     // unresolved obligations, the Practice not yet Operationalized, or
@@ -503,6 +533,24 @@
         else                       { el.disabled = locked; }
       });
     }
+  }
+
+  // -------------------- re-analysis (migration 501) -------------------
+  // Releases the already-analysed lock for this page load only. Nothing
+  // is written here: the form simply becomes editable and the next save
+  // carries `reanalyse: true`, which is what lets the procedure skip its
+  // 55143 guard. The 367/372 obligation and Operationalization locks are
+  // NOT released -- applyTerminalInvalidMode() re-evaluates them once the
+  // analysed lock is gone, matching the server, which still throws
+  // 55144/55145 on a re-analysis.
+  async function onReanalyseClick() {
+    if (!await window.gracUi.confirm(
+          "Re-analyse this gap? The saved analysis becomes editable, and saving replaces it.",
+          { type: "warning", title: "Re-analyse gap", confirmText: "Re-analyse" })) return;
+    state.reanalyse = true;
+    applyTerminalInvalidMode();
+    const form = document.getElementById("gapAnalysisForm");
+    if (form) form.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // -------------------- actions strip --------------------
@@ -702,7 +750,10 @@
       // (sp_custom_gap_analysis_save COALESCEs them, per migration 323) --
       // never overwritten, never used to drive anything.
       remediationPossible:     null,
-      businessRiskPresent:     null
+      businessRiskPresent:     null,
+      // Migration 501: false on a first analysis, so the server's 55143
+      // guard still catches an accidental second save.
+      reanalyse:               state.reanalyse === true
     };
     const result = await apiPut(`/gaps/${state.gapId}/analysis`, payload);
     if (!result || result.success === false) {
@@ -729,6 +780,10 @@
     // Analysed, lock the form into read-only/View mode immediately --
     // otherwise the analyst would see an editable form (that the server
     // will now reject on a second submit) until the next manual refresh.
+    // Migration 501: a re-analysis ends the same way. Clearing the flag
+    // first re-locks the form and brings the Re-analyse button back, so
+    // re-analysing twice takes two deliberate decisions.
+    state.reanalyse = false;
     applyTerminalInvalidMode();
 
     const summary = buildSaveSummary(result, payload, fresh, artefacts);

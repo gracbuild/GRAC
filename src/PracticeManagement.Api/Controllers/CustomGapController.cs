@@ -11,6 +11,7 @@
 // Stage 4b unified endpoints (Assurance-source flow etc.):
 //   GET    /{id}                   Get detail
 //   POST   /save                   Full unified upsert
+//   POST   /{id}/edit              Edit a Custom gap -- Add page fields (495)
 //   DELETE /{id}                   Soft-delete (Open only)
 //   POST   /generate               Generate from Assurance observation
 //   POST   /{id}/start
@@ -173,6 +174,31 @@ public sealed class CustomGapController(
             return BadRequest(new { error = "organizationId is required." });
 
         var result = await customGapService.SaveAsync(body, cancellationToken);
+        return result.Success
+            ? Ok(new { customGapId = result.CustomGapId })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    // -----------------------------------------------------------
+    // Migration 495: edit a Custom gap (Edit Custom Gap page). The editor
+    // is the session caller the Web tier stamps (X-PM-Caller-Employee-Id),
+    // never a value in the body. Body: CustomGapEditRequest.
+    // 200 { customGapId } | 400 { error, reasonCode }
+    // -----------------------------------------------------------
+    private const string CallerEmployeeHeader = "X-PM-Caller-Employee-Id";
+
+    [HttpPost("{id:long}/edit")]
+    public async Task<IActionResult> Edit(
+        long id,
+        [FromBody] CustomGapEditRequest body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+
+        long? caller = long.TryParse(Request.Headers[CallerEmployeeHeader].ToString(), out var e) && e > 0 ? e : null;
+        var result = await customGapService.EditAsync(id, body, caller, cancellationToken);
         return result.Success
             ? Ok(new { customGapId = result.CustomGapId })
             : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });

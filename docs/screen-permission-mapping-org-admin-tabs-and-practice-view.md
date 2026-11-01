@@ -133,3 +133,58 @@ out and in again.
 Note: as designed in 383, all Risk Management submenus share `risk-centre`,
 so View on one submenu opens the others by URL; the sidebar still lists
 only the submenus the role was granted.
+
+## Sidebar shows only permitted menus (2026-10-09)
+
+Before: `PracticeMenuService` returned every active `menu_master` row (its
+log line said "Permission filtering is disabled for base menu loading") and
+`PracticeController` rendered all of them, so a role with no grants saw the
+whole sidebar and was refused only on click (`ScreenAccessDenied`).
+
+Now `PracticeController.VisibleMenu()` passes the tree through
+`PermittedMenu()`, which applies the same check every page applies before it
+renders -- `CanViewScreen(menuKey)` (permissionPolicy + `ScreenPermissionArea`,
+management dashboards via `ManagementDashboards.CanOpen`):
+
+- Home (`dashboard`) is always shown (the landing page has no grant check).
+- A leaf is shown only with VIEW on its menu key.
+- A parent keeps the children the caller may open and is dropped when none
+  remain (no empty groups). A page-parent (e.g. Audit Definition, 276) stays
+  while it has a visible child.
+- The Organization Management module's flat menu is filtered the same way.
+- PM_ADMIN (`*:*`) still sees the full tree.
+
+`ViewBag.Screens` is unchanged (the page heading lookup uses it after the
+permission check). The menu service stays role-agnostic and per-request
+memoized. Grants are read from the session at sign-in, so a user sees a menu
+change after signing in again. Web only; no API or database change.
+
+## Role Master's Menu Permission card (2026-10-26)
+
+Symptom: Role Master -> Add showed the menu permission matrix, but Edit showed
+"You do not have permission to view role-menu-permissions. Ask an administrator
+to grant that menu permission to your role." on the card.
+
+Cause: migration 401 moved the standalone Role Menu Permission screen into Role
+Master (hidden from the sidebar), and the matrix leaves the
+`role-menu-permissions` menu out (`role-menu-permission-editor.js`
+`EXCLUDED_KEYS`), so `role-menu-permissions:VIEW` could not be granted to any
+role. Add never reads saved permissions, so only Edit hit the check
+(`POST role-menu-permissions/query`).
+
+Fix: `Security/PermissionAreaMap.cs` (linked into both tiers) maps
+`role-menu-permissions` -> `roles`. VIEW on Role Master reads the matrix; its
+ADD / EDIT save it. The card's View Data Scope settings
+(`RoleViewDataScopeController`, which reads the same mapping) follow too.
+No database change.
+
+### ...and the saved permissions now load in full (2026-10-26)
+
+With the card readable, Edit still opened some roles with nothing ticked. The
+matrix read `role-menu-permissions/query` for the WHOLE organisation in one
+`pageSize: 1000` request and filtered by role in the browser, but the
+repository procedure caps a page at 200 rows (`IF @page_size>200 SET
+@page_size=200`, 404), ordered by role name -- so only the first role or two
+were ever complete. `role-menu-permission-editor.js` now reads every page
+(`queryAll`, 200 per page, until a short page or `TotalRows`), for the menus
+(`menu-master/query`, was `pageSize: 500`) as well. UI only.

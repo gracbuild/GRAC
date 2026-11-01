@@ -31,6 +31,11 @@ public sealed class SecurePracticeClient(HttpClient httpClient, IConfiguration c
     public Task<string> ResolveIdentityAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
         SendAsync("secure/resolve-identity", token, request, cancellationToken);
 
+    // Single sign-on (2026-10-12): the identity provider's verified email ->
+    // the GRAC sign-in identity. Same bootstrap-token transport as sign-in.
+    public Task<string> AuthenticateExternalAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/authenticate-external", token, request, cancellationToken);
+
     private async Task<string> SendAsync(string path, string token, SecureRepositoryRequest request, CancellationToken cancellationToken)
     {
         request.TimestampUtc = DateTimeOffset.UtcNow;

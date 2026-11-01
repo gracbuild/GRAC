@@ -68,6 +68,10 @@
 --          @organization_id = <id>, @refresh = 1, @actor = N'cutover';
 --
 -- SAFE TO RE-RUN. Requires 302 (vw_pm_obligation_typed_detail) and 347.
+-- After 478 (2026-10-18): re-running this file rebuilds
+-- vw_repo_src_framework_statement without the statement classifications
+-- (Control Management 079); re-run 478_statement_classification_multi.sql
+-- straight after it.
 -- Rollback: 391_repository_subscription_copy_phase1_rollback.sql
 -- ASCII-only.
 -- =====================================================================

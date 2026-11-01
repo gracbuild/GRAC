@@ -115,7 +115,11 @@
 
     renderHeader(header);
     renderFacts(header);
+    renderNarrative(header);
     renderInstanceLink(header);
+    // 2026-10-27: the analysis record -- the same read gap-detail.js makes
+    // for its Analysis form (404 = not analysed yet).
+    renderAnalysis(await apiGet(gapBase, `/gaps/${state.gapId}/analysis`));
 
     const artefacts = await apiGet(gapBase, `/gaps/${state.gapId}/linked-artefacts`);
     renderObligations(artefacts && artefacts.failedObligations);
@@ -143,9 +147,12 @@
   // field a Custom/manually-raised gap simply has nothing to say about
   // (Detection Method, SLA, Practice Instance...); a page of dashes for
   // those is noise, not information.
-  function dd(label, value) {
+  // `full` (2026-10-27): a text-area field -- the fact spans the whole
+  // row (.gv-full) so a long paragraph reads across the panel instead of
+  // in a narrow column.
+  function dd(label, value, full) {
     if (value === null || value === undefined || String(value).trim() === "") return "";
-    return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
+    return `<div${full ? ' class="gv-full"' : ""}><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
   }
 
   function renderFacts(h) {
@@ -154,16 +161,16 @@
       : "";
     const facts = [
       dd("Gap Reference",    `GAP-${h.customGapId}`),
-      dd("Description",      h.description),
+      // Description, Current State, Finding and Comments moved to the
+      // Gap Narrative panel (renderNarrative, 2026-10-27).
       dd("Source / Origin",  h.sourceModuleCode),
       dd("Detection Method", h.detectionMethodName || h.detectionMethodCode),
-      dd("Practice / Practice Instance",
-         h.practiceInstanceName ? `${h.practiceInstanceName}${h.practiceInstanceCode ? ` (${h.practiceInstanceCode})` : ""}` : ""),
+      // "Practice / Practice Instance" moved to the Practice Instance(s)
+      // entry (renderGvMappedPractices, 496): name linked, description.
       // 379: same precedence bug as the status chip above -- a Closed
       // gap must not have its lifecycle label (almost always "Analysed")
       // outrank its own Closed status in this facts panel either.
       dd("Gap Status",       h.statusCode === "Closed" ? "Closed" : (h.lifecycleStateName || h.statusCode)),
-      dd("Priority",         h.priority),
       dd("Severity",         h.severityName || h.severityCode),
       dd("Owner",            h.ownerName),
       dd("Due Date",         fmtDate(h.dueDate)),
@@ -177,23 +184,83 @@
     renderGvMappedPractices();
   }
 
-  // Migration 382: read-only list of practices mapped to this Custom Gap.
+  // 2026-10-27: a fact that is shown even when empty ("Not recorded"), so
+  // every field the gap's forms capture is visible on this page -- dd()
+  // above drops empties, which hid the narrative of a gap that had none.
+  function ddAlways(label, value, full) {
+    const empty = value === null || value === undefined || String(value).trim() === "";
+    return `<div${full ? ' class="gv-full"' : ""}><dt>${escapeHtml(label)}</dt>`
+      + (empty ? `<dd class="gv-empty">Not recorded</dd>` : `<dd>${escapeHtml(value)}</dd>`) + `</div>`;
+  }
+
+  // The Add / Edit Custom Gap page's narrative (491). A Custom gap shows
+  // all four, recorded or not; a gap of another source never had the
+  // Current State / Finding / Comments boxes, so it shows only what it has.
+  function renderNarrative(h) {
+    const custom = (h.sourceModuleCode || "") === "Custom";
+    const f = custom ? ddAlways : dd;
+    const html = [
+      // All four are text areas on the Add / Edit page: one full row each.
+      f("Description",                    h.description,  true),
+      f("Current State / As-Is",          h.currentState, true),
+      f("Gap Identified / Finding",       h.gapFinding,   true),
+      f("Comments / Management Response", h.remarks,      true)
+    ].join("");
+    document.getElementById("gvNarrative").innerHTML = html
+      || `<div><dd class="gv-empty">No narrative recorded.</dd></div>`;
+  }
+
+  // The Analysis tab's fields (gap-detail.cshtml), as saved. Labels are
+  // the form's own: Recommended Action Summary is shown as "Corrective
+  // Action", the name the form gives it. RCA Summary / Corrective /
+  // Preventive belong to the RCA card: always listed when RCA was
+  // required, otherwise only if they hold a value. Not analysed yet = one
+  // line saying so.
+  function renderAnalysis(a) {
+    const host = document.getElementById("gvAnalysis");
+    if (!a) {
+      host.innerHTML = `<div><dd class="gv-empty">This gap has not been analysed yet.</dd></div>`;
+      return;
+    }
+    const yesNo = v => (v ? "Yes" : "No");
+    const decisions = [
+      a.recommendTask      ? "Generate Task"     : "",
+      a.recommendException ? "Request Exception" : "",
+      a.recommendRisk      ? "Create Risk"       : ""
+    ].filter(Boolean).join(", ");
+    host.innerHTML = [
+      ddAlways("Detection Method",          a.detectionMethodName || a.detectionMethodCode),
+      ddAlways("Severity",                  a.severityName || a.severityCode),
+      ddAlways("Business Impact",           a.businessImpactCode),
+      // The summaries and the RCA card's three boxes are text areas on
+      // the Analysis form: one full row each.
+      ddAlways("Business Impact Summary",   a.businessImpactSummary, true),
+      ddAlways("Regulatory Impact",         a.regulatoryImpactCode),
+      ddAlways("Regulatory Impact Summary", a.regulatoryImpactSummary, true),
+      ddAlways("RCA Required",              yesNo(a.rcaRequired)),
+      // A value saved while RCA was ticked stays visible even if the tick
+      // was later cleared (dd drops it when empty).
+      (a.rcaRequired ? ddAlways : dd)("RCA Summary",       a.rcaSummary,               true),
+      (a.rcaRequired ? ddAlways : dd)("Corrective Action", a.recommendedActionSummary, true),
+      (a.rcaRequired ? ddAlways : dd)("Preventive Action", a.preventiveAction,         true),
+      ddAlways("Decisions",                 decisions || "None"),
+      dd("Analysed On",                     fmtDate(a.analysedOn))
+    ].join("");
+  }
+
+  // Migration 382/388, reworked 2026-10-27 (496): the Practice
+  // Instance(s) this gap concerns -- the one it was materialized from and
+  // those mapped to it -- each name a link to the instance's view page,
+  // its description beneath. Shared with the Gap Details page:
+  // Shared/gap-practice-instances.js. Full row: descriptions are text.
   async function renderGvMappedPractices() {
     const el = document.getElementById("gvFacts");
-    if (!el) return;
-    let rows = [];
-    try {
-      const r = await fetch(
-        U(`/practice/api/gaps/custom/${state.gapId}/practices?organizationId=${encodeURIComponent(state.orgId || 0)}`),
-        { credentials: "same-origin" });
-      if (r.ok) { const b = await r.json(); rows = (b && (b.data || b.Data)) || []; }
-    } catch (_) { return; }
-    // 388: show the mapped practice instance next to its practice.
-    const names = rows.map(x => escapeHtml(x.practiceName || x.PracticeName || ("Practice #" + (x.practiceId || x.PracticeId)))
-      + ((x.practiceInstanceName || x.PracticeInstanceName)
-          ? " - " + escapeHtml(x.practiceInstanceName || x.PracticeInstanceName) : ""));
+    if (!el || !window.gracGapPracticeInstances) return;
+    const orgId = state.orgId || (state.gapHeader && state.gapHeader.organizationId) || 0;
+    const list = await window.gracGapPracticeInstances.load(state.gapId, orgId, state.gapHeader);
     el.insertAdjacentHTML("beforeend",
-      `<div><dt>Mapped Practices</dt><dd>${names.length ? names.join(", ") : "None"}</dd></div>`);
+      `<div class="gv-full"><dt>Practice Instance${list.length === 1 ? "" : "s"}</dt>`
+      + `<dd>${window.gracGapPracticeInstances.renderHtml(list, orgId)}</dd></div>`);
   }
 
   // Same destination gap-detail.cshtml's own "View Practice Instance"
@@ -498,7 +565,10 @@
     const fields = {
       gapId: state.gapId, isMaterialized: true, isAnalysed: isAnalysed,
       sourceModuleCode: h.sourceModuleCode || "", statusCode: h.statusCode || "",
-      practiceInstanceId: h.practiceInstanceId || null, existingTaskCount: nOpen
+      practiceInstanceId: h.practiceInstanceId || null, existingTaskCount: nOpen,
+      // 495: Edit's rule, from the header's own terminal flag.
+      lifecycleStateCode: h.lifecycleStateCode || "",
+      isLifecycleTerminal: !!h.lifecycleIsTerminal
     };
 
     // No onAnalysis, no onView passed to buildMenu(): this page already
@@ -509,6 +579,11 @@
     // moment the gap is analysed. buildMenu() only includes an item
     // whose handler is supplied, so neither is offered from it.
     const items = window.gracGapActions.buildMenu(fields, {
+      // Migration 495: the Edit Custom Gap page, back to this view.
+      onEdit: () => {
+        window.location.href = window.gracGapActions.editUrl(
+          state.gapId, state.orgId || h.organizationId || "", "", "view");
+      },
       onViewExistingTasks: () => {
         // Bug fix (2026-09-22): this was a bare "/Practice/Index/tasks..."
         // href -- an absolute path that ignores the app's PathBase when

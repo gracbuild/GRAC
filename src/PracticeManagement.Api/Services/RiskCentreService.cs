@@ -1095,7 +1095,11 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
                 : NullableInt(HasColumn(r, "MappedPracticeCount") ? r["MappedPracticeCount"] : null),
             // 376. Same additive column as the list row above, for the
             // Risk View detail page.
-            HasColumn(r, "RiskCategoryNames") ? r["RiskCategoryNames"] as string : null);
+            HasColumn(r, "RiskCategoryNames") ? r["RiskCategoryNames"] as string : null,
+            // 485. Review Risk pre-fill; guarded like the columns above.
+            HasColumn(r, "AnalystRemarks")      ? r["AnalystRemarks"]      as string : null,
+            HasColumn(r, "ReviewFrequencyId")   ? r["ReviewFrequencyId"]   as int?   : null,
+            HasColumn(r, "ReviewFrequencyName") ? r["ReviewFrequencyName"] as string : null);
     }
 
     // =================================================================

@@ -45,6 +45,17 @@ public sealed class TaskController(
     ITaskService taskService,
     ILogger<TaskController> logger) : ControllerBase
 {
+    // 477: the caller the Web tier stamps from the session (X-PM-Caller-*),
+    // for the Evidence Center visibility rule.
+    private const string CallerEmployeeHeader = "X-PM-Caller-Employee-Id";
+    private const string CallerAdminHeader    = "X-PM-Caller-Is-Admin";
+
+    private long? CallerEmployeeId =>
+        long.TryParse(Request.Headers[CallerEmployeeHeader].ToString(), out var id) && id > 0 ? id : null;
+
+    private bool CallerIsAdmin =>
+        Request.Headers[CallerAdminHeader].ToString() is "1" or "true" or "True";
+
     // GET /api/practice/tasks/counts?organizationId=
     // Returns the tab count badges for the Task Center UI.
     [HttpGet("counts")]
@@ -275,7 +286,14 @@ public sealed class TaskController(
         if (body is null) return BadRequest(new { error = "Request body is required." });
 
         // Route id wins, as it does on every other command here.
-        var result = await taskService.UpdateAsync(body with { TaskId = id }, cancellationToken);
+        // 2026-10-26: the actor comes from the session the Web tier stamps
+        // (X-PM-Caller-Employee-Id), as Reopen does -- the browser never
+        // sent ActorEmployeeId, so an SLA extension (BRD 8) raised from the
+        // edit form was refused with ACTOR_REQUIRED. The body value is only
+        // a fallback for a direct API caller with no stamped header.
+        var result = await taskService.UpdateAsync(
+            body with { TaskId = id, ActorEmployeeId = CallerEmployeeId ?? body.ActorEmployeeId },
+            cancellationToken);
 
         if (!result.Success)
         {
@@ -321,6 +339,22 @@ public sealed class TaskController(
     {
         var request = (body ?? new TaskCloseRequest(id, null, null, null, null, null)) with { TaskId = id };
         var result = await taskService.CloseAsync(request, cancellationToken);
+        return Respond(result);
+    }
+
+    [HttpPost("{id:long}/reopen")]
+    public async Task<IActionResult> Reopen(long id, [FromBody] TaskReopenRequest? body, CancellationToken cancellationToken)
+    {
+        // Actor + admin come from the session the Web tier stamps
+        // (X-PM-Caller-*); sp_task_reopen authorizes admin OR task owner.
+        var request = (body ?? new TaskReopenRequest(id, null, null, false, null, null)) with
+        {
+            TaskId          = id,
+            ActorEmployeeId = CallerEmployeeId,
+            IsAdmin         = CallerIsAdmin,
+            ActorRoleCode   = CallerIsAdmin ? "Admin" : null
+        };
+        var result = await taskService.ReopenAsync(request, cancellationToken);
         return Respond(result);
     }
 
@@ -424,6 +458,17 @@ public sealed class TaskController(
         [FromForm] IFormFile? file,
         [FromForm] string? evidenceDescription,
         [FromForm] long? uploadedByEmployeeId,
+        [FromForm] long? instanceEvidenceId,   // 482: the recurring evidence row it answers
+        // 499: the Evidence Center fields the shared upload dialog captures.
+        // All optional -- posting only the file behaves exactly as before.
+        [FromForm] string?   evidenceTitle,
+        [FromForm] int?      evidenceTypeId,
+        [FromForm] string?   evidenceItemDescription,
+        [FromForm] long?     ownerEmployeeId,
+        [FromForm] DateTime? validFrom,
+        [FromForm] DateTime? validTo,
+        [FromForm] string?   classification,
+        [FromForm] string?   tags,
         CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0)
@@ -432,12 +477,82 @@ public sealed class TaskController(
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, cancellationToken);
 
+        // evidenceDescription is the ATTACHMENT's note on this task;
+        // evidenceItemDescription is the Evidence Center item's own
+        // description. Two different fields, which is why the form names
+        // them apart.
+        var metadata = new EvidenceUploadMetadata(
+            evidenceTitle, evidenceTypeId, evidenceItemDescription, ownerEmployeeId,
+            validFrom, validTo, classification, tags);
+
         var result = await taskService.AddAttachmentAsync(
             id, file.FileName, file.ContentType, ms.ToArray(),
-            evidenceDescription, uploadedByEmployeeId, cancellationToken);
+            evidenceDescription, uploadedByEmployeeId, CallerIsAdmin, instanceEvidenceId, cancellationToken,
+            metadata.HasAny ? metadata : null);
 
         return result.Success
-            ? StatusCode(StatusCodes.Status201Created, new { taskAttachmentId = result.TaskId })
+            ? StatusCode(StatusCodes.Status201Created, new { taskAttachmentId = result.TaskId, message = result.Message })
+            : Respond(result);
+    }
+
+    // ---- 477: Select from Evidence Center on a task -------------------
+    // organizationId is required and checked by the Web tier against the
+    // session; the procedures check the task belongs to it.
+    [HttpGet("{id:long}/evidence-center")]
+    public async Task<IActionResult> EvidenceCandidates(
+        long id,
+        [FromQuery] long    organizationId,
+        [FromQuery] string? search,
+        [FromQuery] int?    evidenceTypeId,
+        [FromQuery] int     pageNumber = 1,
+        [FromQuery] int     pageSize   = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await taskService.ListEvidenceCandidatesAsync(
+            id, organizationId, CallerEmployeeId, CallerIsAdmin, search, evidenceTypeId, pageNumber, pageSize, cancellationToken);
+        return result.Success
+            ? Ok(new { data = result.Rows, totalRows = result.TotalRows })
+            : BadRequest(new { error = result.Error });
+    }
+
+    [HttpPost("{id:long}/evidence-links")]
+    public async Task<IActionResult> LinkEvidence(long id, [FromBody] TaskEvidenceLinkRequest body, CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        var actor = CallerEmployeeId is { } eid ? $"employee:{eid}" : "system";
+        var result = await taskService.LinkEvidenceAsync(id, body, CallerEmployeeId, CallerIsAdmin, actor, cancellationToken);
+        return result.Success
+            ? Ok(new { success = true, taskAttachmentId = result.TaskId, message = result.Message })
+            : Respond(result);
+    }
+
+    // ---- 482: recurring evidence on Complete Task --------------------
+    // The recurring evidence of a scheduled task's obligation, and the
+    // option chosen per row (Direct Upload / Evidence Center Reference /
+    // External Evidence Reference). organizationId is required and checked
+    // by the Web tier against the session; the procedures check the task
+    // belongs to it. Nothing here is mandatory.
+    [HttpGet("{id:long}/recurring-evidence")]
+    public async Task<IActionResult> RecurringEvidence(
+        long id, [FromQuery] long organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await taskService.ListRecurringEvidenceAsync(id, organizationId, cancellationToken);
+        return result.Success
+            ? Ok(new { data = result.Rows, general = result.General })   // 483: general
+            : BadRequest(new { error = result.Error });
+    }
+
+    [HttpPost("{id:long}/recurring-evidence")]
+    public async Task<IActionResult> SaveRecurringEvidence(
+        long id, [FromBody] TaskRecurringEvidenceSaveRequest body, CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        var actor = CallerEmployeeId is { } eid ? $"employee:{eid}" : "system";
+        var result = await taskService.SaveRecurringEvidenceAsync(id, body, CallerEmployeeId, actor, cancellationToken);
+        return result.Success
+            ? Ok(new { success = true, message = result.Message })
             : Respond(result);
     }
 
@@ -453,8 +568,13 @@ public sealed class TaskController(
     {
         if (body is null) return BadRequest(new { error = "Request body is required." });
 
+        // Approver = the authenticated caller (see ApprovePriorityReduction).
+        var approver = CallerEmployeeId ?? (body.ApprovedByEmployeeId > 0 ? body.ApprovedByEmployeeId : (long?)null);
+        if (approver is null)
+            return BadRequest(new { error = "Your account is not linked to an employee record, so you cannot approve this request." });
+
         var result = await taskService.ApproveSlaExtensionAsync(
-            body with { ExceptionRequestId = exceptionRequestId }, cancellationToken);
+            body with { ExceptionRequestId = exceptionRequestId, ApprovedByEmployeeId = approver.Value }, cancellationToken);
 
         return result.Success
             ? Ok(new { exceptionRequestId, taskId = result.TaskId, statusCode = result.StatusCode })
@@ -467,8 +587,16 @@ public sealed class TaskController(
     {
         if (body is null) return BadRequest(new { error = "Request body is required." });
 
+        // The approver is the authenticated caller (X-PM-Caller-Employee-Id),
+        // not a value the browser sends. Falls back to the body only if the
+        // header is absent. sp_task_priority_reduction_approve requires a
+        // non-null approver, so refuse cleanly when neither is available.
+        var approver = CallerEmployeeId ?? (body.ApprovedByEmployeeId > 0 ? body.ApprovedByEmployeeId : (long?)null);
+        if (approver is null)
+            return BadRequest(new { error = "Your account is not linked to an employee record, so you cannot approve this request." });
+
         var result = await taskService.ApprovePriorityReductionAsync(
-            body with { ExceptionRequestId = exceptionRequestId }, cancellationToken);
+            body with { ExceptionRequestId = exceptionRequestId, ApprovedByEmployeeId = approver.Value }, cancellationToken);
 
         return result.Success
             ? Ok(new { exceptionRequestId, taskId = result.TaskId, statusCode = result.StatusCode })
@@ -498,6 +626,11 @@ public sealed class TaskController(
             "CHILD_PRIORITY_LOCKED"     => StatusCodes.Status409Conflict,
             "CHILD_SLA_LOCKED"          => StatusCodes.Status409Conflict,
             "CHILD_NESTING_NOT_ALLOWED" => StatusCodes.Status409Conflict,
+
+            // task reopen (479)
+            "TASK_NOT_CLOSED"           => StatusCodes.Status409Conflict,
+            "REOPEN_FORBIDDEN"          => StatusCodes.Status403Forbidden,
+            "TASK_NOT_FOUND"            => StatusCodes.Status404NotFound,
 
             "REASON_REQUIRED"           => StatusCodes.Status400BadRequest,
             "ACTOR_REQUIRED"            => StatusCodes.Status400BadRequest,

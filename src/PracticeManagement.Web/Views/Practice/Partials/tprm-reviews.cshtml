@@ -1,0 +1,96 @@
+@*
+    Third-Party Reviews -- Third-Party Risk Management (migrations 486-490).
+    Rendered from Manage.cshtml when Model.Key == "tprm-reviews".
+
+    Screen key : `tprm-reviews`
+    Group      : Third-Party Risk
+    Menu       : nav-tprm (Third-Party Risk) -> Reviews
+
+    BRD section 4 (lifecycle monitoring): every periodic and triggered
+    review of the organization's engagements in one queue. The scheduler
+    pass (TaskNotificationWorker -> sp_tprm_monitoring_sweep) raises the due
+    ones -- periodic reviews from the review rules, contract /
+    certification / risk-acceptance expiry, reassessment flags, overdue
+    remediation, new assurance findings on a live engagement -- once per
+    source; "Run monitoring now" runs the same pass for the organization.
+    People raise incident, SLA-breach or material-change reviews from the
+    engagement. Completing a review records the outcome: no change /
+    remediate (the review dates move for a periodic review), reassess
+    (flags the engagement), suspend or exit (performs the lifecycle step).
+
+    Opened from the dashboard with status / type / dueWithin (banner by
+    Shared/dashboard-drill.js), or from an engagement with
+    ?engagementId=&reviewId=.
+
+    Backend: practice/api/tprm/reviews..., monitoring/run (TprmController)
+    Script : wwwroot/js/Tprm/tprm-common.js, tprm-reviews.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var rvPermissions = ViewBag.Permissions as string[] ?? [];
+    bool rvHas(string action) => rvPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var rvCanEdit = rvHas("EDIT");
+    var rvCanApprove = rvHas("APPROVE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="rvRoot" data-can-edit="@(rvCanEdit ? "1" : "0")" data-can-approve="@(rvCanApprove ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="rvOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <p class="pm-message" id="rvMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-toolbar">
+            <input type="search" id="rvSearch" placeholder="Search review, engagement or third party" maxlength="200" />
+            <select id="rvStatusFilter" title="Status">
+                <option value="OPEN">Open</option>
+                <option value="OVERDUE">Overdue</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="CANCELLED">Cancelled</option>
+                <option value="ALL">All</option>
+            </select>
+            <select id="rvTypeFilter" title="Type">
+                <option value="">All types</option>
+                <option value="PERIODIC">Periodic</option>
+                <option value="TRIGGERED">Triggered</option>
+                <option value="CONTRACT_EXPIRY">Contract expiry</option>
+                <option value="CERTIFICATION_EXPIRY">Certification expiry</option>
+                <option value="ACCEPTANCE_EXPIRY">Risk acceptance expiry</option>
+            </select>
+            <select id="rvDueFilter" title="Due">
+                <option value="">Any due date</option>
+                <option value="7">Due in 7 days</option>
+                <option value="30">Due in 30 days</option>
+                <option value="90">Due in 90 days</option>
+            </select>
+            <select id="rvOwnerFilter" title="Owner"><option value="">All owners</option></select>
+            <button class="pm-button icon" id="rvRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            @if (rvCanApprove)
+            {
+                <button class="pm-button" id="rvRun" type="button"><i class="fa-solid fa-satellite-dish"></i> Run monitoring now</button>
+            }
+        </div>
+        <p class="tprm-note" id="rvEngagementNote" hidden></p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Review</th><th>Engagement</th><th>Type / trigger</th><th>Due</th><th>Owner</th><th>Status</th><th></th></tr></thead>
+                <tbody id="rvListBody"></tbody>
+            </table>
+        </div>
+        <div id="rvPager"></div>
+    </section>
+</div>
+
+<partial name="Partials/_tprm-form-dialog" />
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-common.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-reviews.js" asp-append-version="true"></script>

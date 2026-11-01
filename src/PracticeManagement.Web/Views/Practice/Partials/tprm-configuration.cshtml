@@ -1,0 +1,109 @@
+@*
+    TPRM Configuration -- Third-Party Risk Management (migrations 486-490).
+    Rendered from Manage.cshtml when Model.Key == "tprm-configuration".
+
+    Screen key : `tprm-configuration`
+    Group      : Third-Party Risk
+    Menu       : nav-tprm (Third-Party Risk) -> TPRM Configuration
+
+    BRD section 6/11 -- three configuration layers:
+      GRAC baseline   lists, library, risk model, questionnaires and rules
+                      shipped by GRAC (487). Maintained by the platform
+                      administrator only (PM_ADMIN): pick "GRAC baseline"
+                      as the scope. Illustrative, not regulatory, unless a
+                      source authority says otherwise.
+      Organization    an organization relabels / reorders / hides a GRAC
+                      value or library item, overrides a rule, and adds
+                      its own values, items, rules, custom fields and
+                      templates. Its changes never alter the baseline.
+      Templates       risk models and questionnaires are versioned: a GRAC
+                      template is adopted (copied) into the organization,
+                      changed on a Draft version, compared and activated
+                      (one version in force; earlier versions are kept and
+                      assessments stay pinned to the version they used).
+                      "Update available" shows that GRAC published a newer
+                      version than the one the copy derives from; adopting
+                      again creates a new Draft from it (controlled
+                      adoption).
+    Tabs: Reference lists | Library | Risk models & questionnaires |
+          Approval & review rules | Delegations | Custom fields.
+
+    Permissions (TprmController): VIEW to read; ADD / EDIT to change;
+    APPROVE to activate or retire a template version and for delegations.
+
+    Backend: practice/api/tprm/config/... (TprmController)
+    Script : wwwroot/js/Tprm/tprm-common.js, tprm-configuration.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var cfPermissions = ViewBag.Permissions as string[] ?? [];
+    bool cfHas(string action) => cfPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var cfCanChange = cfHas("ADD") || cfHas("EDIT");
+    var cfCanApprove = cfHas("APPROVE");
+    var cfIsPlatformAdmin = ViewBag.IsSystemAdmin is bool b && b;
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="cfRoot" data-can-change="@(cfCanChange ? "1" : "0")" data-can-approve="@(cfCanApprove ? "1" : "0")"
+     data-platform-admin="@(cfIsPlatformAdmin ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="cfOrg" title="Organization"><option value="">Select organization</option></select>
+            @if (cfIsPlatformAdmin)
+            {
+                <select id="cfScope" title="Configuration layer">
+                    <option value="ORG">Organization configuration</option>
+                    <option value="BASELINE">GRAC baseline (all organizations)</option>
+                </select>
+            }
+        </div>
+        <p class="pm-message" id="cfMessage" role="status" aria-live="polite" hidden></p>
+        <p class="tprm-note" id="cfScopeNote"></p>
+        <div class="pm-tabs" role="tablist" aria-label="TPRM configuration">
+            <button role="tab" class="active" data-cf-tab="LISTS" aria-selected="true">Reference lists</button>
+            <button role="tab" data-cf-tab="LIBRARY" aria-selected="false">Library</button>
+            <button role="tab" data-cf-tab="TEMPLATES" aria-selected="false">Risk models &amp; questionnaires</button>
+            <button role="tab" data-cf-tab="RULES" aria-selected="false">Approval &amp; review rules</button>
+            <button role="tab" data-cf-tab="DELEGATIONS" aria-selected="false">Delegations</button>
+            <button role="tab" data-cf-tab="FIELDS" aria-selected="false">Custom fields</button>
+        </div>
+        <div data-cf-panel="LISTS" id="cfPanelLists"></div>
+        <div data-cf-panel="LIBRARY" id="cfPanelLibrary" hidden></div>
+        <div data-cf-panel="TEMPLATES" id="cfPanelTemplates" hidden></div>
+        <div data-cf-panel="RULES" id="cfPanelRules" hidden></div>
+        <div data-cf-panel="DELEGATIONS" id="cfPanelDelegations" hidden></div>
+        <div data-cf-panel="FIELDS" id="cfPanelFields" hidden></div>
+    </section>
+</div>
+
+@* ======================= Template version editor ======================= *@
+<div class="pm-modal" id="cfVersionModal" hidden>
+    <div class="pm-modal-panel tprm-wide">
+        <header>
+            <h2 id="cfVersionTitle">Template</h2>
+            <button class="pm-modal-close" type="button" data-close-cf="cfVersionModal" aria-label="Close">&times;</button>
+        </header>
+        <p class="pm-message" id="cfVersionMessage" role="status" aria-live="polite" hidden></p>
+        <div id="cfVersionBody"></div>
+    </div>
+</div>
+
+<partial name="Partials/_tprm-form-dialog" />
+
+<style>
+    .cf-origin-GRAC { background: var(--info-50, #eff6ff); }
+    .cf-origin-GRAC_OVERRIDDEN { background: var(--warning-50); color: var(--warning-700); }
+    .cf-origin-ORGANIZATION { background: var(--success-100); color: var(--success-700); }
+    .cf-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; border: 1px solid #0002; }
+    .cf-hidden-row td { opacity: .55; }
+</style>
+
+<script src="~/js/Tprm/tprm-common.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-configuration.js" asp-append-version="true"></script>

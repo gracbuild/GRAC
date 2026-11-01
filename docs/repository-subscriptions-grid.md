@@ -122,7 +122,8 @@ Level 1 summary uses — instances, not practices — and turns it into one labe
 | `Implemented` | Applicable **and** at least one practice instance **and** every instance `Implemented`. Identical test to `ImplementedStatementsCount`, so the drill-down can never contradict the summary. |
 | `Partially Implemented` | Applicable and at least one instance is `Implemented`, but not all of them. |
 | `Not Applicable` | Applicability is `Not Applicable`, `Deferred`, `Accepted Risk`, `Not Implemented` or `Retired`. |
-| `Not Implemented` | Everything else — including `Not Updated` statements and Applicable statements with no practice, no instance, or no implemented instance. |
+| `Not Implemented` | Applicable, at least one mapped instance updated (anything but `Not Updated` / legacy `Not Started`), none `Implemented`. |
+| `Not Updated` | Everything else (default since migration 456) — `Not Updated` statements, and Applicable statements with no practice, no instance, or no instance updated. See `docs/implementation-status-not-updated-default.md`. |
 
 Node rows in the `UNION ALL` select `CAST(NULL AS NVARCHAR(40)) ImplementationStatus`
 in the same ordinal position; both branches must keep 21 columns in the same order.
@@ -245,3 +246,107 @@ other file in this project used the same alias. Anyone who ran the original
 copy and hit this error should simply re-run the corrected script in full --
 both `CREATE OR ALTER` and the backfill's `WHERE subscription_type = N'Manual'`
 clause are idempotent, so re-running is safe.
+
+## Control Statements order follows the source structure's display order (2026-10-08)
+
+**Before:** `renderStatementTree()` in `practice.js` sorted statements by the text of their hierarchy path (`"CH1 / CH2"`, numeric-aware `localeCompare`). A node's `display_order` was ignored, so the list followed the references, not the order the source structure is set in.
+
+**Now:** each node gets a sort key, `nodeOrderKey()`. It lists the `SourceStructureDisplayOrder` values from the **root node** (`parent_node_id` NULL) down to the node, e.g. `[2, 1, 3]`. Statements sort by that key, level by level:
+
+- **Root first:** the root node's display order decides before anything below it.
+- **Ties:** two siblings with the same display order fall back to their reference (numeric-aware).
+- **No display order:** a node without one sorts after its ordered siblings.
+- **Parent before children:** a node's own statements come before its children's.
+- **Within a node:** statements keep their order, `StatementDisplayOrder` then `StatementReference`.
+
+The Reference column still shows the same hierarchy path text. Only the order changed.
+
+UI only (`practice.js`). `QueryReleaseStatementsAsync` already returns `SourceStructureDisplayOrder` and `ParentSourceStructureNodeId` on every node row, so there is no API or database change. The Practice form's mapping tree already orders siblings by `DisplayOrder` at each level, so it is unchanged.
+
+## Control Statements lists every subscribed framework (2026-10-08)
+
+**Before:** the Framework filter on Control Statements offered only "ready" releases. A release was ready only when **both** of these held:
+- a release owner was assigned;
+- at least one statement's applicability was marked (`Total - NotUpdated > 0`).
+
+A new organization therefore had an empty filter and the message *"No framework is ready yet…"*, even though the same release opened from Standards & Frameworks listed its statements. A release opened from Standards & Frameworks without an owner was also blocked, with *"…has no release owner…"*.
+
+**Now:** `openControlStatementsRelease()` in `practice.js` offers every subscribed release from `subscribed-frameworks/query`.
+- `releaseReadyForStatements()` and the no-owner block are removed.
+- Employee scope still narrows the list to releases the employee owns or is assigned to.
+- When nothing is left, the message reads *"No framework is subscribed for this organization…"*, or *"No framework release is assigned to you…"* under employee scope.
+
+**Unchanged:**
+- **Listing:** `release-statements/query` only needs an Active subscription.
+- **Marking applicability:** it still requires the **statement** owner chosen in the form (`THROW 51047`). That is not the release owner.
+
+UI only.
+
+## Applicability filter offers only settable statuses (2026-10-08)
+
+**Before:** on Control Statements (`source-statements`) and Organization Practices (`organization-requirements`), the *All applicability statuses* filter listed every row of the shared `applicability-status` lookup, including **Not Implemented, Accepted Risk and Deferred**.
+- Mark / Update Applicability on these screens cannot set those values, so filtering by them only ever returned an empty grid.
+- Those values are still valid on Organization Controls, so the shared master is unchanged.
+
+**Now:** in `practice.js`, the filter is narrowed to `PRACTICE_APPLICABILITY_STATUSES`: **Not Updated, Applicable, Not Applicable, Retired**.
+- The Statement Applicability form's options now read the same constant instead of a second literal list, so the filter and the form cannot drift.
+- The bulk form keeps its own list (Applicable, Not Applicable, Retired).
+- Organization Controls is untouched.
+
+UI only.
+
+## Update Applicability on an Applicable statement (2026-10-08)
+
+**Before:** the Control Statements 3-dot menu offered:
+- **Mark Applicability** on a *Not Updated* statement;
+- **Update Applicability** on a *Not Applicable* / *Retired* statement;
+- for an **Applicable** statement, only *Practices* and *View*. Once a statement was marked Applicable, its decision could not be changed.
+
+**Now:** an Applicable statement's menu is *Practices, **Update Applicability**, View* (plus Edit on a manually added statement). Employees get *Update Applicability, View*, since their menu has no Practices.
+- Update Applicability opens the existing Statement Applicability form. It is pre-filled with the current status, owner and reason.
+- The save path is unchanged. Moving to Not Applicable still needs a reason (51045); Applicable or Not Applicable still needs an owner (51047).
+- Practices already linked to the statement are not removed.
+
+**Organization Practices:** no change was needed. The menu (`allowedActions`, `organization-requirements`) already offers **Update Applicability** on any marked practice, Applicable included. The same holds on Practice View → Actions.
+
+UI only (`practice.js`).
+
+## Control Statements: "All sources" filter instead of Origin (2026-10-08)
+
+**Before:** Control Statements showed an **Origin** filter (*All origins* / Repository / Organization / **Hybrid**). It came from the generic grid toolbar and filtered nothing on this page, because `release-statements/query` takes no origin. Standards & Frameworks uses an **All sources** filter instead.
+
+**Now:** both pages show the same **All sources** filter: Repository / Organization, no Hybrid.
+- **Markup:** `Manage.cshtml` renders `#sourceFilter` for `source-statements` too and hides `#originTypeFilter` there.
+- **Rule:** one function, `releaseMatchesSourceFilter()` in `practice.js`, now serves both pages. Standards & Frameworks used to carry the same rule inline.
+  - Repository = a subscribed repository release (`ReleaseId > 0`).
+  - Organization = a custom release (`ReleaseId < 0`).
+- **What it narrows:**
+  - On Standards & Frameworks it narrows the release list, as before.
+  - On Control Statements it narrows the frameworks the **Framework** filter offers. Every statement belongs to its release, so it narrows the statements too.
+- **Changing Source:** re-runs release selection. If the current framework does not match, the first matching one opens. If none matches, the page says so and points to *All sources*.
+
+Organization Practices keeps its own Origin filter (Repository / Organization / Hybrid). There the practice's `origin_type` really can be Hybrid.
+
+UI only.
+
+## Owner column on Control Statements (2026-10-08)
+
+**Owner** is a new grid column, placed directly before **Applicability Status**. Column order:
+
+Statement Reference | Statement Title | **Owner** | Applicability Status | Implementation Status | Practice Count | Actions
+
+It is the owner chosen in Mark / Update Applicability.
+
+| Release | Source of `OwnerName` |
+|---|---|
+| Repository | Unchanged: `QueryReleaseStatementsAsync` already returned `OwnerName` (`organization_framework_statements.owner_id` → `organization_employee`). |
+| Custom | `QueryCustomReleaseStatementsAsync` now returns `OwnerName` too: the organization copy's owner, else the custom statement's own `owner_id` (032). |
+
+**Code:**
+- **UI (`practice.js`):** `statementTreeColumnDefs` gains the column, and both `renderStatementTree` and `renderCustomStatementGrid` render it. Colspans read the same list.
+- **API:** a new response field on `custom-release-statements/query`: `OwnerName` (string, null when no owner).
+- **Database:** no change.
+
+**Loading header (same day):** while the page loaded, the header still showed the old columns without Owner. The new column appeared only once the rows arrived. Two fixes make the header the same from the first paint:
+- **Server paint:** `PracticeScreen.cs` → `source-statements` columns now include **Owner**. This is the header `Manage.cshtml` draws before any script runs.
+- **Load start:** `renderGridHeader()` in `practice.js` now draws the statement-tree header (`renderStatementTreeHeader`) on Control Statements. It used to draw the screen-definition columns at the start of every load.

@@ -167,15 +167,33 @@
     }
     if (handlers.onClose) {
       items.push({ icon: 'fa-lock',
-        label: fields.taskType === 'Custom' ? 'Close / Inactivate' : 'Close Task',
+        label: fields.taskType === 'Custom' ? 'Close / Inactivate' : 'Cancel Task',
         applicable: !fields.isTerminal && fields.taskType !== 'Assurance',
         action: handlers.onClose });
+    }
+    // Reopen -- only for tasks whose current status is actually 'Closed'
+    // (terminal). The API (sp_task_reopen) enforces admin-OR-owner; the
+    // button is offered broadly and the server is the real gate.
+    if (handlers.onReopen) {
+      items.push({ icon: 'fa-rotate-left', label: 'Reopen',
+        applicable: !!fields.isTerminal && fields.rawStatusCode === 'Closed',
+        action: handlers.onReopen });
     }
     return items;
   }
 
   // ---- module state (the dialogs this drives) --------------------------
   var cfg = { getOrganizationId: function () { return null; }, onChanged: function () {} };
+  // Full-page host (task-edit.cshtml): the view/edit dialog rendered
+  // inline on its own page instead of as a modal. hideDialog then
+  // navigates back to the Task Board. Only the taskDetailDialog (the
+  // view/edit surface) is hosted this way; the other dialogs are not
+  // reachable from the edit page.
+  var pageMode = false;
+  var pageBackUrl = null;
+  // 2026-10-23: which dialog the full page hosts -- taskDetailDialog
+  // (task-edit.cshtml) or taskCompleteDialog (task-complete.cshtml).
+  var pageDialogId = 'taskDetailDialog';
   var wired = false;
   var currentTaskDetail  = null;
   var currentEditOptions = null;
@@ -186,12 +204,22 @@
 
   function showDialog(dlg) {
     if (!dlg) return;
+    if (pageMode && dlg === $(pageDialogId)) {
+      dlg.classList.add(pageDialogId === 'taskCompleteDialog' ? 'tcd--page' : 'tdd--page');
+      dlg.setAttribute('open', 'open');
+      dlg.style.display = 'block';
+      return;
+    }
     if (dlg.open) return;
     if (typeof dlg.showModal === 'function') dlg.showModal();
     else { dlg.setAttribute('open', 'open'); dlg.style.display = 'block'; }
   }
   function hideDialog(dlg) {
     if (!dlg) return;
+    if (pageMode && dlg === $(pageDialogId)) {
+      window.location.assign(pageBackUrl);
+      return;
+    }
     if (typeof dlg.close === 'function') dlg.close();
     else { dlg.removeAttribute('open'); dlg.style.display = 'none'; }
   }
@@ -235,7 +263,14 @@
     }
   }
 
-  async function openEdit(taskId) {
+  async function openEdit(taskId, pageOpts) {
+    // pageOpts.host === "page" -> render inline on the task-edit page
+    // and navigate back to the board on close/save. Omitted elsewhere,
+    // so the row-menu / view-dialog Edit keep their modal behaviour.
+    if (pageOpts && pageOpts.host === 'page') {
+      pageMode = true;                       // sticky for this page load
+      pageBackUrl = pageOpts.backUrl || U('/Practice/Index/tasks');
+    }
     var dlg    = $('taskDetailDialog');
     var bodyEl = $('taskDetailBody');
     if (!dlg || !bodyEl) return;
@@ -275,7 +310,7 @@
     var bodyEl = $('taskDetailBody');
     $('taskDetailTitle').textContent = 'Edit ' + (h.taskNumber || ('Task #' + h.taskId));
 
-    var employees = await fetchOrgEmployees(cfg.getOrganizationId());
+    var employees = await fetchOrgEmployees(cfg.getOrganizationId() || (h && h.organizationId));
     var statuses  = (opts && opts.allowedStatuses) || [];
 
     var canPriority = !opts || opts.canEditPriority !== false;
@@ -331,6 +366,9 @@
 
     p.push('<label><span class="tef-l">Due date</span>'
          + '<input type="date" id="tefDueAt" value="' + escape(dateVal(h.slaDueAt)) + '"'
+         // 2026-10-26: the date the form opened with -- saveTaskEdit sends
+         // the field only when it differs (see there).
+         + ' data-initial="' + escape(dateVal(h.slaDueAt)) + '"'
          + (canDue && !slaPending ? '' : ' disabled') + ' />'
          + '<span class="tef-h">'
          + (isChild
@@ -342,7 +380,8 @@
 
     p.push('<label><span class="tef-l">Start date</span>'
          + '<input type="date" id="tefStartDate" value="'
-         + escape(dateVal(cur.startDate != null ? cur.startDate : h.startDate)) + '" /></label>');
+         + escape(dateVal(cur.startDate != null ? cur.startDate : h.startDate)) + '"'
+         + ' data-initial="' + escape(dateVal(cur.startDate != null ? cur.startDate : h.startDate)) + '" /></label>');
 
     if (opts && opts.canEditMandatory) {
       p.push('<label class="tef-span2 tef-check">'
@@ -380,6 +419,15 @@
     var val = function (id) { var e = $(id); return e ? e.value : null; };
     var num = function (id) { var v = val(id); return v ? Number(v) : null; };
     var mand = $('tefMandatory');
+    // 2026-10-26: the two date boxes show the DATE of a stored date-time
+    // (a due date is usually end of day, 23:59:59). Sending the box back
+    // unchanged made sp_task_update see a different value and treat an
+    // untouched due date as an SLA extension that needs a reason. A date
+    // is sent only when the user changed it; null = "no opinion".
+    var changedDate = function (id) {
+      var e = $(id); if (!e || !e.value) return null;
+      return e.value !== (e.getAttribute('data-initial') || '') ? e.value : null;
+    };
 
     var title = (val('tefTitle') || '').trim();
     if (!title) { msg.style.color = 'var(--danger-700)'; msg.textContent = 'Task name is required.'; return; }
@@ -390,8 +438,8 @@
       assignedToEmployeeId: num('tefOwner'),
       priority:             val('tefPriority'),
       statusCode:           val('tefStatus'),
-      startDate:            val('tefStartDate') || null,
-      dueAt:                val('tefDueAt') || null,
+      startDate:            changedDate('tefStartDate'),
+      dueAt:                changedDate('tefDueAt'),
       isMandatoryChild:     mand ? mand.checked : null,
       changeReason:         (val('tefReason') || '').trim() || null,
       expectedUpdatedDt:    (currentEditOptions && currentEditOptions.updatedDt) || null
@@ -640,7 +688,9 @@
       var kb   = Math.max(1, Math.round((f.fileSizeBytes || 0) / 1024));
       p.push('<tr style="border-top:1px solid var(--neutral-100);">'
            + '<td style="padding:5px 8px;">' + escape(f.fileName)
-           + ' <span style="color:var(--fg-subtle);">(' + kb + ' KB)</span>'
+           + ' <span style="color:var(--fg-subtle);">(' + evidenceMeta(f, kb) + ')</span>'
+           + (f.evidenceTitle && f.evidenceTitle !== f.fileName
+               ? '<div style="color:var(--fg-muted); font-size:11px;">' + escape(f.evidenceTitle) + '</div>' : '')
            + (f.evidenceDescription
                ? '<div style="color:var(--fg-muted); font-size:11px;">' + escape(f.evidenceDescription) + '</div>' : '')
            + '</td>'
@@ -655,20 +705,85 @@
     return p.join('');
   }
 
-  async function postEvidence(taskId, file, description) {
+  // 477: "(v2, 12 KB, for 2026-10-01)" -- the Evidence Center version the
+  // task is pinned to and the period it was attached for, when present.
+  function evidenceMeta(f, kb) {
+    return [f.versionNo ? 'v' + f.versionNo : '', kb + ' KB',
+            f.periodDate ? 'for ' + String(f.periodDate).substring(0, 10) : '']
+      .filter(Boolean).map(escape).join(', ');
+  }
+
+  // 482: instanceEvidenceId = the recurring evidence row the file answers
+  // (Complete Task); omitted = general task evidence, as before.
+  // 499: metadata = the Evidence Center fields the shared upload dialog
+  // collected. The endpoint is unchanged; 499 taught it and
+  // sp_task_attachment_add to carry them to sp_evidence_item_store, so a
+  // file attached while completing a task is described instead of blank.
+  async function postEvidence(taskId, file, description, instanceEvidenceId, metadata) {
     var fd = new FormData();
     fd.append('file', file);
     if (description) fd.append('evidenceDescription', description);
+    if (instanceEvidenceId) fd.append('instanceEvidenceId', String(instanceEvidenceId));
+    if (metadata) {
+      // evidenceItemDescription, not evidenceDescription: the latter is
+      // this attachment's note on the task, the former is the Evidence
+      // Center item's own description. The Api keeps them apart.
+      if (metadata.evidenceTitle)       fd.append('evidenceTitle', metadata.evidenceTitle);
+      if (metadata.evidenceTypeId)      fd.append('evidenceTypeId', String(metadata.evidenceTypeId));
+      if (metadata.evidenceDescription) fd.append('evidenceItemDescription', metadata.evidenceDescription);
+      if (metadata.ownerEmployeeId)     fd.append('ownerEmployeeId', String(metadata.ownerEmployeeId));
+      if (metadata.validFrom)           fd.append('validFrom', metadata.validFrom);
+      if (metadata.validTo)             fd.append('validTo', metadata.validTo);
+      if (metadata.classification)      fd.append('classification', metadata.classification);
+      if (metadata.tags)                fd.append('tags', metadata.tags);
+    }
     try {
       var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/attachments', {
         method: 'POST', credentials: 'same-origin', body: fd
       });
-      if (r.ok) return { ok: true };
+      if (r.ok) {
+        // 477: says whether the file was stored or the identical one in
+        // the Evidence Center linked instead.
+        var ok = await r.json().catch(function () { return {}; });
+        return { ok: true, message: ok.message || null };
+      }
       var b = await r.json().catch(function () { return {}; });
-      return { ok: false, error: b.error || ('Upload failed (HTTP ' + r.status + ')') };
+      // b.title: an ASP.NET ProblemDetails (model-binding) 400 has no
+      // "error" field -- show its title rather than only the status code.
+      return { ok: false, error: b.error || b.title || ('Upload failed (HTTP ' + r.status + ')') };
     } catch (err) {
       return { ok: false, error: 'Network error: ' + err.message };
     }
+  }
+
+  // 499: Complete Task's Direct Upload. Opens the Evidence Center's own
+  // Upload evidence form (Shared/evidence-upload.js) and stores the file
+  // immediately, with everything the dialog captured -- instead of the
+  // bare file picker that used to sit on the row and be swept up when the
+  // task was completed. instanceEvidenceId null = general task evidence.
+  //
+  // Named apart from openEvidenceUpload below, which is this file's own
+  // "Add evidence" dialog on a task and is not part of the completion flow.
+  async function openEcUploadDialog(taskId, instanceEvidenceId, context, typeId) {
+    if (!window.gracEvidenceUpload) return { ok: false, error: 'The upload dialog did not load. Refresh the page.' };
+
+    var employees = [];
+    try { employees = await fetchOrgEmployees(await taskOrganizationId(taskId)); }
+    catch (err) { console.warn('[task-actions] employee list unavailable for the upload dialog', err); }
+
+    var outcome = await window.gracEvidenceUpload.open({
+      context: context || '',
+      typeId:  typeId || '',
+      // Evidence types are not loaded on this screen; the dropdown is
+      // offered empty rather than wrong, and every other field still
+      // reaches the Evidence Center.
+      lookups: { types: [], employees: employees },
+      submit:  function (payload) {
+        return postEvidence(taskId, payload.file, null, instanceEvidenceId, payload.metadata)
+          .then(function (r) { return { ok: r.ok, error: r.error, message: r.message }; });
+      }
+    });
+    return outcome.saved ? { ok: true, message: outcome.message } : { ok: false, cancelled: true };
   }
 
   async function openEvidenceUpload(taskId, taskNumber) {
@@ -686,10 +801,92 @@
     try {
       var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
       var d = r.ok ? await r.json() : null;
+      rememberTaskOrganization(taskId, d);
       listEl.innerHTML = renderEvidenceList((d && d.attachments) || [], { compact: true });
     } catch (_e) {
       listEl.innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Existing evidence could not be loaded.</p>';
     }
+  }
+
+  // ==== 477: Select from Evidence Center ==================================
+  // The shared picker (Shared/evidence-picker.js). The API lists the
+  // Evidence Center items the caller can see; one whose validity does not
+  // cover the task's period is listed with the reason and cannot be linked.
+  // A link keeps the version it was made with (a task completed for a
+  // period keeps that file).
+  var taskOrganizations = {};
+
+  function rememberTaskOrganization(taskId, detail) {
+    var h = detail && (detail.header || detail.Header);
+    var org = h && (h.organizationId || h.OrganizationId);
+    if (org) taskOrganizations[String(taskId)] = org;
+  }
+
+  async function taskOrganizationId(taskId) {
+    if (taskOrganizations[String(taskId)]) return taskOrganizations[String(taskId)];
+    try {
+      var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
+      rememberTaskOrganization(taskId, r.ok ? await r.json() : null);
+    } catch (_e) { /* falls back below */ }
+    return taskOrganizations[String(taskId)] || cfg.getOrganizationId() || null;
+  }
+
+  // Resolves to the success message, or null when nothing was linked.
+  // 482: opts = { instanceEvidenceId, typeId, typeName } when the item
+  // answers one recurring evidence row (Complete Task); omitted = general.
+  async function pickFromEvidenceCenter(taskId, context, opts) {
+    if (!window.gracEvidencePicker) return null;
+    opts = opts || {};
+    var orgId = await taskOrganizationId(taskId);
+    if (!orgId) { alert('The organization of this task could not be determined.'); return null; }
+    var base = U('/practice/api/tasks/') + encodeURIComponent(taskId);
+    var outcome = await window.gracEvidencePicker.open({
+      context: context || '',
+      typeId:   opts.typeId   || null,
+      typeName: opts.typeName || null,
+      load: async function (q) {
+        var qs = new URLSearchParams({ organizationId: orgId, pageNumber: q.pageNumber, pageSize: q.pageSize });
+        if (q.search) qs.set('search', q.search);
+        if (q.typeId) qs.set('evidenceTypeId', q.typeId);
+        var r = await fetch(base + '/evidence-center?' + qs.toString(), { credentials: 'same-origin' });
+        var b = await r.json().catch(function () { return {}; });
+        return r.ok ? { ok: true, rows: b.data || [], totalRows: b.totalRows || 0 }
+                    : { ok: false, error: b.error || b.title || ('Could not load the Evidence Center (HTTP ' + r.status + ').') };
+      },
+      link: async function (item) {
+        var r = await fetch(base + '/evidence-links', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ organizationId: Number(orgId),
+                                 evidenceItemId: Number(item.evidenceItemId || item.EvidenceItemId),
+                                 instanceEvidenceId: opts.instanceEvidenceId ? Number(opts.instanceEvidenceId) : null })
+        });
+        var b = await r.json().catch(function () { return {}; });
+        return r.ok ? { ok: true, message: b.message }
+                    : { ok: false, error: b.error || b.title || ('Could not link the evidence (HTTP ' + r.status + ').') };
+      }
+    });
+    return outcome && outcome.linked ? (outcome.message || 'Evidence linked.') : null;
+  }
+
+  async function pickFromEvidenceDialog() {
+    var dlg    = $('taskEvidenceDialog');
+    var taskId = dlg.getAttribute('data-task-id');
+    var linked = await pickFromEvidenceCenter(taskId, $('taskEvidenceSubject').textContent);
+    if (!linked) return;
+    hideDialog(dlg);
+    openView(taskId);
+    changed();
+  }
+
+  async function pickFromCompleteDialog() {
+    var dlg    = $('taskCompleteDialog');
+    var taskId = dlg.getAttribute('data-task-id');
+    var msg    = $('taskCompleteMsg');
+    var linked = await pickFromEvidenceCenter(taskId, $('taskCompleteSubject').textContent);
+    if (!linked) return;
+    msg.style.color = 'var(--success-700)';
+    msg.textContent = linked;
+    await refreshCompleteEvidence(taskId);
   }
 
   async function submitEvidenceUpload(ev) {
@@ -735,15 +932,29 @@
     }
   }
 
-  async function openComplete(taskId, taskNumber, taskTitle) {
+  // pageOpts.host === "page" -> rendered inline on task-complete.cshtml;
+  // Cancel and a successful completion go back to pageOpts.backUrl. The
+  // page knows only the id, so the subject is filled from the task itself.
+  async function openComplete(taskId, taskNumber, taskTitle, pageOpts) {
     var dlg = $('taskCompleteDialog');
     if (!dlg) return;
-    $('taskCompleteSubject').textContent = taskNumber + (taskTitle ? ' — ' + taskTitle : '');
+    if (pageOpts && pageOpts.host === 'page') {
+      pageMode = true;
+      pageDialogId = 'taskCompleteDialog';
+      pageBackUrl = pageOpts.backUrl || U('/Practice/Index/tasks');
+    }
+    $('taskCompleteSubject').textContent = taskNumber
+      ? taskNumber + (taskTitle ? ' — ' + taskTitle : '')
+      : 'Task #' + taskId;
     $('taskCompleteRemark').value = '';
     $('taskCompleteMsg').textContent = '';
-    $('taskCompleteFile').value = '';
+    // 499: the general evidence picker became a dialog button; nothing to reset.
     dlg.setAttribute('data-task-id', taskId);
 
+    // 482: a fresh dialog forgets choices made for another task.
+    completeRecurring = { taskId: String(taskId), rows: [], state: {}, generalStored: null, general: null };
+    renderCompleteRecurring([]);
+    renderCompleteGeneral();
     refreshCompleteEvidence(taskId);
 
     var gate = $('taskCompleteGate');
@@ -776,29 +987,274 @@
     try {
       var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
       var d = r.ok ? await r.json() : null;
-      el.innerHTML = renderEvidenceList((d && d.attachments) || [], { compact: true });
+      rememberTaskOrganization(taskId, d);
+      // Full page: the subject comes from the task (the page has only its id).
+      var hh = d && (d.header || d.Header);
+      if (hh && hh.taskNumber && $('taskCompleteSubject').textContent === 'Task #' + taskId)
+        $('taskCompleteSubject').textContent = hh.taskNumber + (hh.subjectTitle ? ' — ' + hh.subjectTitle : '');
+      var files = (d && d.attachments) || [];
+      // 482: a file that answers a recurring evidence row is listed under
+      // that row; this list keeps the general task evidence.
+      el.innerHTML = renderEvidenceList(files.filter(function (f) { return !f.instanceEvidenceId; }), { compact: true });
+      await loadCompleteRecurring(taskId);
+      renderCompleteRecurring(files);
+      renderCompleteGeneral();   // 483
     } catch (_e) {
       el.innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Evidence could not be loaded.</p>';
     }
   }
 
-  async function attachFromCompleteDialog() {
+  // ==== 482: recurring evidence on Complete Task ==========================
+  // The recurring evidence of a scheduled task's obligation (481 took it
+  // off Operationalize). Each row asks how it is provided -- the shared
+  // Shared/evidence-source.js options -- and shows only that option's
+  // control. Nothing is required. A chosen file and an external reference
+  // are saved by Complete task (saveCompleteRecurring); Select from
+  // Evidence Center links at once, like the dialog's own picker.
+  var completeRecurring = { taskId: null, rows: [], state: {}, generalStored: null, general: null };
+  var rv = function (o, k) {   // rows arrive with PascalCase keys (column-name rows)
+    if (!o) return null;
+    var v = o[k] !== undefined ? o[k] : o[k.charAt(0).toLowerCase() + k.slice(1)];
+    return v === undefined ? null : v;
+  };
+
+  async function loadCompleteRecurring(taskId) {
+    var rows = [], general = null;
+    try {
+      var orgId = await taskOrganizationId(taskId);
+      if (orgId) {
+        var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId)
+                            + '/recurring-evidence?organizationId=' + encodeURIComponent(orgId),
+                            { credentials: 'same-origin' });
+        var b = r.ok ? await r.json().catch(function () { return {}; }) : {};
+        rows = b.data || [];
+        general = b.general || null;   // 483
+      }
+    } catch (_e) { rows = []; }
+    if (completeRecurring.taskId !== String(taskId))
+      completeRecurring = { taskId: String(taskId), rows: [], state: {}, generalStored: null, general: null };
+    completeRecurring.rows = rows;
+    completeRecurring.generalStored = general;
+  }
+
+  // ==== 483: the same three options for the dialog's general evidence ====
+  // Direct Upload (Attach) and Select from Evidence Center keep their own
+  // immediate buttons; External is held here and saved with the
+  // recurring rows by saveCompleteRecurring (an item with no evidenceId).
+  function generalState() {
+    var S = window.gracEvidenceSource;
+    if (!completeRecurring.general) {
+      var stored = completeRecurring.generalStored;
+      var src = stored ? rv(stored, 'EvidenceSource') : null;
+      completeRecurring.general = {
+        source:   S && S.isKnown(src) ? src : (S ? S.DEFAULT : 'DirectUpload'),
+        location: (stored && rv(stored, 'EvidenceLocation')) || '',
+        locator:  (stored && rv(stored, 'EvidenceLocator'))  || '',
+        touched:  false
+      };
+    }
+    return completeRecurring.general;
+  }
+
+  function renderCompleteGeneral() {
+    var S = window.gracEvidenceSource;
+    var host = $('taskCompleteGeneralSource');
+    if (!S || !host) return;
+    // A stored choice that arrived after the dialog opened replaces the
+    // default, unless the operator has already changed something.
+    if (completeRecurring.general && !completeRecurring.general.touched && completeRecurring.generalStored)
+      completeRecurring.general = null;
+    var st = generalState();
+    host.innerHTML = S.radios('taskGenSrc', st.source, { 'data-gen-source': '1' });
+    $('taskCompleteGenLocation').value = st.location;
+    $('taskCompleteGenLocator').value  = st.locator;
+    S.showPanels($('taskCompleteGeneral'), st.source);
+    host.querySelector('[data-gen-source]').addEventListener('change', function (ev) {
+      if (!ev.target.matches('input[type="radio"]')) return;
+      var g = generalState();
+      g.source = ev.target.value; g.touched = true;
+      S.showPanels($('taskCompleteGeneral'), g.source);
+    });
+  }
+
+  // What the operator has chosen / typed and not saved yet wins over what
+  // is stored, so a refresh after a link keeps it.
+  function recurringStateOf(row) {
+    var S = window.gracEvidenceSource;
+    var id = String(rv(row, 'EvidenceId'));
+    var st = completeRecurring.state[id];
+    if (!st) {
+      var stored = rv(row, 'EvidenceSource');
+      st = completeRecurring.state[id] = {
+        source:   S && S.isKnown(stored) ? stored : (S ? S.DEFAULT : 'DirectUpload'),
+        location: rv(row, 'EvidenceLocation') || '',
+        locator:  rv(row, 'EvidenceLocator')  || '',
+        touched:  false
+      };
+    }
+    return st;
+  }
+
+  function renderCompleteRecurring(files) {
+    var wrap = $('taskCompleteRecurringWrap');
+    var host = $('taskCompleteRecurring');
+    var label = $('taskCompleteEvidenceLabel');
+    var S = window.gracEvidenceSource;
+    if (!wrap || !host) return;
+    var rows = completeRecurring.rows || [];
+    if (!rows.length || !S) {
+      wrap.style.display = 'none';
+      host.innerHTML = '';
+      if (label) label.textContent = 'Evidence';
+      return;
+    }
+    wrap.style.display = 'block';
+    if (label) label.textContent = 'Other evidence';
+
+    host.innerHTML = rows.map(function (row) {
+      var id  = String(rv(row, 'EvidenceId'));
+      var st  = recurringStateOf(row);
+      var mine = (files || []).filter(function (f) { return String(f.instanceEvidenceId || '') === id; });
+      var type = rv(row, 'EvidenceType');
+      var name = rv(row, 'EvidenceName') || type || 'Evidence';
+      var sub  = [rv(row, 'ObligationName'), rv(row, 'EvidenceDescription')].filter(Boolean).map(escape).join(' &middot; ');
+      return '<div class="tce-row" data-rec-ev="' + escape(id) + '">'
+           + '<div style="font-size:12px; font-weight:600;">' + escape(name)
+           + (type && type !== name ? ' ' + formatBadge(type) : '')
+           + (rv(row, 'IsProvided') ? ' <span class="pm-badge" style="background:var(--success-50); color:var(--success-700);">Provided</span>' : '')
+           + '</div>'
+           + (sub ? '<div style="font-size:11px; color:var(--fg-muted);">' + sub + '</div>' : '')
+           + S.radios('taskRecSrc-' + id, st.source, { 'data-rec-source': id })
+           // The chosen File is held in the row's state, so a redraw
+           // (after a link elsewhere in the dialog) does not lose it.
+           // 499: the dialog stores the file when it is submitted, so there
+           // is no chosen-but-unattached file to carry to task completion.
+           + S.panel('DirectUpload', st.source,
+               '<button type="button" class="pm-button" data-rec-upload="' + escape(id) + '" style="padding:3px 10px; font-size:12px;"'
+               + ' title="Upload a file and describe it for the Evidence Center in one step.">'
+               + '<i class="fa-solid fa-upload" aria-hidden="true"></i> Upload evidence</button>'
+               + '<span data-rec-file-name="' + escape(id) + '" style="display:block; font-size:11px; color:var(--fg-muted);"></span>')
+           + S.panel('EvidenceCenter', st.source,
+               '<button type="button" class="pm-button" data-rec-pick="' + escape(id) + '" style="padding:3px 10px; font-size:12px;"'
+               + ' title="Link evidence already uploaded to the Evidence Center. It must be valid for this task\'s period.">'
+               + '<i class="fa-solid fa-box-archive" aria-hidden="true"></i> Select from Evidence Center</button>')
+           + S.panel('External', st.source,
+               '<div style="display:flex; gap:8px; flex-wrap:wrap;">'
+               + '<label style="flex:1 1 180px; font-size:12px;">Location'
+               + '<input class="pm-input" type="text" maxlength="500" data-rec-location="' + escape(id) + '" value="' + escape(st.location)
+               + '" placeholder="Where it is kept" style="width:100%; font-size:13px;" /></label>'
+               + '<label style="flex:1 1 180px; font-size:12px;">Locator'
+               + '<input class="pm-input" type="text" maxlength="500" data-rec-locator="' + escape(id) + '" value="' + escape(st.locator)
+               + '" placeholder="Path, link or reference" style="width:100%; font-size:13px;" /></label>'
+               + '</div>')
+           + S.panel('DirectUpload EvidenceCenter', st.source,
+               mine.length ? renderEvidenceList(mine, { compact: true }) : '')
+           + '</div>';
+    }).join('');
+
+    host.querySelectorAll('[data-rec-source]').forEach(function (group) {
+      group.addEventListener('change', function (ev) {
+        if (!ev.target.matches('input[type="radio"]')) return;
+        var st = completeRecurring.state[group.getAttribute('data-rec-source')];
+        if (st) { st.source = ev.target.value; st.touched = true; }
+        S.showPanels(group.closest('[data-rec-ev]'), ev.target.value);
+      });
+    });
+    host.querySelectorAll('[data-rec-location], [data-rec-locator]').forEach(function (input) {
+      input.addEventListener('change', function () {
+        var isLoc = input.hasAttribute('data-rec-location');
+        var st = completeRecurring.state[input.getAttribute(isLoc ? 'data-rec-location' : 'data-rec-locator')];
+        if (!st) return;
+        if (isLoc) st.location = input.value; else st.locator = input.value;
+        st.touched = true;
+      });
+    });
+    // 499: Direct Upload opens the shared Evidence Center form and stores
+    // the file there and then; the row only reports what happened.
+    host.querySelectorAll('[data-rec-upload]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        var id = b.getAttribute('data-rec-upload');
+        var st = completeRecurring.state[id];
+        var row = (completeRecurring.rows || []).filter(function (r) {
+          return String(rv(r, 'EvidenceId')) === String(id);
+        })[0];
+        var note = host.querySelector('[data-rec-file-name="' + id + '"]');
+        var res = await openEcUploadDialog(
+          completeRecurring.taskId, Number(id),
+          row ? ('Evidence: ' + (rv(row, 'EvidenceName') || rv(row, 'EvidenceType') || '')) : '',
+          row ? rv(row, 'EvidenceTypeId') : '');
+        if (res.cancelled) return;
+        if (note) note.textContent = res.ok ? (res.message || 'Attached.') : res.error;
+        if (res.ok && st) st.touched = true;
+        if (res.ok) await refreshCompleteEvidence(completeRecurring.taskId);
+      });
+    });
+    host.querySelectorAll('[data-rec-pick]').forEach(function (b) {
+      b.addEventListener('click', function () { pickRecurringFromEvidenceCenter(b.getAttribute('data-rec-pick')); });
+    });
+  }
+
+  async function pickRecurringFromEvidenceCenter(evidenceId) {
     var dlg    = $('taskCompleteDialog');
     var taskId = dlg.getAttribute('data-task-id');
-    var input  = $('taskCompleteFile');
     var msg    = $('taskCompleteMsg');
-    msg.style.color = 'var(--danger-700)';
-    if (!input.files || !input.files.length) { msg.textContent = 'Choose a file to attach.'; return; }
-
-    msg.style.color = 'var(--fg-muted)';
-    msg.textContent = 'Uploading evidence…';
-    var res = await postEvidence(taskId, input.files[0], null);
-    if (!res.ok) { msg.style.color = 'var(--danger-700)'; msg.textContent = res.error; return; }
-
-    input.value = '';
+    var row = (completeRecurring.rows || []).filter(function (x) { return String(rv(x, 'EvidenceId')) === String(evidenceId); })[0];
+    var st  = completeRecurring.state[String(evidenceId)];
+    var linked = await pickFromEvidenceCenter(taskId,
+        row ? 'Evidence: ' + (rv(row, 'EvidenceName') || rv(row, 'EvidenceType') || '') : $('taskCompleteSubject').textContent,
+        { instanceEvidenceId: evidenceId,
+          typeId:   row ? rv(row, 'EvidenceTypeId') : null,
+          typeName: row ? rv(row, 'EvidenceType')   : null });
+    if (!linked) return;
+    if (st) st.touched = true;   // the option is recorded with the task's completion
     msg.style.color = 'var(--success-700)';
-    msg.textContent = 'Evidence attached.';
+    msg.textContent = linked;
     await refreshCompleteEvidence(taskId);
+  }
+
+  // Uploads the files chosen under Direct Upload, then records the option
+  // (and the external reference) of every row the operator touched.
+  // Returns { ok, error }. Nothing chosen = nothing to do.
+  async function saveCompleteRecurring(taskId) {
+    var rows = completeRecurring.rows || [];
+    if (completeRecurring.taskId !== String(taskId)) return { ok: true };
+    var items = [];
+    for (var i = 0; i < rows.length; i++) {
+      var id = String(rv(rows[i], 'EvidenceId'));
+      var st = completeRecurring.state[id];
+      if (!st) continue;
+      // 499: nothing to attach here. Direct Upload is a dialog that stores
+      // the file on submit, so a file can no longer be held on the row
+      // waiting for this moment.
+      if (st.touched) {
+        items.push({ evidenceId: Number(id), evidenceSource: st.source,
+                     evidenceLocation: st.source === 'External' ? (st.location || null) : null,
+                     evidenceLocator:  st.source === 'External' ? (st.locator  || null) : null });
+      }
+    }
+    // 483: the general evidence's option (and, for External, its reference).
+    // 2026-10-23: its Direct Upload file is attached here too (no Attach
+    // button any more), as general task evidence.
+    var g = generalState();
+    // 499: the general evidence file is uploaded by the dialog too.
+    if (g.touched) {
+      items.push({ evidenceId: null, evidenceSource: g.source,
+                   evidenceLocation: g.source === 'External' ? (g.location || null) : null,
+                   evidenceLocator:  g.source === 'External' ? (g.locator  || null) : null });
+    }
+    if (!items.length) return { ok: true };
+    try {
+      var orgId = await taskOrganizationId(taskId);
+      var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId) + '/recurring-evidence', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId: Number(orgId), items: items })
+      });
+      if (r.ok) return { ok: true };
+      var b = await r.json().catch(function () { return {}; });
+      return { ok: false, error: b.error || b.title || ('The evidence details could not be saved (HTTP ' + r.status + ').') };
+    } catch (err) {
+      return { ok: false, error: 'Network error: ' + err.message };
+    }
   }
 
   async function submitCompleteTask(ev) {
@@ -807,6 +1263,13 @@
     var taskId = dlg.getAttribute('data-task-id');
     var msg    = $('taskCompleteMsg');
     msg.textContent = '';
+
+    // 482: the recurring evidence chosen in the dialog goes first, so the
+    // task completes with it. Optional -- an empty dialog saves nothing.
+    msg.style.color = 'var(--fg-muted)';
+    var saved = await saveCompleteRecurring(taskId);
+    msg.style.color = 'var(--danger-700)';
+    if (!saved.ok) { msg.textContent = saved.error + ' The task was not completed.'; return; }
 
     var ok = await postTaskAction(taskId, '/complete',
         { completionRemark: $('taskCompleteRemark').value.trim() || null }, null);
@@ -856,10 +1319,38 @@
     else    msg.textContent = 'The task was not closed — see the message above.';
   }
 
+  async function openReopen(taskId, taskNumber, taskTitle) {
+    var dlg = $('taskReopenDialog');
+    if (!dlg) return;
+    $('taskReopenSubject').textContent = taskNumber + (taskTitle ? ' — ' + taskTitle : '');
+    $('taskReopenReason').value = '';
+    $('taskReopenMsg').textContent = '';
+    var warn = $('taskReopenWarn');
+    if (warn) warn.style.display = 'none';
+    dlg.setAttribute('data-task-id', taskId);
+    showDialog(dlg);
+  }
+
+  async function submitReopen(ev) {
+    ev.preventDefault();
+    var dlg    = $('taskReopenDialog');
+    var taskId = dlg.getAttribute('data-task-id');
+    var msg    = $('taskReopenMsg');
+    var reason = $('taskReopenReason').value.trim();
+    msg.textContent = '';
+    if (!reason) { msg.textContent = 'A reason is required to reopen a closed task.'; return; }
+
+    var ok = await postTaskAction(taskId, '/reopen',
+        { reasonText: reason }, null);
+    if (ok) hideDialog(dlg);
+    else    msg.textContent = 'The task was not reopened — see the message above.';
+  }
+
   // ==== Add Update / Comment ==========================================
   async function openAddUpdate(taskId) {
     var remark = await window.gracUi.prompt('Add an update or comment to this task.',
-        { title: 'Task #' + taskId, inputLabel: 'Update', confirmText: 'Add update' });
+        { title: 'Task #' + taskId, inputLabel: 'Update', confirmText: 'Add update',
+          multiline: true, rows: 7, wide: true });
     if (!remark || !remark.trim()) return;
     await postTaskAction(taskId, '/activity',
         { activityTypeCode: 'Update', remark: remark.trim() }, null);
@@ -908,14 +1399,49 @@
       b.addEventListener('click', function () { hideDialog(xDlg); });
     });
 
+    var rDlg = $('taskReopenDialog');
+    var rFrm = $('taskReopenForm');
+    if (rFrm) rFrm.addEventListener('submit', submitReopen);
+    document.querySelectorAll('[data-close-task-reopen]').forEach(function (b) {
+      b.addEventListener('click', function () { hideDialog(rDlg); });
+    });
+
     var eDlg = $('taskEvidenceDialog');
     var eFrm = $('taskEvidenceForm');
     if (eFrm) eFrm.addEventListener('submit', submitEvidenceUpload);
     document.querySelectorAll('[data-close-task-evidence]').forEach(function (b) {
       b.addEventListener('click', function () { hideDialog(eDlg); });
     });
-    var cAttach = $('taskCompleteAttach');
-    if (cAttach) cAttach.addEventListener('click', attachFromCompleteDialog);
+    // 483: the general evidence's external reference (saved on Complete).
+    ['taskCompleteGenLocation', 'taskCompleteGenLocator'].forEach(function (fid) {
+      var inp = $(fid);
+      if (!inp) return;
+      inp.addEventListener('change', function () {
+        var g = generalState();
+        if (fid === 'taskCompleteGenLocation') g.location = inp.value; else g.locator = inp.value;
+        g.touched = true;
+      });
+    });
+    // 499: general task evidence, Direct Upload -> the shared dialog.
+    var cUp = $('taskCompleteUpload');
+    if (cUp) cUp.addEventListener('click', async function () {
+      var dlg = $('taskCompleteDialog');
+      var taskId = completeRecurring.taskId || (dlg && dlg.getAttribute('data-task-id'));
+      if (!taskId) return;
+      var note = $('taskCompleteUploadNote');
+      var res  = await openEcUploadDialog(taskId, null, 'General task evidence', '');
+      if (res.cancelled) return;
+      if (note) note.textContent = res.ok ? (res.message || 'Attached.') : res.error;
+      if (res.ok) {
+        generalState().touched = true;
+        await refreshCompleteEvidence(taskId);
+      }
+    });
+    // 477
+    var cPick = $('taskCompletePick');
+    if (cPick) cPick.addEventListener('click', pickFromCompleteDialog);
+    var ePick = $('taskEvidencePick');
+    if (ePick) ePick.addEventListener('click', pickFromEvidenceDialog);
   }
 
   function init(options) {
@@ -931,6 +1457,7 @@
     openEdit: openEdit,
     openComplete: openComplete,
     openClose: openClose,
+    openReopen: openReopen,
     openEvidenceUpload: openEvidenceUpload,
     openAddUpdate: openAddUpdate,
     postTaskAction: postTaskAction

@@ -29,6 +29,9 @@
   const CAN_ADD = root.dataset.canAdd === "1";
   const CAN_EDIT = root.dataset.canEdit === "1";
   const CAN_APPROVE = root.dataset.canApprove === "1";
+  // 461: review / approve / validate need a sign-in linked to an employee (the procedures refuse one without).
+  const HAS_EMPLOYEE = root.dataset.hasEmployee === "1";
+  const NO_EMPLOYEE_NOTE = "Approval needs a sign-in linked to an employee of the organization.";
 
   const CONTRACT_STATUS = {
     DRAFT: ["Draft", "aco-st-open"], APPROVED: ["Approved", "aco-st-wait"], ACTIVE: ["Active", "aco-st-active"],
@@ -447,7 +450,7 @@
       const [st, scss] = MAPPING_STATE[m.effectiveState] || [m.status, "aco-st-open"];
       const acts = [];
       if (!terminated && m.effectiveState !== "ENDED") {
-        if (m.status === "PENDING_VALIDATION" && CAN_APPROVE && !m.actorIsCreator) acts.push(["VALIDATE", "Validate", true]);
+        if (m.status === "PENDING_VALIDATION" && CAN_APPROVE && HAS_EMPLOYEE && !m.actorIsCreator) acts.push(["VALIDATE", "Validate", true]);
         if (CAN_EDIT) acts.push(["EDIT", "Edit", false], ["END", "End", false]);
       }
       return `<tr>
@@ -624,7 +627,7 @@
     document.getElementById("acoVfWarningList").innerHTML = warn.map(w => `<li>${esc(w.warning)}</li>`).join("");
 
     const acts = [];
-    const notSubmitter = !v.actorIsSubmitter;
+    const notSubmitter = HAS_EMPLOYEE && !v.actorIsSubmitter;
     if (draft && CAN_EDIT) acts.push(["SAVE", "Save draft", false], ["SUBMIT", "Submit for review", true], ["WITHDRAW", "Withdraw", false]);
     if (v.statusCode === "IN_REVIEW") {
       if (CAN_EDIT && notSubmitter) acts.push(["REVIEW", "Review complete", true]);
@@ -636,7 +639,9 @@
       if (CAN_EDIT) acts.push(["RETURN", "Return to draft", false]);
       if (CAN_APPROVE && notSubmitter) acts.push(["REJECT", "Reject", false]);
     }
-    document.getElementById("acoVersionActions").innerHTML = acts.map(([a, l, pr]) =>
+    const versionNote = (["IN_REVIEW", "PENDING_APPROVAL"].includes(v.statusCode) && (CAN_EDIT || CAN_APPROVE) && !notSubmitter)
+      ? `<span class="aco-note">${HAS_EMPLOYEE ? "You submitted this version; another person reviews and approves it." : NO_EMPLOYEE_NOTE}</span>` : "";
+    document.getElementById("acoVersionActions").innerHTML = versionNote + acts.map(([a, l, pr]) =>
       `<button class="pm-button${pr ? " primary" : ""}" type="button" data-aco-vact="${a}">${l}</button>`).join("")
       || `<span class="aco-note">${draft ? "Read-only." : "This version is " + esc(v.statusName.toLowerCase()) + " and cannot be changed."}</span>`;
     hide("acoVersionMessage");
@@ -790,7 +795,7 @@
     const acts = [];
     if (open) acts.push(["SAVE", "Save", false], ["SUBMIT", "Submit decision", true]);
     if (r.statusCode === "PENDING_APPROVAL" && CAN_APPROVE) {
-      if (!r.actorIsSubmitter) acts.push(["APPROVE", "Approve decision", true]);
+      if (HAS_EMPLOYEE && !r.actorIsSubmitter) acts.push(["APPROVE", "Approve decision", true]);
       acts.push(["RETURN", "Return", false]);
     }
     if (r.statusCode === "APPROVED" && CAN_EDIT) {
@@ -800,8 +805,10 @@
       if (!r.resultingVersionId) acts.push(["REOPEN", "Reopen decision", false]);
     }
     if (["OPEN", "PENDING_APPROVAL", "APPROVED"].includes(r.statusCode) && CAN_EDIT) acts.push(["CANCEL", "Cancel renewal", false]);
-    document.getElementById("acoRenActions").innerHTML = acts.map(([a, l, pr]) =>
-      `<button class="pm-button${pr ? " primary" : ""}" type="button" data-aco-ract="${a}">${l}</button>`).join("")
+    const renewalNote = (r.statusCode === "PENDING_APPROVAL" && CAN_APPROVE && !(HAS_EMPLOYEE && !r.actorIsSubmitter))
+      ? `<span class="aco-note">${HAS_EMPLOYEE ? "You submitted this decision; another person approves it." : NO_EMPLOYEE_NOTE}</span>` : "";
+    document.getElementById("acoRenActions").innerHTML = (renewalNote + acts.map(([a, l, pr]) =>
+      `<button class="pm-button${pr ? " primary" : ""}" type="button" data-aco-ract="${a}">${l}</button>`).join(""))
       || `<span class="aco-note">No step available.</span>`;
     hide("acoRenMessage");
 

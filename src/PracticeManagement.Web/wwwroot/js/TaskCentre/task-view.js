@@ -295,8 +295,13 @@
     document.getElementById("tvEvidenceBody").innerHTML = files.map(f => {
       const href = U("/practice/api/tasks/attachments/") + encodeURIComponent(f.taskAttachmentId);
       const kb = Math.max(1, Math.round((f.fileSizeBytes || 0) / 1024));
+      // 477: the Evidence Center version this task is pinned to, and the
+      // period it was attached for (absent before the migration).
+      const meta = [f.versionNo ? "v" + f.versionNo : "", kb + " KB",
+                    f.periodDate ? "for " + String(f.periodDate).substring(0, 10) : ""].filter(Boolean).join(", ");
       return `<tr>
-        <td>${escapeHtml(f.fileName)} <span class="tv-hint">(${kb} KB)</span>
+        <td>${escapeHtml(f.fileName)} <span class="tv-hint">(${escapeHtml(meta)})</span>
+          ${f.evidenceTitle && f.evidenceTitle !== f.fileName ? `<div class="tv-hint">${escapeHtml(f.evidenceTitle)}</div>` : ""}
           ${f.evidenceDescription ? `<div class="tv-hint">${escapeHtml(f.evidenceDescription)}</div>` : ""}</td>
         <td>${escapeHtml(f.uploadedByName || "—")}</td>
         <td>${escapeHtml(fmtDate(f.uploadedDt))}</td>
@@ -400,7 +405,8 @@
       taskType: h.taskTypeCode || "",
       isTerminal: !!h.currentStatusIsTerminal,
       isChild: !!h.isChild,
-      isEligible: !!h.isEligibleForCompletion
+      isEligible: !!h.isEligibleForCompletion,
+      rawStatusCode: h.currentStatusCode || ""
     };
 
     // No onView: this page already IS the read-only view Task Center's
@@ -410,12 +416,14 @@
     // was already its own shared component (window.gracTaskForm) before
     // this change, so it is called directly, below.
     const items = window.gracTaskActions.buildMenu(fields, {
-      onEdit:        () => { closeActionsMenu(); window.gracTaskActions.openEdit(h.taskId); },
-      onComplete:    () => { closeActionsMenu(); window.gracTaskActions.openComplete(h.taskId, taskNumber, taskTitle); },
+      onEdit:        () => { closeActionsMenu(); window.location.assign(U("/Practice/Index/task-edit") + "?taskId=" + encodeURIComponent(h.taskId)); },
+      // 2026-10-23: Complete is a full page; it returns here (from=view).
+      onComplete:    () => { closeActionsMenu(); window.location.assign(U("/Practice/Index/task-complete") + "?taskId=" + encodeURIComponent(h.taskId) + "&from=view"); },
       onAddChild:    () => { closeActionsMenu(); addChildTask(h); },
       onAddEvidence: () => { closeActionsMenu(); window.gracTaskActions.openEvidenceUpload(h.taskId, taskNumber); },
       onAddUpdate:   () => { closeActionsMenu(); window.gracTaskActions.openAddUpdate(h.taskId); },
-      onClose:       () => { closeActionsMenu(); window.gracTaskActions.openClose(h.taskId, taskNumber, taskTitle); }
+      onClose:       () => { closeActionsMenu(); window.gracTaskActions.openClose(h.taskId, taskNumber, taskTitle); },
+      onReopen:      () => { closeActionsMenu(); window.gracTaskActions.openReopen(h.taskId, taskNumber, taskTitle); }
     });
     const shown = items.filter(it => it && it.applicable !== false);
 

@@ -611,7 +611,7 @@ public sealed class PracticeManagementGatewayController(
         "organization-profile",   // 2026-10-06: Organization tab's read, see PermissionAreaMap
         "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets",
         "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability",
-        "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", "dependencies", "evidence-configurations",
+        "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve", "dependencies", "dependency-options", "evidence-configurations",
         "subscribed-frameworks", "release-statements", "statement-applicability", "statement-applicability-bulk", "requirement-applicability-bulk", "custom-release", "custom-release-statements", "custom-release-source-structure", "custom-statement", "dashboard-summary",
         "assurance-schedule-rules", "assurance-schedule-overrides", "assurance-calendar-config", "assurance-calendar-events"
     };
@@ -729,7 +729,9 @@ public sealed class PracticeManagementGatewayController(
         var context = ResolveNavigationContext(token, code, entityType);
         if (context is null) return;
         if (context.OrganizationId.HasValue) organizationId = context.OrganizationId;
-        if (context.OrganizationControlId.HasValue && !context.FilterType.Equals("FrameworkStatement", StringComparison.OrdinalIgnoreCase))
+        if (context.OrganizationControlId.HasValue
+            && !context.FilterType.Equals("FrameworkStatement", StringComparison.OrdinalIgnoreCase)
+            && !context.FilterType.Equals("OrgStatement", StringComparison.OrdinalIgnoreCase))
             organizationControlId = context.OrganizationControlId;
         if (context.OrganizationRequirementId.HasValue) organizationRequirementId = context.OrganizationRequirementId;
         if (context.FilterType.Equals("Organization", StringComparison.OrdinalIgnoreCase)) organizationId = context.FilterId;
@@ -739,6 +741,10 @@ public sealed class PracticeManagementGatewayController(
         else if (context.FilterType.Equals("PracticeInstance", StringComparison.OrdinalIgnoreCase)) practiceInstanceId = context.FilterId;
         else if (context.FilterType.Equals("FrameworkRelease", StringComparison.OrdinalIgnoreCase)) { }
         else if (context.FilterType.Equals("FrameworkStatement", StringComparison.OrdinalIgnoreCase)) { }
+        // Custom-release statement (2026-10-08). Without this branch every
+        // OrgStatement code fell through to the throw below, which the caller
+        // reports as "The navigation context is invalid or has expired."
+        else if (context.FilterType.Equals("OrgStatement", StringComparison.OrdinalIgnoreCase)) { }
         else throw new CryptographicException("Invalid navigation context.");
     }
 
@@ -772,6 +778,16 @@ public sealed class PracticeManagementGatewayController(
             // filtered only by organization + statement (via the mapping table).
             values.Remove("organizationControlId");
         }
+        // Custom-release statement: same treatment as FrameworkStatement, keyed on
+        // org_statement_id (a custom statement has no framework_statement_id).
+        // Taken from the signed context, not from the browser's own payload. No
+        // releaseId: a custom release has no repository release behind it.
+        if (context?.FilterType.Equals("OrgStatement", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            values["orgStatementId"] = context.FilterId;
+            values.Remove("organizationControlId");
+            values.Remove("frameworkStatementId");
+        }
         return JsonSerializer.SerializeToElement(values);
     }
 
@@ -783,6 +799,16 @@ public sealed class PracticeManagementGatewayController(
         data = ApplyNavigationContext(token, entityType, command.ContextCode, data);
 
         var values = JsonSerializer.Deserialize<Dictionary<string, object?>>(data.GetRawText()) ?? [];
+        // 2026-10-12: a blank date filter means "no date filter". The grid
+        // (practice.js loadRows) sends dateFrom/dateTo = "" inside data when
+        // the inputs are empty, and the generic query procedure reads them
+        // with TRY_CONVERT(DATETIME2, ...) -- which turns "" into 1900-01-01,
+        // not NULL. dateTo = 1900-01-01 then filtered every row out (Audit
+        // Traceability showed nothing although practice_audit_trace has
+        // thousands of rows). Dropping the blank keys makes them NULL in SQL
+        // = no filter, which is what an empty input means.
+        foreach (var key in new[] { "dateFrom", "dateTo" })
+            if (values.TryGetValue(key, out var raw) && IsBlankJsonValue(raw)) values.Remove(key);
         PutIfMissing(values, "search", command.Search);
         PutIfMissing(values, "status", command.Status);
         PutIfMissing(values, "owner", command.Owner);
@@ -794,6 +820,15 @@ public sealed class PracticeManagementGatewayController(
         PutIfMissing(values, "pageSize", command.PageSize);
         return JsonSerializer.SerializeToElement(values);
     }
+
+    private static bool IsBlankJsonValue(object? value) => value switch
+    {
+        null => true,
+        JsonElement { ValueKind: JsonValueKind.Null } => true,
+        JsonElement { ValueKind: JsonValueKind.String } e => string.IsNullOrWhiteSpace(e.GetString()),
+        string text => string.IsNullOrWhiteSpace(text),
+        _ => false
+    };
 
     private static void PutIfMissing(Dictionary<string, object?> values, string key, object? value)
     {
@@ -828,6 +863,10 @@ public sealed class PracticeManagementGatewayController(
             { FilterType: "OrganizationControl", TargetArea: "organization-requirements" } => true,
             { FilterType: "FrameworkRelease", TargetArea: "organization-requirements" } => true,
             { FilterType: "FrameworkStatement", TargetArea: "organization-requirements" } => true,
+            // Custom-release statement -> Organization Practices (2026-10-08).
+            // A custom statement has no framework_statement_id; FilterId is its
+            // org_statement_id (organization_framework_statements overlay, 347).
+            { FilterType: "OrgStatement", TargetArea: "organization-requirements" } => true,
             { FilterType: "OrganizationRequirement", TargetArea: "practices" or "practice-instances" } => true,
             { FilterType: "Practice", TargetArea: "practice-instances" or "practice-view" } => true,
             // The Organization Practices grid does not always carry a practice

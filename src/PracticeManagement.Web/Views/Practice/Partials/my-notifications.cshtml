@@ -29,6 +29,12 @@
         /practice/api/asset-config/notifications/mine*, scoped the same way.
         Read, action and manager acknowledgements follow the notification
         profile. Script: wwwroot/js/AssetConfig/asset-my-notifications.js
+
+    EVIDENCE CENTER (migration 477)
+        The third section lists the expiry notices of Evidence Center items
+        the user owns or uploaded ("expiring within 30 days", "expired")
+        through /practice/api/evidence-center/notices/me*, scoped the same
+        way. Script: wwwroot/js/EvidenceCenter/evidence-my-notifications.js
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 
@@ -122,6 +128,35 @@
     <div id="amnPager"></div>
 </section>
 
+@* ---------------- Evidence Center expiry notices (477) ---------------- *@
+<section class="pm-panel" id="evnRoot" hidden>
+    <h2 class="amn-title">Evidence Center notices</h2>
+    <div class="pm-toolbar">
+        <select id="evnFilter" title="Show">
+            <option value="Unread">Unread</option>
+            <option value="Read">Read</option>
+            <option value="All">All</option>
+        </select>
+        <span class="amn-counts" id="evnCounts"></span>
+        <button class="pm-button icon" id="evnRefresh" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button" id="evnReadAll" type="button">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i> Mark all read
+        </button>
+    </div>
+    <p class="pm-message" id="evnMessage" role="status" aria-live="polite" hidden></p>
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr><th>Notice</th><th>Evidence</th><th>Why you</th><th>Valid to</th><th>Received</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="evnBody"><tr><td colspan="7" class="pm-empty">Loading...</td></tr></tbody>
+        </table>
+    </div>
+    <div id="evnPager"></div>
+</section>
+
 <style>
     .amn-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); margin: 0 0 8px; }
     .amn-counts { font-size: 12px; color: var(--fg-secondary); }
@@ -129,6 +164,7 @@
 </style>
 <script src="~/js/pm-grid.js" asp-append-version="true"></script>
 <script src="~/js/AssetConfig/asset-my-notifications.js" asp-append-version="true"></script>
+<script src="~/js/EvidenceCenter/evidence-my-notifications.js" asp-append-version="true"></script>
 
 <script>
 (function () {

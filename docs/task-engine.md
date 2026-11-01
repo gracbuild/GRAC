@@ -62,6 +62,7 @@ Base route: `/api/practice/tasks` (charter §7 convention). All endpoints are st
 | POST | `/api/practice/tasks/{id}/assign` | Reassign |
 | POST | `/api/practice/tasks/{id}/transition` | State change (409 on illegal) |
 | POST | `/api/practice/tasks/{id}/close` | Close (409 on two-gate not passed) |
+| POST | `/api/practice/tasks/{id}/reopen` | Reopen a Closed task (admin or task owner; 403 otherwise, 409 if not Closed) |
 
 **Error mapping:**
 
@@ -70,6 +71,10 @@ Base route: `/api/practice/tasks` (charter §7 convention). All endpoints are st
 | 53520 | `ILLEGAL_TRANSITION` | 409 Conflict |
 | 53521 | `REASON_REQUIRED` | 400 Bad Request |
 | 53752 | `TWO_GATE_NOT_PASSED` | 409 Conflict |
+| 53760 | `VALIDATION_ERROR` (reopen: task id required) | 400 Bad Request |
+| 53761 | `TASK_NOT_FOUND` (reopen) | 404 Not Found |
+| 53762 | `TASK_NOT_CLOSED` (reopen: only a Closed task can be reopened) | 409 Conflict |
+| 53763 | `REOPEN_FORBIDDEN` (not admin and not the task owner) | 403 Forbidden |
 | other | `SQL_ERROR` | 500 |
 
 ## Program.cs wire-up (pending explicit approval)

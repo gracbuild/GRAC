@@ -87,6 +87,7 @@
                stored request_title is untouched). *@
             <thead>
                 <tr>
+                    <th>Exception ID</th>
                     <th>Request</th>
                     <th>Request Date</th>
                     <th>Status</th>
@@ -97,7 +98,7 @@
                 </tr>
             </thead>
             <tbody id="excTableBody">
-                <tr><td colspan="7" class="pm-empty-row">Select an organization to load requests.</td></tr>
+                <tr><td colspan="8" class="pm-empty-row">Select an organization to load requests.</td></tr>
             </tbody>
         </table>
     </div>
@@ -325,5 +326,14 @@
 <script src="~/js/practice-picker.js" asp-append-version="true"></script>
 @* Management dashboard drill-down receiver (414) -- read by exception-centre.js. *@
 <script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+@* APPROVE is computed server-side from this role's permissions (same
+   source as the Add button above) and handed to exception-actions.js
+   as window.pmCanApprove. Inline here in the body so it does not depend
+   on the layout @section Scripts block. *@
+@{
+    var __excPerms = (ViewBag.Permissions as string[]) ?? System.Array.Empty<string>();
+    var __excCanApprove = System.Array.IndexOf(__excPerms, "APPROVE") >= 0;
+}
+<script>window.pmCanApprove = @(__excCanApprove ? "true" : "false");</script>
 <script src="~/js/ExceptionCentre/exception-centre.js" asp-append-version="true"></script>
 <script src="~/js/Shared/exception-actions.js" asp-append-version="true"></script>

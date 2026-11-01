@@ -2951,7 +2951,7 @@ So the page states the whole sequence and asks for one part of it:
 | **3** | Residual risk (score + analyst remark) | this page's form | yes |
 | | Existing Controls (scope) | `riskMapping` | yes |
 | | Acceptance & next review | `sp_risk_register_get` | no |
-| | Residual history (§20) | `/residual/history` | no |
+| | ~~Residual history (§20)~~ | removed from the page 2026-10-15 (below) | -- |
 
 #### The page asks for a score and one remark — nothing else
 
@@ -3904,3 +3904,347 @@ rather than raising the task the user declined.
 **Rollback.** `418_risk_treatment_task_optional_rollback.sql` re-issues
 263's body.
 
+
+# Risk settings moved to Settings -> Risk Settings (2026-10-08, migration 458)
+
+The Risk Centre settings (BRD §19, §22) used to open in a modal from a gear icon at the right of the tab strip on Risk Candidate / Risk Register. They are now a page of their own: **Settings -> Risk Settings** (`Practice/Index/risk-settings`). It sits beside Risk Acceptance Approval Authority and follows that page's layout: an organization picker, one panel, **Save settings** / **Discard changes**.
+
+**What did not change:**
+* the settings and their fields;
+* `org_risk_config` and its procs;
+* the endpoints: `GET/POST /practice/api/risk-centre/config`, `scoring-options` (threshold list), `/practice/api/roles` (approver list);
+* the save payload, including `clearMinRating` / `clearApproverRole`;
+* the read-only §21 notify matrix.
+
+**Files:**
+| File | Change |
+|---|---|
+| `Views/Practice/Partials/risk-settings.cshtml` | new page. The modal's form is moved here (same `cfg*` ids). Uses local `.rs-check` / `.rs-chip` styles, because Risk Centre's style block is not loaded on this page. |
+| `wwwroot/js/RiskCentre/risk-settings.js` | new. Holds the modal's `openConfigModal` / `loadRoles` / `onConfigSubmit`, moved, plus an org picker via `_workflow-common`. |
+| `risk-centre.cshtml` | gear button, settings modal and `.risk-tab-action` removed. |
+| `risk-centre.js` | `openConfigModal`, `loadRoles`, `onConfigSubmit`, `state.roles` and their bindings removed. **`loadConfig` stays:** the risk pages still read the settings (treatment-task pre-tick, residual gate). |
+| `practice-management.css` | on single-tab risk pages the whole tab strip is hidden. The gear was the only thing still visible there, so the strip would otherwise be left as an empty bar. |
+| `PracticeScreen.cs`, `Manage.cshtml` | `risk-settings` screen registered as a dedicated partial (Organization group). |
+| `database/458_risk_settings_menu.sql` | menu row `risk-settings` under `nav-organization` (Settings), order 265, icon `sliders`. Every active role gets full grants, as in 383, so everyone who could reach the gear can reach the page. Rollback included. |
+| `database/274_menu_master_seed.sql` | row and parent link added (snapshot convention). |
+
+**Permission:** the page uses its own menu row's VIEW grant (`ScreenPermissionArea` returns the key). The config API is session + organization guarded, unchanged.
+
+# Risk pages: step-1 cards stacked in one column (2026-10-08)
+
+**Pages:** Residual analysis, Review and Risk Acceptance.
+
+**Problem:** step 1 put **Risk summary** beside a second card, in two columns (`.ra-row-split`, 1.35fr : 1fr). On Acceptance, for example, that card is *Inherent risk before treatment*. Risk summary is short and the other card can be tall (its impact analysis), so a large empty block was left under Risk summary.
+
+**Change:**
+- `.risk-page .ra-row-split` in `risk-centre.cshtml` is now a single `minmax(0, 1fr)` column, and its 1100px media rule is removed. Each card is a full-width row, as on Analysis and Treatment.
+- Fields inside a card keep their own grids (`.ra-grid-1` etc.).
+
+CSS only. No markup, JS, API or database change.
+
+# Risk pages: long-text fields on their own full row (2026-10-08)
+
+**Problem:** in the read-only field grids of the risk pages (`.risk-page .pm-detail-grid`), a long value shared a row with one-word fields. Statement sat beside Risk ID and Category, so the paragraph made that whole row tall.
+
+**Change:** `dd()` in `risk-centre.js` now adds two classes to a prose field. It does this by label, through `PROSE_LABELS`:
+- `pm-detail-span`: the field takes the full row. This class already existed.
+- `pm-detail-prose`: new. In `risk-centre.cshtml`, `.risk-page .pm-detail-grid .pm-detail-prose { order: 1; }` places the field after the short fields of its grid, in its own order.
+
+**Prose labels:** Statement, Impact analysis, Potential consequence, Consequence, Threat, Vulnerability, Treatment plan, Controls now in place, Analyst remark(s), Justification, Rationale, Summary, Source observation, Clarification.
+
+**Result:**
+- On Risk summary, for example, row 1 now reads Risk ID | Category | Owner | Business unit | ..., and Statement is a full row below.
+- View Risk's Risk context, Analysis and Treatment already used this layout, so they look the same as before.
+- The modals' `.risk-meta` lists are already one field per row, and are unaffected.
+
+**Forms:**
+- Every statement and remark textarea was already full width (`pm-form-grid-full` / `full`).
+- The acceptance rationale (`.ac-note`) stays in column 2, spanning the four fields beside it. That layout is deliberate: the textarea takes its height from those fields, so it leaves no empty space.
+
+UI only.
+
+# Traceability shows the lifecycle stages (2026-10-08)
+
+Traceability appears on View Risk (`#rdTrace`) and in the register detail modal (`#regTrace`). Both are built by `riskTraceSteps()`. Until now it showed only where the risk came from:
+
+    R-001 → Identify → (Candidate) → Custom risk creation | Gap link | Source
+
+The stages the risk has reached are now appended to that chain, each with its date and, where the register records it, who did it:
+
+| Step | Shown when (`riskReach()` — the same test the View Risk sections use) | Detail |
+|---|---|---|
+| Analysed | analysis done (`!analysisPending`) | `analysisOn` by `analysedByName` |
+| Treated | treatment decided (`treatmentOptionCode`) | `treatmentOptionName`, `treatmentDecidedOn` |
+| Residual analysed | `residualPending === false` | `residualAssessedOn` by `residualAssessedByName` |
+| Accepted | `acceptedOn` | `acceptedOn` by `acceptedByName` |
+| Reviewed | `lastReviewedOn` or `reviewCount > 0` | `lastReviewedOn` (+ review count when more than one) |
+| Retired (or legacy Closed) | `statusCode` is `Retired` / `Closed` — set by **Retire risk** (Register row menu, Risk View Actions → `sp_risk_register_status_set`) | `closedOn` by `closedByName` — `closureReason` |
+
+A stage that has not been reached is not shown. The fields come from the existing `/register/{id}` payload.
+
+UI only (`risk-centre.js`). No API or database change.
+
+## Acceptance rationale is mandatory (2026-10-10)
+
+Accept Risk (full page, `#acNote`) and Bulk Accept (`#baNote`): the
+**Acceptance rationale** (remark) is now required.
+
+- UI: label marked `*`, textarea `required`, and `onAcceptanceSubmit` /
+  `onBulkAcceptSubmit` stop with "Acceptance rationale is required ..." when
+  it is blank or whitespace.
+- API: `POST /api/practice/risk-centre/register/{riskId}/acceptance` and
+  `POST .../register/bulk-accept` return 400
+  `{ success: false, error: "Acceptance rationale is required." }` when
+  `acceptanceNote` is blank (`RiskCentreController`).
+- Not enforced inside `sp_risk_acceptance_save`: Bulk Review with status
+  Accepted (299) composes the same procedure with its review remarks, which
+  stay optional. No database change.
+
+
+## Residual Analysis: "Residual history" section removed (2026-10-15)
+
+Change request: the Residual Analysis page no longer shows the **Residual
+history** table. Removed: the section in `risk-centre.cshtml` (`#rrHistory`)
+and `renderResidualHistory()` / its call in `risk-centre.js`.
+
+Unchanged on purpose: every save still writes a new retained
+`risk_residual_analysis` row with the next `residual_version` and marks the
+previous one `is_current = 0` (BRD §20), and the API endpoint
+`GET /register/{id}/residual/history` is still there. Only the page stopped
+displaying it. `risk_register.risk_version` (moved only by acceptance, 310)
+is unaffected. No API or database change.
+
+## Impact Details: Asset picker no longer loads the whole register up front (2026-10-15)
+
+Change request: "the first load lu thanne full asset load aakalle cheyyunnathu" --
+the Category/Sub-category/Type cascade added to the Asset row (242, Operationalize
+parity) only ever hid rows in an already-downloaded list; `refresh()` still fetched
+every category's objects up front, Asset included, so a large asset register was
+pulled over the wire before any filter was ever touched.
+
+- **API** (`PracticeRepositoryService.QueryDependencyOptionsFallbackAsync`,
+  `/practice-management-gateway/dependency-options/query`): three new optional
+  payload arrays, read only when the source table is `organization_dependency_asset`
+  -- `assetCategoryIds`, `assetSubcategoryIds`, `assetTypeIds`. Each is serialised
+  to a JSON array string and matched with `OPENJSON`/`TRY_CONVERT`, the same
+  CSV/array-into-SQL idiom `@allowed` already uses a few hundred lines up in the
+  same file. Empty or absent means no restriction, exactly as before. Every other
+  dependency type ignores the three fields.
+- **UI** (`risk-centre.js`): `refresh()` no longer calls `loadDependencyObjects()`
+  for the Asset category up front when the asset taxonomy is available (`hasAssetTaxonomy`)
+  -- the row starts empty except for whatever is already mapped (unaffected, since
+  a mapped-but-unfetched id was always kept via the existing "extra" fallback).
+  With no taxonomy deployed (241 not run) Asset keeps the old flat, fully-loaded
+  behaviour -- there is no cascade to drive a scoped fetch with.
+  `categoryRow()`'s cascade filters (`showAssetFilters`) now render regardless of
+  whether anything has loaded yet, with a "Select an Asset Category, Sub Category
+  or Type above to load assets" hint (`data-asset-empty-hint`) sitting in the same
+  options box until something has. Ticking Category/Sub-category/Type fires the new
+  `reloadAssetPicker()`, which fetches only the matching assets and appends the
+  ones not already in the DOM (`dependencyOptionLabel()`, factored out of
+  `categoryRow()` so both places render the same option markup) -- it never
+  touches or rebuilds an existing `<label>`, so a pending (not yet saved) tick
+  survives a filter change. `applyAssetFilters()`'s "nothing ticked" case changed
+  from "show everything downloaded" to "show only what is already selected",
+  since there is no longer a complete downloaded list for "everything" to mean.
+  `loadDependencyObjects()`'s cache key now includes the filter combination.
+
+No database schema change. No change to any other dependency category (Vendor,
+Location, Team, Committee, Business Function, Person) or to the Operationalize
+Dependencies table, which has its own separate (and still fully-eager)
+`loadDependencyObjectsFor()` in `resolve-workspace.cshtml` -- out of scope for
+this change request.
+
+**Follow-up (same day):** the three trigger labels reworded from "All Asset
+Category" / "All Asset Sub Category" / "All Asset Type" to "Select Asset
+Category" / "Select Asset Sub Category" / "Select Asset Type"
+(`assetFilterCells()`) -- "All ..." read as "nothing picked still shows
+everything", which stopped being true the moment picking became what loads
+the list. Wording only, same `data-checkcombo-empty` mechanism.
+
+## Impact Details: Asset Category -> Sub Category -> Type filters now cascade (2026-10-15)
+
+Change request: "Asset category de selection lu sub category filter akanam. ipo
+akunnilla. multi selection anu asset category lu varunnathu. athinu anusarichu
+venam filter cheyyan" -- ticking Asset Category (multi-select) did not narrow
+which Sub Categories could be ticked; the three filter combos (Category, Sub
+Category, Type, added same day above) only drove the asset fetch, never
+cross-narrowed each other's own option lists.
+
+- **UI only** (`risk-centre.js`), no API or database change. `assetFilterCells()`'s
+  option markup now carries `data-parent` (the taxonomy lookup's existing `Parent`
+  column -- `item.parent` from `loadAssetTaxonomy()`, captured earlier but unused
+  until now) on every Sub Category and Type option.
+- New `applyAssetTaxonomyCascade(row)`, run from the change listener before
+  `applyAssetFilters()`/`reloadAssetPicker()` whenever the tick was on one of the
+  three taxonomy filters themselves: a Category tick narrows which Sub Category
+  options stay visible (`data-parent` matching a ticked Category id, or everything
+  when nothing is ticked), then the now-current Sub Category ticks narrow Type the
+  same way, one level at a time. A tick that falls outside its new parent set is
+  **unchecked**, not just hidden -- a hidden-but-still-checked Sub Category would
+  otherwise have gone on narrowing Type, and gone on narrowing the asset fetch
+  itself, from behind a filter the user can no longer see or clear. Same pattern
+  already used for the Person row's department filter (`applyPersonFilters`,
+  385, 2026-09-26).
+- Extended one hop further than literally asked: the user named Category ->
+  Sub Category; Sub Category -> Type had the identical gap, so both hops now
+  cascade for consistency. Flagging this in case only the first hop was wanted.
+
+No change to the Operationalize Dependencies table (`resolve-workspace.cshtml`),
+which has no equivalent cascade and was not part of this request.
+
+**Follow-up (same day):** the cascade above only ever narrowed Sub Category/Type
+once something changed -- on first paint every Sub Category and Type option sat
+fully open regardless of Category, so a reader could tick a Sub Category (or
+Type) straight away without ever picking a Category. Change request: "asset
+category select cheythenu sesham subcategory load ayal mathi. athu vare select
+asset category nte option matram mathi" -- Sub Category and Type should show no
+options of their own until their parent has a tick.
+
+- `narrow()` (inside `applyAssetTaxonomyCascade`) now treats "nothing ticked
+  upstream" as **hide everything**, not "no restriction" -- the opposite of
+  before. Hidden options are also marked `filteredOut` (the convention
+  `applyPersonFilters` already uses), so the generic search-box handler, which
+  only looks at the search text and that flag, cannot type its way past the
+  cascade.
+- `assetFilterCells()`'s Sub Category and Type buckets each render a
+  `data-taxonomy-parent-hint` line ("Select an Asset Category above first." /
+  "Select an Asset Sub Category above first.") inside their own options box,
+  toggled by the same `narrow()` call -- the same device `categoryRow()`'s
+  `assetEmptyHint` already uses for the asset picker itself, so an empty combo
+  still reads as "nothing to pick from yet" rather than broken.
+- `applyAssetTaxonomyCascade(row)` now also runs once on first render (next to
+  the existing `applyPersonFilters` initialisation), not only on a later
+  `change` -- otherwise the very first paint was still wide open.
+
+UI only, no API or database change.
+
+## Register grid: Residual Risk Score column shows Rating only (2026-10-15)
+
+Change request: "Risk register lu residual risk score lu rating koodathe
+likelyhoodXimpact koodi kanikunnundu. apthu remove cheyyam. inherent risk rate
+le pole Rating mathram display cheythal mathi" -- on the Risk Register grid
+(`refreshRegister()`'s rows), the Residual Risk Score column printed the
+rating chip plus a second line ("High x Critical"-style Likelihood x Impact
+text) under it, while the Inherent Risk Score column beside it has only ever
+printed the bare chip (`severityChip(r.inherentRatingCode)`) -- the two
+columns read inconsistently.
+
+- UI only (`risk-centre.js`). `residualCell(r)`, the function that paints
+  just this column, dropped the `<br>` + Likelihood x Impact line; it now
+  returns `severityChip(r.residualRatingCode)` (or `"--"` with no rating),
+  matching the Inherent column exactly. The "--" until a rating actually
+  exists (2026-09-30) is unchanged.
+- Nothing else uses `residualCell()` -- it has exactly one call site, this
+  grid's `<td>`. The Likelihood x Impact detail still shows elsewhere on
+  purpose: the View Risk page's stage rail (`rdFlow`) and its Residual
+  Treatment stepper print it for BOTH Inherent and Residual symmetrically
+  (a different, intentionally detailed widget, not the asymmetric case this
+  request was about), and the Residual Analysis page's live preview
+  (`resSub`) keeps it too -- none of those were touched.
+
+No API or database change.
+
+## Candidate View: quick-look modal promoted to a full page (2026-10-15)
+
+Change request: "Risk candidate nte view page ipo pop up anu. athu bhaki ulla
+pages nte pole thanne full page akkanam. Actions lu assessment idanam. Back to
+candidates register button oke venam. View risk nte page pole thanne set
+cheyyanam. oru uniformity ku vendi anu" -- the candidate's own "View details"
+was still a modal (`riskDetailModal`) after every other Risk Centre modal
+(Analysis, Treatment, Residual, Review, View Risk, Acceptance) had already
+been promoted to a full page; this brings the last one in line, for
+uniformity with the Register side's own View Risk page.
+
+- **UI only** (`risk-centre.js` + `risk-centre.cshtml`), no API or database
+  change. New full page `riskCandidateDetailPageView`, added to `FULL_PAGES`,
+  grouped right after `riskDetailPageView` in the markup. Same shell every
+  other promoted page uses: `pm-page-heading compact ra-head` with an
+  Actions button, a Print button and a "Back to candidates register" button
+  (`cdvActionsBtn`/`cdvPrintBtn`/`cdvBackBtn`), three `pm-panel` sections
+  (Candidate details, Assessment history, Related tasks) in a `.rd-body`.
+  No flow rail -- a candidate has not reached any of View Risk's four stages
+  yet.
+- Every element id the old modal used (`riskDetailTitle`, `riskDetailMeta`,
+  `riskAnalysisHistory`, `riskRelatedTasks`) moved into the new page
+  unchanged, same principle the earlier promotions (Analysis/Treatment/
+  Residual/Review/Acceptance, see [[risk_centre_full_page_pattern]]) already
+  used -- `openDetailModal()` (renamed `openCandidateDetailPage()`) needed no
+  change to its own body beyond how it is shown at the end
+  (`showFullPage("riskCandidateDetailPageView")` instead of
+  `show("riskDetailModal")`, `analysisReturnTab = "candidates"` instead of
+  hardcoded "register"). `riskDetailModal`'s markup is removed; nothing else
+  referenced it.
+- **Actions** (the explicit ask): the candidate row menu's own two items --
+  "View details", "Assessment" -- are now built once, by a new
+  `buildCandidateMenu(fields, handlers)`, mirroring how `buildRegisterMenu()`
+  is the one place the Register row menu's own rules live. Both the
+  Candidates grid's row menu and the new page's own Actions button
+  (`openCandidateViewActionsMenu()`, mirroring `openRiskViewActionsMenu()`)
+  call it; the page's own button omits `onView` (the page already IS that
+  view), same convention Risk View's own Actions button uses to omit "View
+  risk".
+- Reaching Assessment from the page's own Actions button means the page can
+  now stay open underneath it, which was never possible before (View and
+  Assessment were previously two alternatives, not nested) -- the same
+  staleness risk View Risk already solved with `refreshRiskViewIfShowing()`.
+  New `refreshCandidateViewIfShowing(id)` re-renders the page if and only if
+  it is the one open for that candidate; called after every action reachable
+  from the Assessment modal that changes the candidate (`onAnalysisSubmit`,
+  `doRegister`, `onRejectSubmit`, the duplicate-close handler).
+- `backFromFullPage()` (the single exit path every full page already shares)
+  now also clears the Related Tasks host (`riskRelatedTasks`) on the way
+  out, the same release `closeDetailModal()` used to do for the old modal --
+  harmless on every other page's exit, since none of them ever mount into
+  that host.
+- All four entry points retargeted: the `#candidateId=` deep-link, the
+  dashboard drill-down (`data-open-candidate`), the Candidates grid's own
+  row click (`data-cand-view`), and the row menu's "View details" item.
+- Print CSS (`@@media print`) extended to cover
+  `#riskCandidateDetailPageView` the same way `#riskDetailPageView` already
+  is, since this page now has a Print button too.
+
+Related: [[risk_centre_full_page_pattern]].
+
+## 484 -- treated risk with no treatment task no longer stuck "In treatment" (2026-10-24)
+
+Found on SR R-002 (risk_register_id 38): Treat / Reduce chosen with "Generate a
+treatment task?" = No (418), residual assessed, risk accepted -- yet the stage
+read **In treatment**. `vw_pm_risk_workflow_stage` (299) had the branch
+"Terminate/Treat/Transfer and no treatment task at all -> InTreatment" ahead of
+ResidualDue and the acceptance branches; with the task declined it matched for
+ever.
+
+`database/484_risk_stage_no_task_after_residual.sql` re-issues the view (299
+body, CREATE OR ALTER) with one extra condition on that branch:
+`residual_pending = 1`. Before the residual assessment such a risk still reads
+In treatment; after it, the risk moves to Acceptance due / Accepted like any
+treated risk. Risks with treatment tasks are unaffected. The script lists the
+risks whose stage changes. No API or Web change. Rollback restores the 299 view.
+
+Diagnostic: `database/_diag_risk_workflow_stage.sql` shows, for one risk, the
+columns the stage is computed from and which branch decided it.
+
+## 485 -- Review Risk opens on the current assessment (2026-10-24)
+
+Change request: Review Risk's reassessment opens filled with the risk's current
+likelihood, impact, risk category, analyst remark, impact details and review
+frequency, and the next review date recalculated from the frequency.
+
+- **Bug fixed (UI):** `rvCategory`, `rvLikelihood`, `rvImpact` were never filled
+  with options (`loadOptions` filled the Analysis and Residual selects only), so
+  `openReviewPage`'s pre-fill had nothing to select. They are now filled from
+  the same scoring options.
+- **DB:** `database/485_risk_register_get_review_prefill.sql` re-issues
+  `sp_risk_register_get` (376 body) with three trailing columns:
+  `AnalystRemarks` (applied assessment), `ReviewFrequencyId`,
+  `ReviewFrequencyName` (+ LEFT JOIN `frequency_master`). Rollback restores 376.
+- **API:** `GET /api/practice/risk-centre/register/{id}` (`RiskRegisterDetail`)
+  gains `analystRemarks`, `reviewFrequencyId`, `reviewFrequencyName` -- read
+  only when present.
+- **UI (`risk-centre.js` `openReviewPage`):** Analyst remark pre-filled; the
+  review frequency preselected; next review date = today + that frequency
+  (`applyReviewFrequencyToDate`, the select's own rule). Impact Details and
+  Existing Controls were already loaded from the risk's current mapping.
+
+Deploy: 485, then API + Web.

@@ -35,13 +35,15 @@
     const overlay = document.createElement("div");
     overlay.className = "grac-dialog-overlay";
     overlay.innerHTML = `
-      <section class="grac-dialog" role="dialog" aria-modal="true" aria-labelledby="gracDialogTitle">
+      <section class="grac-dialog${options.wide ? " grac-dialog--wide" : ""}" role="dialog" aria-modal="true" aria-labelledby="gracDialogTitle">
         <div class="grac-dialog-body">
           <div class="grac-dialog-icon ${escapeHtml(type)}"><i class="${escapeHtml(iconMap[type] || iconMap.info)}" aria-hidden="true"></i></div>
           <div>
             <h2 class="grac-dialog-title" id="gracDialogTitle">${escapeHtml(options.title || titleMap[type] || titleMap.info)}</h2>
             <p class="grac-dialog-message">${escapeHtml(options.message || "")}</p>
-            ${options.prompt ? `<input class="grac-dialog-input" type="text" value="${escapeHtml(options.defaultValue || "")}" aria-label="${escapeHtml(options.inputLabel || "Comments")}">` : ""}
+            ${options.prompt ? (options.multiline
+              ? `<textarea class="grac-dialog-input" rows="${Number(options.rows) > 0 ? Number(options.rows) : 4}" aria-label="${escapeHtml(options.inputLabel || "Comments")}">${escapeHtml(options.defaultValue || "")}</textarea>`
+              : `<input class="grac-dialog-input" type="text" value="${escapeHtml(options.defaultValue || "")}" aria-label="${escapeHtml(options.inputLabel || "Comments")}">`) : ""}
           </div>
         </div>
         <div class="grac-dialog-actions">
@@ -61,7 +63,12 @@
       cancel?.addEventListener("click", () => finish(options.prompt ? null : false));
       overlay.addEventListener("keydown", event => {
         if (event.key === "Escape") { event.preventDefault(); finish(options.prompt ? null : false); }
-        if (event.key === "Enter" && options.prompt && document.activeElement === input) { event.preventDefault(); finish(input.value); }
+        // Single-line prompt: Enter submits. Multiline: Enter is a newline,
+        // Ctrl/Cmd+Enter submits -- so the textarea can hold real paragraphs.
+        if (event.key === "Enter" && options.prompt && document.activeElement === input
+            && (!options.multiline || event.ctrlKey || event.metaKey)) {
+          event.preventDefault(); finish(input.value);
+        }
       });
     });
   }
@@ -118,6 +125,7 @@
     prompt: (message, opts = {}) =>
       api.prompt({ type: opts.type || "info", title: opts.title, message,
                    defaultValue: opts.defaultValue || "",
+                   multiline: opts.multiline, rows: opts.rows, wide: opts.wide,
                    inputLabel: opts.inputLabel, confirmText: opts.confirmText }),
 
     // promptRequired -- like prompt(), but a blank answer re-asks instead
@@ -135,6 +143,7 @@
         const value = await api.prompt({
           type: opts.type || "info", title: opts.title, message: prefixedMessage,
           defaultValue: opts.defaultValue || "",
+          multiline: opts.multiline, rows: opts.rows, wide: opts.wide,
           inputLabel: opts.inputLabel, confirmText: opts.confirmText
         });
         if (value === null) return null;                 // cancelled

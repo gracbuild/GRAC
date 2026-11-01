@@ -522,6 +522,15 @@
   // ===================================================================
   // The evidence list (migration 232)
   // ===================================================================
+  // 492: the evidence cadence -- the codes and wording of Control
+  // Management's evidence-cadence options (077, GRAC_New.reference_option
+  // group 'evidence-cadence'), which vw_pm_instance_evidence_cadence also
+  // labels with.
+  const EVIDENCE_CADENCES = [
+    { value: "Recurring", label: "Recurring" },
+    { value: "OneTime",   label: "One-time" }
+  ];
+
   function renderEvidence() {
     const host = $("gofEvidenceRows");
     // The per-evidence Description box. Both scopes round-trip it, each via
@@ -542,6 +551,16 @@
           + '<label class="gof-evidence-retention">Retention'
             + '<input type="text" data-ev-retention="' + i + '" value="'
             + esc(e.retentionPeriod || "") + '"></label>'
+          // 492: Recurring / One-time, as Control Management asks it for
+          // published evidence (077). One-time evidence is provided once on
+          // Operationalize (481); Recurring evidence on each scheduled
+          // task's Complete page (482).
+          + '<label class="gof-evidence-cadence">Cadence'
+            + '<select data-ev-cadence="' + i + '">'
+            + EVIDENCE_CADENCES.map(c => '<option value="' + c.value + '"'
+                + ((e.evidenceCadence || "Recurring") === c.value ? " selected" : "") + ">"
+                + esc(c.label) + "</option>").join("")
+            + "</select></label>"
           + (e.locked
               // A row somebody has already worked on cannot be removed
               // here -- the procedure keeps it anyway, and a control that
@@ -574,6 +593,11 @@
         localEvidence[Number(this.getAttribute("data-ev-retention"))].retentionPeriod = this.value;
       });
     });
+    host.querySelectorAll("[data-ev-cadence]").forEach(el => {
+      el.addEventListener("change", function () {
+        localEvidence[Number(this.getAttribute("data-ev-cadence"))].evidenceCadence = this.value;
+      });
+    });
     host.querySelectorAll("[data-ev-desc]").forEach(el => {
       el.addEventListener("input", function () {
         localEvidence[Number(this.getAttribute("data-ev-desc"))].remarks = this.value;
@@ -598,6 +622,7 @@
       isMandatory:     true,
       retentionPeriod: "",
       remarks:         "",
+      evidenceCadence: "Recurring",   // 492: the 077 default
       locked:          false
     });
     renderEvidence();
@@ -685,10 +710,10 @@
     const legacyOwner = !ownerId ? String(seed.responsibility || "").trim() : "";
     $("gofResponsibility").innerHTML =
         (legacyOwner ? '<option value="" selected disabled>' + esc(legacyOwner) + " (role - pick an employee)</option>" : "")
-      + options(lookup("owners"), ownerId, "Not set");
+      + options(lookup("owners"), ownerId, "Unassigned");
     $("gofApproval").innerHTML       = options(lookup("roles"), seed.approvalAuthority, "Not set");
     $("gofAssuranceType").innerHTML  = options(lookup("assuranceTypes"), seed.assuranceType, "Not set");
-    $("gofImplStatus").innerHTML     = options(lookup("implementationStatuses"), seed.implementationStatusId, "Not set");
+    $("gofImplStatus").innerHTML     = options(lookup("implementationStatuses"), seed.implementationStatusId, "Not Updated"); // 456
     $("gofRemarks").value            = seed.remarks || "";
     $("gofConnectionUrl").value      = seed.connectionUrl || "";
 
@@ -848,7 +873,9 @@
         // The per-evidence Description, captured in the practice scope
         // (see renderEvidence). Trimmed to null so a blank box stores
         // nothing rather than an empty string.
-        remarks:         (e.remarks && String(e.remarks).trim()) ? e.remarks : null
+        remarks:         (e.remarks && String(e.remarks).trim()) ? e.remarks : null,
+        // 492
+        evidenceCadence: e.evidenceCadence === "OneTime" ? "OneTime" : "Recurring"
       }))
     };
 
@@ -933,7 +960,40 @@
       body: JSON.stringify(payload)
     });
     const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.error || ("Could not remove (HTTP " + r.status + ")."));
+    if (!r.ok) throw new Error(body.error || ("Could not retire (HTTP " + r.status + ")."));
+    return body;
+  }
+
+  // Migration 464. The mirror of retire(), and deliberately the same
+  // shape: the same endpoint, the same id-only payload, one flag
+  // different. Retiring never deleted anything -- it set the row's status
+  // to 'Retired' and the fan-out retired every instance copy -- so this
+  // flips it back to 'Active' and the procedure re-runs the same fan-out.
+  //
+  // Practice scope only for now: that is the door 464 opened. An instance
+  // scope call would need @restore on sp_resolve_local_obligation_save
+  // too, so it is refused here rather than posting a flag the instance
+  // endpoint would quietly ignore.
+  async function restore(o) {
+    const scope = (o && o.scope) || "instance";
+    if (scope !== "practice")
+      throw new Error("Restore is available on practice-level obligations only.");
+
+    const payload = {
+      restore:           true,
+      organizationId:       o.organizationId ? Number(o.organizationId) : null,
+      practiceId:           Number(o.practiceId),
+      practiceObligationId: Number(o.recordId)
+    };
+
+    const r = await fetch(U("/practice/api/practice-obligations"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrf() },
+      body: JSON.stringify(payload)
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || ("Could not restore (HTTP " + r.status + ")."));
     return body;
   }
 
@@ -988,9 +1048,12 @@
   function vocabulary() { return { triggerModes, eventTypes }; }
 
   window.gracObligationForm = {
-    open, close, retire, loadTypes, prime, vocabulary,
+    open, close, retire, restore, loadTypes, prime, vocabulary,
     // Exported so a host can read the presentation contract rather than
     // restate it. `typedArrays` is deliberately NOT here -- see seedOf.
-    TYPE_SCHEMA, retiredTypes
+    TYPE_SCHEMA, retiredTypes,
+    // 494: the cadence codes and labels, so Practice View labels the
+    // badge with the same wording the form offers.
+    EVIDENCE_CADENCES
   };
 })();

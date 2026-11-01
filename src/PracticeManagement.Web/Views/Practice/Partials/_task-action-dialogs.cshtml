@@ -103,6 +103,8 @@
     #taskEditForm textarea {
         width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong);
         border-radius: var(--radius-sm); font: inherit; font-size: 13px;
+        /* Normal weight: AdminLTE makes every <label> bold (700) and `font: inherit` carried that weight into the control inside it (2026-10-26). */
+        font-weight: 400;
         color: var(--fg-strong); background: var(--bg-surface);
     }
     /* Sized here rather than with a rows attribute so the two textareas
@@ -137,6 +139,15 @@
         #taskEditForm textarea { height: 58px; }
         #taskEditForm .tef-grid { gap: 8px 14px; }
     }
+
+    /* 482: recurring evidence rows on Complete Task. The radios are the
+       shared .radio-group / .radio-option (cacca-styles.css); they only
+       need to wrap inside the dialog's width. */
+    #taskCompleteDialog .rw-evidence-source { flex-wrap: wrap; gap: 6px 16px; margin: 6px 0; }
+    #taskCompleteDialog .tce-row {
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        padding: 8px 10px; margin-top: 6px;
+    }
 </style>
 
 @*
@@ -165,19 +176,82 @@
            sp_task_completion_eligibility does not consult evidence, so
            blocking completion on a file would be a rule this product does
            not have. *@
-        <div style="margin-bottom:10px;">
-            <div style="font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:4px;">Evidence</div>
-            <div id="taskCompleteEvidence"></div>
-            <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
-                <input type="file" id="taskCompleteFile" style="font-size:12px; flex:1 1 auto; min-width:0;" />
-                <button type="button" class="pm-button" id="taskCompleteAttach" style="padding:3px 10px; font-size:12px;">
-                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i> Attach
-                </button>
-            </div>
-            <span style="display:block; font-size:11px; color:var(--fg-muted); margin-top:3px;">
-                Optional. Attaching is immediate and append-only &mdash; evidence is never
-                overwritten or deleted, so a newer file is added alongside the old one.
+        @* 482: the recurring evidence of a scheduled task's obligation (moved
+           off Operationalize by 481). Each row asks how it is provided --
+           Direct Upload / Evidence Center Reference / External Evidence
+           Reference -- and shows only that option's control. Optional:
+           the 473 gate that required a file was removed by 482. Chosen
+           files and external references are saved when the task is
+           completed; Select from Evidence Center links at once. Hidden for
+           any task that has no recurring evidence. *@
+        <div id="taskCompleteRecurringWrap" style="display:none; margin-bottom:10px;">
+            <div style="font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:2px;">Recurring evidence for this occurrence</div>
+            <span style="display:block; font-size:11px; color:var(--fg-muted);">
+                Optional. Choose how each one is provided. A chosen file or an external reference is saved when you complete the task.
             </span>
+            <div id="taskCompleteRecurring"></div>
+        </div>
+
+        <div style="margin-bottom:10px;">
+            <div id="taskCompleteEvidenceLabel" style="font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:4px;">Evidence</div>
+            <div id="taskCompleteEvidence"></div>
+            @* 483: the same three options as the recurring rows above. The
+               radios are drawn by task-actions.js (Shared/evidence-source.js);
+               each panel below shows for its option only. Select from
+               Evidence Center links at once; Direct Upload stores the file
+               when its dialog is submitted (499); the external reference is
+               saved when the task is completed. The panels carry no inline
+               display so [hidden] can hide them. *@
+            <div id="taskCompleteGeneral">
+                <div id="taskCompleteGeneralSource"></div>
+                @* 499: was a bare file picker, which put the file in the
+                   Evidence Center with no title, type, validity,
+                   classification, tags or owner. The button opens the SAME
+                   Upload evidence form the Evidence Center screen uses
+                   (Shared/evidence-upload.js), so it is described once,
+                   here, and stored on submit rather than at completion. *@
+                <div data-ev-src-panel="DirectUpload">
+                    <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+                        <button type="button" class="pm-button" id="taskCompleteUpload" style="padding:3px 10px; font-size:12px;"
+                                title="Upload a file and describe it for the Evidence Center in one step.">
+                            <i class="fa-solid fa-upload" aria-hidden="true"></i> Upload evidence
+                        </button>
+                    </div>
+                    <span id="taskCompleteUploadNote" style="display:block; font-size:11px; color:var(--fg-muted); margin-top:3px;">
+                        Optional.
+                    </span>
+                </div>
+                <div data-ev-src-panel="EvidenceCenter" hidden>
+                    @* 477: link evidence already in the Evidence Center. *@
+                    <button type="button" class="pm-button" id="taskCompletePick" style="padding:3px 10px; font-size:12px; margin-top:6px;"
+                            title="Link evidence already uploaded to the Evidence Center. It must be valid for this task's period.">
+                        <i class="fa-solid fa-box-archive" aria-hidden="true"></i> Select from Evidence Center
+                    </button>
+                </div>
+                <div data-ev-src-panel="External" hidden>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+                        <label style="flex:1 1 180px; font-size:12px;">Location
+                            <input class="pm-input" type="text" id="taskCompleteGenLocation" maxlength="500"
+                                   placeholder="Where it is kept" style="width:100%; font-size:13px;" />
+                        </label>
+                        <label style="flex:1 1 180px; font-size:12px;">Locator
+                            <input class="pm-input" type="text" id="taskCompleteGenLocator" maxlength="500"
+                                   placeholder="Path, link or reference" style="width:100%; font-size:13px;" />
+                        </label>
+                    </div>
+                </div>
+                <div data-ev-src-panel="EvidenceCenter" hidden>
+                    <span style="display:block; font-size:11px; color:var(--fg-muted); margin-top:3px;">
+                        Optional. Linking is immediate and append-only &mdash; evidence is never
+                        overwritten or deleted, so a newer item is added alongside the old one.
+                    </span>
+                </div>
+                <div data-ev-src-panel="External" hidden>
+                    <span style="display:block; font-size:11px; color:var(--fg-muted); margin-top:3px;">
+                        Optional. The reference is saved when you complete the task.
+                    </span>
+                </div>
+            </div>
         </div>
 
         <label style="display:block;">
@@ -229,6 +303,38 @@
 </dialog>
 
 @*
+    Reopen task — brings a Closed / Inactivated task back to Open.
+
+    Mirrors the Close dialog. A reason is required and recorded in the
+    state-transition history (reason_code TASK_REOPENED). The API
+    (sp_task_reopen) authorizes admin OR the task owner; the menu item
+    only appears on tasks whose current status is Closed.
+*@
+<dialog id="taskReopenDialog" style="max-width:520px; width:94%;">
+    <form id="taskReopenForm" method="dialog" style="margin:0; padding:18px 20px;">
+        <h2 style="margin:0 0 10px; font-size:16px;">Reopen task</h2>
+        <p id="taskReopenSubject" style="margin:0 0 10px; font-size:13px; color:var(--neutral-700);"></p>
+        <div id="taskReopenWarn" style="display:none; font-size:12px; border-radius:var(--radius-md); padding:8px 10px; margin-bottom:10px;
+                                      background:var(--warning-50); border:1px solid var(--warning-200); color:var(--danger-700);"></div>
+        <label style="display:block;">
+            <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">
+                Reason<span style="color:var(--danger-700);">*</span>
+            </span>
+            <textarea class="pm-input" id="taskReopenReason" rows="3" maxlength="1000" required
+                      style="width:100%; font-size:13px;"
+                      placeholder="Why is this closed task being reopened?"></textarea>
+        </label>
+        <p id="taskReopenMsg" style="margin:8px 0 0; font-size:12px; color:var(--danger-700);"></p>
+        <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+            <button type="button" class="pm-button" data-close-task-reopen>Cancel</button>
+            <button type="submit" class="pm-button primary">
+                <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reopen task
+            </button>
+        </footer>
+    </form>
+</dialog>
+
+@*
     Add Evidence — the pre-completion path.
 
     Evidence often has to be attached BEFORE completion, for review or
@@ -259,6 +365,16 @@
             </span>
             <input type="file" id="taskEvidenceFile" required style="font-size:12px; width:100%;" />
         </label>
+        @* 477: or link evidence already in the Evidence Center. *@
+        <div style="margin:0 0 8px;">
+            <button type="button" class="pm-button" id="taskEvidencePick" style="padding:3px 10px; font-size:12px;"
+                    title="Link evidence already uploaded to the Evidence Center. It must be valid for this task's period.">
+                <i class="fa-solid fa-box-archive" aria-hidden="true"></i> Select from Evidence Center
+            </button>
+            <span style="font-size:11px; color:var(--fg-muted); margin-left:6px;">
+                A file uploaded here is also kept in the Evidence Center for reuse.
+            </span>
+        </div>
         <label style="display:block;">
             <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">Description</span>
             <input class="pm-input" type="text" id="taskEvidenceDesc" maxlength="1000"
@@ -275,3 +391,23 @@
         </footer>
     </form>
 </dialog>
+
+@*
+    Migration 477: "Select from Evidence Center" on the Complete Task and
+    Add Evidence dialogs uses the shared picker (_evidence-picker-dialog +
+    Shared/evidence-picker.js, the Operationalize one). Included here, once,
+    so every page that includes these dialogs gets it. pm-grid pages the
+    picker's list.
+*@
+<partial name="Partials/_evidence-picker-dialog" />
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/evidence-picker.js" asp-append-version="true"></script>
+@* 482: the three evidence options, shared with Operationalize (481). *@
+<script src="~/js/Shared/evidence-source.js" asp-append-version="true"></script>
+@* 499: Direct Upload opens the Evidence Center's own Upload evidence form,
+   so a file attached while completing a task arrives described rather than
+   blank. Included here, beside the picker, so all four pages that render
+   these dialogs (tasks / task-view / task-edit / task-complete) get it from
+   one place. *@
+<partial name="Partials/_evidence-upload-dialog" />
+<script src="~/js/Shared/evidence-upload.js" asp-append-version="true"></script>

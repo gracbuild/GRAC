@@ -361,7 +361,9 @@ Base route `/api/practice/tasks` (Api tier), proxied at
 | POST | `/{id}/children` | Decompose (§11) |
 | POST | `/{id}/complete` | Governed completion (§10, §12) |
 | POST | `/{id}/activity` | Comment / update (§16) |
-| POST | `/{id}/attachments` | Upload evidence (multipart) |
+| POST | `/{id}/attachments` | Upload evidence (multipart). Since 477 the file is stored in the Evidence Center and linked (`docs/evidence-center.md`) |
+| GET | `/{id}/evidence-center` | 477: Select from Evidence Center -- candidates for this task (`organizationId` required) |
+| POST | `/{id}/evidence-links` | 477: link an Evidence Center item (validity must cover the task's period) |
 | POST | `/requests/{rid}/approve-sla-extension` | Approve (§8) |
 | POST | `/requests/{rid}/approve-priority-reduction` | Approve (§7) |
 
@@ -1524,3 +1526,84 @@ filter counts. UI only (`tasks.cshtml`); `sp_task_center_counts` and
 The Event Driven Assurance tab's badge is removed too (it was set from the
 `event-assurance:loaded` event, which is still dispatched but no longer
 listened to by Task Board).
+
+## Evidence upload "Upload failed (HTTP 400)" fixed (2026-10-10)
+
+`POST /practice/api/tasks/{id}/attachments` (Web, `TaskController.UploadAttachment`)
+streamed `Request.Body` straight into a `StreamContent`. That races with
+`[ApiController]` input-formatter probing (the same problem
+`DocumentUploadController.ForwardMultipartAsync` documents): the Api received a
+truncated multipart body, `[FromForm] IFormFile file` failed to bind, and the
+Api returned a ProblemDetails 400 with no `error` field -- the browser could
+only show "Upload failed (HTTP 400)".
+
+The proxy now uses the same pattern as Document Upload / Exception Centre:
+`Request.ReadFormAsync` and a rebuilt `MultipartFormDataContent`. It also
+stamps `uploadedByEmployeeId` from the session (the browser never sent it, and
+a browser-sent value is dropped). `Shared/task-actions.js` `postEvidence` shows
+a ProblemDetails `title` when there is no `error`. Api and database unchanged.
+
+## Fix 2026-10-26 -- Edit Task: untouched due date asked for a reason; actor missing
+
+Two defects on the task edit save (`PUT /api/practice/tasks/{id}`, `sp_task_update` 269):
+
+1. **An unchanged due date was treated as an SLA extension.** The form's date
+   box shows only the DATE of `sla_due_at` (usually end of day, 23:59:59) and
+   sent it back as midnight on every save, so `@due_at <> @cur_due` and the
+   procedure demanded a reason (`REASON_REQUIRED`). `Shared/task-actions.js`
+   now remembers the date each box opened with (`data-initial`) and sends
+   `dueAt` / `startDate` only when the user changed it (null = no opinion).
+   Start date had the same pattern and is fixed the same way.
+2. **`ACTOR_REQUIRED` on a real due-date change.** The browser never sends
+   `actorEmployeeId`, and the Api's `Update` action did not read the session
+   caller the Web tier stamps (`X-PM-Caller-Employee-Id`). It now sets
+   `ActorEmployeeId = CallerEmployeeId` (body value only as fallback), the way
+   `Reopen` already did.
+
+No database change. API + Web rebuild.
+
+## Fix 2026-10-29 -- Edit / New / Complete Task 404'd on the deployed site only
+
+**Symptom.** Opening Edit Task on the deployed site logged
+
+```
+/practice/api/tasks/30/edit-options:1  Failed to load resource: 404
+/practice/api/tasks/30:1               Failed to load resource: 404
+```
+
+and the form never filled. Localhost was fine.
+
+**Cause.** A published deployment runs under a PathBase (for example
+`/Practicemanagement`). `_Layout.cshtml` sets `window.appBasePath` in its trailing
+inline script at line 376 -- **after** `@RenderBody()` at line 349. The three
+dedicated task pages (`task-edit.cshtml`, `task-new.cshtml`,
+`task-complete.cshtml`) called `gracTaskActions.openEdit` / `openComplete` /
+`gracTaskForm.open` from an IIFE that ran **at parse time**, so `window.appBasePath`
+was still `undefined`. Their `U()` helper was already lazy, but being *called* early
+is the same failure: `openEdit` builds both URLs inside `Promise.all([fetch(...),
+fetch(...)])`, which evaluates them synchronously before the first `await`. The
+result is `/practice/api/...` with no base, which 404s behind a PathBase and works
+by accident on localhost, where the base is `""`.
+
+The eagerly built `backUrl` ("Back to Task Board" / "Back to Task View") had the
+same defect and would have 404'd in production too.
+
+**Fix.** All three pages now defer the open call, the pattern `gaps.cshtml` and
+`repository-updates.cshtml` already document:
+
+```js
+function start() { /* init + open, backUrl built here */ }
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+else start();
+```
+
+**Rule for any new body partial:** never *call* anything that builds a URL while the
+partial is parsing. Resolving the base lazily is not enough on its own -- the call
+itself has to wait for `DOMContentLoaded`. Checked the other body partials that read
+`appBasePath`: the four `_*` panels with no `DOMContentLoaded`
+(`_audit-question-set-adoption`, `_event-assurance-panel`, `_related-tasks-panel`,
+`_workflow-common`) only *define* functions on `window.__*` and are called later by
+their hosts, so they are not affected.
+
+No database change, no API change (both `/{id}/edit-options` routes already exist).
+Web rebuild only.

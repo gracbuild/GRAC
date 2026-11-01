@@ -68,6 +68,16 @@ public sealed record TaskCloseRequest(
     string? ReasonText,
     Guid? CorrelationId);
 
+// Migration 479: reopen a Closed task (admin or task owner). Actor +
+// IsAdmin are stamped by the controller from X-PM-Caller-*.
+public sealed record TaskReopenRequest(
+    long TaskId,
+    long? ActorEmployeeId,
+    string? ActorRoleCode,
+    bool IsAdmin,
+    string? ReasonText,
+    Guid? CorrelationId);
+
 public sealed record TaskListQuery(
     long? OrganizationId,
     long? AssignedToEmployeeId,
@@ -198,7 +208,9 @@ public sealed record TaskCommandResult(
     // Populated when the command produced an Exception Centre request
     // instead of applying the change directly (BRD §7, §8).
     long? ExceptionRequestId = null,
-    string? StatusCode = null);
+    string? StatusCode = null,
+    // 477: a sentence for the user (evidence upload / link).
+    string? Message = null);
 
 // =====================================================================
 // Task Centre v2 — detail view  (BRD §16)
@@ -223,7 +235,16 @@ public sealed record TaskAttachmentRow(
     string? EvidenceDescription,
     long? UploadedByEmployeeId,
     string? UploadedByName,
-    DateTime UploadedDt);
+    DateTime UploadedDt,
+    // 477: evidence is an Evidence Center link (TaskAttachmentId = link
+    // id; the file is the pinned version). Null before the migration.
+    long? EvidenceItemId = null,
+    string? EvidenceTitle = null,
+    int? VersionNo = null,
+    DateTime? PeriodDate = null,
+    // 482: the recurring evidence row of the task's obligation this file
+    // answers. Null = general task evidence (or a database without 482).
+    long? InstanceEvidenceId = null);
 
 public sealed record TaskChildRow(
     long TaskId,
@@ -299,7 +320,12 @@ public sealed record TaskSlaExtensionRequest(
 /// TASK_PRIORITY_REDUCTION, from the Exception Centre.</summary>
 public sealed record TaskGovernanceApproveRequest(
     long ExceptionRequestId,
-    long ApprovedByEmployeeId);
+    // Nullable: the Exception Centre may post this as null (the approver
+    // is stamped from the signed-in caller, X-PM-Caller-Employee-Id, in
+    // TaskController). A non-nullable long here made [ApiController] reject
+    // a null body value with a bare HTTP 400 before the controller could
+    // resolve the approver.
+    long? ApprovedByEmployeeId);
 
 /// <summary>BRD §11. Priority and SLA are inherited from the parent and are
 /// not accepted here — they are read-only on a child.</summary>
@@ -540,3 +566,48 @@ public sealed record TaskSourceCountsResult(
     long TotalCount,
     long UnsourcedCount,
     string? Error = null);
+
+// ---------- 477: Evidence Center on a task ----------
+/// <summary>"Select from Evidence Center" list for one task
+/// (sp_task_evidence_candidates), column-name rows.</summary>
+public sealed record TaskEvidenceCandidateResult(
+    bool Success,
+    IReadOnlyList<Dictionary<string, object?>> Rows,
+    int TotalRows,
+    string? Error = null);
+
+/// <summary>Link an Evidence Center item to an open task.</summary>
+public sealed record TaskEvidenceLinkRequest(
+    long    OrganizationId,
+    long    EvidenceItemId,
+    string? LinkNote = null,
+    /// <summary>482: the recurring evidence row it answers; null = general.</summary>
+    long?   InstanceEvidenceId = null);
+
+// ---------- 482: recurring evidence on Complete Task ----------
+/// <summary>sp_task_recurring_evidence_list, column-name rows: EvidenceId,
+/// EvidenceName, EvidenceTypeId, EvidenceType, EvidenceDescription,
+/// ObligationName, EvidenceSource, EvidenceLocation, EvidenceLocator,
+/// FileCount, IsProvided.</summary>
+public sealed record TaskRecurringEvidenceResult(
+    bool Success,
+    IReadOnlyList<Dictionary<string, object?>> Rows,
+    string? Error = null,
+    /// <summary>483: the task's general evidence ("Other evidence") --
+    /// EvidenceSource, EvidenceLocation, EvidenceLocator; null when nothing
+    /// is recorded (or a database without 483).</summary>
+    Dictionary<string, object?>? General = null);
+
+/// <summary>One recurring evidence row's answer. EvidenceSource is
+/// DirectUpload, EvidenceCenter or External; location / locator are kept
+/// only for External. A null EvidenceSource records nothing.</summary>
+public sealed record TaskRecurringEvidenceItem(
+    /// <summary>483: null = the task's general evidence ("Other evidence").</summary>
+    long?   EvidenceId,
+    string? EvidenceSource,
+    string? EvidenceLocation = null,
+    string? EvidenceLocator  = null);
+
+public sealed record TaskRecurringEvidenceSaveRequest(
+    long OrganizationId,
+    IReadOnlyList<TaskRecurringEvidenceItem>? Items);

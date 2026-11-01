@@ -196,7 +196,7 @@
         fb.innerHTML =
             `<strong>Risk approval is switched off for this organisation.</strong> `
           + `Authorities set here are saved, but nothing enforces them until approval `
-          + `is enabled in Risk Centre settings.`;
+          + `is enabled in Settings &rarr; Risk Settings.`;
       } else if (!f.fallbackRoleId) {
         fb.className = "raa-note";
         fb.innerHTML =

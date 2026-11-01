@@ -459,8 +459,8 @@
                     menu.appendChild(upd);
                 }
 
-                // Add "Add Implementation Task" only when status is Not Implemented / Partially Implemented / Not Started (legacy)
-                var showAddTask = (statusText === 'Not Implemented' || statusText === 'Partially Implemented' || statusText === 'Not Started');
+                // Add "Add Implementation Task" only when status is Not Updated (456 default) / Not Implemented / Partially Implemented / Not Started (legacy)
+                var showAddTask = (statusText === 'Not Updated' || statusText === 'Not Implemented' || statusText === 'Partially Implemented' || statusText === 'Not Started');
                 if (showAddTask && !menu.querySelector('button[data-action="addImplementationTask"]')) {
                     var add = document.createElement('button');
                     add.type = 'button';

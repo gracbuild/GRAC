@@ -109,7 +109,7 @@
             var cells = tr.children;
             if (!cells || cells.length <= statusColIndex) return;
             var statusText = (cells[statusColIndex].textContent || '').trim();
-            if (statusText !== 'Not Implemented' && statusText !== 'Not Started') return;
+            if (statusText !== 'Not Updated' && statusText !== 'Not Implemented' && statusText !== 'Not Started') return; // 456: Not Updated is the default
 
             // Try to resolve the instance id from a data-* attribute or from
             // a visible id/code column.

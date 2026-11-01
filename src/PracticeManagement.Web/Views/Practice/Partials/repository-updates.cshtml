@@ -15,6 +15,16 @@
     PracticeController.ScreenPermissionArea maps it onto organization-controls.
     Who may DECIDE is enforced by sp_repository_change_apply, not here.
 
+    Details (migration 500) is read from
+    /practice/api/repository-changes/{id}/details, which returns the
+    snapshot fields already labelled, with every id column resolved to the
+    name it points at. The old client-side diff of the raw snapshots is
+    kept as the fallback for a database where 500 has not been run.
+
+    Above the diff, one sentence says what the change IS and what
+    approving it does, built from the row's own action, kind and status --
+    no extra read.
+
     Query string: organizationId (required), releaseId (optional).
     Self-contained: its own helpers, talks to /practice/api/repository-changes.
 *@
@@ -36,6 +46,9 @@
     #ruRoot .ru-old { color: var(--danger-700); }
     #ruRoot .ru-new { color: var(--success-700); }
     #ruRoot .ru-row-actions { white-space: nowrap; display: flex; gap: 6px; }
+    #ruRoot .ru-field { white-space: nowrap; font-weight: 600; }
+    #ruRoot .ru-json { white-space: pre-wrap; margin: 0; font: inherit; }
+    #ruRoot .ru-summary { margin: 2px 0 10px; font-size: 13px; line-height: 1.5; }
 </style>
 
 <div id="ruRoot">
@@ -123,6 +136,7 @@
     const allEl     = document.getElementById("ruSelectAll");
     const msgEl     = document.getElementById("ruMessage");
     let records = [];
+    const detailLoaded = new Set();
 
     function setMsg(text, kind) {
         msgEl.className = "ru-msg" + (kind ? " " + kind : "");
@@ -147,7 +161,131 @@
         try { return JSON.parse(json); } catch (_) { return null; }
     }
 
-    // Field-by-field comparison of the organization's copy and grac_new.
+    // ---------------------------------------------------------------
+    // Readable values
+    // ---------------------------------------------------------------
+    // statement_reference / StatementReference -> "Statement reference".
+    const humanise = k => {
+        let s = String(k == null ? "" : k)
+            .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+            .replace(/_/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .replace(/\s+json$/i, "")
+            .replace(/\s+id$/i, "")
+            .trim();
+        return s ? s.charAt(0).toUpperCase() + s.slice(1) : String(k == null ? "" : k);
+    };
+    const isDateish = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}([T ]|$)/.test(v);
+    const scalarText = v => {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "boolean") return v ? "Yes" : "No";
+        if (v === "true" || v === "false") return v === "true" ? "Yes" : "No";
+        if (isDateish(v)) return fmtDate(v);
+        return String(v);
+    };
+    // Inside a nested object, an id that has a name/code sibling adds
+    // nothing: "ControlId: 418" next to "ControlCode: A.5.1".
+    const TEXT_SIBLINGS = ["Name", "Code", "Title", "Reference", "_name", "_code", "_title", "_reference"];
+    function redundantIds(obj) {
+        const drop = new Set();
+        Object.keys(obj).forEach(k => {
+            const m = /^(.+?)_?(Id|id)$/.exec(k);
+            if (!m) return;
+            if (TEXT_SIBLINGS.some(sfx => Object.prototype.hasOwnProperty.call(obj, m[1] + sfx))) drop.add(k);
+        });
+        return drop;
+    }
+    function pairText(obj) {
+        const drop = redundantIds(obj);
+        let keys = Object.keys(obj)
+            .filter(k => !drop.has(k) && obj[k] !== null && obj[k] !== undefined && obj[k] !== "");
+        // A bare row number inside a spec ("Obligation: 55", the spec's own
+        // key) means nothing to the approver. Dropped only while something
+        // descriptive is left, so a change can never become an empty line.
+        const described = keys.filter(k => !(/(?:Id|_id)$/.test(k) && typeof obj[k] === "number"));
+        if (described.length) keys = described;
+        return keys
+            .map(k => humanise(k) + ": " +
+                (typeof obj[k] === "object" ? (Array.isArray(obj[k]) ? obj[k].map(scalarText).join(", ") : pairText(obj[k]))
+                                            : scalarText(obj[k])))
+            .join("; ");
+    }
+    // The 7 typed-detail columns hold an array of specs; one line each.
+    function jsonText(raw) {
+        const parsed = parse(raw);
+        if (parsed === null || typeof parsed !== "object") return scalarText(raw);
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        const lines = items
+            .map(it => (it !== null && typeof it === "object") ? pairText(it) : scalarText(it))
+            .filter(line => line !== "");
+        return lines.length ? lines.map(line => "- " + line).join("\n") : "";
+    }
+
+    // One side of one field: the resolved name when there is one, else the
+    // value itself made readable.
+    function fieldCell(row, side) {
+        const text = F(row, side + "Text");
+        if (text !== null && text !== undefined && String(text) !== "") return esc(text);
+        const raw = F(row, side + "Value");
+        if (raw === null || raw === undefined || String(raw) === "") return "";
+        if (F(row, "ValueKind") === "Json") {
+            const body = jsonText(raw);
+            return body ? `<div class="ru-json">${esc(body)}</div>` : "";
+        }
+        return esc(scalarText(raw));
+    }
+
+    // "A, B and C", capped so a wide change does not run away.
+    function listOf(names) {
+        const shown = names.slice(0, 6);
+        const rest = names.length - shown.length;
+        const joined = shown.length > 1
+            ? shown.slice(0, -1).join(", ") + " and " + shown[shown.length - 1]
+            : shown[0];
+        return rest > 0 ? shown.join(", ") + " and " + rest + " more" : joined;
+    }
+
+    // What the change is, in words, and what approving it will do. Built
+    // from the list row plus the field labels already loaded -- the field
+    // list is omitted when they are not available (the fallback path).
+    function summaryMarkup(record, fieldLabels) {
+        const action  = F(record, "ChangeAction");
+        // An unseeded copy step reads badly lowercased ("this somethingnew"),
+        // and the Kind column already shows the raw code.
+        const kind    = (KIND[F(record, "CopyCode")] || "item").toLowerCase();
+        const pending = F(record, "Status") === "Pending";
+        let what;
+        if (action === "Added") {
+            what = `This ${kind} is new in the repository and is not in this organization yet.`;
+        } else if (action === "Retired") {
+            what = `This ${kind} is no longer active in the repository.`;
+        } else {
+            const names = (fieldLabels || []).filter(Boolean);
+            what = names.length
+                ? `${names.length === 1 ? "1 field" : names.length + " fields"} changed in the repository: ${listOf(names)}.`
+                : `The content of this ${kind} changed in the repository.`;
+        }
+        // Only a Pending row can still be acted on; a decided row says who
+        // and when in its Status cell already.
+        const next = !pending ? ""
+            : action === "Added"   ? " Approving copies it into this organization."
+            : action === "Retired" ? " Approving flags this organization's copy as Retired."
+            :                        " Approving updates this organization's copy.";
+        return `<p class="ru-summary">${esc(what + next)}</p>`;
+    }
+
+    function fieldsMarkup(rows) {
+        if (!rows.length) return `<div class="pm-cell-muted">No field-level difference to show.</div>`;
+        const body = rows.map(row => `<tr>
+                <td class="ru-field">${esc(F(row, "FieldLabel") || humanise(F(row, "FieldName")))}</td>
+                <td class="ru-old">${fieldCell(row, "Old")}</td>
+                <td class="ru-new">${fieldCell(row, "New")}</td></tr>`).join("");
+        return `<table><thead><tr><th>Field</th><th>In this organization</th><th>In the repository</th></tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    // Fallback for a database without migration 500: the raw snapshots,
+    // field by field, as this page showed them before.
     function diffMarkup(r) {
         const oldRow = parse(F(r, "OldSnapshotJson")) || {};
         const newRow = parse(F(r, "NewSnapshotJson")) || {};
@@ -166,6 +304,7 @@
     }
 
     function render() {
+        detailLoaded.clear();
         const pending = records.filter(r => F(r, "Status") === "Pending");
         bulkEl.hidden = pending.length === 0;
         allEl.checked = false;
@@ -192,8 +331,30 @@
                                    <button type="button" class="pm-button" data-reject="${i}">Reject</button>` : ""}
                 </div></td>
             </tr>
-            <tr class="ru-diff" data-diff-row="${i}" hidden><td></td><td colspan="7">${diffMarkup(r)}</td></tr>`;
+            <tr class="ru-diff" data-diff-row="${i}" hidden><td></td>
+                <td colspan="7" data-detail-body="${i}"><div class="pm-cell-muted">Loading details...</div></td></tr>`;
         }).join("");
+    }
+
+    // Read once per change, when Details is first opened.
+    async function loadDetail(index) {
+        const cell = rowsEl.querySelector(`[data-detail-body="${index}"]`);
+        const record = records[index];
+        if (!cell || !record) return;
+        detailLoaded.add(index);
+        const changeId = Number(F(record, "ChangeId"));
+        try {
+            const body = await call(`${API()}/${changeId}/details?organizationId=${encodeURIComponent(organizationId)}`);
+            const rows = (body && (body.data || body.Data)) || [];
+            cell.innerHTML = F(body, "resolved") === false
+                ? summaryMarkup(record, null) + diffMarkup(record)
+                : summaryMarkup(record, rows.map(r => F(r, "FieldLabel") || humanise(F(r, "FieldName"))))
+                  + fieldsMarkup(rows);
+        } catch (err) {
+            // Never leave the operator with nothing: fall back to the raw
+            // snapshots rather than reporting the read failure here.
+            cell.innerHTML = summaryMarkup(record, null) + diffMarkup(record);
+        }
     }
 
     async function loadReleases() {
@@ -275,8 +436,10 @@
         const t = ev.target.closest("button");
         if (!t) return;
         if (t.dataset.diff !== undefined) {
-            const row = rowsEl.querySelector(`[data-diff-row="${t.dataset.diff}"]`);
+            const index = Number(t.dataset.diff);
+            const row = rowsEl.querySelector(`[data-diff-row="${index}"]`);
             if (row) row.hidden = !row.hidden;
+            if (row && !row.hidden && !detailLoaded.has(index)) loadDetail(index);
         } else if (t.dataset.approve !== undefined) {
             decide([Number(t.dataset.approve)], "Approve");
         } else if (t.dataset.reject !== undefined) {

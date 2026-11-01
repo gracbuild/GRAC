@@ -36,7 +36,13 @@ public sealed record ExceptionRequestRow(
     // Migration 184 -- exception-centre tab filter + SLA-override payload.
     string RequestTypeCode = "GAP_CANDIDATE",
     int?   SlaDaysOriginal  = null,
-    int?   SlaDaysRequested = null);
+    int?   SlaDaysRequested = null,
+    // Migration 470/472: the exception's per-organization sequential id
+    // (E-001), from exception_request.exception_number. Trailing/optional.
+    string? ExceptionNumber = null,
+    // 498: the designated approver chosen at submit-for-approval.
+    long?   DesignatedApproverEmployeeId = null,
+    string? DesignatedApproverName = null);
 
 public sealed record ExceptionRequestListResult(
     long TotalRows, int Page, int PageSize,
@@ -87,7 +93,13 @@ public sealed record ExceptionRequestDetail(
     long? RejectedByEmployeeId,
     string? RejectedByName,
     DateTime? RejectedOn,
-    string? RejectionReason);
+    string? RejectionReason,
+    // 498: the designated approver chosen at submit-for-approval.
+    long?   DesignatedApproverEmployeeId = null,
+    string? DesignatedApproverName = null);
+
+public sealed record ExceptionApproverCandidate(
+    long EmployeeId, string EmployeeName, string? EmployeeCode);
 
 public sealed record ExceptionApproveRequest(
     DateTime EffectiveUntil,
@@ -251,7 +263,9 @@ public sealed record ExceptionHistoryRow(
 
 public sealed record ExceptionSubmitForApprovalRequest(
     long?   ActorEmployeeId,
-    string? CallerDisplayName);
+    string? CallerDisplayName,
+    // 498: mandatory designated approver chosen on the submit-for-approval form.
+    long?   DesignatedApproverEmployeeId = null);
 
 /// <summary>A remediation task attached to an exception.</summary>
 public sealed record ExceptionTaskRow(

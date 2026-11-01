@@ -647,3 +647,129 @@ load. So the menu item opens Organization Practices with
 3. When the dialog closes, whether saved or cancelled, it returns to this
    practice's View page with a fresh navigation code. Navigation codes
    expire after 30 minutes, so the old URL is not reused.
+
+## Assign Team and Add Obligation moved to Actions (2026-10-08)
+
+The two panel buttons on Practice View -- **Configure** (Practice Instances
+panel) and **Add New Obligation** (Obligations panel) -- are removed from the
+panels and offered from the page **Actions** menu instead:
+
+| Old button (panel)            | Actions menu item | Opens (unchanged)                         |
+|-------------------------------|-------------------|-------------------------------------------|
+| Configure (Practice Instances)| Assign Team       | `#pvConfigureDialog` (`openConfigure`), title now "Assign Team" |
+| Add New Obligation (Obligations) | Add Obligation | shared obligation form, scope "practice" (`openPracticeObligationForm(null)`) |
+
+Rules (`actionItems()` in `practice-view.cshtml`):
+
+- Shown only when the practice's Applicability is **Applicable**. Not Updated,
+  Not Applicable, etc. show only Mark/Update Applicability.
+- Assign Team also needs `PracticeId > 0` (migration 218 fallback has no
+  practice row) -- the same condition the old button used.
+- Add Obligation also needs the obligation type list
+  (`obligationTypesReady`, set by `primeObligationForm`) -- the same condition
+  the old button used.
+- Menu order: Mark/Update Applicability, Assign Team, Add Obligation.
+
+No API, stored procedure or database change: the dialogs, endpoints and
+permissions are unchanged; only where they are opened from moved. The empty
+Obligations message now points to "Actions -> Add Obligation".
+
+## Practice Details card is a shared component (2026-10-08)
+
+The Practice Details panel moved to `Partials/_practice-details-panel.cshtml`
++ `wwwroot/js/Shared/practice-details.js` so the Operationalize workspace can
+show the same card (see `docs/resolve-typed-obligations.md`). Practice View
+loads the practice through `gracPracticeDetails.load()` and draws the card with
+`gracPracticeDetails.render()`; the fields and their order are unchanged.
+Element ids changed from `pvDetails` / `pvDescription(Wrap)` to
+`pmPracticeDetailsGrid` / `pmPracticeDetailsDesc(Wrap)`.
+
+## Mark / Update Applicability opens on Practice View (2026-10-08)
+
+Previously, Actions -> Mark / Update Applicability navigated to Organization
+Practices with `?applicabilityFor=<requirementId>`, opened the list's form
+there, and navigated back after it closed. It now opens a modal dialog on
+Practice View itself (`#pvApplicabilityDialog`, `openApplicability()` /
+`saveApplicability()` in `practice-view.cshtml`).
+
+Behaviour matches the list page's form (practice.js, organization-requirements
++ mode `applicability`):
+
+- Fields: Practice Code, Practice Name (read-only), Applicability Status
+  (Not Updated / Applicable / Not Applicable / Retired; a legacy value stays
+  selectable), Owner (Functional Users of the organization), Reason /
+  Justification (disabled while Applicable, value kept).
+- Prefill: the requirement row (`organization-requirements/query` by id), with
+  justification / owner taken from the practice row when missing; an owner
+  stored only by name is matched to its employee id.
+- Validation: Reason required for Not Applicable / Deferred / Accepted Risk;
+  Owner required for Applicable.
+- Save: `POST /practice-management-gateway/organization-requirements`
+  `{ id, contextCode: "", data }` -- the same endpoint, permission check
+  (EDIT/ADD on Organization Practices) and stored procedure as the list.
+- After save the dialog closes and the page re-reads the practice, instances
+  and obligations (marking Applicable can create the practice row, and the
+  Actions menu depends on applicability).
+
+`practice.js`: `openRequestedApplicability()` and its call in the initial load
+chain were removed -- nothing sends `?applicabilityFor=` any more. No API or
+database change.
+
+### Why "Control context is required to load requirements." appeared, and the guard (2026-10-08)
+
+That message is error 51024 from the generic `pm_get_practice_repository`
+procedure's `organization-requirements` branch, raised when no
+`organizationControlId` is supplied. The API only bypasses that branch (with
+`QueryOrganizationRequirementFallbackAsync`) when the query payload carries an
+`organizationId`, or the caller is a system admin
+(`PracticeRepositoryService.CanUseOrganizationFallback`). The old round trip
+opened the list's form with `?applicabilityFor=` and no navigation code, so its
+`organization-requirements/query` had neither -- a non-admin user got 51024.
+
+The Practice View dialog's reads (`gwQuery` for `organization-requirements`
+and `practices`) always send `data.organizationId`, so they take the
+organization-scoped direct query and cannot reach the 51024 branch.
+
+## Practice Instances row click opens the instance (2026-10-08)
+
+Clicking a row in Practice View's Practice Instances list opens that instance's
+read-only Operationalize page in a new window:
+`/Practice/Index/resolve-workspace?instanceId=<id>&organizationId=<org>&mode=view`
+-- the same URL Risk Centre and Gap Detail use. Rows carry
+`class="pm-row-clickable" data-instance-id` (pointer cursor from
+practice-management.css); one delegated click listener on `#pvInstances`
+(`openInstanceView`). The id is the row's `Id` (or `PracticeInstanceId`); a row
+without one is not clickable. The panel hint now says "Click a row to view the
+instance in a new window." UI-only.
+
+## Evidence cadence: One-time / Recurring (migration 494, 2026-10-27)
+
+Every evidence entry on an obligation card now shows its cadence beside the
+type badge: **One-time** (file-check icon) or **Recurring** (rotate icon), with
+a tooltip that says where it is attached (at implementation on Operationalize,
+or on each scheduled task). The badge, icons and wording are the same as the
+Operationalize card's (473). An entry with a cadence takes its own row, so the
+cadence badge is never read as belonging to the neighbouring evidence.
+
+| Card | Where the cadence comes from |
+| --- | --- |
+| Published obligation | `dbo.sp_pm_view_obligations_typed` (494): each `EvidenceJson` element gains `EvidenceCadence` (`Recurring` / `OneTime`) and `EvidenceCadenceLabel`, from the organisation's copy `organization_obligation_evidence.evidence_cadence` (473) and Control Management's `evidence-cadence` options (077). Same OUTER APPLY and rule as `sp_resolve_obligation_list` (473): a spec copied without a cadence reads Recurring. |
+| Organization defined (practice level) | the cadence chosen on the obligation form (492), stored in `practice_obligation.evidence_json` as `EvidenceCadence`. Evidence saved before 492 reads Recurring. No database change. |
+
+The label for an organisation-defined entry comes from
+`window.gracObligationForm.EVIDENCE_CADENCES` (now exported by
+`Shared/obligation-form.js`), the list the form itself offers, so "One-time" is
+written in one place.
+
+**API:** no change. The `evidence-obligations-typed` query passes the JSON
+through untouched; the elements simply carry two more keys.
+
+**Without 494** (Web deployed first) published evidence has no cadence keys and
+shows no cadence badge, exactly as before; organisation-defined evidence still
+shows its cadence.
+
+Files: `database/494_practice_view_evidence_cadence.sql` (+ `_rollback.sql`,
+which restores the 493 body), `Views/Practice/Partials/practice-view.cshtml`
+(`renderEvidence`, `renderPracticeObligation`, `cadenceBadge`, `cadenceLabel`,
+`.pm-evidence-item.has-cadence`), `wwwroot/js/Shared/obligation-form.js`
+(export only).

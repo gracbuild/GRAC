@@ -101,6 +101,12 @@ proc — terminal-invalid `55142`, re-analysis `55143`, the MERGE, the
 auto-trigger blocks, the auto-delegate transition — are byte-for-byte
 unchanged.
 
+> **Superseded in part by migration 501 (2026-10-29).** 372's body is the
+> one 501 re-issues, with `@reanalyse BIT = 0` added and the re-analysis
+> guard `55143` made opt-out so a deliberate re-analysis is possible.
+> `55144` and `55145` are **not** opt-out — a re-analysis meets the same
+> preconditions. See `docs/gap-reanalysis-501.md`.
+
 ## Client-side: same lock mechanism, narrower input
 
 `gap-detail.js` gets one new helper and one call-site swap — no new

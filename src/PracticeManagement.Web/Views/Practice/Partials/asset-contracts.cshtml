@@ -38,16 +38,25 @@
     excluded, unresolved) and derives the outcome. Unresolved assets are
     resolved one by one. The contract dialog shows the Renewal history.
 
+    461: review, approval and validation need a sign-in linked to an
+    employee (the procedures refuse a request with no employee); the page
+    reads from the session whether there is one (data-has-employee, the
+    way risk-centre reads it -- a display hint only, the procedures stay
+    the authority) and offers those steps only then, with a note why not.
+
     Backend: practice/api/asset-config/contracts... (AssetConfigController)
     Script : wwwroot/js/AssetConfig/asset-contracts.js
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
+@using PracticeManagement.Web.Security
+@using Microsoft.AspNetCore.Http
 @{
     var acoPermissions = ViewBag.Permissions as string[] ?? [];
     bool acoHas(string action) => acoPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
     var acoCanAdd = acoHas("ADD");
     var acoCanEdit = acoHas("EDIT");
     var acoCanApprove = acoHas("APPROVE");
+    var acoHasEmployee = long.TryParse(Context.Session.GetString(PracticeSessionIdentity.EmployeeIdKey), out var acoEmployeeId) && acoEmployeeId > 0;
 }
 
 <div class="pm-page-heading compact">
@@ -58,7 +67,7 @@
     </div>
 </div>
 
-<div id="acoRoot" data-can-add="@(acoCanAdd ? "1" : "0")" data-can-edit="@(acoCanEdit ? "1" : "0")" data-can-approve="@(acoCanApprove ? "1" : "0")">
+<div id="acoRoot" data-can-add="@(acoCanAdd ? "1" : "0")" data-can-edit="@(acoCanEdit ? "1" : "0")" data-can-approve="@(acoCanApprove ? "1" : "0")" data-has-employee="@(acoHasEmployee ? "1" : "0")">
     <section class="pm-panel">
         <div class="pm-toolbar">
             <select id="acoOrg" title="Organization"><option value="">Select organization</option></select>

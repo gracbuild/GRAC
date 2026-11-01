@@ -1,0 +1,174 @@
+@*
+    Engagements -- Third-Party Risk Management (migrations 486-490).
+    Rendered from Manage.cshtml when Model.Key == "tprm-engagements".
+
+    Screen key : `tprm-engagements`
+    Group      : Third-Party Risk
+    Menu       : nav-tprm (Third-Party Risk) -> Engagements
+
+    The list of engagements and, for one engagement, the workspace of the
+    BRD's five steps (step 1, registration, is the Third Parties screen):
+      Scope & exposure   engagement details, proposed / actual scope,
+                         discovery of the GRAC practice instances,
+                         obligations, dependencies, assurance findings,
+                         gaps, risks and contracts (read-only until
+                         recorded), validated links
+      Inherent risk      the pinned risk model's factors (prefilled from
+                         the scope), score, band and due-diligence tier
+      Due diligence      questionnaires chosen by service, tier and scope
+                         (conditional follow-ups), responses and ratings,
+                         safeguards whose effectiveness is verified,
+                         evidence from the Evidence Center or external,
+                         findings and remediation, residual risk
+      Decision           the decision pack, the approval path from the
+                         approval rules (levels, roles, SoD, delegation),
+                         time-bound acceptance, Risk Centre escalation /
+                         link
+      Onboarding &       prerequisites met or waived, actual vs proposed
+      monitoring         exposure and deviations, activation, reviews,
+                         suspension / renewal / scope change / exit
+      History            every event, kept after closure
+    A step's chip shows done / current. Every rule is the procedures'
+    (sp_tprm_*); buttons only mirror the screen permissions.
+
+    Opened with ?engagementId= (dashboard, Third Parties, Reviews) or
+    ?newForThirdParty= (Third Parties -> New engagement); a dashboard drill
+    passes stage / band / criticality / attention (Shared/dashboard-drill.js
+    paints the banner).
+
+    Backend: practice/api/tprm/... (TprmController)
+    Script : wwwroot/js/Tprm/tprm-common.js, tprm-engagements.js;
+             Shared/evidence-picker.js with Partials/_evidence-picker-dialog
+             (the Evidence Center picker, reused)
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@using PracticeManagement.Web.Security
+@using Microsoft.AspNetCore.Http
+@{
+    var enPermissions = ViewBag.Permissions as string[] ?? [];
+    bool enHas(string action) => enPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var enCanAdd = enHas("ADD");
+    var enCanEdit = enHas("EDIT");
+    var enCanApprove = enHas("APPROVE");
+    var enHasEmployee = long.TryParse(Context.Session.GetString(PracticeSessionIdentity.EmployeeIdKey), out var enEmployeeId) && enEmployeeId > 0;
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="enRoot" data-can-add="@(enCanAdd ? "1" : "0")" data-can-edit="@(enCanEdit ? "1" : "0")"
+     data-can-approve="@(enCanApprove ? "1" : "0")" data-has-employee="@(enHasEmployee ? "1" : "0")"
+     data-employee-id="@(enHasEmployee ? enEmployeeId.ToString() : "")">
+
+    @* ======================= List ======================= *@
+    <section class="pm-panel" id="enList">
+        <div class="pm-toolbar">
+            <select id="enOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <p class="pm-message" id="enMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-toolbar">
+            <input type="search" id="enSearch" placeholder="Search engagement, code or third party" maxlength="200" />
+            <select id="enStageFilter" title="Stage">
+                <option value="OPEN">Open engagements</option>
+                <option value="IN_ASSESSMENT">In assessment</option>
+                <option value="">All stages</option>
+                <option value="CLOSED">Closed</option>
+            </select>
+            <select id="enBandFilter" title="Risk band"><option value="">Any risk band</option></select>
+            <select id="enCriticalityFilter" title="Service criticality"><option value="">Any criticality</option></select>
+            <select id="enAttentionFilter" title="Needs attention">
+                <option value="">All</option>
+                <option value="MINE">Mine (owner or assessor)</option>
+                <option value="REASSESS">Reassessment required</option>
+                <option value="REVIEW_DUE">Review due in 30 days</option>
+            </select>
+            <button class="pm-button icon" id="enRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            @if (enCanAdd)
+            {
+                <button class="pm-button primary" id="enNew" type="button"><i class="fa-solid fa-plus"></i> New engagement</button>
+            }
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Code</th><th>Engagement</th><th>Third party</th><th>Stage</th><th>Criticality</th><th>Risk band</th><th>Next review</th><th>Business owner</th></tr></thead>
+                <tbody id="enListBody"></tbody>
+            </table>
+        </div>
+        <div id="enPager"></div>
+    </section>
+
+    @* ======================= Workspace ======================= *@
+    <section class="pm-panel" id="enWs" hidden>
+        <div class="en-ws-head">
+            <button class="pm-button" type="button" id="enBack"><i class="fa-solid fa-arrow-left"></i> Engagements</button>
+            <div class="en-ws-title">
+                <h2 id="enWsTitle"></h2>
+                <div class="tprm-muted" id="enWsSub"></div>
+            </div>
+            <div class="tprm-actions" id="enWsActions"></div>
+        </div>
+        <p class="pm-message" id="enWsMessage" role="status" aria-live="polite" hidden></p>
+        <div id="enWsBanner"></div>
+        <div class="tprm-info" id="enWsSummary"></div>
+        <div class="pm-tabs" role="tablist" aria-label="Engagement steps">
+            <button role="tab" class="active" data-en-tab="SCOPE" aria-selected="true">Scope &amp; exposure<span class="tprm-step-chip" data-en-chip="SCOPE"></span></button>
+            <button role="tab" data-en-tab="RISK" aria-selected="false">Inherent risk<span class="tprm-step-chip" data-en-chip="RISK"></span></button>
+            <button role="tab" data-en-tab="DD" aria-selected="false">Due diligence<span class="tprm-step-chip" data-en-chip="DD"></span></button>
+            <button role="tab" data-en-tab="DECISION" aria-selected="false">Decision<span class="tprm-step-chip" data-en-chip="DECISION"></span></button>
+            <button role="tab" data-en-tab="ONBOARD" aria-selected="false">Onboarding &amp; monitoring<span class="tprm-step-chip" data-en-chip="ONBOARD"></span></button>
+            <button role="tab" data-en-tab="HISTORY" aria-selected="false">History</button>
+        </div>
+        <div data-en-panel="SCOPE" id="enPanelScope"></div>
+        <div data-en-panel="RISK" id="enPanelRisk" hidden></div>
+        <div data-en-panel="DD" id="enPanelDd" hidden></div>
+        <div data-en-panel="DECISION" id="enPanelDecision" hidden></div>
+        <div data-en-panel="ONBOARD" id="enPanelOnboard" hidden></div>
+        <div data-en-panel="HISTORY" id="enPanelHistory" hidden></div>
+    </section>
+</div>
+
+@* ======================= Evidence of one item ======================= *@
+<div class="pm-modal" id="enEvidenceModal" hidden>
+    <div class="pm-modal-panel tprm-wide">
+        <header>
+            <h2 id="enEvidenceTitle">Evidence</h2>
+            <button class="pm-modal-close" type="button" data-close-en="enEvidenceModal" aria-label="Close">&times;</button>
+        </header>
+        <p class="tprm-note" id="enEvidenceNote"></p>
+        <p class="pm-message" id="enEvidenceMessage" role="status" aria-live="polite" hidden></p>
+        <div class="tprm-actions" id="enEvidenceActions"></div>
+        <div class="pm-table-wrap"><table>
+            <thead><tr><th>Evidence</th><th>Source</th><th>Valid</th><th>Review</th><th>Added by</th><th></th></tr></thead>
+            <tbody id="enEvidenceBody"></tbody>
+        </table></div>
+    </div>
+</div>
+
+<partial name="Partials/_tprm-form-dialog" />
+<partial name="Partials/_evidence-picker-dialog" />
+
+<style>
+    .en-ws-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .en-ws-title { flex: 1 1 320px; }
+    .en-ws-title h2 { margin: 0; font-size: 18px; }
+    .en-ws-head .tprm-actions { margin-bottom: 0; }
+    .en-q-row td { vertical-align: top; }
+    .en-q-row.is-followup td:first-child { padding-left: 24px; }
+    .en-answer { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .en-answer select, .en-answer input, .en-answer textarea { min-width: 160px; }
+    .en-chain { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+    .en-chain > div { border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 6px; padding: 6px 10px; font-size: 12px; min-width: 180px; }
+    .en-chain > div.is-current { border-color: var(--warning-700, #b45309); }
+    tr[data-en-row] { cursor: pointer; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+<script src="~/js/Shared/evidence-picker.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-common.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-engagements.js" asp-append-version="true"></script>

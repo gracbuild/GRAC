@@ -106,7 +106,7 @@ public sealed class PracticeObligationService(
     }
 
     // ==============================================================
-    // Save -- add, edit or retire, and fan out
+    // Save -- add, edit, retire or restore, and fan out
     // ==============================================================
     public async Task<PracticeObligationSaveResult> SaveAsync(
         PracticeObligationSaveRequest request, CancellationToken cancellationToken)
@@ -118,7 +118,12 @@ public sealed class PracticeObligationService(
 
         // The procedure refuses these too. Catching them here turns a SQL
         // error into a sentence the form can put next to the field.
-        if (!request.Retire)
+        //
+        // Migration 464: Retire and Restore are both id-only modes --
+        // neither reads the name or the type, so the field validation
+        // applies to an add or an edit alone. Retire wins if both flags
+        // arrive, the same precedence the procedure applies.
+        if (!request.Retire && !request.Restore)
         {
             if (string.IsNullOrWhiteSpace(request.ObligationName))
                 return new PracticeObligationSaveResult(false, null, Error: "Obligation name is required.");
@@ -128,7 +133,9 @@ public sealed class PracticeObligationService(
         else if (request.PracticeObligationId <= 0)
         {
             return new PracticeObligationSaveResult(false, null,
-                Error: "An obligation must be identified before it can be removed.");
+                Error: request.Retire
+                    ? "An obligation must be identified before it can be retired."
+                    : "An obligation must be identified before it can be restored.");
         }
 
         try
@@ -162,6 +169,12 @@ public sealed class PracticeObligationService(
             AddParam(command, "@evidence_json",          DbType.String,
                      request.Evidence is null ? DBNull.Value : JsonSerializer.Serialize(request.Evidence));
             AddParam(command, "@retire",                 DbType.Boolean, request.Retire);
+            // Migration 464: the way back from Retired. Suppressed when
+            // @retire is set so the two modes cannot both fire -- the
+            // procedure already prefers retire; this keeps the payload
+            // honest about which one was asked for.
+            AddParam(command, "@restore",                DbType.Boolean,
+                     request.Restore && !request.Retire);
             AddParam(command, "@actor",                  DbType.String,
                      string.IsNullOrWhiteSpace(request.Actor) ? "system" : request.Actor, 100);
 

@@ -16,6 +16,12 @@
 // those screens read through Shared/dashboard-drill.js; an ageing band is a
 // link only where the page filters by age (AGEING_DRILL).
 //
+// 490: also the Third-Party Risk dashboard (tprm). Its section keys carry a
+// "tprm" prefix (one drill map serves every dashboard and "findings" is
+// already Audit Assurance's). Tiles and bars open Engagements (stage /
+// band / criticality / attention) or Reviews (status / type / dueWithin),
+// which read those values on load; a list row opens the engagement.
+//
 // Nothing here decides what "open", "overdue" or "pending" means: the
 // drill passes the same bucket code (drill=) the dashboard counted with,
 // and the list procedure filters by the same definition (414 section 3).
@@ -69,7 +75,11 @@
     discovery:     (p, l) => link("/Practice/Index/asset-discovery", p, l),
     services:      (p, l) => link("/Practice/Index/business-services", p, l),
     relationships: (p, l) => link("/Practice/Index/asset-relationships", p, l),
-    notifications: (p, l) => link("/Practice/Index/asset-notifications", p, l)
+    notifications: (p, l) => link("/Practice/Index/asset-notifications", p, l),
+    // 490: Third-Party Risk dashboard sections
+    tprmthirdparties: (p, l) => link("/Practice/Index/tprm-third-parties", p, l),
+    tprmengagements:  (p, l) => link("/Practice/Index/tprm-engagements", p, l),
+    tprmreviews:      (p, l) => link("/Practice/Index/tprm-reviews", p, l)
   };
 
   // KPI (section.key) -> list filter. Absent = the tile is not a link.
@@ -110,6 +120,7 @@
     "instances.implemented":    { status: "Implemented" },
     "instances.partial":        { status: "Partially Implemented" },
     "instances.notimplemented": { status: "Not Implemented" },
+    "instances.notupdated":     { status: "Not Updated" },   // 456
     // 451: Asset & Contract. A tile without an entry counts something its
     // page cannot filter to (in use, no owner, overdue activities ...), so
     // it is not a link.
@@ -146,7 +157,19 @@
     "relationships.proposed": { tab: "RELATIONSHIPS", status: "PROPOSED" },
     "relationships.disputed": { tab: "RELATIONSHIPS", status: "DISPUTED" },
     "notifications.open":     { tab: "OCCURRENCES", status: "OPEN" },
-    "notifications.failed":   { tab: "LOG", status: "Failed" }
+    "notifications.failed":   { tab: "LOG", status: "Failed" },
+    // 490: Third-Party Risk. Due-diligence, findings and acceptance tiles
+    // count records inside engagements that no list filters to -- no link.
+    "tprmthirdparties.total":          {},
+    "tprmengagements.open":            { stage: "OPEN" },
+    "tprmengagements.inassessment":    { stage: "IN_ASSESSMENT" },
+    "tprmengagements.pendingdecision": { stage: "PENDING_DECISION" },
+    "tprmengagements.active":          { stage: "ACTIVE" },
+    "tprmengagements.reassess":        { attention: "REASSESS" },
+    "tprmreviews.open":                { status: "OPEN" },
+    "tprmreviews.overdue":             { status: "OVERDUE" },
+    "tprmreviews.due30":               { status: "OPEN", dueWithin: "30" },
+    "tprmreviews.triggered":           { status: "OPEN", type: "TRIGGERED" }
     // instances.noowner has no drill: Operationalize has no "no owner"
     // filter, and an unfiltered list under a "No owner" tile would lie.
   };
@@ -180,7 +203,12 @@
     discovery_kind:       ["discovery",     k => ({ tab: "QUEUE", kind: k })],
     discovery_confidence: ["discovery",     k => ({ tab: "CONFIDENCE", status: k })],
     services_status:      ["services",      k => ({ tab: "SERVICES", status: k })],
-    relationships_status: ["relationships", k => ({ tab: "RELATIONSHIPS", status: k })]
+    relationships_status: ["relationships", k => ({ tab: "RELATIONSHIPS", status: k })],
+    // 490: Third-Party Risk
+    tprmengagements_stage:       ["tprmengagements", k => ({ stage: k })],
+    tprmengagements_band:        ["tprmengagements", k => ({ stage: "OPEN", band: k })],
+    tprmengagements_criticality: ["tprmengagements", k => ({ stage: "OPEN", criticality: k })],
+    tprmreviews_type:            ["tprmreviews",     k => ({ status: "OPEN", type: k })]
   };
 
   const sectionOf = key => String(key || "").split("_")[0];
@@ -300,6 +328,8 @@
     if (listKey === "technology_unsupported" && id)
       return U("/Practice/Index/asset-register") + "?" + new URLSearchParams({ organizationId: orgId, assetId: id }).toString();
     if (listKey === "attestation_overdue") return TARGET.attestation({ tab: "ALL", status: "OVERDUE" }, "Overdue attestations");
+    // 490: every Third-Party Risk list row is an engagement (?engagementId=).
+    if (listKey.startsWith("tprm") && id) return TARGET.tprmengagements({ engagementId: id }, "");
     return null;
   }
 

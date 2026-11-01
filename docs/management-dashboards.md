@@ -11,6 +11,7 @@ pages, with their own filters.
 | Issues & Actions (`nav-oversight`) | `issues-actions-dashboard`, 223 | `Practice/Index/issues-actions-dashboard` | 414; submenu 416 |
 | Risk Management (`risk-centre`) | `risk-centre-dashboard`, 280 (was 286) | `Practice/Index/risk-centre-dashboard` (existing screen, restructured) | 413, see `docs/risk-centre.md`; submenu 383, made first by 416 |
 | Audit Assurance (`nav-assurance`) | `audit-assurance-dashboard`, 439 | `Practice/Index/audit-assurance-dashboard` | 414; submenu 416 |
+| Third-Party Risk (`nav-tprm`) | `tprm-dashboard`, 369 | `Practice/Index/tprm-dashboard` | 490, see `docs/tprm.md` |
 
 **Parent menus only expand or collapse (416).** From 413/414 to 416, the
 parent row itself carried the dashboard url. The sidebar navigates a
@@ -84,8 +85,8 @@ is a `<span>`, so its inline width was ignored. It is now
 | Web proxy | `GET /practice/api/management-dashboard/{module}?organizationId=` |
 | API | `GET /api/practice/management-dashboard/{module}?organizationId=` |
 
-`module` = `governance` | `issues-actions` | `audit-assurance` (404 for
-anything else). One call, one response:
+`module` = `governance` | `issues-actions` | `audit-assurance` |
+`asset-contract` (451) | `tprm` (490) (404 for anything else). One call, one response:
 
 ```json
 {
@@ -171,6 +172,23 @@ overdue, closed, no owner; Audit plans: total, active. Ageing of pending
 findings; audits by status, pending findings by severity (the severity
 master's colours), findings by status, plans by status; upcoming and
 overdue audits.
+
+**Third-Party Risk (490)** -- sections carry a `tprm` prefix because the
+page's drill map is shared and `findings` is Audit Assurance's:
+`tprmthirdparties` (registered, with an active engagement, samples),
+`tprmengagements` (open, in assessment, pending decision, active, high or
+critical band, reassessment required), `tprmdiligence` (rounds in
+progress, overdue, evidence awaiting review), `tprmfindings` (open, high,
+overdue remediation, open conditions), `tprmreviews` (open, overdue, due
+in 30 days, triggered), `tprmacceptance` (accepted risk, acceptance /
+engagement / certification expiring). Ageing of open findings and pending
+decisions; engagements by stage, band and criticality, findings by
+severity, reviews by type; lists of overdue reviews, overdue remediation,
+pending decisions and expiring acceptances (each row opens the
+engagement). Drills: Engagements `stage` / `band` / `criticality` /
+`attention`, Reviews `status` / `type` / `dueWithin`. Due-diligence,
+findings and acceptance tiles count records inside engagements that no
+list filters to, so they are not links.
 
 ## Not linked, on purpose
 

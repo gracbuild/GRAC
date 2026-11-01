@@ -42,6 +42,9 @@ public interface ICustomGapService
     // Migration 382: practices mapped to a Custom Gap (read-only display).
     Task<IReadOnlyList<CustomGapPracticeRow>> GetPracticesAsync(long customGapId, CancellationToken cancellationToken);
     Task<CustomGapSaveResult>    SaveAsync(CustomGapSaveRequest request, CancellationToken cancellationToken);
+    // Migration 495: edit a Custom gap from the Add Custom Gap page's fields.
+    Task<CustomGapCommandResult> EditAsync(long customGapId, CustomGapEditRequest request,
+                                           long? actorEmployeeId, CancellationToken cancellationToken);
     Task<CustomGapCommandResult> DeleteAsync(CustomGapCommandRequest request, CancellationToken cancellationToken);
     Task<CustomGapGenerateResult> GenerateFromAssuranceObservationAsync(
         CustomGapGenerateRequest request, CancellationToken cancellationToken);
@@ -169,6 +172,15 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             // Migration 382: JSON array of practice ids to map to this gap.
             AddParam(command, "@practice_ids_json", DbType.String,
                 (object?)JsonSerializer.Serialize(request.PracticeIds) ?? DBNull.Value, -1);
+            // Migration 491: Current State / As-Is, Gap Identified / Finding.
+            if (await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                    connection, "sp_custom_gap_open", "@current_state", cancellationToken))
+            {
+                AddParam(command, "@current_state", DbType.String,
+                    string.IsNullOrWhiteSpace(request.CurrentState) ? DBNull.Value : request.CurrentState, -1);
+                AddParam(command, "@gap_finding",   DbType.String,
+                    string.IsNullOrWhiteSpace(request.GapFinding)   ? DBNull.Value : request.GapFinding, -1);
+            }
 
             var idOut = command.CreateParameter();
             idOut.ParameterName = "@custom_gap_id";
@@ -235,7 +247,9 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
                 HasColumn(reader, "PracticeInstanceId") && reader["PracticeInstanceId"] != DBNull.Value
                     ? Convert.ToInt64(reader["PracticeInstanceId"]) : null,
                 HasColumn(reader, "PracticeInstanceName") ? reader["PracticeInstanceName"] as string : null,
-                HasColumn(reader, "PracticeInstanceCode") ? reader["PracticeInstanceCode"] as string : null));
+                HasColumn(reader, "PracticeInstanceCode") ? reader["PracticeInstanceCode"] as string : null,
+                // Migration 496; absent on a pre-496 database.
+                HasColumn(reader, "PracticeInstanceDescription") ? reader["PracticeInstanceDescription"] as string : null));
         }
         return rows;
     }
@@ -343,6 +357,62 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
             var reason = MapReason(ex.Number);
             logger.LogWarning(ex, "CustomGapService.SaveAsync SQL error {Number}: {Message}", ex.Number, ex.Message);
             return new CustomGapSaveResult(false, Error: ex.Message, ReasonCode: reason);
+        }
+    }
+
+    // -------------------------------------------------------------
+    // Migration 495: edit a Custom gap (sp_custom_gap_edit). The fields
+    // the Add Custom Gap page shows, and the mapped practice instances
+    // (the chosen set replaces the current one). The procedure enforces
+    // who-can-edit-when (55004-55006, 55060-55062); the SLA is re-matched
+    // afterwards the same way OpenAsync does, because severity may have
+    // changed.
+    // -------------------------------------------------------------
+    public async Task<CustomGapCommandResult> EditAsync(long customGapId, CustomGapEditRequest request,
+                                                        long? actorEmployeeId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Title))
+            return new CustomGapCommandResult(false, null, "Title is required.", "TITLE_REQUIRED");
+        if (request.PracticeInstanceIds is null || request.PracticeInstanceIds.Count == 0)
+            return new CustomGapCommandResult(false, null,
+                "Map at least one Practice Instance.", "PRACTICE_INSTANCE_REQUIRED");
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_custom_gap_edit";
+
+            AddParam(command, "@organization_id",            DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@custom_gap_id",              DbType.Int64,  customGapId);
+            AddParam(command, "@title",                      DbType.String, request.Title.Trim(), 250);
+            AddParam(command, "@description",                DbType.String, (object?)request.Description ?? DBNull.Value, -1);
+            AddParam(command, "@current_state",              DbType.String, (object?)request.CurrentState ?? DBNull.Value, -1);
+            AddParam(command, "@gap_finding",                DbType.String, (object?)request.GapFinding ?? DBNull.Value, -1);
+            AddParam(command, "@remarks",                    DbType.String, (object?)request.Remarks ?? DBNull.Value, 1000);
+            AddParam(command, "@severity_code",              DbType.String, (object?)request.SeverityCode ?? DBNull.Value, 30);
+            AddParam(command, "@owner_employee_id",          DbType.Int64,  (object?)request.OwnerEmployeeId ?? DBNull.Value);
+            AddParam(command, "@due_date",                   DbType.Date,   (object?)request.DueDate ?? DBNull.Value);
+            AddParam(command, "@detection_method_code",      DbType.String, (object?)request.DetectionMethodCode ?? DBNull.Value, 60);
+            AddParam(command, "@detection_method_name",      DbType.String, (object?)request.DetectionMethodName ?? DBNull.Value, 200);
+            AddParam(command, "@practice_instance_ids_json", DbType.String,
+                JsonSerializer.Serialize(request.PracticeInstanceIds), -1);
+            AddParam(command, "@actor_employee_id",          DbType.Int64,  (object?)actorEmployeeId ?? DBNull.Value);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            // Same best-effort SLA re-match as OpenAsync (severity may have
+            // changed); a missing SLA never fails the edit.
+            await ApplyAutoSlaAsync(customGapId, actorEmployeeId?.ToString() ?? "system", cancellationToken);
+
+            return new CustomGapCommandResult(true, customGapId);
+        }
+        catch (SqlException ex)
+        {
+            var reason = MapReason(ex.Number);
+            logger.LogWarning(ex, "CustomGapService.EditAsync SQL error {Number}: {Message}", ex.Number, ex.Message);
+            return new CustomGapCommandResult(false, null, ex.Message, reason);
         }
     }
 
@@ -876,6 +946,8 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
                         PracticeGapId:      ReadLongOrNull(reader, "PracticeGapId"),
                         PracticeInstanceId: ReadLongOrNull(reader, "PracticeInstanceId"),
                         IsMaterialized:     reader["IsMaterialized"] is bool m && m,
+                        // Migration 469/471. HasColumn-guarded for a pre-469 database.
+                        GapNumber:          HasColumn(reader, "GapNumber") ? ReadStringOrNull(reader, "GapNumber") : null,
                         Title:              ReadStringOrNull(reader, "Title"),
                         Context:            ReadStringOrNull(reader, "Context"),
                         StatusText:         ReadStringOrNull(reader, "StatusText"),
@@ -1184,6 +1256,10 @@ public sealed class CustomGapService(IConfiguration configuration, ILogger<Custo
         55044 => "ACTION_NOT_FOUND",
         55045 => "ACTION_GAP_MISMATCH",
         55050 => "HISTORY_IDS_REQUIRED",
+        // Migration 495 (sp_custom_gap_edit).
+        55060 => "NOT_CUSTOM_GAP",
+        55061 => "NOT_EDITABLE_IN_LIFECYCLE",
+        55062 => "PRACTICE_INSTANCE_REQUIRED",
         _     => "SQL_ERROR"
     };
 }

@@ -58,6 +58,9 @@ public sealed record PracticeScreen(string Key, string Title, string Description
     // Asset & Contract Management (migration 420). Root menu
     // nav-asset-contract; must match menu_master.module_type (page eyebrow).
     public const string AssetContractGroup = "Asset & Contract";
+    // Third-Party Risk Management (migrations 486-490). Root menu nav-tprm;
+    // must match menu_master.module_type (page eyebrow).
+    public const string TprmGroup = "Third-Party Risk";
 
     public static readonly PracticeScreen[] All =
     [
@@ -71,7 +74,15 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         new("departments","Department Management","Departments mapped to organizations","building-user",["Organization","Code","Name","HeadUser","Status"], OrganizationGroup),
         new("teams","Team Management","Organization teams mapped to departments and managed by employees. In-house or vendor-managed; accountability stays with the team manager either way","people-group",["Organization","Name","TeamType","Vendor","TeamManager","ParentDepartment","Status"], OrganizationGroup),
         new("committees","Committee Management","Organization committees with committee head and review frequency","users-gear",["Organization","Name","Chairperson","ReviewFrequency","Status"], OrganizationGroup),
-        new("roles","Role Master","Organization-specific roles used for menu and action permissions","user-lock",["Organization","RoleCode","RoleName","Description","Status"], AdministrationGroup),
+        // 2026-10-27: Organization dropped from the grid. "roles" is in
+        // practice.js's organizationScopedScreens, so the toolbar filter
+        // offers "Select organization" rather than "All organizations", one
+        // organization is auto-selected on load, and loadRows refuses to list
+        // without one. Every row therefore carried the SAME organization --
+        // a column repeating the filter above it. Display only: the list
+        // procedure still returns Organization and the Add/Edit form still
+        // asks for it.
+        new("roles","Role Master","Organization-specific roles used for menu and action permissions","user-lock",["RoleCode","RoleName","Description","Status"], AdministrationGroup),
         new("role-menu-permissions","Role Menu Permission","Assign Practice Management menu permissions to an organization role","list-check",["Organization","RoleName","MenuName","CanView","CanAdd","CanEdit","CanDelete","CanApprove","Status"], AdministrationGroup),
         new("user-role-assignments","User Role Assignment","Assign one or more organization roles to organization users","user-gear",["EmployeeCode","EmployeeName","Email","RoleNames","Status"], AdministrationGroup),
         new("users","User Management","Users available for organization ownership and assignment. Employees and third-party personnel; a third party must name the provider that supplies them","users",["EmployeeCode","EmployeeName","PersonnelType","Email","RoleName","Provider","Designation","Status"], AdministrationGroup),
@@ -122,7 +133,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Pre-hydration header only; practice.js swaps in statementTreeColumns.
         // Kept in step with it (minus Actions, which Manage.cshtml appends) so the
         // grid does not flash a different column set before the script runs.
-        new("source-statements","Control Statements","Control Statement grid for a subscribed Framework Release.","shield",["Statement Reference","Statement Title","Applicability Status","Implementation Status","Practice Count"], GovernanceGroup),
+        new("source-statements","Control Statements","Control Statement grid for a subscribed Framework Release.","shield",["Statement Reference","Statement Title","Owner","Applicability Status","Implementation Status","Practice Count"], GovernanceGroup),   // Owner 2026-10-08: same columns as practice.js statementTreeColumnDefs, so the server-drawn loading header matches
         // custom-source-statements: no menu_master row of its own (same convention as
         // ownership-management / practice-instances / gap-detail) -- reached only by a
         // link from the Standards & Frameworks screen (organization-controls), which is
@@ -144,7 +155,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // the columns below are unused placeholders.
         new("repository-updates","Repository Updates","Review and approve Control Management changes to a subscribed framework release.","shield",["Item","Change","Release","Detected"], GovernanceGroup),
         // Pre-hydration header and colspan source only: practice.js draws this
-        // grid through renderRequirementControlGroups / renderStatementPracticeRows,
+        // grid through renderRequirementStatementGroups / renderStatementPracticeRows,
         // which write their own <th> row. ImplementationStatus is the practice-level
         // roll-up over the practice's instances (PracticeImplementationStatus on the
         // row), mirroring the Source Statement column above. Six entries plus the
@@ -225,6 +236,11 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // admin batches for tracking user acknowledgement of published
         // documents. Renders via document-acknowledgements.cshtml.
         new("document-acknowledgements","Document Acknowledgements","Roll published documents into named batches and track who has acknowledged each","file-signature",["Name","Due","Docs","Users","AckCount","Progress","Status"], PoliciesDocumentsGroup),
+        // Evidence Center (migration 476, Phase 1): evidence files uploaded
+        // once for the organisation and linked wherever they are used
+        // (Operationalize one-time evidence in Phase 1). Own partial, own
+        // JS, own proxy (practice/api/evidence-center) -- no generic grid.
+        new("evidence-center","Evidence Center","Evidence uploaded once for the organization and reused wherever it is needed: owner, validity, versions and where each item is used","box-archive",["Title","Type","Owner","Validity","Version","UsedIn","Status"], PoliciesDocumentsGroup),
         // Phase 3 user-side counterpart (migrations 153-154). Every
         // employee sees their own pending acknowledgements here.
         new("my-acknowledgements","My Acknowledgements","Documents you are asked to acknowledge -- pick a batch and confirm each one","inbox",["Batch","Due","MyDocs","Acknowledged","Pending","Progress","Status"], MyNotificationGroup),
@@ -237,6 +253,13 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Analysis Engine, Decision Gateway with downstream links.
         // Reached from Gap Centre's 3-dot menu with ?gapId=.
         new("gap-detail","Gap Details","Gap lifecycle, analysis and downstream link management","route",["State","Severity","Impact"], OversightGroup),
+        // Add Custom Gap -- full page (2026-10-25), was the Gap Register's
+        // popup. Route screen, reached from the register's Add Gap button.
+        new("gap-new","Add Custom Gap","Add a Custom gap -- full-page form.","route",["Title","Severity","Owner","Practice Instances"], OversightGroup),
+        // Migration 495: Edit Custom Gap -- the same page (gap-edit.cshtml
+        // renders gap-new.cshtml in edit mode), reached from the Edit item
+        // of the Gap Register row menu / Gap View's Actions menu.
+        new("gap-edit","Edit Custom Gap","Edit a Custom gap -- full-page form.","route",["Title","Severity","Owner","Practice Instances"], OversightGroup),
         // Exception Centre (migrations 161-163) -- time-boxed
         // acceptance of gaps. Auto-populated from gap analysis.
         new("exception-centre","Exceptions & Waivers","Approve or reject time-boxed exception requests raised from gap analysis","shield-halved",["Request","Gap","Status","EffectiveUntil"], OversightGroup),
@@ -261,6 +284,15 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Gap View's Task card, with ?taskId=. A "route" screen: no menu
         // entry of its own, because it is always about one specific task.
         new("task-view","Task View","Read-only full view of a single task -- identity, SLA, related record, evidence and activity","route",["Type","Status","Priority","Owner","Related"], OversightGroup),
+        // New Task / Edit Task -- full-page versions of the Task Board's
+        // create and edit forms (previously modal dialogs). Same "route"
+        // convention as task-view/gap-view: no sidebar entry, reached by
+        // URL from the Task Board, permission tied to tasks (below).
+        new("task-new","New Task","Create a Custom task -- full-page form.","route",["Organization","Title","Assignee","Priority","Target"], OversightGroup),
+        new("task-edit","Edit Task","Edit a task -- full-page form.","route",["Status","Owner","Priority","Due"], OversightGroup),
+        // Complete Task -- full page (2026-10-23): the Complete dialog grew a
+        // list of recurring evidence (482/483), too much for a modal.
+        new("task-complete","Complete Task","Complete a task -- evidence and completion remark, full page.","route",["Evidence","Remark"], OversightGroup),
         // Exception View -- dedicated read-only full view of an exception
         // request in ANY status, complementing exception-analysis (the
         // Pending-request analysis workflow, unchanged). Reached from
@@ -422,6 +454,10 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // at runtime, so listing them here would be a second, stale copy
         // of a vocabulary that is deliberately not fixed.
         new("risk-acceptance-authority","Risk Acceptance Approval Authority","Set who may approve accepting a risk at each rating level, separately for the inherent score and the residual score after treatment. Levels not set here fall back to the organization's general risk approver.","user-shield",["Risk Level","Inherent Authority","Same as Inherent","Residual Authority"], OrganizationGroup),
+        // Settings -> Risk Settings (migration 458, 2026-10-08). The Risk
+        // Centre settings (BRD §19, §22) moved off the gear icon on Risk
+        // Candidate / Risk Register into their own Settings page.
+        new("risk-settings","Risk Settings","Risk Management settings for an organization: approval before registering a risk, the approver, the treatment-task default, notifications and the residual-analysis rule.","sliders",["Setting","Value"], OrganizationGroup),
         // Asset & Contract Management, Phase 2.1 (migration 420). Field
         // Dictionary is the read-only BRD 5.1 field library; Asset Form
         // Templates is the per-organization, versioned form designer.
@@ -477,7 +513,15 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         new("asset-notifications","Asset Notifications","Reminders and escalations for asset and contract dates: notification profiles by activity with reminder, due and escalation stages, recipients and acknowledgement, the escalation matrix by severity, the occurrences the scheduler is tracking and every notice it recorded.","bell-concierge",["Activity","Subject","Date","Stage","Status"], AssetContractGroup),
         // Phase 5.1 (migration 434): contracts -- contract register,
         // immutable versions with approval, vendor contact mapping.
-        new("asset-contracts","Contracts","Maintain contracts with the vendors of the organization: every renewal, amendment, extension or termination is a new version that is reviewed and approved, takes effect on its date and keeps the earlier versions, documents and vendor contacts unchanged.","file-contract",["Contract","Type","Vendor","Status","Version"], AssetContractGroup)
+        new("asset-contracts","Contracts","Maintain contracts with the vendors of the organization: every renewal, amendment, extension or termination is a new version that is reviewed and approved, takes effect on its date and keeps the earlier versions, documents and vendor contacts unchanged.","file-contract",["Contract","Type","Vendor","Status","Version"], AssetContractGroup),
+        // Third-Party Risk Management (migrations 486-490): the module
+        // dashboard, the third-party register, the engagement workspace (the
+        // BRD's five steps), reviews and the three configuration layers.
+        new("tprm-dashboard","Third-Party Risk Dashboard","Third parties, engagements by stage, criticality and risk band, due diligence, open findings and remediation, reviews and expiring risk acceptances for the selected organization.","chart-pie",["Metric","Value"], TprmGroup),
+        new("tprm-third-parties","Third Parties","Register third parties once with their legal identity, services, contacts and lifecycle status: duplicates are found before saving, GRAC vendors can be imported and linked, and every engagement with the third party is listed.","building",["Code","Third party","Type","Category","Status","Engagements","Owner"], TprmGroup),
+        new("tprm-engagements","Engagements","Assess each engagement with a third party: scope and exposure discovered from GRAC, inherent risk, due diligence with safeguards and evidence, residual risk, the risk decision and approvals, onboarding and the engagement lifecycle.","file-signature",["Code","Engagement","Third party","Stage","Criticality","Risk band","Next review","Owner"], TprmGroup),
+        new("tprm-reviews","Third-Party Reviews","Periodic and triggered reviews of third-party engagements: scheduled reviews, contract, certification and risk-acceptance expiry, incidents, material changes and overdue remediation.","calendar-check",["Review","Engagement","Type","Trigger","Due","Owner","Status"], TprmGroup),
+        new("tprm-configuration","TPRM Configuration","GRAC baseline and organization configuration of Third-Party Risk Management: reference lists, safeguard and evidence library, risk models and questionnaires with versions, approval and review rules, delegations and custom fields.","sliders",["Item","Origin","Status"], TprmGroup)
     ];
 }
 

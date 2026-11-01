@@ -180,7 +180,19 @@ public static class PermissionAreaMap
         // screen governs it -- same rule as practice-instances above, and
         // the same mapping PracticeController.ScreenPermissionArea applies
         // to the page itself.
-        ["practice-view"] = "organization-requirements"
+        ["practice-view"] = "organization-requirements",
+        // Role Master's Menu Permission card (2026-10-26). Migration 401
+        // moved the standalone "Role Menu Permission" screen INTO Role
+        // Master (hidden from the sidebar), and the matrix itself leaves
+        // the role-menu-permissions menu out (role-menu-permission-editor.js
+        // EXCLUDED_KEYS) -- so "role-menu-permissions:VIEW" became a grant
+        // no role could be given, and opening an existing role answered
+        // "You do not have permission to view role-menu-permissions" on the
+        // card. The screen that shows it governs it: VIEW on Role Master
+        // reads the matrix, its ADD / EDIT save it. Also covers the card's
+        // View Data Scope settings (RoleViewDataScopeController reads
+        // PermissionAreaMap.For("role-menu-permissions")).
+        ["role-menu-permissions"] = "roles"
     };
 
     /// <summary>

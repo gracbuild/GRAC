@@ -1,0 +1,139 @@
+@*
+    Evidence Center -- migration 476, Phase 1 (2026-10-18).
+    Rendered from Manage.cshtml when Model.Key == "evidence-center".
+
+    Screen key : `evidence-center`
+    Group      : Policies & Documents
+    Menu       : nav-documents (Policies & Documents) -> Evidence Center
+
+    One organisation-level store of evidence files. A file is uploaded
+    ONCE; every place that uses it holds a link pinned to the version that
+    was linked (Operationalize one-time evidence in Phase 1). The grid
+    lists what the caller may see -- uploader, owner, users who can see an
+    instance the item is linked to, organization admins; "Restricted"
+    items only the owner and admins (sp_evidence_center_list). The detail
+    shows the versions and where the item is used. Unlinking happens where
+    the item is used; Delete here is allowed only when nothing links it,
+    otherwise Retire.
+
+    Same layout conventions as the Asset & Contract screens: pm-page-heading
+    compact, an organization picker, one pm-panel with a pm-toolbar of
+    filters, a pm-table-wrap grid with the pm-grid pager, pm-modal dialogs.
+
+    Backend: practice/api/evidence-center... (EvidenceCenterController)
+    Script : wwwroot/js/EvidenceCenter/evidence-center.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var ecPermissions = ViewBag.Permissions as string[] ?? [];
+    bool ecHas(string action) => ecPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var ecCanAdd = ecHas("ADD");
+    var ecCanEdit = ecHas("EDIT");
+    var ecCanDelete = ecHas("DELETE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="ecRoot" data-can-add="@(ecCanAdd ? "1" : "0")" data-can-edit="@(ecCanEdit ? "1" : "0")" data-can-delete="@(ecCanDelete ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="ecOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <p class="pm-message" id="ecMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-toolbar">
+            <input type="search" id="ecSearch" placeholder="Search title, file name or tag" maxlength="200" />
+            <select id="ecTypeFilter" title="Evidence type"><option value="">All types</option></select>
+            <select id="ecOwnerFilter" title="Owner"><option value="">All owners</option></select>
+            <select id="ecValidityFilter" title="Validity">
+                <option value="">Any validity</option>
+                <option value="Valid">Valid</option>
+                <option value="Expiring">Expiring (30 days)</option>
+                <option value="Expired">Expired</option>
+            </select>
+            <select id="ecUsageFilter" title="Used in">
+                <option value="">Used or not</option>
+                <option value="Used">Used</option>
+                <option value="Unused">Not used</option>
+            </select>
+            <select id="ecStatusFilter" title="Status">
+                <option value="Active">Active</option>
+                <option value="Retired">Retired</option>
+                <option value="All">All</option>
+            </select>
+            <button class="pm-button icon" id="ecRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            @if (ecCanAdd)
+            {
+                <button class="pm-button primary" id="ecUploadNew" type="button"><i class="fa-solid fa-upload"></i> Upload evidence</button>
+            }
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Evidence</th><th>Type</th><th>Owner</th><th>Valid to</th><th>Version</th><th>Used in</th><th>Classification</th><th>Status</th></tr></thead>
+                <tbody id="ecListBody"></tbody>
+            </table>
+        </div>
+        <div id="ecPager"></div>
+    </section>
+</div>
+
+@* ======================= Item detail ======================= *@
+<div class="pm-modal" id="ecDetailModal" hidden>
+    <div class="pm-modal-panel ec-wide">
+        <header>
+            <h2 id="ecDetailTitle">Evidence</h2>
+            <button class="pm-modal-close" type="button" data-close-ec="ecDetailModal" aria-label="Close">&times;</button>
+        </header>
+        <p class="pm-message" id="ecDetailMessage" role="status" aria-live="polite" hidden></p>
+        <div class="ec-info" id="ecDetailInfo"></div>
+        <div class="ec-actions" id="ecDetailActions"></div>
+        <div class="pm-tabs" role="tablist" aria-label="Evidence">
+            <button role="tab" class="active" data-ec-tab="USEDIN" aria-selected="true">Used in</button>
+            <button role="tab" data-ec-tab="VERSIONS" aria-selected="false">Versions</button>
+        </div>
+        <div data-ec-panel="USEDIN">
+            <p class="ec-note" id="ecHiddenUsage" hidden></p>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Obligation</th><th>Practice instance</th><th>Evidence / task</th><th>Version</th><th>Linked by</th><th>Linked on</th></tr></thead>
+                    <tbody id="ecUsedInBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div data-ec-panel="VERSIONS" hidden>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Version</th><th>File</th><th>Size</th><th>Note</th><th>Uploaded by</th><th>Uploaded on</th><th>Pinned by</th></tr></thead>
+                    <tbody id="ecVersionsBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ======================= Upload / edit ======================= *@
+@* 499: the dialog moved to Partials/_evidence-upload-dialog.cshtml so
+   Operationalize and Complete Task open the SAME form. Ids unchanged. *@
+<partial name="Partials/_evidence-upload-dialog" />
+
+<style>
+    .ec-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .ec-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .pm-modal-panel.ec-wide { max-width: 1100px; width: 100%; }
+    .ec-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .ec-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .ec-valid-expired  { background: var(--danger-100); color: var(--danger-700); }
+    .ec-valid-expiring { background: var(--warning-50); color: var(--warning-700); }
+    .ec-valid-valid    { background: var(--success-100); color: var(--success-700); }
+    tr[data-ec-item] { cursor: pointer; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+@* 499: the shared upload dialog module, before the screen script that calls it. *@
+<script src="~/js/Shared/evidence-upload.js" asp-append-version="true"></script>
+<script src="~/js/EvidenceCenter/evidence-center.js" asp-append-version="true"></script>

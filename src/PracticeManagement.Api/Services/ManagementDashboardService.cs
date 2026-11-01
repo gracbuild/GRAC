@@ -7,6 +7,7 @@
 //   issues-actions   sp_dashboard_issues_actions
 //   audit-assurance  sp_dashboard_audit_assurance
 //   asset-contract   sp_dashboard_asset_contract    (451)
+//   tprm             sp_dashboard_tprm              (490)
 // Risk Management keeps its own dashboard (RiskCentreService, 413).
 //
 // Every number is computed in SQL; this class only maps rows.
@@ -34,7 +35,8 @@ public sealed class ManagementDashboardService(IConfiguration configuration) : I
         ["governance"]      = "grac_practice.sp_dashboard_governance",
         ["issues-actions"]  = "grac_practice.sp_dashboard_issues_actions",
         ["audit-assurance"] = "grac_practice.sp_dashboard_audit_assurance",
-        ["asset-contract"]  = "grac_practice.sp_dashboard_asset_contract"       // 451
+        ["asset-contract"]  = "grac_practice.sp_dashboard_asset_contract",      // 451
+        ["tprm"]            = "grac_practice.sp_dashboard_tprm"                 // 490
     };
 
     public async Task<ManagementDashboard?> GetAsync(string module, long organizationId,

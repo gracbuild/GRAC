@@ -78,6 +78,11 @@
 
   let opts = null;          // the options of the currently open dialog
   let wired = false;
+  // Full-page host (task-new.cshtml): the same form rendered inline on a
+  // page instead of a modal. Cancel/Close/save then navigate back to the
+  // Task Board instead of closing a dialog.
+  let pageMode = false;
+  let pageBackUrl = null;
 
 
   function msg(text, kind) {
@@ -151,6 +156,8 @@
     wire();
 
     opts = Object.assign({ mode: "task", defaults: {} }, options || {});
+    pageMode    = opts.host === "page";
+    pageBackUrl = opts.backUrl || U("/Practice/Index/tasks");
     const isSub  = opts.mode === "subtask";
     const parent = opts.parentTask || null;
     const d      = opts.defaults || {};
@@ -220,11 +227,17 @@
     sel.disabled = false;
     fillAssignees(list, d.assignedToEmployeeId);
 
-    if (!dlg.open) (dlg.showModal ? dlg.showModal() : (dlg.open = true));
+    if (pageMode) {
+      dlg.classList.add("gtf--page");
+      dlg.open = true;                 // inline, non-modal
+    } else if (!dlg.open) {
+      (dlg.showModal ? dlg.showModal() : (dlg.open = true));
+    }
     $("gracTaskFormTitleInput").focus();
   }
 
   function close() {
+    if (pageMode) { window.location.assign(pageBackUrl); return; }
     const dlg = $("gracTaskFormDialog");
     if (!dlg) return;
     if (dlg.close) { try { dlg.close(); } catch (_) { dlg.open = false; } }
@@ -377,7 +390,7 @@
     // node itself -- only a genuine backdrop click does.
     const dlg = $("gracTaskFormDialog");
     dlg?.addEventListener("click", e => {
-      if (e.target === dlg) close();
+      if (!pageMode && e.target === dlg) close();
     });
   }
 

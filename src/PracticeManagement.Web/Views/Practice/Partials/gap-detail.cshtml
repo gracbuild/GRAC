@@ -103,12 +103,28 @@
         <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
         <div>
             <strong>This gap has already been analysed.</strong>
-            <p>
+            <p id="gapAlreadyAnalysedText">
                 You are viewing the saved analysis below in read-only mode.
                 Generate Task / Request Exception / Create Risk cannot be
                 re-triggered from here -- use the linked artefacts strip
                 below the form to open what was already created.
             </p>
+            @* Migration 501: the same banner in re-analysis mode. Two
+               paragraphs rather than one rewritten in JavaScript, so the
+               copy lives here with the rest of the page's text. *@
+            <p id="gapReanalyseModeText" hidden>
+                You are re-analysing this gap. The saved analysis below is
+                editable again, and saving replaces it and records the
+                re-analysis. Generate Task / Request Exception / Create Risk
+                only create what does not already exist and is still open --
+                see the linked artefacts strip below the form.
+            </p>
+            @* Outside #gapAnalysisForm on purpose: applyTerminalInvalidMode()
+               disables every button inside that form while it is locked, and
+               this is the one control that has to stay clickable. *@
+            <button type="button" class="pm-button" id="gapReanalyseBtn">
+                <i class="fa-solid fa-rotate" aria-hidden="true"></i> Re-analyse
+            </button>
         </div>
     </div>
 
@@ -238,13 +254,14 @@
                 <label>
                     @* Severity is now auto-derived at gap creation time
                        (post-187 for Implementation, always for
-                       Assurance, and post-189 for Custom via priority).
+                       Assurance, and for Custom picked on Add Gap --
+                       the Priority field was removed 2026-10-25).
                        Locked read-only in the analysis form so an
                        analyst does not accidentally break the SLA
                        auto-match by editing it. If a genuine
                        reclassification is needed, do it via the source
                        (practice_instance.criticality / observation /
-                       custom-gap priority). *@
+                       custom-gap severity). *@
                     <span>Severity <small style="color:var(--fg-subtle); font-weight:normal;">(auto)</small></span>
                     @* Explicit disabled="disabled" -- Razor/HTML sanitisers
                        sometimes strip boolean attributes when they carry
@@ -622,6 +639,9 @@
     .gap-analysed-banner i { font-size: 18px; padding-top: 2px; }
     .gap-analysed-banner strong { display: block; font-size: 14px; margin-bottom: 4px; }
     .gap-analysed-banner p { margin: 0; font-size: 12px; line-height: 1.5; }
+    /* Migration 501: the Re-analyse control inside the same banner. */
+    .gap-analysed-banner .pm-button { margin-top: 10px; }
+    .gap-analysed-banner p[hidden] { display: none !important; }
 
     /* Blocked-pending-obligations/Operationalization banner (migration
        367). Same layout as .gap-terminal-banner/.gap-analysed-banner
@@ -749,4 +769,5 @@
     </form>
 </dialog>
 
+<script src="~/js/Shared/gap-practice-instances.js" asp-append-version="true"></script>
 <script src="~/js/GapLifecycle/gap-detail.js" asp-append-version="true"></script>

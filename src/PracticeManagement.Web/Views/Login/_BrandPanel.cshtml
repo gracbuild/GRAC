@@ -1,0 +1,79 @@
+@*
+    The login split-card's dark brand panel.
+
+    One copy, rendered by both Login/Index.cshtml and
+    Login/ChangePassword.cshtml -- the two screens are the same flow and
+    had identical panel markup, so the restyle (change request
+    2026-10-29) lives here rather than being pasted into both.
+
+    The GRAC logo is the real asset, in the place the design marked
+    "Existing GRAC logo stays here". Everything below it is new.
+
+    Colours come from grac-tokens.css, not from the design's literal hex
+    values: --grac-navy-deep (#0C1129 vs the mock's #0E1326) and
+    --grac-gold (#E8A33D vs #E2A43F) are the same two brand colours to
+    the eye, and this panel is exactly the brand-only surface the token's
+    own comment reserves the gold for. The SVG keeps its literal values
+    where a token would be wrong: the node fills and strokes are panel
+    furniture, not design-system surfaces.
+*@
+<div class="brand-panel">
+    <div class="brand-inner">
+        <div class="brand-logo">
+            <img src="~/css/Images/Logo.png" alt="GRAC Logo" loading="lazy" />
+        </div>
+
+        <h1 class="brand-title">Compliance that runs<br />as <span>practice</span>, not paperwork.</h1>
+        <p class="brand-lead">Every requirement, owned, operated and evidenced.</p>
+
+        @* Decorative: the requirement -> practice -> obligations -> evidence
+           flow, with the gap loop back to Task / Exception / Risk. Hidden
+           from assistive technology -- the sentence above already says it. *@
+        <div class="brand-art" aria-hidden="true">
+            <svg viewBox="0 0 480 170" xmlns="http://www.w3.org/2000/svg" role="presentation">
+                <defs>
+                    <linearGradient id="gracGold" x1="0" x2="1">
+                        <stop offset="0" stop-color="#F0B54A" />
+                        <stop offset="1" stop-color="#C9822B" />
+                    </linearGradient>
+                    <marker id="gracAr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                        <path d="M0 0L10 5L0 10z" fill="#4B5578" />
+                    </marker>
+                    <marker id="gracArG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                        <path d="M0 0L10 5L0 10z" fill="#E8A33D" />
+                    </marker>
+                </defs>
+
+                <g stroke="#4B5578" stroke-width="1.5" fill="none" marker-end="url(#gracAr)">
+                    <line x1="96" y1="52" x2="128" y2="52" />
+                    <line x1="216" y1="52" x2="248" y2="52" />
+                    <line x1="336" y1="52" x2="368" y2="52" />
+                </g>
+
+                <g font-size="12" text-anchor="middle">
+                    <rect x="8" y="24" width="88" height="56" rx="10" fill="#161D36" stroke="#2A3354" />
+                    <text x="52" y="49" fill="#fff" font-weight="700">Requirement</text>
+                    <text x="52" y="66" fill="#7E88A6" font-size="10.5">Source statement</text>
+
+                    <rect x="128" y="24" width="88" height="56" rx="10" fill="#161D36" stroke="#2A3354" />
+                    <text x="172" y="49" fill="#fff" font-weight="700">Practice</text>
+                    <text x="172" y="66" fill="#7E88A6" font-size="10.5">Owned &amp; scoped</text>
+
+                    <rect x="248" y="24" width="88" height="56" rx="10" fill="#161D36" stroke="#2A3354" />
+                    <text x="292" y="49" fill="#fff" font-weight="700">Obligations</text>
+                    <text x="292" y="66" fill="#7E88A6" font-size="10.5">Operationalized</text>
+
+                    <rect x="368" y="24" width="104" height="56" rx="10" fill="url(#gracGold)" />
+                    <text x="420" y="49" fill="#0C1129" font-weight="900">Evidence</text>
+                    <text x="420" y="66" fill="#3A2A10" font-size="10.5">Audit-ready</text>
+                </g>
+
+                <path d="M292 80 V122 H232" stroke="#E8A33D" stroke-width="1.5" stroke-dasharray="4 4" fill="none" marker-end="url(#gracArG)" />
+                <rect x="132" y="106" width="98" height="32" rx="16" fill="rgba(232,163,61,.12)" stroke="#E8A33D" />
+                <text x="181" y="126" fill="#E8A33D" font-size="11.5" font-weight="700" text-anchor="middle">Gap detected</text>
+                <path d="M132 122 H60 V84" stroke="#E8A33D" stroke-width="1.5" stroke-dasharray="4 4" fill="none" marker-end="url(#gracArG)" />
+                <text x="64" y="152" fill="#7E88A6" font-size="10.5">Task &#183; Exception &#183; Risk</text>
+            </svg>
+        </div>
+    </div>
+</div>

@@ -1,7 +1,7 @@
 // =====================================================================
 // window.gracGapActions -- THE Gap Centre row-menu actions (Analysis,
-// View, View Existing Tasks, Close Gap) plus the menu-item list they
-// come from.
+// View, Edit, View Existing Tasks, Close Gap) plus the menu-item list
+// they come from. (Edit: migration 495, 2026-10-27.)
 //
 // Extracted from Views/Practice/Partials/gaps.cshtml (change request:
 // Gap View's own "Actions" menu must reuse these verbatim -- same
@@ -53,7 +53,11 @@
   var U = function (p) { return String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p; };
 
   // fields: { gapId, isMaterialized, isAnalysed, sourceModuleCode,
-  //           statusCode, practiceInstanceId, existingTaskCount }
+  //           statusCode, practiceInstanceId, existingTaskCount,
+  //           lifecycleStateCode, isLifecycleTerminal }
+  //   - lifecycleStateCode / isLifecycleTerminal (495) decide whether Edit
+  //     is enabled; isLifecycleTerminal (Gap View's header flag) wins when
+  //     given, else the code is checked against TERMINAL_LIFECYCLE.
   //   - statusCode is the gap's own raw Open/InProgress/Closed/Cancelled
   //     code (custom_gap.status -- GapHeader.StatusCode on Gap View,
   //     row.rawStatusCode on Gap Centre's grid row), NOT the lifecycle
@@ -63,7 +67,8 @@
   //     re-analysis is rejected server-side (55143), so "Analysis" is not
   //     offered again past that point -- "View" is, instead.
   //
-  // handlers: { onAnalysis, onView, onViewExistingTasks, onCloseGap }
+  // handlers: { onAnalysis, onReanalysis, onView, onEdit,
+  //             onViewExistingTasks, onCloseGap }
   // A handler that is omitted means that item is not offered at all --
   // e.g. Gap View has no use for "View" (the page already IS the view),
   // so it simply does not pass onView. Callers are encouraged to pass
@@ -72,6 +77,24 @@
   // window.gracTaskActions.buildMenu() -- but an omitted handler is
   // honoured too, for a host page (like Gap View) that has no use for a
   // given item at all.
+  // Migration 495: the terminal stages of gap_lifecycle_state_master
+  // (is_terminal = 1) -- Analysed shows as Delegated. Used only when the
+  // host has the code but not the flag (Gap Centre's grid row).
+  var TERMINAL_LIFECYCLE = ["Delegated", "Closed", "Invalid", "Duplicate"];
+
+  // Migration 495: why a Custom gap cannot be edited, or "" when it can.
+  // The same rules sp_custom_gap_edit enforces (55006, 55061).
+  function editBlockedReason(fields) {
+    var st = String(fields.statusCode || "");
+    if (st && ["Open", "InProgress", "Reopened"].indexOf(st) < 0)
+      return "Gap is " + st.toLowerCase() + ".";
+    var terminal = typeof fields.isLifecycleTerminal === "boolean"
+      ? fields.isLifecycleTerminal
+      : TERMINAL_LIFECYCLE.indexOf(String(fields.lifecycleStateCode || "")) >= 0;
+    if (terminal) return "Gap has already been analysed, closed or marked invalid / duplicate.";
+    return "";
+  }
+
   function buildMenu(fields, handlers) {
     fields = fields || {};
     handlers = handlers || {};
@@ -88,11 +111,43 @@
       if (!fields.isAnalysed && handlers.onAnalysis) {
         items.push({ icon: "fa-magnifying-glass", label: "Analysis", action: handlers.onAnalysis });
       }
+      // Migration 501: once analysed, Analysis above is replaced by
+      // Re-analysis -- the same destination, opened in re-analysis mode.
+      // An omitted handler drops the item, like every other one here, so
+      // a caller that does not offer re-analysis is unaffected.
+      if (fields.isAnalysed && handlers.onReanalysis) {
+        items.push({ icon: "fa-rotate", label: "Re-analysis", action: handlers.onReanalysis });
+      }
       if (handlers.onView) {
         items.push({ icon: "fa-eye", label: "View", action: handlers.onView });
       }
-    } else if (fields.practiceInstanceId && handlers.onAnalysis) {
-      items.push({ icon: "fa-magnifying-glass", label: "Analysis", action: handlers.onAnalysis });
+    } else if (fields.practiceInstanceId) {
+      // An un-materialized practice-instance gap has no custom_gap row
+      // yet, so BOTH actions first materialize it (the handlers do that)
+      // and then land -- Analysis on the analysis page, View on the
+      // read-only Gap View. An omitted handler drops its item, exactly
+      // like the materialized branch above.
+      if (handlers.onAnalysis) {
+        items.push({ icon: "fa-magnifying-glass", label: "Analysis", action: handlers.onAnalysis });
+      }
+      if (handlers.onView) {
+        items.push({ icon: "fa-eye", label: "View", action: handlers.onView });
+      }
+    }
+
+    // ---- Edit (migration 495) -----------------------------------------
+    // A Custom gap only, the same scope as Close Gap below: gaps of the
+    // other sources are owned by their module. Shown for every Custom
+    // gap, disabled with the reason once it can no longer be edited --
+    // the "disabled, not hidden" choice Close Gap makes.
+    if (fields.sourceModuleCode === "Custom" && gapId && handlers.onEdit) {
+      var blocked = editBlockedReason(fields);
+      items.push({
+        icon: "fa-pen", label: "Edit",
+        disabled: !!blocked,
+        disabledReason: blocked,
+        action: handlers.onEdit
+      });
     }
 
     // ---- View Existing Tasks ----------------------------------------
@@ -148,8 +203,20 @@
     }
   }
 
+  // Migration 495: the Edit Custom Gap page for a gap. `from` = "view"
+  // sends the page back to Gap View after Save / Cancel; anything else
+  // back to the Gap Register.
+  function editUrl(gapId, orgId, orgName, from) {
+    return U("/Practice/Index/gap-edit") + "?gapId=" + encodeURIComponent(gapId)
+      + "&orgId=" + encodeURIComponent(orgId || "")
+      + (orgName ? "&orgName=" + encodeURIComponent(orgName) : "")
+      + (from ? "&from=" + encodeURIComponent(from) : "");
+  }
+
   window.gracGapActions = {
     buildMenu: buildMenu,
-    closeGap: closeGap
+    closeGap: closeGap,
+    editUrl: editUrl,
+    editBlockedReason: editBlockedReason
   };
 })();

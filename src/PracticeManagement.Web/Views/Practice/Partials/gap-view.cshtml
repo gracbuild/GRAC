@@ -125,6 +125,18 @@
     <h3 class="gv-section">Gap Details</h3>
     <dl class="gv-facts" id="gvFacts"></dl>
 
+    @* 2026-10-27: every value the Add / Edit Custom Gap page and the
+       Analysis tab capture is shown here. The narrative (Add page, 491)
+       and the analysis (gap-detail.cshtml's Analysis form) get their own
+       wide panels -- they are paragraphs, not facts. Same data as before:
+       the gap header, plus the analysis record gap-detail.js itself reads
+       (GET /practice/api/gap-lifecycle/gaps/{id}/analysis). *@
+    <h3 class="gv-section">Gap Narrative</h3>
+    <dl class="gv-facts gv-facts-wide" id="gvNarrative"></dl>
+
+    <h3 class="gv-section">Gap Analysis</h3>
+    <dl class="gv-facts gv-facts-wide" id="gvAnalysis"></dl>
+
     @* Practice / Practice Instance -- shown as a fact + a link to the
        instance's own existing read-only workspace (same destination
        gap-detail.cshtml's "View Practice Instance" link and gaps.cshtml's
@@ -177,6 +189,12 @@
         white-space: pre-wrap;
     }
     #gvRoot .gv-facts dd.gv-empty { color: var(--fg-subtle); font-style: italic; }
+    /* Narrative / analysis panels: paragraphs need the width a fact does
+       not (2026-10-27). Same panel, wider columns. */
+    #gvRoot .gv-facts.gv-facts-wide { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    /* A text-area field (narrative, impact summaries, RCA) takes a whole
+       row of its panel -- long sentences read across, not down a column. */
+    #gvRoot .gv-facts > .gv-full { grid-column: 1 / -1; }
 
     .gv-instance-link-wrap { margin: 10px 0 0; text-align: right; }
     .gv-instance-link-wrap a { font-weight: 600; }
@@ -246,5 +264,6 @@
     .gv-card-note { font-size: 11px; color: var(--fg-subtle); font-style: italic; }
 </style>
 
+<script src="~/js/Shared/gap-practice-instances.js" asp-append-version="true"></script>
 <script src="~/js/GapLifecycle/gap-view.js" asp-append-version="true"></script>
 <script src="~/js/Shared/gap-actions.js" asp-append-version="true"></script>

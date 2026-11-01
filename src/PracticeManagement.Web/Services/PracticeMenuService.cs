@@ -8,6 +8,19 @@ public sealed class PracticeMenuService(SecurePracticeClient client, ILogger<Pra
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
+    // Per-request memoization. PracticeMenuService is scoped (one instance
+    // per request), and a single page render calls GetMenuResultAsync more
+    // than once -- ShowArea/Dashboard fetch the menu for both VisibleScreens
+    // and VisibleMenu, and the diagnostics endpoint fetches it again. Each
+    // call otherwise made a fresh menu-master round-trip to the API, so the
+    // server-rendered document paid for the menu two or three times over.
+    // The base menu load does not depend on roles (permission filtering is
+    // disabled for it -- see the log line below), so one fetch per request
+    // serves every caller. The fetch never throws (its catch returns a
+    // fallback result), so caching the Task can never cache a faulted task.
+    private string? _cachedMenuToken;
+    private Task<PracticeMenuResult>? _cachedMenuResult;
+
     public async Task<PracticeScreen[]> GetVisibleScreensAsync(string token, IEnumerable<string> roles, CancellationToken cancellationToken)
     {
         var result = await GetMenuResultAsync(token, roles, cancellationToken);
@@ -32,7 +45,16 @@ public sealed class PracticeMenuService(SecurePracticeClient client, ILogger<Pra
             result.MenuRows.Select(row => new PracticeMenuDiagnosticRow(row.MenuKey, row.MenuName, row.ModuleType, row.DisplayOrder, result.KnownKeys.Contains(row.MenuKey), result.AllowedKeys.Contains(row.MenuKey))).ToArray());
     }
 
-    private async Task<PracticeMenuResult> GetMenuResultAsync(string token, IEnumerable<string> roles, CancellationToken cancellationToken)
+    private Task<PracticeMenuResult> GetMenuResultAsync(string token, IEnumerable<string> roles, CancellationToken cancellationToken)
+    {
+        if (_cachedMenuResult is not null && _cachedMenuToken == token)
+            return _cachedMenuResult;
+        _cachedMenuToken = token;
+        _cachedMenuResult = GetMenuResultCoreAsync(token, roles, cancellationToken);
+        return _cachedMenuResult;
+    }
+
+    private async Task<PracticeMenuResult> GetMenuResultCoreAsync(string token, IEnumerable<string> roles, CancellationToken cancellationToken)
     {
         var roleArray = roles.ToArray();
         try

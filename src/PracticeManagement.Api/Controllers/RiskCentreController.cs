@@ -924,6 +924,13 @@ public sealed class RiskCentreController(
         [FromBody] RiskAcceptanceSaveRequest req, CancellationToken ct)
     {
         if (req is null) return BadRequest(new { success = false, error = "request body is required." });
+        // 2026-10-10: the acceptance rationale (remark) is mandatory on
+        // Accept Risk -- an accepted risk must say why it is acceptable.
+        // Checked here, not in sp_risk_acceptance_save, because that
+        // procedure is also composed by Bulk Review with status Accepted
+        // (299), whose remark stays optional.
+        if (string.IsNullOrWhiteSpace(req.AcceptanceNote))
+            return BadRequest(new { success = false, error = "Acceptance rationale is required." });
         var result = await svc.SaveAcceptanceAsync(riskId, req, ct);
         return result.Success ? Ok(result) : BadRequest(result);
     }
@@ -1084,6 +1091,9 @@ public sealed class RiskCentreController(
         [FromBody] RiskBulkAcceptRequest req, CancellationToken ct)
     {
         if (req is null) return BadRequest(new { success = false, error = "request body is required." });
+        // 2026-10-10: same rule as the single Accept Risk above.
+        if (string.IsNullOrWhiteSpace(req.AcceptanceNote))
+            return BadRequest(new { success = false, error = "Acceptance rationale is required." });
 
         var result = await svc.BulkAcceptAsync(req, ct);
         if (!result.Success) return BadRequest(result);

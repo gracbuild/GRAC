@@ -93,3 +93,42 @@ The Advanced Settings value is staged with the matrix and written by
 the Role dialog's Save (`flushPending`).
 
 Rollback: `415_role_view_data_scope_rollback.sql` (drops the policy first).
+
+## Diagnostic (2026-10-09)
+
+`database/_diag_view_data_scope_user.sql` (read-only): for one login it lists
+the roles the scope procedure considers with their View Data Scope (one role on
+All records makes the user unrestricted), the policy state, and, table by
+table, the rows visible under the user's scope vs all rows. Remember the scope
+covers only the nine tables above -- Organization Practices, Control
+Statements, Standards & Frameworks, assets and other lists are not filtered by
+it.
+
+## Organization Practices and Control Statements (migration 460, 2026-10-09)
+
+Reported: a role on Assigned Owner still saw every row on Organization
+Practices and Control Statements. The diagnostic showed the nine 415 tables
+correctly filtered (0 rows visible) -- those two lists read tables outside the
+policy (organization_requirement / practice / organization_framework_statements
+/ custom_release_statement).
+
+460 adds two predicates on top of 415's `fn_pm_view_scope_owner` (so Owner /
+Team / Location keep one definition), and the API applies them in the two list
+queries only:
+
+| List | Predicate | Visible to a restricted reader when |
+| --- | --- | --- |
+| Organization Practices (`QueryOrganizationRequirementFallbackAsync`, incl. get-by-id) | `fn_pm_view_scope_requirement(organization_requirement_id)` | the practice owner (`practice.practice_owner_id`) is in scope, OR one of its practice instances is visible (practice_instance is already RLS-filtered) |
+| Control Statements, repository (`QueryReleaseStatementsAsync`) and custom (`QueryCustomReleaseStatementsAsync`) | `fn_pm_view_scope_statement(owner, org, framework_statement_id, org_statement_id)` | the statement owner is in scope, OR a mapped practice (`organization_statement_practice_mapping`) is visible by the rule above |
+
+A statement with no owner and no visible mapped practice is hidden. Structure
+node rows are not filtered (they are a lookup for the tree; the grid shows
+statement rows only).
+
+Not added to the security policy on purpose: practice / requirement /
+statement tables are joined by most other lists (instances, tasks, gaps,
+risks), and filtering them for every read would drop a reader's own instances
+and tasks whenever the practice above them is owned by someone else.
+
+Unrestricted readers are unaffected. Rollback:
+`460_view_scope_practices_statements_rollback.sql` (roll back the Api first).

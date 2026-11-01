@@ -13,6 +13,7 @@ using System.Net.Http;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using PracticeManagement.Web.Security;
+using PracticeManagement.Web.Services;
 
 namespace PracticeManagement.Web.Controllers;
 
@@ -133,6 +134,91 @@ public sealed class WorkflowController(
     }
 
     // -----------------------------------------------------------------
+    // Migration 473: Operationalize evidence attachments. The two
+    // file-shaped calls cannot ride the JSON/string catch-alls above, so
+    // they get their own routes (more specific than {**path}, so they win).
+    // The list and the remove are plain JSON and stay on the catch-alls
+    // (which check an organizationId in the query / body). These two
+    // REQUIRE organizationId, check it against the caller, and pass it on,
+    // so the Api serves a file only from that organisation's instance.
+    // -----------------------------------------------------------------
+    [HttpPost("resolve/instances/{practiceInstanceId:long}/evidence/{evidenceId:long}/attachments")]
+    [RequestSizeLimit(52_428_800)] // 50 MB -- matches the Api-side limit
+    public async Task<IActionResult> UploadEvidenceAttachment(
+        long practiceInstanceId, long evidenceId, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        var unauthorized = GuardSession();
+        if (unauthorized is not null) return unauthorized;
+        var forbidden = GuardOrganization(organizationId);
+        if (forbidden is not null) return forbidden;
+        if (!Request.HasFormContentType)
+            return BadRequest(new { error = "Request is not multipart/form-data." });
+
+        var client = BuildClient();
+        try
+        {
+            // The uploader is the session's employee (CallerIdentityHandler /
+            // StampCallerIdentity), so nothing identity-shaped is forwarded.
+            using var content = await ApiFileProxy.BuildMultipartAsync(
+                Request, cancellationToken, "uploadedByEmployeeId");
+            using var req = new HttpRequestMessage(HttpMethod.Post,
+                $"api/practice/workflow/resolve/instances/{practiceInstanceId}/evidence/{evidenceId}/attachments?organizationId={organizationId}")
+            {
+                Content = content
+            };
+            StampCallerIdentity(req);
+            var resp    = await client.SendAsync(req, cancellationToken);
+            var payload = await resp.Content.ReadAsStringAsync(cancellationToken);
+            return new ContentResult
+            {
+                Content     = payload,
+                ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                StatusCode  = (int)resp.StatusCode
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "WorkflowController.UploadEvidenceAttachment failed for evidence {EvidenceId}", evidenceId);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
+    [HttpGet("resolve/instances/{practiceInstanceId:long}/evidence-attachments/{evidenceAttachmentId:long}")]
+    public async Task<IActionResult> DownloadEvidenceAttachment(
+        long practiceInstanceId, long evidenceAttachmentId, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        var unauthorized = GuardSession();
+        if (unauthorized is not null) return unauthorized;
+        var forbidden = GuardOrganization(organizationId);
+        if (forbidden is not null) return forbidden;
+
+        var client = BuildClient();
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"api/practice/workflow/resolve/instances/{practiceInstanceId}/evidence-attachments/{evidenceAttachmentId}?organizationId={organizationId}");
+            StampCallerIdentity(req);
+            var resp = await client.SendAsync(req, cancellationToken);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var payload = await resp.Content.ReadAsStringAsync(cancellationToken);
+                return new ContentResult
+                {
+                    Content     = payload,
+                    ContentType = resp.Content.Headers.ContentType?.ToString() ?? "application/json",
+                    StatusCode  = (int)resp.StatusCode
+                };
+            }
+            return await ApiFileProxy.ToFileResultAsync(resp, $"evidence-{evidenceAttachmentId}", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "WorkflowController.DownloadEvidenceAttachment failed for attachment {AttachmentId}", evidenceAttachmentId);
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
+        }
+    }
+
+    // -----------------------------------------------------------------
     // Feature-flag probe: /practice/api/workflow/feature-status?featureCode=screen.workflows&organizationId=...
     // -----------------------------------------------------------------
     [HttpGet("~/practice/api/workflow-feature/status")]
@@ -169,6 +255,18 @@ public sealed class WorkflowController(
             logger.LogWarning(ex, "WorkflowController.FeatureStatus proxy failed; failing closed.");
             return Ok(new { enabled = false, organizationId, reason = "Probe error; fail closed." });
         }
+    }
+
+    // Migration 473: the file routes' organisation check -- the same test
+    // the catch-alls apply, but mandatory rather than "when present".
+    private IActionResult? GuardOrganization(long? organizationId)
+    {
+        if (organizationId is not > 0)
+            return BadRequest(new { error = "organizationId is required." });
+        if (!HttpContext.IsOrganizationAllowed(organizationId.Value))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "Caller is not authorised for the requested organization." });
+        return null;
     }
 
     private IActionResult? GuardSession()

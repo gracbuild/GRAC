@@ -1,4 +1,5 @@
 using ControlManagement.Security;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using PracticeManagement.Web.Models;
@@ -102,7 +103,17 @@ public sealed class LoginController(
         // an auxiliary lookup) should follow the same permission as
         // editing the Committee itself.
         "committee-members:VIEW",
-        "committee-designations:VIEW"
+        "committee-designations:VIEW",
+        // 2026-10-08: the object list behind every dependency picker --
+        // Operationalize's dependency table (Team, Person, Asset, Vendor,
+        // Committee, Location, Business Function) and Risk -> Impact Details.
+        // No menu_master row governs it, so no database role could ever be
+        // granted "dependency-options:VIEW": the gateway answered 403, the
+        // page swallowed it, and the picker showed no options for an
+        // organization admin while admin@grac.local (PM_ADMIN *:*) saw them.
+        // Organization-scoped at the gateway (OrganizationScopedEntityTypes),
+        // same reasoning as owners/time-zones above.
+        "dependency-options:VIEW"
     ];
 
     [HttpGet]
@@ -111,7 +122,137 @@ public sealed class LoginController(
         if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is not null)
             return DefaultRedirect();
 
+        // Single sign-on outcome (2026-10-12), set by ExternalCallback or by
+        // the OIDC handler's OnRemoteFailure (Program.cs). One message per
+        // case; none of them says whether a GRAC account exists for an email
+        // the visitor did not prove they own.
+        var ssoMessage = Request.Query["sso"].ToString() switch
+        {
+            "failed"   => "Single sign-on did not complete. Please try again.",
+            "notfound" => "Your account is not set up in GRAC. Contact your administrator.",
+            "noemail"  => "Your sign-in did not provide a verified email address. Contact your administrator.",
+            // Migration 466: the organization's SSO policy refused the
+            // provider / Microsoft tenant / email domain.
+            "notallowed" => "Single sign-on with this account is not enabled for your organization. Contact your administrator.",
+            // Migration 467: created on first SSO sign-in (or earlier) and
+            // waiting for an administrator to approve it.
+            "pending"    => "Your GRAC account has been created and is waiting for administrator approval. You can sign in once it is approved.",
+            _          => null
+        };
+        if (ssoMessage is not null) ModelState.AddModelError("", ssoMessage);
+
         return View(new LoginViewModel { ReturnUrl = returnUrl });
+    }
+
+    // =================================================================
+    // Single sign-on -- Microsoft Entra ID / Google (2026-10-12).
+    // docs/single-sign-on.md.
+    //
+    // External: the button on the login page. Hands the browser to the
+    // identity provider (OpenID Connect challenge, Program.cs).
+    //
+    // ExternalCallback: the provider's handler (/signin-oidc-*) has put the
+    // provider's answer in the short-lived external cookie and redirects
+    // here. The VERIFIED email is matched to an active GRAC employee by the
+    // API (secure/authenticate-external); no match = blocked, nothing is
+    // created. A match signs the session in through the same SignIn() a
+    // password sign-in uses, so roles, permissions and data scope are
+    // GRAC's own. No default-password / change-password step: an SSO user
+    // has no GRAC password to change.
+    // =================================================================
+    [HttpGet]
+    public IActionResult External(string? provider, string? returnUrl)
+    {
+        var sso = SsoProviders.Find(configuration, provider);
+        if (sso is null) return DefaultRedirectToLogin();
+
+        var callback = LoginUrl("/ExternalCallback");
+        if (Url.IsLocalUrl(returnUrl)) callback += "?returnUrl=" + Uri.EscapeDataString(returnUrl!);
+        var properties = new AuthenticationProperties { RedirectUri = callback };
+        properties.Items["provider"] = sso.Scheme;
+        return Challenge(properties, sso.Scheme);
+    }
+
+    [HttpGet]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> ExternalCallback(string? returnUrl, CancellationToken cancellationToken)
+    {
+        var result = await HttpContext.AuthenticateAsync(SsoProviders.ExternalScheme);
+        // The external cookie has done its job either way; never leave it.
+        await HttpContext.SignOutAsync(SsoProviders.ExternalScheme);
+        if (!result.Succeeded || result.Principal is null)
+            return RedirectToLoginWithSso("failed", returnUrl);
+
+        var provider = result.Properties?.Items.TryGetValue("provider", out var p) == true ? p : null;
+        var sso = SsoProviders.Find(configuration, provider);
+        if (sso is null) return RedirectToLoginWithSso("failed", returnUrl);
+
+        string? Claim(string type) => result.Principal.FindFirst(type)?.Value;
+        // Google: only a verified email counts. Microsoft (one configured
+        // tenant): the email claim, else the sign-in name, which in an Entra
+        // tenant is the user's UPN / work email.
+        var email = sso.Scheme == SsoProviders.Google
+            ? (string.Equals(Claim("email_verified"), "true", StringComparison.OrdinalIgnoreCase) ? Claim("email") : null)
+            : Claim("email") ?? Claim("preferred_username") ?? Claim("upn");
+        var subject = Claim("oid") ?? Claim("sub");
+        // Migration 466: the Entra tenant that vouched for this person. The
+        // issuer was already checked against it (Program.cs); the API checks
+        // it against the organization's allowed tenants. Google has none.
+        var tenantId = sso.Scheme == SsoProviders.Microsoft ? Claim("tid") : null;
+        // Migration 467: the person's name, used only if the organization
+        // auto-creates the account on this first sign-in.
+        var displayName = Claim("name")
+            ?? string.Join(" ", new[] { Claim("given_name"), Claim("family_name") }.Where(part => !string.IsNullOrWhiteSpace(part)));
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            logger.LogWarning("SSO sign-in via {Provider} returned no usable email (subject {Subject}).", sso.Scheme, subject);
+            return RedirectToLoginWithSso("noemail", returnUrl);
+        }
+
+        var outcome = await loginService.AuthenticateExternalAsync(email.Trim(), sso.Scheme, subject, tenantId, displayName, cancellationToken);
+        if (outcome.Failure == SignInFailures.SsoPending)
+        {
+            logger.LogInformation("SSO sign-in via {Provider} for {Email}: account is waiting for administrator approval.", sso.Scheme, email);
+            return RedirectToLoginWithSso("pending", returnUrl);
+        }
+        if (outcome.Failure == SignInFailures.SsoNotAllowed)
+        {
+            logger.LogWarning("SSO sign-in via {Provider} for {Email} (tenant {TenantId}) rejected by the organization's SSO policy.", sso.Scheme, email, tenantId);
+            return RedirectToLoginWithSso("notallowed", returnUrl);
+        }
+        var dbLogin = outcome.User;
+        if (dbLogin is null)
+        {
+            logger.LogWarning("SSO sign-in via {Provider} for {Email} rejected: no active GRAC employee has this email.", sso.Scheme, email);
+            return RedirectToLoginWithSso("notfound", returnUrl);
+        }
+
+        SignIn(dbLogin, email.Trim());
+        logger.LogInformation("PracticeManagement SSO sign-in via {Provider} succeeded for {Email}.", sso.Scheme, email);
+        return SameSiteHop(Url.IsLocalUrl(returnUrl) ? returnUrl! : DefaultUrl());
+    }
+
+    // The session cookie is SameSite=Strict (Program.cs). This response is
+    // the end of a navigation that STARTED at Microsoft / Google, so a plain
+    // 302 to the app would be sent without the new session cookie and land
+    // back on the login page. A tiny page that navigates on from our own
+    // origin makes the next request same-site, and the cookie goes with it.
+    private ContentResult SameSiteHop(string target)
+    {
+        var url = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(target);
+        return new ContentResult
+        {
+            ContentType = "text/html; charset=utf-8",
+            Content = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0;url=" + url
+                    + "\"><title>GRAC</title></head><body><p>Signing you in&hellip; <a href=\"" + url + "\">Continue</a></p></body></html>"
+        };
+    }
+
+    private IActionResult RedirectToLoginWithSso(string code, string? returnUrl)
+    {
+        var url = LoginUrl("") + "?sso=" + code;
+        if (Url.IsLocalUrl(returnUrl)) url += "&returnUrl=" + Uri.EscapeDataString(returnUrl!);
+        return LocalRedirect(url);
     }
 
     [HttpPost]
@@ -121,7 +262,19 @@ public sealed class LoginController(
     {
         if (!ModelState.IsValid) return View(model);
 
-        var dbLogin = await loginService.AuthenticateAsync(model.LoginId, model.Password, cancellationToken);
+        var signIn = await loginService.SignInAsync(model.LoginId, model.Password, cancellationToken);
+        // Migration 466: the password was right but the organization signs in
+        // with single sign-on only. Said plainly -- only the password holder
+        // can reach this message. The configured ReviewLogin admin is not an
+        // employee sign-in and is never held to an organization's policy.
+        if (signIn.Failure == SignInFailures.SsoRequired
+            && !string.Equals(model.LoginId, configuration["ReviewLogin:Email"], StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogInformation("PracticeManagement password sign-in for {User} refused: organization requires single sign-on.", model.LoginId);
+            ModelState.AddModelError("", "Your organization signs in with single sign-on. Use the Microsoft or Google button below.");
+            return View(model);
+        }
+        var dbLogin = signIn.User;
         if (dbLogin is not null)
         {
             // An account still on the shared default password gets no session.
@@ -344,12 +497,23 @@ public sealed class LoginController(
         return DefaultRedirectToLogin();
     }
 
-    private IActionResult DefaultRedirect()
+    private IActionResult DefaultRedirect() => LocalRedirect(DefaultUrl());
+
+    private string DefaultUrl()
     {
         var pathBase = CurrentPathBase();
         return IsOrganizationManagementRequest()
-            ? LocalRedirect(BuildLocalUrl(pathBase, "/OrganizationManagement"))
-            : LocalRedirect(BuildLocalUrl(pathBase, "/Practice"));
+            ? BuildLocalUrl(pathBase, "/OrganizationManagement")
+            : BuildLocalUrl(pathBase, "/Practice");
+    }
+
+    // /Login (or /OrganizationManagement/Login) under PathBase, plus a
+    // sub-path -- built the way DefaultRedirectToLogin builds it, for the
+    // same LinkGenerator reason.
+    private string LoginUrl(string subPath)
+    {
+        var root = IsOrganizationManagementRequest() ? "/OrganizationManagement/Login" : "/Login";
+        return BuildLocalUrl(CurrentPathBase(), root + subPath);
     }
 
     private IActionResult DefaultRedirectToLogin()

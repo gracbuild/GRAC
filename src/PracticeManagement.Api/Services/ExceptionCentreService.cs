@@ -18,6 +18,7 @@ public interface IExceptionCentreService
     Task<ExceptionRequestListResult> ListAsync(long organizationId, string? statusCode, string? requestType, int page, int pageSize, ListDrillFilter? drill, CancellationToken ct);
     Task<ExceptionRequestDetail?>    GetAsync(long exceptionRequestId, CancellationToken ct);
     Task<ExceptionActionResult>      ApproveAsync(long id, ExceptionApproveRequest req, CancellationToken ct);
+    Task<IReadOnlyList<ExceptionApproverCandidate>> ListApproverCandidatesAsync(long organizationId, CancellationToken ct);
     Task<ExceptionActionResult>      RejectAsync(long id, ExceptionRejectRequest req, CancellationToken ct);
     // Migration 184: SLA override candidates use their own approve path
     // (no effective_until / approval_note required; sla_days_requested
@@ -98,7 +99,10 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
                 // and SLA payload snapshots surface in the grid too.
                 ReadStringSafe(r, "RequestTypeCode") ?? "GAP_CANDIDATE",
                 ReadIntSafe(r,    "SlaDaysOriginal"),
-                ReadIntSafe(r,    "SlaDaysRequested")));
+                ReadIntSafe(r,    "SlaDaysRequested"),
+                ReadStringSafe(r, "ExceptionNumber"),   // 470/472
+                ReadLongSafe(r,   "DesignatedApproverEmployeeId"),   // 498
+                ReadStringSafe(r, "DesignatedApproverName")));
             total = Convert.ToInt64(r["TotalRows"]);
         }
         return new ExceptionRequestListResult(total, page, pageSize, rows);
@@ -175,7 +179,9 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
             r["RejectedByEmployeeId"] as long?,
             r["RejectedByName"] as string,
             r["RejectedOn"] as DateTime?,
-            r["RejectionReason"] as string);
+            r["RejectionReason"] as string,
+            ReadLongSafe(r, "DesignatedApproverEmployeeId"),
+            ReadStringSafe(r, "DesignatedApproverName"));
     }
 
     public async Task<ExceptionActionResult> ApproveAsync(long id, ExceptionApproveRequest req, CancellationToken ct)
@@ -197,6 +203,22 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
         try
         {
             await using var conn = await OpenAsync(ct);
+            // 498: strict -- if a designated approver was named at
+            // submit-for-approval, ONLY that employee may approve. No admin
+            // override. (The designated approver already holds Approve
+            // permission, validated when they were chosen.)
+            long? designated = null;
+            await using (var dcmd = conn.CreateCommand())
+            {
+                dcmd.CommandText = "SELECT designated_approver_employee_id FROM grac_practice.exception_request WHERE exception_request_id = @id";
+                var dp = dcmd.CreateParameter(); dp.ParameterName = "@id"; dp.Value = id; dcmd.Parameters.Add(dp);
+                var o = await dcmd.ExecuteScalarAsync(ct);
+                if (o is not null && o != DBNull.Value) designated = Convert.ToInt64(o);
+            }
+            if (designated is not null && designated.Value != approverId.Value)
+                return new ExceptionActionResult(false, id, null,
+                    "Only the designated approver can approve this exception.");
+
             await using var cmd  = Proc(conn, "grac_practice.sp_exception_request_approve");
             AddParam(cmd, "@exception_request_id",    DbType.Int64,  id);
             AddParam(cmd, "@effective_until",         DbType.Date,   req.EffectiveUntil);
@@ -222,6 +244,21 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
             logger.LogWarning(ex, "ExceptionCentreService.Approve failed {Id}: {Msg}", id, ex.Message);
             return new ExceptionActionResult(false, id, null, ex.Message);
         }
+    }
+
+    public async Task<IReadOnlyList<ExceptionApproverCandidate>> ListApproverCandidatesAsync(long organizationId, CancellationToken ct)
+    {
+        var rows = new List<ExceptionApproverCandidate>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_exception_approver_candidates");
+        AddParam(cmd, "@organization_id", DbType.Int64, organizationId);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new ExceptionApproverCandidate(
+                Convert.ToInt64(r["EmployeeId"]),
+                r["EmployeeName"]?.ToString() ?? "",
+                r["EmployeeCode"] as string));
+        return rows;
     }
 
     public async Task<ExceptionActionResult> RejectAsync(long id, ExceptionRejectRequest req, CancellationToken ct)
@@ -445,6 +482,12 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
                      (object?)req.ProposedEffectiveUntil ?? DBNull.Value);
             AddParam(cmd, "@caller_display_name",  DbType.String,
                      string.IsNullOrWhiteSpace(req.CallerDisplayName) ? "system" : req.CallerDisplayName, 100);
+            // 498's designated approver is NOT part of the Analysis stage: it is
+            // picked on the Submit for Approval form and written by
+            // sp_exception_request_submit_for_approval. It does not belong here --
+            // sp_exception_request_analysis_save (260) has eight parameters and
+            // none of them is @designated_approver_employee_id, so passing it
+            // would fail with "has too many arguments specified".
 
             await using var r = await cmd.ExecuteReaderAsync(ct);
             if (await r.ReadAsync(ct)) { /* consume */ }
@@ -469,6 +512,13 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
             AddParam(cmd, "@actor_employee_id",    DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
             AddParam(cmd, "@caller_display_name",  DbType.String,
                      string.IsNullOrWhiteSpace(req.CallerDisplayName) ? "system" : req.CallerDisplayName, 100);
+            // 498: the mandatory designated approver, chosen on this form. The
+            // procedure THROWs 55288 when it is NULL and 55289 when the chosen
+            // employee does not hold Approve on the Exceptions & Waivers menu
+            // for the request's organisation, so the validation stays in one
+            // place; this call only has to carry what the form already sends.
+            AddParam(cmd, "@designated_approver_employee_id", DbType.Int64,
+                     (object?)req.DesignatedApproverEmployeeId ?? DBNull.Value);
 
             await using var r = await cmd.ExecuteReaderAsync(ct);
             if (await r.ReadAsync(ct)) { /* consume */ }

@@ -34,7 +34,16 @@ public sealed class PracticeLoginService(
 
     private static readonly string[] BootstrapRoles = ["PM_LOGIN"];
 
-    public async Task<PracticeLoginResult?> AuthenticateAsync(string loginId, string password, CancellationToken cancellationToken)
+    public async Task<PracticeLoginResult?> AuthenticateAsync(string loginId, string password, CancellationToken cancellationToken) =>
+        (await SignInAsync(loginId, password, cancellationToken)).User;
+
+    /// <summary>
+    /// Password sign-in with the refusal reason. Failure is set only to
+    /// <see cref="SignInFailures.SsoRequired"/> (migration 466): the password
+    /// was right but the organization signs in with single sign-on only.
+    /// Every other failure stays the uniform "invalid credentials".
+    /// </summary>
+    public async Task<PracticeSignInOutcome> SignInAsync(string loginId, string password, CancellationToken cancellationToken)
     {
         var request = new SecureRepositoryRequest
         {
@@ -54,14 +63,54 @@ public sealed class PracticeLoginService(
             // outage is not misread as an authentication problem; the user still
             // sees the uniform "invalid credentials" message from LoginController.
             logger.LogError(ex, "Sign-in for {LoginId} could not reach the practice API.", loginId);
-            return null;
+            return PracticeSignInOutcome.Rejected;
         }
 
         var envelope = Deserialize<PracticeLoginResult>(responseJson);
         if (envelope is null || !envelope.Success || envelope.Data is null)
-            return null;
+            return new PracticeSignInOutcome(null, envelope?.Field);
 
-        return envelope.Data;
+        return new PracticeSignInOutcome(envelope.Data);
+    }
+
+    /// <summary>
+    /// Single sign-on (2026-10-12). Called ONLY from LoginController
+    /// .ExternalCallback, after Microsoft / Google authenticated the person,
+    /// with the provider's verified email -- never with anything typed on the
+    /// login form. Returns the same identity a password sign-in does, or null
+    /// when no active GRAC employee has that email (the person is blocked).
+    /// Migration 466: <paramref name="tenantId"/> is the Microsoft token's
+    /// tid; the API checks it, the provider and the email domain against the
+    /// employee organization's SSO policy -- Failure
+    /// <see cref="SignInFailures.SsoNotAllowed"/> when it does not accept them.
+    /// </summary>
+    /// Migration 467: <paramref name="displayName"/> (the token's name) is used
+    /// only when the organization auto-creates the user on this sign-in;
+    /// Failure <see cref="SignInFailures.SsoPending"/> = waiting for approval.
+    public async Task<PracticeSignInOutcome> AuthenticateExternalAsync(string email, string provider, string? subject, string? tenantId, string? displayName, CancellationToken cancellationToken)
+    {
+        var request = new SecureRepositoryRequest
+        {
+            EntityType = "authenticate-external",
+            Action = "AUTH",
+            Data = JsonSerializer.SerializeToElement(new { email, provider, subject, tenantId, displayName })
+        };
+
+        string responseJson;
+        try
+        {
+            responseJson = await client.AuthenticateExternalAsync(BootstrapToken(email), request, cancellationToken);
+        }
+        catch (PracticeApiException ex)
+        {
+            logger.LogError(ex, "SSO sign-in for {Email} via {Provider} could not reach the practice API.", email, provider);
+            return PracticeSignInOutcome.Rejected;
+        }
+
+        var envelope = Deserialize<PracticeLoginResult>(responseJson);
+        return envelope is { Success: true, Data: not null }
+            ? new PracticeSignInOutcome(envelope.Data)
+            : new PracticeSignInOutcome(null, envelope?.Field);
     }
 
     /// <summary>
@@ -150,7 +199,27 @@ public sealed class PracticeLoginService(
     // returns the AuthenticatedUser (whose field names line up 1:1 with
     // PracticeLoginResult), resolve-identity returns the smaller identity,
     // and set-password returns none.
-    private sealed record Envelope<T>(bool Success, string? Message, T? Data) where T : class;
+    // Field carries the API's sign-in refusal code (migration 466,
+    // SignInFailures); for entity saves it names the offending payload key.
+    private sealed record Envelope<T>(bool Success, string? Message, T? Data, string? Field = null) where T : class;
+}
+
+/// <summary>Sign-in refusal codes the API returns in
+/// PracticeRepositoryResult.Field (Api Models/OrganizationSsoSettingModels.cs).</summary>
+public static class SignInFailures
+{
+    public const string SsoRequired   = "sso-required";
+    public const string SsoNotAllowed = "sso-not-allowed";
+    public const string SsoPending    = "sso-pending";     // 467
+}
+
+public sealed record PracticeSignInOutcome(PracticeLoginResult? User, string? Failure = null)
+{
+    // Named argument on purpose: a bare new(null) binds to the record's
+    // compiler-generated COPY constructor (PracticeSignInOutcome(original)), which then
+    // dereferences the null original -> NullReferenceException in the type
+    // initializer, breaking every sign-in.
+    public static readonly PracticeSignInOutcome Rejected = new(User: null);
 }
 
 /// <summary>

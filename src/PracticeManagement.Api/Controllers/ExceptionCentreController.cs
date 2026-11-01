@@ -43,6 +43,15 @@ public sealed class ExceptionCentreController(
         return Ok(await svc.ListPracticesAsync(organizationId, ct));
     }
 
+    // 498: eligible approvers for the submit-for-approval combo -- active
+    // employees whose role holds Approve on the Exceptions & Waivers menu.
+    [HttpGet("lookups/approver-candidates")]
+    public async Task<IActionResult> ApproverCandidates([FromQuery] long organizationId, CancellationToken ct)
+    {
+        if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        return Ok(await svc.ListApproverCandidatesAsync(organizationId, ct));
+    }
+
     // Ops-scheduled job entry point: auto-expire Approved rows whose
     // effective_until is in the past. Idempotent; safe to run repeatedly.
     [HttpPost("expire-due")]

@@ -135,3 +135,19 @@ the scoring-band `colorHex` defaults, `_Layout.cshtml`'s SVG stroke,
 
 **Carry forward:** layout-only inline styles (grids, widths) remain; they
 can move to classes screen by screen when a screen is next touched.
+
+## Fix 2026-10-26 -- bold form controls
+
+AdminLTE sets every `<label>` to `font-weight: 700` (the app's form labels are
+600/650). Controls styled with the `font: inherit` shorthand took that weight
+and rendered bold -- most visibly every field on **Edit Task**. Controls now
+read at 400:
+
+- `_task-action-dialogs.cshtml` (Edit Task), `_task-form-dialog.cshtml`
+  (New Task / sub task), `_impact-detail-dialog.cshtml` (Impact Details):
+  `font-weight: 400` added after `font: inherit` in their control rules.
+- `practice-management.css` (last rule): `label input/select/textarea`,
+  `.checkbox-combo-trigger`, `.pm-obligation-toolbar input/select` ->
+  `font-weight: 400`. `.pm-checkcombo-trigger` keeps its deliberate 500.
+
+CSS only.

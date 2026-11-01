@@ -231,7 +231,7 @@
       `${esc(h.templateName)} &middot; v${esc(h.versionNo)} ${chip(h.statusCode)}`;
     document.getElementById("aftDesignMeta").textContent =
       `${h.categoryName} / ${h.subcategoryName} / ${h.assetTypeName}` +
-      ` -- owner: ${h.templateOwnerName || "not set"}` +
+      ` -- owner: ${h.templateOwnerName || "Unassigned"}` +
       (h.effectiveFrom ? ` -- effective ${dateRange(h.effectiveFrom, h.effectiveTo)}` : "") +
       (h.sourceVersionNo ? ` -- from v${h.sourceVersionNo}` : "");
     root.classList.toggle("aft-locked", !editable());

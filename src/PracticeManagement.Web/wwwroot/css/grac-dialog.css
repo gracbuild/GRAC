@@ -26,6 +26,15 @@
     width: min(440px, 100%);
 }
 
+/* Opt-in wider variant (gracUi.prompt { wide: true }) -- for a prompt whose
+   textarea needs to hold a real paragraph comfortably, e.g. Task Centre's
+   Add Update / Comment. Every other alert/confirm/prompt call site leaves
+   wide unset and keeps the default 440px. */
+.grac-dialog--wide {
+    max-width: 760px;
+    width: min(760px, 100%);
+}
+
 .grac-dialog-overlay.closing .grac-dialog {
     animation: gracDialogRiseOut 140ms ease-in forwards;
 }
@@ -83,6 +92,15 @@
     border-color: var(--primary-500);
     box-shadow: 0 0 0 3px var(--focus-ring);
     outline: none;
+}
+
+/* Multiline prompt (gracUi.prompt { multiline: true }) -- a textarea
+   reusing the same input styling, but with the editor font and a
+   vertical resize handle so a longer remark has room. */
+textarea.grac-dialog-input {
+    font-family: inherit;
+    line-height: 1.4;
+    resize: vertical;
 }
 
 .grac-dialog-actions {

@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <!-- Single sign-on (2026-10-12): Microsoft Entra ID + Google over OpenID Connect. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.11" />
   </ItemGroup>
 
   <ItemGroup>

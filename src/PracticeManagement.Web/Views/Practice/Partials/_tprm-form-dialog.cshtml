@@ -1,0 +1,61 @@
+@*
+    THE TPRM form dialog (migrations 486-490).
+
+    One pm-modal shared by every Third-Party Risk screen for its smaller
+    forms (a status change, a finding, a decision, a review outcome ...).
+    window.gracTprm.form({ title, fields, submitText }) fills it, shows it
+    and resolves with the values (or null on Cancel) -- the screens describe
+    the fields instead of each carrying its own copy of the same modal
+    markup. Larger editors (third party, engagement, configuration items)
+    use the same dialog with more fields.
+
+    Included ONCE per page (the ids are global) by tprm-third-parties,
+    tprm-engagements, tprm-reviews and tprm-configuration. Its style block
+    also carries the few tprm- classes those four screens share (info grid,
+    notes, action rows, wide modal, step chips), so they are written once.
+    Script: wwwroot/js/Tprm/tprm-common.js
+*@
+<div class="pm-modal" id="tprmFormModal" hidden>
+    <div class="pm-modal-panel tprm-form-panel">
+        <header>
+            <h2 id="tprmFormTitle">Edit</h2>
+            <button class="pm-modal-close" type="button" id="tprmFormClose" aria-label="Close">&times;</button>
+        </header>
+        <p class="tprm-note" id="tprmFormIntro" hidden></p>
+        <form id="tprmForm" class="pm-form-grid" novalidate>
+            <div class="full tprm-form-fields" id="tprmFormFields"></div>
+            <p class="pm-message full" id="tprmFormMessage" role="status" aria-live="polite" hidden></p>
+            <div class="full" id="tprmFormExtra" hidden></div>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" id="tprmFormCancel">Cancel</button>
+                <button type="submit" class="pm-button primary" id="tprmFormSubmit"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .tprm-form-panel { max-width: 860px; width: 100%; }
+    .tprm-form-panel.wide { max-width: 1100px; }
+    .tprm-form-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+    .tprm-form-fields > label.full, .tprm-form-fields > div.full { grid-column: 1 / -1; }
+    .tprm-form-fields .tprm-help { color: var(--fg-secondary); font-size: 11px; display: block; margin-top: 2px; }
+    .tprm-form-fields .tprm-check { display: flex; gap: 8px; align-items: center; }
+    .tprm-form-fields .tprm-section { grid-column: 1 / -1; font-weight: 600; font-size: 13px; margin: 6px 0 0; border-bottom: 1px solid var(--border-subtle, #e5e7eb); padding-bottom: 4px; }
+    .tprm-form-fields .tprm-multi { display: flex; flex-wrap: wrap; gap: 4px 12px; max-height: 160px; overflow: auto; border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 6px; padding: 6px 8px; }
+    .tprm-form-fields .tprm-multi label { display: inline-flex; gap: 4px; align-items: center; font-weight: 400; }
+    .tprm-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .tprm-muted { color: var(--fg-secondary); font-size: 12px; }
+    .tprm-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .tprm-inline-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+    .pm-modal-panel.tprm-wide { max-width: 1100px; width: 100%; }
+    .tprm-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .tprm-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .tprm-sample { background: var(--warning-50); color: var(--warning-700); }
+    .tprm-alert { color: var(--danger-700); font-weight: 600; }
+    .tprm-step-chip { display: inline-block; margin-left: 6px; min-width: 8px; height: 8px; border-radius: 50%; background: var(--border-subtle, #d1d5db); vertical-align: middle; }
+    .tprm-step-chip.done { background: var(--success-700, #15803d); }
+    .tprm-step-chip.current { background: var(--warning-700, #b45309); }
+    .tprm-subhead { font-size: 14px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    @@media (max-width: 720px) { .tprm-form-fields { grid-template-columns: 1fr; } }
+</style>

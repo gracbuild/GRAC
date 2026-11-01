@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using PracticeManagement.Web.Security;
+using ControlManagement.Security;
 
 namespace PracticeManagement.Web.Controllers;
 
@@ -15,8 +16,27 @@ namespace PracticeManagement.Web.Controllers;
 public sealed class ExceptionCentreController(
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
+    PermissionPolicy permissionPolicy,
     ILogger<ExceptionCentreController> logger) : ControllerBase
 {
+    // Approve / Approve-SLA on Exceptions & Waivers require the APPROVE grant
+    // on the exception-centre menu (Role Master -> Approve checkbox). The grid
+    // already hides the button; this is the server-side gate behind it, so a
+    // direct API call cannot approve without the permission.
+    private string[] Roles() =>
+        (HttpContext.Session.GetString(PracticeSessionIdentity.RolesKey) ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+    private bool CanApprove() =>
+        permissionPolicy.IsAllowed(Roles(), PermissionAreaMap.For("exception-centre"), "APPROVE");
+
+    private IActionResult? ApprovePermissionGuard() =>
+        HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null
+            ? Unauthorized(new { error = "Session expired. Please sign in again." })
+            : CanApprove() ? null
+            : StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "You do not have Approve permission for Exceptions & Waivers." });
+
     private const string ApiBaseKey = "ApiBaseUrl";
 
     private HttpClient BuildClient()
@@ -68,6 +88,15 @@ public sealed class ExceptionCentreController(
         if (!TryGuardOrganization(out var err)) return Task.FromResult(err!);
         var orgId = Request.Query["organizationId"];
         return ForwardGetAsync($"api/practice/exception-centre/lookups/practices?organizationId={orgId}", ct);
+    }
+
+    // 498: eligible-approver list for the submit-for-approval combo.
+    [HttpGet("lookups/approver-candidates")]
+    public Task<IActionResult> ApproverCandidates(CancellationToken ct)
+    {
+        if (!TryGuardOrganization(out var err)) return Task.FromResult(err!);
+        var orgId = Request.Query["organizationId"];
+        return ForwardGetAsync($"api/practice/exception-centre/lookups/approver-candidates?organizationId={orgId}", ct);
     }
 
     // Ops-triggered expiry sweep (or a scheduled task can hit the Api directly).
@@ -235,9 +264,13 @@ public sealed class ExceptionCentreController(
 
     [HttpPost("{id:long}/approve")]
     public Task<IActionResult> Approve(long id, CancellationToken ct)
-        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+    {
+        var guard = ApprovePermissionGuard();
+        if (guard is not null) return Task.FromResult(guard);
+        return ForwardJsonWithCallerStampAsync(HttpMethod.Post,
             $"api/practice/exception-centre/{id}/approve",
             "approvedByEmployeeId", ct);
+    }
 
     [HttpPost("{id:long}/reject")]
     public Task<IActionResult> Reject(long id, CancellationToken ct)
@@ -253,9 +286,13 @@ public sealed class ExceptionCentreController(
     // browser gets 404 before the request ever leaves the Web tier.
     [HttpPost("{id:long}/approve-sla")]
     public Task<IActionResult> ApproveSla(long id, CancellationToken ct)
-        => ForwardJsonWithCallerStampAsync(HttpMethod.Post,
+    {
+        var guard = ApprovePermissionGuard();
+        if (guard is not null) return Task.FromResult(guard);
+        return ForwardJsonWithCallerStampAsync(HttpMethod.Post,
             $"api/practice/exception-centre/{id}/approve-sla",
             "approvedByEmployeeId", ct);
+    }
 
     // =================================================================
     // Migration 257 -- Analysis stage proxies.

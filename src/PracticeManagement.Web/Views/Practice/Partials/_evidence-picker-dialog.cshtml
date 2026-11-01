@@ -1,0 +1,88 @@
+@*
+    THE "Select from Evidence Center" dialog (migration 476, Phase 1).
+
+    Driven by wwwroot/js/Shared/evidence-picker.js (window.gracEvidencePicker).
+    Include this partial once on a page, load that script, and any screen on
+    that page can open the same picker. Phase 1 caller: Operationalize
+    (one-time evidence rows, resolve-workspace.cshtml). Phase 2 adds Task
+    completion with the same dialog -- that is why it is shared from the
+    start, the _obligation-form-dialog / obligation-form.js pattern.
+
+    What it shows: Evidence Center items the caller can see (the procedure
+    decides), the evidence row's type as the default filter, validity, the
+    latest version and how many places use each item. An item that cannot
+    be linked (expired, or already on this evidence) says why instead of
+    offering Link.
+
+    NOT A <form>: Enter in the search box must not submit and close the
+    dialog. Every button is type="button".
+
+    SELF-CONTAINED STYLES: every class is `gep-` prefixed and defined below,
+    so the dialog renders the same on whichever page includes it.
+    Included ONCE per page; the ids are global.
+*@
+<dialog class="gep" id="gepDialog" aria-labelledby="gepHeading">
+  <div class="gep-form">
+    <header class="gep-head">
+        <h2 id="gepHeading">Select from Evidence Center</h2>
+        <button class="pm-icon-button" id="gepClose" type="button" aria-label="Close">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </header>
+
+    <div class="gep-body">
+        <p class="gep-note" id="gepContext"></p>
+        <div class="gep-toolbar">
+            <input type="search" id="gepSearch" placeholder="Search title, file name or tag" maxlength="200" />
+            <label class="gep-check" id="gepTypeWrap" hidden>
+                <input type="checkbox" id="gepSameType" checked />
+                <span id="gepTypeLabel">Same evidence type only</span>
+            </label>
+        </div>
+        <p class="pm-message" id="gepMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Evidence</th><th>Type</th><th>Owner</th><th>Valid to</th><th>Version</th><th>Used in</th><th></th></tr></thead>
+                <tbody id="gepBody"></tbody>
+            </table>
+        </div>
+        <div id="gepPager"></div>
+    </div>
+
+    <footer class="gep-foot">
+        <span class="gep-note">The link keeps the version you pick. A newer version is offered as an update later.</span>
+        <button class="pm-button" id="gepCancel" type="button">Close</button>
+    </footer>
+  </div>
+</dialog>
+
+<style>
+    /* Scoped to .gep so nothing here can reach another dialog. */
+    .gep {
+        width: min(960px, calc(100vw - 32px));
+        max-height: calc(100vh - 64px);
+        padding: 0; border: 0; border-radius: var(--radius-md);
+        background: var(--bg-surface); color: var(--fg-default);
+    }
+    .gep::backdrop { background: rgba(15, 23, 42, .45); }
+    .gep-form { display: flex; flex-direction: column; max-height: calc(100vh - 64px); }
+    .gep-head {
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    .gep-head h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
+    .gep-body { padding: 14px 16px; overflow-y: auto; }
+    .gep-foot {
+        display: flex; align-items: center; gap: 8px; justify-content: space-between;
+        padding: 12px 16px; border-top: 1px solid var(--border);
+        background: var(--neutral-50);
+    }
+    .gep-toolbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+    .gep-toolbar input[type=search] { flex: 1 1 260px; }
+    .gep-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+    .gep-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .gep-foot .gep-note { margin: 0; }
+    .gep-sub { color: var(--fg-secondary); font-size: 12px; }
+    .gep-expired  { background: var(--danger-100); color: var(--danger-700); }
+    .gep-expiring { background: var(--warning-50); color: var(--warning-700); }
+</style>

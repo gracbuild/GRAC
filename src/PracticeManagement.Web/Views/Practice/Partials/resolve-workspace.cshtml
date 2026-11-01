@@ -3,6 +3,8 @@
     Screen key: `resolve-workspace`
 
     Everything an instance still needs, on one page:
+        0. the Practice Details card of the practice it belongs to
+           (shared with Practice View, 2026-10-08)
         1. its details, as a compact header strip
         2. an obligation card per published obligation, adopted or not
         3. a dependency card per declared category
@@ -60,18 +62,8 @@
         opacity: 1;
     }
 
-    /* Header strip: the instance facts, one line of chips, no scrolling.
-       Below it, the profile edit row lines up with the same chips, so
-       both rows should breathe and share horizontal rhythm. */
-    #rwRoot .rw-facts {
-        display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0 0 16px;
-    }
-    #rwRoot .rw-facts div { min-width: 150px; }
-    #rwRoot .rw-facts dt {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--fg-muted);
-    }
-    #rwRoot .rw-facts dd { margin: 0; font-size: 13px; color: var(--fg-default); }
+    /* .rw-facts (the instance facts strip) removed with the panel,
+       2026-10-08 -- see the note where it used to sit in the markup. */
 
     /* Stacked, not side by side.
        Obligations first, dependencies underneath.
@@ -136,18 +128,16 @@
         white-space: pre-wrap;
     }
 
-    /* Published detail beside the organisation's answers.
-       minmax(0, 1fr) rather than 1fr: a grid track's default minimum is
-       min-content, and one long unbroken value (a URL, a locator) would
-       otherwise push its column wider than half and shove the other one
-       off. Below 1000px the two stack, which is the pre-existing layout --
-       half of a narrow card is not enough for either side. */
+    /* Published detail, then the organisation's answers BELOW it, one
+       full-width row each (2026-10-08). Side by side, a long published
+       value made its column tall and the answers column kept the same row
+       height, leaving a large empty block beside it. minmax(0, 1fr)
+       rather than 1fr: a grid track's default minimum is min-content, and
+       one long unbroken value (a URL, a locator) would otherwise widen the
+       card. */
     #rwRoot .rw-split {
-        display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 0 16px; align-items: start;
-    }
-    @@media (max-width: 1000px) {
-        #rwRoot .rw-split { grid-template-columns: minmax(0, 1fr); }
+        display: grid; grid-template-columns: minmax(0, 1fr);
+        gap: 0; align-items: start;
     }
     /* Same chrome as .rw-typed so the pair reads as two of a kind rather
        than a titled box next to a loose form. Margin matches .rw-typed's
@@ -162,14 +152,24 @@
     }
     /* Scoped to this column, not to .rw-fields generally -- the profile
        box and the dialog use the same class and are not in a split.
-       Two tracks at most, so a card whose only inputs are Owner and
-       Implementation status does not render one select half a card wide. */
+       Narrow screens: as many 170px tracks as fit. */
     #rwRoot .rw-answers .rw-fields {
         grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     }
+    /* Wide screen (2026-10-08): ONE row, a column per answer, so the
+       column count follows the obligation's own field count -- State 2
+       (Owner, Implementation status), Execution 4, Scheduled Assurance 5,
+       EventDriven Assurance 6. Seven or more (an Automated Assurance adds
+       Connection type + URL) would be too narrow on one line, so those
+       wrap at four a row. */
     @@media (min-width: 1001px) {
-        #rwRoot .rw-answers .rw-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        #rwRoot .rw-answers .rw-fields .full { grid-column: 1 / -1; }
+        #rwRoot .rw-answers .rw-fields {
+            grid-template-columns: none;
+            grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+        }
+        #rwRoot .rw-answers .rw-fields:has(> :nth-child(7)) {
+            grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
     }
     /* The .rw-dialog* and .rw-evidence-line rules that used to sit here
        styled the inline add/edit obligation modal. They moved with it into
@@ -289,6 +289,20 @@
     #rwRoot .rw-evidence-remark {
         margin: 0 0 8px; line-height: 1.45; white-space: pre-wrap;
     }
+    /* Migration 473. Files attached to a one-time evidence row at
+       implementation -- a plain list under the row's inputs, the same
+       12px rhythm as the fields above it. */
+    #rwRoot .rw-evidence-attach { margin-top: 8px; }
+    #rwRoot .rw-evidence-files { list-style: none; margin: 4px 0 0; padding: 0; font-size: 12px; }
+    #rwRoot .rw-evidence-files li {
+        display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 3px 0;
+    }
+    #rwRoot .rw-evidence-attach input[type="file"] { font-size: 12px; }
+    /* Migration 481: Direct Upload / Evidence Center Reference / External
+       Evidence Reference. .radio-group / .radio-option are the shared
+       cacca-styles.css radio styles; only wrapping is added so the three
+       options fit a narrow card. */
+    #rwRoot .rw-evidence-source { flex-wrap: wrap; gap: 6px 20px; margin: 8px 0 4px; }
     #rwRoot .rw-warn { color: var(--warning-700); }
     #rwRoot .rw-ok   { color: var(--success-700); }
     #rwRoot .rw-sticky {
@@ -346,15 +360,17 @@
 </section>
 
 <div id="rwRoot" hidden>
-    @* Read-only facts, on their own -- was the top half of the panel
-       below, which put a plain summary and an editable form in one
-       box with nothing marking the line between them. Split into its
-       own .pm-panel so "look" and "edit" read as two different things,
-       the way Obligations/Dependencies below are already separate
-       panels rather than one. *@
-    <section class="pm-panel">
-        <dl class="rw-facts" id="rwFacts"></dl>
-    </section>
+    @* Practice Details (2026-10-08) -- the practice this instance belongs
+       to, shown exactly as Practice View shows it, above the instance's
+       own facts. Shared partial + Shared/practice-details.js; hidden until
+       loadPracticeDetails() has the practice. *@
+    <partial name="Partials/_practice-details-panel" />
+
+    @* The read-only instance facts panel (#rwFacts: Owner, Department,
+       Practice Type, Criticality, Implementation) was removed 2026-10-08.
+       Practice Type, Criticality and Owner are in Instance Profile below;
+       Department is shown in the Practice Details card above
+       (loadPracticeDetails passes it as an extra row). *@
 
     @* The instance-level Save frequency box was retired. Frequency now
        belongs to each obligation, and is only meaningful for the types
@@ -404,7 +420,7 @@
                 </select>
             </label></div>
             <div id="rwOwnerField" hidden><label>Owner
-                <select id="rwOwner"><option value="">Not set</option></select>
+                <select id="rwOwner"><option value="">Unassigned</option></select>
             </label></div>
             <div class="rw-freq-actions">
                 <button class="pm-button ghost small" id="rwProfileSave" type="button">
@@ -534,7 +550,19 @@
 *@
 <partial name="Partials/_obligation-form-dialog" />
 <script src="~/js/Shared/obligation-form.js" asp-append-version="true"></script>
+@* Migration 476: "Select from Evidence Center" on one-time evidence rows.
+   pm-grid pages the picker's list. *@
+<partial name="Partials/_evidence-picker-dialog" />
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/evidence-picker.js" asp-append-version="true"></script>
+@* 499: Direct Upload opens the Evidence Center's own Upload evidence
+   form, so a file attached here arrives described instead of blank. *@
+<partial name="Partials/_evidence-upload-dialog" />
+<script src="~/js/Shared/evidence-upload.js" asp-append-version="true"></script>
+@* 481/482: the three evidence options, shared with Complete Task. *@
+<script src="~/js/Shared/evidence-source.js" asp-append-version="true"></script>
 <script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Shared/practice-details.js" asp-append-version="true"></script>
 
 <script>
 (function () {
@@ -552,6 +580,12 @@
 
     let instanceId = null, orgId = null, instance = null;
     let obligations = [], frequencies = [], employees = [], evidence = [];
+    // Migration 473: files attached to one-time evidence at implementation
+    // (metadata only), loaded with the evidence rows.
+    let evidenceAttachments = [];
+    // Migration 481: an evidence option chosen on screen and not saved yet,
+    // keyed by evidence id, so a redraw of the card does not lose it.
+    const evidenceSourceChoice = new Map();
     // Migration 342: the functional-user subset of `employees`, used for the
     // Instance Owner picker (owners must be Functional Users). `employees`
     // itself stays the full org-scoped list -- it also resolves stored owner
@@ -749,6 +783,7 @@
             isAdmin = body.isAdmin === true || body.IsAdmin === true;
             orgId = orgId || Number(F(instance, 'organizationId') || 0) || null;
             renderInstance();
+            loadPracticeDetails();
             renderProfile();
             renderRetire();
             document.getElementById('rwRoot').hidden = false;
@@ -766,22 +801,28 @@
             [F(instance, 'instanceCode'),
              [F(instance, 'practiceCode'), F(instance, 'practiceName')].filter(Boolean).join(' - '),
              F(instance, 'organizationName')].filter(Boolean).join('  |  ');
+        // The instance facts strip (#rwFacts) was removed 2026-10-08:
+        // Department now shows in the Practice Details card
+        // (loadPracticeDetails); the rest is in Instance Profile.
+    }
 
-        // Execution and Assurance frequency were removed from this strip
-        // when the instance stopped carrying a cadence of its own -- each
-        // obligation now owns its frequency, and only the types that use
-        // one (Execution, Assurance) hold it. Migration 236 stopped the
-        // detail procedure projecting them at all.
-        const facts = [
-            ['Owner',          F(instance, 'ownerName')],
-            ['Department',     F(instance, 'department')],
-            ['Practice Type',  F(instance, 'assuranceMode')],
-            ['Criticality',    F(instance, 'criticality')],
-            ['Implementation', F(instance, 'implementationStatus')]
-        ].filter(([, v]) => v);
-
-        document.getElementById('rwFacts').innerHTML = facts
-            .map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('');
+    // Practice Details card (2026-10-08). Best-effort and not awaited:
+    // the instance workspace is complete without it, so a failed read
+    // only leaves the card hidden. Same endpoint and renderer as
+    // Practice View (Shared/practice-details.js).
+    async function loadPracticeDetails() {
+        const practiceId = Number(F(instance, 'practiceId') || 0);
+        if (!practiceId || !window.gracPracticeDetails) return;
+        try {
+            const res = await window.gracPracticeDetails.load({ practiceId, organizationId: orgId });
+            // The instance's Department rides in this card since the
+            // instance facts panel was removed (2026-10-08).
+            const dept = F(instance, 'department');
+            if (res.practice) window.gracPracticeDetails.render(res.practice,
+                { extraRows: dept ? [['Department', dept]] : [] });
+        } catch (err) {
+            console.warn('resolve-workspace: practice details load failed', err);
+        }
     }
 
     // renderFrequency / saveFrequency retired with rwFrequencyBox. The
@@ -1030,7 +1071,7 @@
                 if (current) ownerList = ownerList.concat([current]);
             }
             document.getElementById('rwOwner').innerHTML =
-                options(ownerList, ownerText, 'Not set');
+                options(ownerList, ownerText, 'Unassigned');
         }
         document.getElementById('rwProfileNote').textContent = isAdmin
             ? 'How this instance is carried out, how much it matters, and who owns it.'
@@ -1285,7 +1326,26 @@
             console.error('resolve-workspace: evidence failed', err);
             evidence = [];
         }
+        await loadEvidenceAttachments();
     }
+
+    // Migration 473. Same failure rule as the evidence rows: a list that
+    // cannot load shows no files, it does not take the cards down.
+    async function loadEvidenceAttachments() {
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances/'
+                        + encodeURIComponent(instanceId) + '/evidence-attachments'
+                        + (orgId ? '?organizationId=' + encodeURIComponent(orgId) : '')), { credentials: 'same-origin' });
+            evidenceAttachments = r.ok ? ((await r.json()).data || []) : [];
+        } catch (err) {
+            console.error('resolve-workspace: evidence attachments failed', err);
+            evidenceAttachments = [];
+        }
+    }
+
+    // Line breaks compared as LF: a textarea returns LF, the published text
+    // may carry CRLF, and "the same text" must still read as the same.
+    const normText = v => String(v ?? '').replace(/\r\n/g, '\n').trim();
 
     // Migration 334: the POST, extracted from saveEvidence so it has
     // exactly one caller shape and two callers.
@@ -1328,8 +1388,13 @@
                     // leaves the stored name alone rather than blanking it.
                     evidenceName:          values.evidenceName        || null,
                     evidenceDescription:   values.evidenceDescription || null,
+                    // Migration 473: the explicit "back to as published".
+                    clearEvidenceDescription: !!values.clearEvidenceDescription,
                     evidenceLocation:      values.evidenceLocation    || null,
-                    evidenceLocator:       values.evidenceLocator     || null
+                    evidenceLocator:       values.evidenceLocator     || null,
+                    // Migration 481: DirectUpload | EvidenceCenter | External.
+                    // Absent / null = unchanged.
+                    evidenceSource:        values.evidenceSource      || null
                 })
             });
             const body = await r.json().catch(() => ({}));
@@ -1353,16 +1418,22 @@
         };
 
         if (msgEl) msgEl.textContent = 'Saving...';
+        // The description is read-only (2026-10-27): it is not sent, and
+        // postEvidenceValues sends evidenceDescription null with
+        // clearEvidenceDescription false -- "unchanged" -- so what is
+        // stored stays as it is.
         const res = await postEvidenceValues(evidenceId, {
-            evidenceName:        read('evidenceName'),
-            evidenceDescription: read('evidenceDescription'),
-            evidenceLocation:    read('evidenceLocation'),
-            evidenceLocator:     read('evidenceLocator')
+            evidenceName:             read('evidenceName'),
+            evidenceLocation:         read('evidenceLocation'),
+            evidenceLocator:          read('evidenceLocator'),
+            // Migration 481: the option ticked on the row.
+            evidenceSource:           (rowEl.querySelector('[data-ev-source] input:checked') || {}).value || null
         });
         if (!res.ok) {
             if (msgEl) msgEl.textContent = res.error;
             return;
         }
+        evidenceSourceChoice.delete(String(evidenceId));   // 481: stored now
         if (msgEl) msgEl.textContent = res.message || 'Saved.';
         await loadEvidence();
         renderObligations();
@@ -1485,6 +1556,11 @@
         'triggercondition', 'responsibleparty', 'assuranceparty',
         'escalationpath', 'exceptionpolicy', 'scope',
 
+        // Migration 473: the cadence CODE. Its label (EvidenceCadenceLabel,
+        // "One-time" rather than "OneTime") is what an Evidence-type card
+        // shows, under detailLabels' "Evidence cadence".
+        'evidencecadence',
+
         // Remarks retired from the obligation detail display. Every typed
         // array carries a remarks column (224 projects roe.remarks and the
         // per-type equivalents), so it appeared on every card as free text
@@ -1502,7 +1578,8 @@
         slavalue: 'SLA', slaunit: 'SLA unit',
         minretentionvalue: 'Minimum retention', minretentionunit: 'Minimum retention unit',
         maxretentionvalue: 'Maximum retention', maxretentionunit: 'Maximum retention unit',
-        evidencetype: 'Evidence type', retentionrequirement: 'Retention'
+        evidencetype: 'Evidence type', retentionrequirement: 'Retention',
+        evidencecadencelabel: 'Evidence cadence'   // 473
     };
 
     const normKey = k => String(k).replace(/_/g, '').toLowerCase();
@@ -1617,52 +1694,16 @@
         }).join('');
     }
 
-    // The keys that this obligation's type lets the organisation OVERRIDE.
-    // A published item can be read-only elsewhere but editable here, and
-    // this is the one place that decides which is which. Anything not in
-    // the returned set falls through to the read-only generic renderer.
-    //
-    //   Execution                          -> execution_frequency
-    //   Assurance + trigger_mode Scheduled -> assurance_frequency
-    //   Assurance + trigger_mode EventDriven
-    //                                      -> event_type_id, sla_value, sla_unit
-    //
-    // Returns a set of *normalised* keys, so genericFields can skip them
-    // and the editor can render its own row.
-    function editableOverrideKeys(type, item) {
-        const set = new Set();
-        if (type === 'Execution') {
-            set.add('executionfrequency');
-            set.add('executionfrequencyid');
-        } else if (type === 'Assurance') {
-            const mode = String(F(item, 'triggerMode') || F(item, 'trigger_mode') || '');
-            if (mode === 'Scheduled') {
-                set.add('assurancefrequency');
-                set.add('assurancefrequencyid');
-            } else if (mode === 'EventDriven') {
-                set.add('eventtypeid');
-                set.add('eventname');
-                set.add('slavalue');
-                set.add('slaunit');
-            }
-        }
-        return set;
-    }
-
-    // One editable row inside publishedBlock. Binds through the same
-    // [data-field][data-ob] pattern the parameter row uses, so
+    // One override input in the "Your answers" box (2026-10-08: moved out
+    // of publishedBlock, which is now read-only). Rendered by field(), the
+    // same [data-field][data-ob] markup as every other answer, so
     // wireObligationCards's existing scanner marks the obligation dirty
     // and saveObligations sends the value in the same payload.
     //
     // The blank option carries the authority's value in its label, so the
     // organisation always sees what "As published" here would mean.
     function overrideRow(id, label, storeField, control) {
-        return '<div class="rw-span rw-override">'
-             + '<dt>' + esc(label) + '</dt>'
-             + '<dd><label data-field="' + esc(storeField) + '" data-ob="' + esc(id) + '">'
-             +     control
-             + '</label></dd>'
-             + '</div>';
+        return field(id, storeField, label, control, false);
     }
 
     function overrideEditor(id, o, type, item) {
@@ -1748,12 +1789,29 @@
         return parts.join('');
     }
 
+    // The override inputs for "Your answers": frequency + first occurrence
+    // (Execution, Scheduled Assurance) or event + SLA (EventDriven
+    // Assurance). The stored overrides are per obligation, so one set is
+    // rendered -- from the first published rule that has any. A local
+    // obligation has nothing published to override; it is edited on its
+    // own form.
+    function answerOverrides(o) {
+        if (F(o, 'isOrganizationDefined') === true) return '';
+        const type  = String(F(o, 'typeCode') || '');
+        const spec  = typedArrays[type];
+        const items = spec ? parseJsonArray(o, spec[0]) : [];
+        const id    = keyOf(o);
+        for (const item of items) {
+            const html = overrideEditor(id, o, type, item);
+            if (html) return html;
+        }
+        return '';
+    }
+
     function publishedBlock(o) {
         const type  = String(F(o, 'typeCode') || '');
         const spec  = typedArrays[type];
         const items = spec ? parseJsonArray(o, spec[0]) : [];
-        const local = F(o, 'isOrganizationDefined') === true;
-        const id    = keyOf(o);
 
         if (items.length) {
             const body = items.map(function (item) {
@@ -1761,15 +1819,12 @@
                 // special case, so nothing appears twice.
                 const consumed = new Set();
                 const head = ruleLine(type, item, consumed);
-                // Editable-override keys are consumed before the generic
-                // pass, so the read-only display stops repeating them.
-                // Locals aren't overridden -- they were authored here, so
-                // the same fields are edited on the Add form instead.
-                if (!local) editableOverrideKeys(type, item).forEach(k => consumed.add(k));
+                // Read-only (2026-10-08): the published frequency / event /
+                // SLA stay on display here, and the inputs that override
+                // them are in "Your answers" (answerOverrides).
                 const rest = genericFields(item, consumed);
-                const editor = local ? '' : overrideEditor(id, o, type, item);
                 return '<div class="rw-typed-item"><dl>'
-                     + ((head + rest + editor) || '<div class="rw-span"><dd class="rw-note">No detail recorded.</dd></div>')
+                     + ((head + rest) || '<div class="rw-span"><dd class="rw-note">No detail recorded.</dd></div>')
                      + '</dl></div>';
             }).join('');
             return '<div class="rw-typed">'
@@ -1822,10 +1877,24 @@
         // So: always print if we have text; the header stays a short title
         // and the description carries the requirement in full.
         const text = F(o, 'obligationDescription') || F(o, 'obligationText');
+        // Read-only (change request 2026-10-27). 473 made a PUBLISHED
+        // obligation's description editable here for this instance; it is
+        // shown, not edited, again. ObligationDescription is still the text
+        // the instance works to (an edit stored before this change, else the
+        // published text), and the published wording is shown under it when
+        // the two differ, so an earlier edit is never passed off as
+        // published. Organisation-defined obligations are unchanged: Edit
+        // obligation owns their text.
         if (!text) return '';
+        const local     = F(o, 'isOrganizationDefined') === true;
+        const published = F(o, 'publishedObligationDescription');
         return '<div class="rw-description">'
              + '<span class="rw-description-label">Description</span>'
-             + esc(text) + '</div>';
+             + esc(text)
+             + (!local && normText(published) && normText(text) !== normText(published)
+                 ? '<p class="rw-note rw-evidence-remark" style="margin-top:4px">As published: ' + esc(published) + '</p>'
+                 : '')
+             + '</div>';
     }
 
     function renderObligations() {
@@ -1851,13 +1920,14 @@
             const local    = F(o, 'isOrganizationDefined') === true;
             const cls = adoptedF ? (modified ? 'modified' : 'adopted') : '';
 
-            const pubEv  = Number(F(o, 'publishedEvidenceCount') || 0);
-            const gotEv  = Number(F(o, 'resolvedEvidenceCount') || 0);
-            const evNote = pubEv
-                ? (gotEv >= pubEv
-                    ? '<span class="rw-ok">' + gotEv + ' evidence</span>'
-                    : '<span class="rw-warn">' + gotEv + ' / ' + pubEv + ' evidence</span>')
-                : '<span class="rw-note">no evidence published</span>';
+            // Migration 481: one-time evidence only, counted from the rows
+            // under the same rule the rows show (IsResolved per option).
+            const evSum  = oneTimeEvidenceSummary(o);
+            const evNote = evSum.total
+                ? (evSum.resolved >= evSum.total
+                    ? '<span class="rw-ok">' + evSum.resolved + ' evidence</span>'
+                    : '<span class="rw-warn">' + evSum.resolved + ' / ' + evSum.total + ' evidence</span>')
+                : '<span class="rw-note">' + (evSum.hidden ? 'recurring evidence only' : 'no evidence published') + '</span>';
 
             return '<article class="rw-card ' + cls + '">'
               + '<button class="rw-card-head" type="button" data-toggle="' + esc(key) + '">'
@@ -1871,7 +1941,7 @@
                 + '<span class="rw-card-title">' + esc(F(o, 'obligationName'))
                   // Migration 396: approved repository retirement -- flag only.
                   + (String(F(o, 'repositoryLifecycleStatus') || '').toLowerCase() === 'retired'
-                      ? ' <span class="pm-badge" title="Control Management retired this obligation; it stays adopted here.">Retired in repository</span>' : '')
+                      ? ' <span class="pm-badge pm-badge-repo-retired" title="Control Management retired this obligation; it stays adopted here.">Retired in repository</span>' : '')
                   + '<small>' + esc(F(o, 'typeName') || F(o, 'typeCode') || '')
                   + (F(o, 'frameworkRelease') ? '  |  ' + esc(F(o, 'frameworkRelease')) : '')
                   + (local ? '  |  Added by this organisation' : '  |  ' + evNote) + '</small></span>'
@@ -1880,26 +1950,24 @@
                 // obligation that has not been adopted carries no status yet,
                 // so it shows nothing -- exactly as before. An adopted
                 // obligation (or an organisation-defined one, which is always
-                // in effect) shows its status, defaulting to "Not set" when
-                // none is stored. Nothing is lost by dropping the old
+                // in effect) shows its status, defaulting to "Not Updated"
+                // (456) when none is stored. Nothing is lost by dropping the old
                 // Organisation / Modified badges: the org-defined origin is
                 // still signalled by the building-columns icon and the "Added
                 // by this organisation" subtitle, and a parameter override
                 // still tints the whole card via the 'modified' class above.
                 + ((adoptedF || local)
-                    ? '<span class="pm-badge">' + esc(implStatusLabel(o) || 'Not set') + '</span>'
+                    ? '<span class="pm-badge">' + esc(implStatusLabel(o) || 'Not Updated') + '</span>'
                     : '')
                 + '<i class="fa-solid fa-chevron-' + (isOpen ? 'up' : 'down') + '"></i>'
               + '</button>'
               + '<div class="rw-card-body"' + (isOpen ? '' : ' hidden') + '>'
                 + description(o)
-                // Two columns on a wide screen: what the authority
-                // published on the left, what this organisation answers on
-                // the right. Stacked before this, which left the whole
-                // right-hand half of a full-width card empty -- the fields
-                // are few and short, and .rw-fields' auto-fit stretched
-                // three of them across 1100px. Collapses back to stacked
-                // under 1000px (see .rw-split).
+                // What the authority published, then what this
+                // organisation answers directly below it, each a full-width
+                // row (2026-10-08 -- side by side, a long published value
+                // left a large empty block beside the answers). The answer
+                // fields stay at most two a row (.rw-answers .rw-fields).
                 + '<div class="rw-split">'
                   + '<div class="rw-split-col">'
                     + publishedBlock(o)
@@ -1912,8 +1980,7 @@
                       + '<h4>Your answers</h4>'
                 // A local obligation is edited and removed through its own
                 // endpoint, so the card offers those two actions instead of
-                // the adopt-time parameter row's "leave blank to keep the
-                // published value" -- there is no published value.
+                // the override inputs -- there is no published value.
                 + (local
                     ? '<div class="rw-card-actions" style="margin:0 0 10px">'
                         + '<button class="pm-button ghost small" type="button" data-local-edit="' + esc(F(o, 'adoptionId')) + '">'
@@ -1921,7 +1988,7 @@
                         + '<button class="pm-button ghost small" type="button" data-local-remove="' + esc(F(o, 'adoptionId')) + '">'
                           + '<i class="fa-solid fa-trash"></i> Remove</button>'
                       + '</div>'
-                    : '<p class="rw-note" style="margin:0 0 8px">Leave a field blank to keep the published value.</p>')
+                    : '')
                 // Migration 226. Assurance frequency and Retention are
                 // gone: the typed block above now carries whatever the
                 // admin module recorded for this obligation's type,
@@ -1938,12 +2005,15 @@
                 // derives the instance cadence from it through
                 // vw_pm_practice_default_frequency.
                 + '<div class="rw-fields">'
+                  // Override inputs (frequency / first occurrence / event /
+                  // SLA) -- moved here from publishedBlock 2026-10-08.
+                  + answerOverrides(o)
                   // Execution frequency used to live here regardless of
                   // type. Migration 234 and the typed-panel editors made
                   // that repetitious for an Execution obligation and
                   // meaningless for the others -- the editable execution
-                  // frequency now lives inside publishedBlock's typed
-                  // item, next to the value it overrides.
+                  // frequency is one of the override inputs rendered just
+                  // above by answerOverrides.
                   //
                   // field(..., isSelect=true) wraps the options in a
                   // <select> itself -- passing '<select>...</select>' as
@@ -1993,7 +2063,7 @@
                   // Not Implemented / Partially Implemented flow through
                   // to the instance's gap entry in 243.
                   + field(id, 'implementationStatusId', 'Implementation status',
-                          options(implementationStatuses, val(o, 'implementationStatusId'), 'Not set'), true)
+                          options(implementationStatuses, val(o, 'implementationStatusId'), 'Not Updated'), true)
                   // Remarks textarea retired alongside the published
                   // Remarks in hiddenDetailKeys -- the card no longer
                   // shows or asks for remarks at all.
@@ -2085,12 +2155,371 @@
             if (!type) return;
             const key    = typeKeyOf(type);
             const remark = String(e.Remarks ?? e.remarks ?? '').trim();
+            // Migration 473: the spec's cadence. Merged rows follow the
+            // procedure's rule (vw_pm_instance_evidence_cadence) -- any
+            // recurring spec makes the row recurring. Absent (a database
+            // without 473) stays absent, and no badge is drawn.
+            const cadence = String(e.EvidenceCadence ?? e.evidenceCadence ?? '').trim();
+            const cadenceLabel = String(e.EvidenceCadenceLabel ?? e.evidenceCadenceLabel ?? cadence).trim();
             const hit    = byType.get(key);
-            if (!hit) { byType.set(key, { key: key, type: type, remark: remark }); return; }
+            if (!hit) {
+                byType.set(key, { key: key, type: type, remark: remark,
+                                  cadence: cadence, cadenceLabel: cadenceLabel });
+                return;
+            }
             if (remark && hit.remark.indexOf(remark) < 0)
                 hit.remark = hit.remark ? (hit.remark + '\n' + remark) : remark;
+            if (cadence === 'Recurring' && hit.cadence !== 'Recurring') {
+                hit.cadence = cadence; hit.cadenceLabel = cadenceLabel;
+            }
         });
         return [...byType.values()];
+    }
+
+    // Migration 473: the cadence badge, said the same way on both
+    // evidence branches. Empty cadence (pre-473 database) draws nothing.
+    function cadenceBadge(cadence, label, source) {
+        if (!cadence) return '';
+        const title = cadence === 'OneTime'
+            ? 'One-time evidence: produced once. Attach it here, at implementation.'
+            : (source === 'Default'
+                ? 'Nothing is published for this evidence, so it is treated as recurring: attach it to each scheduled task.'
+                : 'Recurring evidence: a new copy is needed for every scheduled occurrence. Attach it to the scheduled task when you complete it.');
+        return '<span class="pm-badge" title="' + esc(title) + '">'
+             + '<i class="fa-solid ' + (cadence === 'OneTime' ? 'fa-file-circle-check' : 'fa-rotate-right') + '" aria-hidden="true"></i> '
+             + esc(label || cadence) + '</span>';
+    }
+
+    // ---------- migration 481: how one-time evidence is provided ---------
+    // Operationalize lists ONE-TIME evidence only: recurring evidence is
+    // attached to each scheduled task (473), so it is not asked for here.
+    // An empty cadence (a database without 473) is still listed, as before.
+    const isOneTimeCadence = c => String(c || '') !== 'Recurring';
+
+    // The three ways one-time evidence is provided, their radios and the
+    // show-one-panel rule: Shared/evidence-source.js (482 moved them there
+    // so Complete Task uses the same ones). Only the chosen option's
+    // control is shown; what the others hold is kept, not deleted, and
+    // only the chosen one counts towards resolved
+    // (fn_pm_instance_evidence_is_resolved).
+    const EVIDENCE_SOURCE = window.gracEvidenceSource;
+    const DEFAULT_EVIDENCE_SOURCE = EVIDENCE_SOURCE.DEFAULT;
+    const isKnownSource        = EVIDENCE_SOURCE.isKnown;
+    const evidenceSourceRadios = EVIDENCE_SOURCE.radios;
+    const sourcePanel          = EVIDENCE_SOURCE.panel;
+    const showSourcePanels     = EVIDENCE_SOURCE.showPanels;
+
+    // A saved row: the unsaved choice wins, then what is stored, then the
+    // default (a row nobody has answered yet).
+    function evidenceSourceOf(e) {
+        const eid = String(F(e, 'evidenceId'));
+        if (evidenceSourceChoice.has(eid)) return evidenceSourceChoice.get(eid);
+        const stored = F(e, 'evidenceSource');
+        return isKnownSource(stored) ? stored : DEFAULT_EVIDENCE_SOURCE;
+    }
+
+    // Radio groups are addressed by data-ev-source (a saved row) or
+    // data-pev-source / data-pev-ob / data-pev-type (a pre-adoption draft).
+
+    // The evidence rows of one obligation. A locally added obligation has
+    // no GRAC_New id, so its evidence is matched on the link column
+    // migrations 231/232 added instead.
+    function evidenceRowsOf(o) {
+        return F(o, 'isOrganizationDefined') === true
+            ? evidence.filter(e => String(F(e, 'sourcePracticeInstanceObligationId') || '')
+                                   === String(F(o, 'adoptionId') || ''))
+            : evidence.filter(e => Number(F(e, 'sourceObligationId')) === Number(F(o, 'obligationId')));
+    }
+
+    // The card head's count: one-time evidence only, from the rows (or, not
+    // adopted yet, from what is published). `hidden` = recurring ones left out.
+    function oneTimeEvidenceSummary(o) {
+        const rows = evidenceRowsOf(o);
+        if (rows.length) {
+            const shown = rows.filter(e => isOneTimeCadence(F(e, 'evidenceCadence')));
+            return { total: shown.length, resolved: shown.filter(e => F(e, 'isResolved')).length,
+                     hidden: rows.length - shown.length };
+        }
+        const published = publishedEvidenceOf(o);
+        if (!published.length) {
+            // No published detail to read the cadence from (older database):
+            // fall back to the published count, as the head did before.
+            return { total: Number(F(o, 'publishedEvidenceCount') || 0), resolved: 0, hidden: 0 };
+        }
+        const shown = published.filter(p => isOneTimeCadence(p.cadence));
+        return { total: shown.length, resolved: 0, hidden: published.length - shown.length };
+    }
+
+    const RECURRING_ONLY_NOTE =
+        'This obligation has recurring evidence only. Attach it to each scheduled task when you complete it.';
+
+    // Migration 473: files attached to a ONE-TIME evidence row, and the
+    // picker for another. The chosen file is attached by the card's
+    // Save obligation (saveOneObligation uploads it before saving; the
+    // separate Attach file button was removed 2026-10-18 -- two ways to do
+    // one thing is how a chosen file got left behind). View mode hides the
+    // controls (.rw-card-actions, .pm-button) and keeps the download links.
+    // Migration 476: every file is an Evidence Center item linked here.
+    // "Select from Evidence Center" links one already uploaded (for any
+    // practice); a link keeps the version it was made with and offers the
+    // newer one ("Use vN"); Remove unlinks -- the file stays in the
+    // Evidence Center.
+    function evidenceFilesBlock(e) {
+        const eid   = F(e, 'evidenceId');
+        const files = evidenceAttachments.filter(a => String(F(a, 'evidenceId')) === String(eid));
+        const when  = v => {
+            if (!v) return '';
+            if (typeof window.gracFormatDisplayDate === 'function') {
+                const out = window.gracFormatDisplayDate(v);
+                if (out && out !== v) return out;
+            }
+            return String(v).slice(0, 10);
+        };
+        const list = files.length
+            ? '<ul class="rw-evidence-files">' + files.map(function (a) {
+                  const aid  = F(a, 'evidenceAttachmentId');
+                  const kb   = Math.max(1, Math.round(Number(F(a, 'fileSizeBytes') || 0) / 1024));
+                  const href = U('/practice/api/workflow/resolve/instances/' + encodeURIComponent(instanceId)
+                                 + '/evidence-attachments/' + encodeURIComponent(aid)
+                                 + '?organizationId=' + encodeURIComponent(orgId || ''));
+                  const version = F(a, 'versionNo');   // 476; null before the migration
+                  const meta = [version ? 'v' + version : '', kb + ' KB', F(a, 'uploadedByName'), when(F(a, 'uploadedDt'))].filter(Boolean).join(', ');
+                  const title = F(a, 'evidenceTitle');
+                  const expired = F(a, 'validityState') === 'Expired';
+                  return '<li><i class="fa-solid fa-paperclip" aria-hidden="true"></i>'
+                       + '<a href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(F(a, 'fileName')) + '</a>'
+                       + (title && title !== F(a, 'fileName') ? '<span class="rw-note">' + esc(title) + '</span>' : '')
+                       + '<span class="rw-note">(' + esc(meta) + ')</span>'
+                       + (expired ? '<span class="pm-badge" title="The validity of this evidence has ended in the Evidence Center.">Expired</span>' : '')
+                       + (F(a, 'attachmentDescription')
+                           ? '<span class="rw-note">' + esc(F(a, 'attachmentDescription')) + '</span>' : '')
+                       + (F(a, 'newerVersionAvailable')
+                           ? '<button type="button" class="pm-button ghost small" data-ev-file-refresh="' + esc(aid) + '"'
+                             + ' title="A newer version is in the Evidence Center. This evidence keeps the version it was linked with until you update it.">'
+                             + '<i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Use v' + esc(F(a, 'currentVersionNo')) + '</button>'
+                           : '')
+                       + '<button type="button" class="pm-button ghost small" data-ev-file-remove="' + esc(aid) + '"'
+                         + ' title="Removes it from this evidence. The file stays in the Evidence Center.">'
+                         + '<i class="fa-solid fa-xmark" aria-hidden="true"></i> Remove</button>'
+                     + '</li>';
+              }).join('') + '</ul>'
+            : '<p class="rw-note" style="margin:2px 0 0">No file attached yet.</p>';
+        // Migration 481: the block belongs to Direct Upload and Evidence
+        // Center Reference; inside it, the file picker shows for the first
+        // and the Evidence Center button for the second.
+        const src = evidenceSourceOf(e);
+        return sourcePanel('DirectUpload EvidenceCenter', src, ''
+             + '<span class="rw-description-label">Attached at implementation</span>'
+             + list
+             + '<div class="rw-card-actions" style="margin-top:6px">'
+               + sourcePanel('DirectUpload', src,
+                     // 499: was a bare file picker, which stored the file in
+                     // the Evidence Center with no title, type, validity,
+                     // classification, tags or owner -- the operator then had
+                     // to describe it again there. The button opens the SAME
+                     // Upload evidence dialog the Evidence Center screen uses
+                     // (Shared/evidence-upload.js), so every field is captured
+                     // once, here.
+                     '<button type="button" class="pm-button ghost small" data-ev-upload="' + esc(eid) + '"'
+                   + ' title="Upload a file and describe it for the Evidence Center in one step.">'
+                   + '<i class="fa-solid fa-upload" aria-hidden="true"></i> Upload evidence</button>')
+               + sourcePanel('EvidenceCenter', src,
+                     '<button type="button" class="pm-button ghost small" data-ev-pick="' + esc(eid) + '"'
+                   + ' title="Link evidence already uploaded to the Evidence Center, for this or any other practice.">'
+                   + '<i class="fa-solid fa-box-archive" aria-hidden="true"></i> Select from Evidence Center</button>')
+               + '<span class="rw-note" data-ev-file-msg="' + esc(eid) + '"></span>'
+             + '</div>', { 'class': 'rw-evidence-attach' });
+    }
+
+    // 499: opens the shared Upload evidence dialog and stores what it
+    // collected. The file is attached immediately on submit -- there is no
+    // longer a file sitting in a picker waiting for the obligation save,
+    // which is why saveOneObligation no longer sweeps for one.
+    async function openEvidenceUpload(evidenceId) {
+        const row = evidence.find(x => String(F(x, 'evidenceId')) === String(evidenceId));
+        const msg = document.querySelector('[data-ev-file-msg="' + evidenceId + '"]');
+        if (!window.gracEvidenceUpload) {
+            if (msg) msg.textContent = 'The upload dialog did not load. Refresh the page.';
+            return false;
+        }
+
+        const outcome = await window.gracEvidenceUpload.open({
+            context: row ? ('Evidence: ' + (F(row, 'evidenceType') || F(row, 'evidenceTypeName') || '')) : '',
+            // The evidence row already says which type this answers; the
+            // operator can still change it in the dialog.
+            typeId:  row ? F(row, 'evidenceTypeId') : '',
+            lookups: { types: evidenceTypes, employees: employees },
+            submit:  payload => uploadEvidenceFile(evidenceId, payload)
+        });
+        if (!outcome.saved) return false;
+
+        await refreshEvidenceFiles(evidenceId);
+        const fresh = document.querySelector('[data-ev-file-msg="' + evidenceId + '"]');
+        if (fresh && outcome.message) fresh.textContent = outcome.message;
+        return true;
+    }
+
+    // Posts one file plus the dialog's Evidence Center fields. The endpoint
+    // is unchanged; 499 taught it (and sp_resolve_evidence_attachment_add)
+    // to carry the metadata through to sp_evidence_item_store.
+    async function uploadEvidenceFile(evidenceId, payload) {
+        const file = payload && payload.file;
+        const meta = (payload && payload.metadata) || {};
+        if (!file) return { ok: false, error: 'Choose a file to attach.' };
+
+        const fd = new FormData();
+        fd.append('file', file);
+        Object.keys(meta).forEach(k => {
+            if (meta[k] !== null && meta[k] !== '') fd.append(k, meta[k]);
+        });
+        let uploadMessage = null;
+        if (msg) msg.textContent = 'Uploading...';
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/instances/' + encodeURIComponent(instanceId)
+                                    + '/evidence/' + encodeURIComponent(evidenceId) + '/attachments'
+                                    + '?organizationId=' + encodeURIComponent(orgId || '')), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'X-CSRF-TOKEN': CSRF }, body: fd
+            });
+            const b = await r.json().catch(() => ({}));
+            if (!r.ok)
+                // b.title: an ASP.NET ProblemDetails 400 has no "error" field.
+                return { ok: false, error: b.error || b.title || ('Upload failed (HTTP ' + r.status + ').') };
+            // 476: the message says what happened -- stored in the Evidence
+            // Center, or the identical file already there was linked instead.
+            // That path is handled inside the procedure, so this endpoint
+            // never answers 409 and the dialog's duplicate banner stays down.
+            uploadMessage = b.message || null;
+        } catch (err) {
+            console.error('resolve-workspace: evidence upload failed', err);
+            return { ok: false, error: 'Could not upload the file.' };
+        }
+        return { ok: true, message: uploadMessage };
+    }
+
+    // Redraws ONLY the file block of one evidence row. A full
+    // renderObligations() would rebuild the card from the server copy and
+    // throw away whatever the operator has typed into the row and not yet
+    // saved (saveEvidence reads those values off the DOM).
+    async function refreshEvidenceFiles(evidenceId) {
+        await loadEvidenceAttachments();
+        const row   = evidence.find(e => String(F(e, 'evidenceId')) === String(evidenceId));
+        const block = document.querySelector('[data-ev="' + evidenceId + '"] .rw-evidence-attach');
+        if (!row || !block) { renderObligations(); return; }
+        const holder = document.createElement('div');
+        holder.innerHTML = evidenceFilesBlock(row);
+        const fresh = holder.firstElementChild;
+        block.replaceWith(fresh);
+        wireEvidenceFileControls(fresh);
+    }
+
+    function wireEvidenceFileControls(root) {
+        root.querySelectorAll('[data-ev-file-remove]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                removeEvidenceFile(this.getAttribute('data-ev-file-remove'),
+                                   this.closest('[data-ev]')?.getAttribute('data-ev'));
+            });
+        });
+        // 476
+        // 499: Direct Upload's button, beside the Evidence Center picker's.
+        root.querySelectorAll('[data-ev-upload]').forEach(function (b) {
+            b.addEventListener('click', function () { openEvidenceUpload(this.getAttribute('data-ev-upload')); });
+        });
+        root.querySelectorAll('[data-ev-pick]').forEach(function (b) {
+            b.addEventListener('click', function () { pickFromEvidenceCenter(this.getAttribute('data-ev-pick')); });
+        });
+        root.querySelectorAll('[data-ev-file-refresh]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                refreshEvidenceLink(this.getAttribute('data-ev-file-refresh'),
+                                    this.closest('[data-ev]')?.getAttribute('data-ev'));
+            });
+        });
+    }
+
+    // Migration 476: "Select from Evidence Center" -- the shared picker
+    // (Shared/evidence-picker.js), defaulting to this row's evidence type.
+    // The endpoints check the row (one-time, this instance) and the item
+    // (visible to the caller, active, not expired) and pin its current
+    // version. Only the file block is redrawn, as after an upload.
+    async function pickFromEvidenceCenter(evidenceId) {
+        if (!window.gracEvidencePicker) return;
+        const row = evidence.find(e => String(F(e, 'evidenceId')) === String(evidenceId));
+        const name = row ? (F(row, 'evidenceName') || F(row, 'evidenceType') || '') : '';
+        const base = '/practice/api/workflow/resolve/instances/' + encodeURIComponent(instanceId)
+                   + '/evidence/' + encodeURIComponent(evidenceId) + '/evidence-center';
+        const outcome = await window.gracEvidencePicker.open({
+            context:  name ? 'Evidence: ' + name : '',
+            typeId:   row ? F(row, 'evidenceTypeId') : null,
+            typeName: row ? F(row, 'evidenceType') : null,
+            load: async function (q) {
+                const qs = new URLSearchParams({ organizationId: orgId || '', pageNumber: q.pageNumber, pageSize: q.pageSize });
+                if (q.search) qs.set('search', q.search);
+                if (q.typeId) qs.set('evidenceTypeId', q.typeId);
+                const r = await fetch(U(base + '?' + qs), { credentials: 'same-origin' });
+                const b = await r.json().catch(() => ({}));
+                return r.ok ? { ok: true, rows: b.data || [], totalRows: b.totalRows || 0 }
+                            : { ok: false, error: b.error || b.title || ('Could not load the Evidence Center (HTTP ' + r.status + ').') };
+            },
+            link: async function (item) {
+                const r = await fetch(U('/practice/api/workflow/resolve/evidence-links'), {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                    body: JSON.stringify({ practiceInstanceId: instanceId, organizationId: orgId,
+                                           evidenceId: Number(evidenceId),
+                                           evidenceItemId: Number(F(item, 'evidenceItemId')) })
+                });
+                const b = await r.json().catch(() => ({}));
+                return r.ok ? { ok: true, message: b.message }
+                            : { ok: false, error: b.error || b.title || ('Could not link the evidence (HTTP ' + r.status + ').') };
+            }
+        });
+        if (!outcome || !outcome.linked) return;
+        await refreshEvidenceFiles(evidenceId);
+        const msg = document.querySelector('[data-ev-file-msg="' + evidenceId + '"]');
+        if (msg && outcome.message) msg.textContent = outcome.message;
+    }
+
+    async function refreshEvidenceLink(attachmentId, evidenceId) {
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/evidence-links/refresh'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ practiceInstanceId: instanceId, organizationId: orgId,
+                                       evidenceAttachmentId: Number(attachmentId) })
+            });
+            const b = await r.json().catch(() => ({}));
+            if (!r.ok) { window.alert(b.error || ('Could not update the file (HTTP ' + r.status + ').')); return; }
+            if (evidenceId) {
+                await refreshEvidenceFiles(evidenceId);
+                const msg = document.querySelector('[data-ev-file-msg="' + evidenceId + '"]');
+                if (msg && b.message) msg.textContent = b.message;
+            } else { await loadEvidenceAttachments(); renderObligations(); }
+        } catch (err) {
+            console.error('resolve-workspace: evidence link refresh failed', err);
+            window.alert('Could not update the file.');
+        }
+    }
+
+    async function removeEvidenceFile(attachmentId, evidenceId) {
+        // 476: unlink only -- the file stays in the Evidence Center.
+        if (!await window.gracUi.confirm('Remove this file from the evidence? It stays in the Evidence Center and can be linked again.',
+                { type: 'warning', title: 'Remove attachment', confirmText: 'Remove' })) return;
+        try {
+            const r = await fetch(U('/practice/api/workflow/resolve/evidence-attachments/remove'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ practiceInstanceId: instanceId, organizationId: orgId,
+                                       evidenceAttachmentId: Number(attachmentId) })
+            });
+            const b = await r.json().catch(() => ({}));
+            if (!r.ok) { window.alert(b.error || ('Could not remove the file (HTTP ' + r.status + ').')); return; }
+        } catch (err) {
+            console.error('resolve-workspace: evidence file remove failed', err);
+            window.alert('Could not remove the file.');
+            return;
+        }
+        if (evidenceId) await refreshEvidenceFiles(evidenceId);
+        else { await loadEvidenceAttachments(); renderObligations(); }
     }
 
     // ---------- pre-adoption evidence drafts  (migration 334) ---------
@@ -2100,8 +2529,8 @@
     // evidence type key above:
     //
     //     o._evidenceDraft = { 'policy document': { evidenceName: ...,
-    //                          evidenceLocation: ..., evidenceLocator: ...,
-    //                          evidenceDescription: ... } }
+    //                          evidenceLocation: ..., evidenceLocator: ... } }
+    //     (no evidenceDescription: read-only since 2026-10-27)
     //
     // It has to be held in JS rather than read off the DOM at save time,
     // the way the adopted rows are: ticking the adopt box calls
@@ -2128,19 +2557,36 @@
         const rowKey = keyOf(o);
         const local = F(o, 'isOrganizationDefined') === true;
         const pub   = Number(F(o, 'publishedEvidenceCount') || 0);
-        // A locally added obligation has no GRAC_New id, so its evidence is
-        // matched on the link column migrations 231/232 added instead.
-        const mine  = local
-            ? evidence.filter(e => String(F(e, 'sourcePracticeInstanceObligationId') || '')
-                                   === String(F(o, 'adoptionId') || ''))
-            : evidence.filter(e => Number(F(e, 'sourceObligationId')) === id);
+        const mine  = evidenceRowsOf(o);
+        // Migration 481: one-time evidence only (see isOneTimeCadence).
+        const shown = mine.filter(e => isOneTimeCadence(F(e, 'evidenceCadence')));
 
         // What the server has recorded, versus what the checkbox currently
         // shows. Ticking is not adopting -- the rows appear on Save.
         const savedAdopted   = !!F(o, 'isAdopted');
         const pendingAdopted = !!val(o, 'isAdopted');
 
-        if (!pub && !mine.length) {
+        // 2026-10-28: this early return used to test publishedEvidenceCount
+        // ALONE, and that hid evidence the card could perfectly well show.
+        //
+        // The count and the list come from two different places:
+        //   * pub  = PublishedEvidenceCount, counted off
+        //            vw_pm_obligation_evidence -- the ORGANISATION's approved
+        //            copy (394, organization_obligation_evidence);
+        //   * the list below is rendered from publishedEvidenceJson, which
+        //            sp_resolve_obligation_list projects from the typed
+        //            detail view.
+        // An organisation whose obligation-evidence copy was never populated
+        // therefore has pub = 0 while the typed detail still carries the
+        // specs. The card then claimed the authority publishes no evidence
+        // and offered nothing -- until a Save created the rows from the other
+        // path and the evidence appeared, which is why it looked like a
+        // save-first restriction.
+        //
+        // Test what can actually be SHOWN, not the count: if there are specs
+        // to render, render them, adopted or not.
+        const publishedSpecs = publishedEvidenceOf(o);
+        if (!pub && !mine.length && !publishedSpecs.length) {
             return '<div class="rw-evidence"><h4>Evidence</h4>'
                 + '<p class="rw-note">'
                 + (local
@@ -2182,7 +2628,13 @@
             // is the existing /resolve/evidence save, reached at a moment
             // the screen previously refused to offer it.
             // -------------------------------------------------------------
-            const published = publishedEvidenceOf(o);
+            // Migration 481: one-time specs only. publishedSpecs was read
+            // above, so this does not parse the same JSON a second time.
+            const published = publishedSpecs.filter(p => isOneTimeCadence(p.cadence));
+            if (!published.length) {
+                return '<div class="rw-evidence"><h4>Evidence</h4>'
+                    + '<p class="rw-note">' + esc(RECURRING_ONLY_NOTE) + '</p></div>';
+            }
             // Migration 334. An organisation-defined obligation is NOT
             // offered the inputs. Its evidence is authored in the modal
             // Edit obligation opens, it is matched on the 231/232 link
@@ -2206,49 +2658,67 @@
                 + '<p class="rw-note">' + esc(note) + '</p>'
                 + published.map(function (p) {
                     const d = editable ? evidenceDraftOf(o, p.key) : {};
-                    // "Ready on save" means the two fields IsResolved is
-                    // computed from are both filled. Same test the
-                    // procedure applies, said before the row exists.
-                    const ready = !!(String(d.evidenceLocation || '').trim()
+                    // Migration 481: the option chosen in the draft.
+                    const dsrc = isKnownSource(d.evidenceSource) ? d.evidenceSource : DEFAULT_EVIDENCE_SOURCE;
+                    // "Ready on save": what fn_pm_instance_evidence_is_resolved
+                    // will accept, said before the row exists. Only an
+                    // external reference can be complete before the save --
+                    // a file needs the row the save creates.
+                    const ready = dsrc === 'External'
+                               && !!(String(d.evidenceLocation || '').trim()
                                   && String(d.evidenceLocator  || '').trim());
                     return '<div class="rw-evidence-row pending' + (ready ? ' done' : '') + '">'
                       + '<div class="rw-evidence-head">'
                         + '<i class="fa-solid ' + (ready ? 'fa-circle-check rw-ok' : 'fa-circle-dot rw-warn') + '"></i>'
                         + '<strong>' + esc(d.evidenceName || p.type) + '</strong>'
                         + (d.evidenceName ? '<span class="pm-badge">' + esc(p.type) + '</span>' : '')
+                        + cadenceBadge(p.cadence, p.cadenceLabel, 'Published')
                         + '<span class="pm-badge">'
                           + (ready ? 'Ready on save' : (pendingAdopted ? 'Created on save' : 'Not started'))
                         + '</span>'
                       + '</div>'
-                      // Read-only, exactly as on the adopted branch: this
-                      // is what the authority asks for, not an answer.
+                      // The published description, read-only (change request
+                      // 2026-10-27; 473 had made it an editable box below).
                       + (p.remark ? '<p class="rw-note rw-evidence-remark">' + esc(p.remark) + '</p>' : '')
                       + (editable
                         ? '<div class="rw-fields">'
                           + '<div class="full">' + pevField(rowKey, p.key, 'evidenceName', 'Evidence name',
                               '<input type="text" value="' + esc(d.evidenceName || '')
                               + '" placeholder="' + esc(p.type) + '">', true) + '</div>'
+                        + '</div>'
+                        // Migration 481: the three options, then only the
+                        // chosen one's control.
+                        + evidenceSourceRadios('rwPevSrc-' + rowKey + '-' + p.key, dsrc,
+                              { 'data-pev-source': '1', 'data-pev-ob': rowKey, 'data-pev-type': p.key })
+                        + sourcePanel('External', dsrc, '<div class="rw-fields">'
                           + pevField(rowKey, p.key, 'evidenceLocation', 'Location',
                               '<input type="text" value="' + esc(d.evidenceLocation || '')
                               + '" placeholder="Where it is kept">')
                           + pevField(rowKey, p.key, 'evidenceLocator', 'Locator',
                               '<input type="text" value="' + esc(d.evidenceLocator || '')
                               + '" placeholder="Path, link or reference">')
-                          + '<div class="full">' + pevField(rowKey, p.key, 'evidenceDescription', 'Description',
-                              '<textarea rows="2">' + esc(d.evidenceDescription || '') + '</textarea>', true) + '</div>'
-                        + '</div>'
+                          + '</div>')
+                        + sourcePanel('DirectUpload EvidenceCenter', dsrc,
+                              '<p class="rw-note">The file is attached once the obligation is saved -- saving creates this evidence row.</p>')
                         : '')
                     + '</div>';
                   }).join('')
                 + '</div>';
         }
 
+        // Migration 481: recurring evidence is not listed here.
+        if (!shown.length) {
+            return '<div class="rw-evidence"><h4>Evidence</h4>'
+                + '<p class="rw-note">' + esc(RECURRING_ONLY_NOTE) + '</p></div>';
+        }
+
         return '<div class="rw-evidence"><h4>Evidence <span class="pm-badge">'
-             + mine.filter(e => F(e, 'isResolved')).length + ' / ' + mine.length + ' resolved</span></h4>'
-             + '<p class="rw-note">A location and a locator are both needed before evidence counts as resolved.</p>'
-             + mine.map(function (e) {
+             + shown.filter(e => F(e, 'isResolved')).length + ' / ' + shown.length + ' resolved</span></h4>'
+             + '<p class="rw-note">Choose how each evidence is provided: a file uploaded here, evidence already in the Evidence Center, or a reference to where it is kept.</p>'
+             + shown.map(function (e) {
                  const eid  = F(e, 'evidenceId');
                  const done = !!F(e, 'isResolved');
+                 const src  = evidenceSourceOf(e);   // 481
                  return '<div class="rw-evidence-row' + (done ? ' done' : '') + '" data-ev="' + esc(eid) + '">'
                    + '<div class="rw-evidence-head">'
                      + '<i class="fa-solid ' + (done ? 'fa-circle-check rw-ok' : 'fa-circle-dot rw-warn') + '"></i>'
@@ -2260,6 +2730,8 @@
                      + (F(e, 'evidenceName') && F(e, 'evidenceType')
                          ? '<span class="pm-badge">' + esc(F(e, 'evidenceType')) + '</span>' : '')
                      + (F(e, 'organizationModified') ? '<span class="pm-badge">Organization defined</span>' : '')
+                     // Migration 473 (Control Management 077).
+                     + cadenceBadge(F(e, 'evidenceCadence'), F(e, 'evidenceCadenceLabel'), F(e, 'evidenceCadenceSource'))
                    + '</div>'
                    // Migration 306. The published remark, under the name.
                    // It was already shown this way on the not-yet-adopted
@@ -2268,11 +2740,19 @@
                    // the operator started filling the evidence in. Same
                    // rw-note class, so the two branches read alike.
                    //
-                   // Read-only: this is what the authority asks for, not an
-                   // organization answer. Description below is the box for
-                   // the organization's own words.
-                   + (F(e, 'evidenceRemarks')
+                   // Read-only (change request 2026-10-27; 473 had made it
+                   // an editable Description box). The text the row works
+                   // to: a description stored for it earlier -- by 473's box
+                   // or, for an organisation-defined obligation, by Edit
+                   // obligation -- else the published one. When a stored
+                   // text differs from what was published, the published
+                   // wording follows it, so it is never lost from the row.
+                   + (normText(F(e, 'evidenceDescription') || F(e, 'evidenceRemarks'))
                        ? '<p class="rw-note rw-evidence-remark">'
+                         + esc(F(e, 'evidenceDescription') || F(e, 'evidenceRemarks')) + '</p>' : '')
+                   + (F(e, 'evidenceRemarks') && normText(F(e, 'evidenceDescription'))
+                        && normText(F(e, 'evidenceDescription')) !== normText(F(e, 'evidenceRemarks'))
+                       ? '<p class="rw-note rw-evidence-remark">As published: '
                          + esc(F(e, 'evidenceRemarks')) + '</p>' : '')
                    + '<div class="rw-fields">'
                      // Migration 254. First field on the row: it is what
@@ -2282,12 +2762,9 @@
                          '<input type="text" value="' + esc(F(e, 'evidenceName') || '')
                          + '" placeholder="' + esc(F(e, 'evidenceType') || 'Name this evidence') + '">',
                          true) + '</div>'
-                     + evField(eid, 'evidenceLocation', 'Location',
-                         '<input type="text" value="' + esc(F(e, 'evidenceLocation') || '')
-                         + '" placeholder="Where it is kept">')
-                     + evField(eid, 'evidenceLocator', 'Locator',
-                         '<input type="text" value="' + esc(F(e, 'evidenceLocator') || '')
-                         + '" placeholder="Path, link or reference">')
+                     // Migration 481: Location / Locator moved below the
+                     // option radios -- they are the External Evidence
+                     // Reference control now.
                      // Migration 245: evidence Owner input retired. The
                      // owner of the assurance obligation is by definition
                      // the owner of its evidence -- a second picker here
@@ -2307,9 +2784,26 @@
                      // The columns and the save endpoint are untouched --
                      // saveEvidence simply stops sending the two keys, and
                      // the procedure leaves what is stored alone.
-                     + '<div class="full">' + evField(eid, 'evidenceDescription', 'Description',
-                         '<textarea rows="2">' + esc(F(e, 'evidenceDescription') || '') + '</textarea>', true) + '</div>'
+                     //
+                     // The Description box (473) is gone: the description
+                     // is read-only and shown above (2026-10-27).
                    + '</div>'
+                   // Migration 481: how the evidence is provided, then only
+                   // that option's control -- Location / Locator for an
+                   // external reference, the file block (473/476) for a
+                   // direct upload or an Evidence Center reference. Only
+                   // one-time rows reach here (recurring evidence is
+                   // attached to each scheduled task).
+                   + evidenceSourceRadios('rwEvSrc-' + eid, src, { 'data-ev-source': eid })
+                   + sourcePanel('External', src, '<div class="rw-fields">'
+                     + evField(eid, 'evidenceLocation', 'Location',
+                         '<input type="text" value="' + esc(F(e, 'evidenceLocation') || '')
+                         + '" placeholder="Where it is kept">')
+                     + evField(eid, 'evidenceLocator', 'Locator',
+                         '<input type="text" value="' + esc(F(e, 'evidenceLocator') || '')
+                         + '" placeholder="Path, link or reference">')
+                     + '</div>')
+                   + evidenceFilesBlock(e)
                    // Migration 245: per-evidence Save button retired --
                    // the card's Save obligation button now flushes every
                    // evidence row inside the card in one action, so a
@@ -2402,40 +2896,67 @@
         // wiring goes with it. saveEvidence is still called by
         // saveOneObligation's parallel flush, so the function stays.
 
+        // Migration 473: one-time evidence files.
+        wireEvidenceFileControls(host);
+
         // Migration 334: the pre-adoption evidence inputs. Deliberately
         // the same handler shape as the [data-field] scanner below --
         // buffer the value, tick adopt, mark the card dirty -- because it
         // is the same decision being recorded, just about an evidence row
         // instead of an obligation parameter.
+        // Migration 481: extracted so the option radios below buffer their
+        // choice exactly the way the text boxes do.
+        function bufferEvidenceDraft(rowKey, typeKey, name, value) {
+            const o       = obligations.find(x => keyOf(x) === rowKey);
+            if (!o) return;
+            o._evidenceDraft = o._evidenceDraft || {};
+            o._evidenceDraft[typeKey] = o._evidenceDraft[typeKey] || {};
+            o._evidenceDraft[typeKey][name] = value;
+            // Filling in evidence is a statement of intent to take the
+            // obligation on -- and here it is more than that: the row
+            // this text belongs to is CREATED by the adopt, so an
+            // un-adopted obligation has nowhere to put it. Ticking is
+            // the only reading of the gesture that can be honoured.
+            o._edit = o._edit || {};
+            if (!val(o, 'isAdopted')) o._edit.isAdopted = true;
+            dirty.add(rowKey);
+            document.getElementById('rwObligationDirty').textContent =
+                dirty.size + ' unsaved change' + (dirty.size === 1 ? '' : 's');
+            const cb = host.querySelector('input[data-adopt="' + rowKey + '"]');
+            if (cb) cb.checked = true;
+            // No re-render. The head's badge and tick would refresh,
+            // but re-rendering on every keystroke-commit would move the
+            // caret out of the box the operator is still working in.
+            // The badge catches up on the next render, and the buffer
+            // -- not the DOM -- is what the save reads.
+        }
         host.querySelectorAll('[data-pev-field]').forEach(function (label) {
             const input = label.querySelector('input, select, textarea');
             if (!input) return;
             input.addEventListener('change', function () {
-                const rowKey  = label.getAttribute('data-pev-ob');
-                const typeKey = label.getAttribute('data-pev-type');
-                const name    = label.getAttribute('data-pev-field');
-                const o       = obligations.find(x => keyOf(x) === rowKey);
-                if (!o) return;
-                o._evidenceDraft = o._evidenceDraft || {};
-                o._evidenceDraft[typeKey] = o._evidenceDraft[typeKey] || {};
-                o._evidenceDraft[typeKey][name] = this.value;
-                // Filling in evidence is a statement of intent to take the
-                // obligation on -- and here it is more than that: the row
-                // this text belongs to is CREATED by the adopt, so an
-                // un-adopted obligation has nowhere to put it. Ticking is
-                // the only reading of the gesture that can be honoured.
-                o._edit = o._edit || {};
-                if (!val(o, 'isAdopted')) o._edit.isAdopted = true;
-                dirty.add(rowKey);
-                document.getElementById('rwObligationDirty').textContent =
-                    dirty.size + ' unsaved change' + (dirty.size === 1 ? '' : 's');
-                const cb = host.querySelector('input[data-adopt="' + rowKey + '"]');
-                if (cb) cb.checked = true;
-                // No re-render. The head's badge and tick would refresh,
-                // but re-rendering on every keystroke-commit would move the
-                // caret out of the box the operator is still working in.
-                // The badge catches up on the next render, and the buffer
-                // -- not the DOM -- is what the save reads.
+                bufferEvidenceDraft(label.getAttribute('data-pev-ob'), label.getAttribute('data-pev-type'),
+                                    label.getAttribute('data-pev-field'), this.value);
+            });
+        });
+
+        // Migration 481: Direct Upload / Evidence Center Reference /
+        // External Evidence Reference. A saved row keeps the unsaved choice
+        // in evidenceSourceChoice (saveEvidence sends the ticked one); a
+        // draft buffers it like its text boxes. Either way only the panels
+        // are toggled -- no redraw.
+        host.querySelectorAll('[data-ev-source]').forEach(function (group) {
+            group.addEventListener('change', function (ev) {
+                if (!ev.target.matches('input[type="radio"]')) return;
+                evidenceSourceChoice.set(String(group.getAttribute('data-ev-source')), ev.target.value);
+                showSourcePanels(group.closest('[data-ev]'), ev.target.value);
+            });
+        });
+        host.querySelectorAll('[data-pev-source]').forEach(function (group) {
+            group.addEventListener('change', function (ev) {
+                if (!ev.target.matches('input[type="radio"]')) return;
+                bufferEvidenceDraft(group.getAttribute('data-pev-ob'), group.getAttribute('data-pev-type'),
+                                    'evidenceSource', ev.target.value);
+                showSourcePanels(group.closest('.rw-evidence-row'), ev.target.value);
             });
         });
 
@@ -2545,7 +3066,7 @@
         const legacyOption = legacy
             ? '<option value="" selected disabled>' + esc(legacy) + ' (role - pick an employee)</option>'
             : '';
-        return legacyOption + options(list, currentText, 'Not set');
+        return legacyOption + options(list, currentText, 'Unassigned');
     }
 
     function obligationFormLookups() {
@@ -2593,6 +3114,9 @@
                         // row as evidence_description; seed it back so editing
                         // shows the current text (it travels as `remarks`).
                         remarks:         String(F(e, 'evidenceDescription') || ''),
+                        // 492: the row's cadence (vw_pm_instance_evidence_cadence;
+                        // Recurring when nothing was chosen).
+                        evidenceCadence: String(F(e, 'evidenceCadence') || 'Recurring'),
                         locked: Boolean(String(F(e, 'evidenceLocation') || '').trim()
                                      || String(F(e, 'evidenceLocator')  || '').trim()
                                      || String(F(e, 'evidenceOwner')    || '').trim())
@@ -2642,7 +3166,7 @@
     // new saveOneObligation share exactly one place where the payload
     // shape lives.
     // Migration 412: ownerEmployeeId for a save payload. Only an EDITED
-    // Owner is sent -- an id sets it, "Not set" sends 0 (clear) -- so a
+    // Owner is sent -- an id sets it, "Unassigned" sends 0 (clear) -- so a
     // save that did not touch the Owner never rewrites it.
     function ownerPayload(o) {
         if (!o._edit || !('ownerEmployeeId' in o._edit)) return null;
@@ -2661,7 +3185,7 @@
             assuranceFrequency:   labelOf(frequencies, val(o, 'assuranceFrequencyId')),
             responsibility:       val(o, 'responsibility') || null,
             // Migration 412: owner employee. Sent only when the Owner
-            // dropdown was changed: an id sets it, "Not set" (0) clears it,
+            // dropdown was changed: an id sets it, "Unassigned" (0) clears it,
             // untouched (null) leaves the stored owner alone.
             ownerEmployeeId:      ownerPayload(o),
             approvalAuthority:    val(o, 'approvalAuthority') || null,
@@ -2683,7 +3207,10 @@
             slaUnit:              val(o, 'slaUnit') || null,
             implementationStatusId: num(val(o, 'implementationStatusId')),
             connectionTypeId:     num(val(o, 'connectionTypeId')),
-            connectionUrl:        val(o, 'connectionUrl') || null
+            connectionUrl:        val(o, 'connectionUrl') || null,
+            // Migration 473 sent the description edited in the card. It is
+            // read-only since 2026-10-27: never sent (null = untouched).
+            obligationDescription: null
         };
     }
 
@@ -2745,6 +3272,12 @@
         const local = F(o, 'isOrganizationDefined') === true;
         const btn = document.querySelector('[data-save-obligation="' + key + '"]');
         const msg = document.querySelector('[data-save-note="' + key + '"]');
+        // 499: nothing to sweep here any more. Direct Upload is a dialog
+        // that stores the file when it is submitted, so a file can no
+        // longer be sitting in a picker waiting for this save. (Before
+        // 499 the card carried a bare file input and this loop attached
+        // whatever was left in it -- see 481 for the hidden-picker rule
+        // that went with it.)
         if (btn) btn.disabled = true;
         if (msg) msg.textContent = 'Saving...';
 
@@ -2817,6 +3350,8 @@
                     // bulk save reports as unmappedEvidenceTypes. Counted
                     // and said out loud rather than dropped quietly.
                     if (!row) { unplaced++; return Promise.resolve(); }
+                    // A draft has no description (read-only since
+                    // 2026-10-27), so the row keeps the published one.
                     return postEvidenceValues(F(row, 'evidenceId'), drafts[tk]);
                 }));
                 // Whatever landed is now stored, and loadObligations below
@@ -2997,10 +3532,15 @@
     // the same line -- keeping the row's vertical footprint at one line
     // was the reason the filters were factored out.
     function buildAssetFilterCells(tax) {
-        // The control's own text names it ("All Asset Category"), so no
-        // separate label sits above it (2026-09-28). data-checkcombo-empty
-        // is the text shown whenever nothing is ticked.
-        const bucket = (label, dataAttr, items) =>
+        // "Select ..." names each filter (2026-10-19, matching Risk
+        // Analysis's 2026-10-15 change): the cascade now REVEALS the asset
+        // list on a pick rather than narrowing one already shown, so "All"
+        // (= "nothing picked still shows everything") read wrong.
+        // Sub Category / Type options carry data-parent (their category id /
+        // subcategory id) so applyAssetTaxonomyCascade keeps them hidden
+        // until their parent is ticked; data-taxonomy-parent-hint is the
+        // "Select ... above first" note shown meanwhile.
+        const bucket = (label, dataAttr, items, parentHint) =>
               '<div class="rw-asset-filter" style="flex:1 1 0;min-width:0">'
             + '<div class="pm-field pm-checkcombo" data-checkcombo ' + dataAttr
             +   ' data-checkcombo-empty="' + esc(label) + '" style="width:100%">'
@@ -3011,18 +3551,20 @@
             + '<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>'
             +   '<input class="pm-checkcombo-search" type="search" placeholder="Search..." data-checkcombo-search>'
             +   '<div class="pm-checkcombo-options">'
+            +     (parentHint ? '<p class="pm-hint" data-taxonomy-parent-hint style="margin:6px">' + esc(parentHint) + '</p>' : '')
             +     items.map(o =>
-                    '<label data-checkcombo-option>'
-                    + '<input type="checkbox" value="' + esc(String(o.id)) + '"> '
+                    '<label data-checkcombo-option'
+                    + (o.parent != null ? ' data-parent="' + esc(String(o.parent)) + '"' : '')
+                    + '><input type="checkbox" value="' + esc(String(o.id)) + '"> '
                     + '<span>' + esc(o.name) + '</span></label>').join('')
             +   '</div>'
             + '</div>'
             + '</div>'
             + '</div>';
 
-        return bucket('All Asset Category',     'data-asset-cat-filter',    tax.cats)
-             + bucket('All Asset Sub Category', 'data-asset-subcat-filter', tax.subs)
-             + bucket('All Asset Type',         'data-asset-type-filter',   tax.types);
+        return bucket('Select Asset Category',     'data-asset-cat-filter',    tax.cats,  null)
+             + bucket('Select Asset Sub Category', 'data-asset-subcat-filter', tax.subs,  'Select an Asset Category above first.')
+             + bucket('Select Asset Type',         'data-asset-type-filter',   tax.types, 'Select an Asset Sub Category above first.');
     }
 
     async function loadAssetTaxonomy() {
@@ -3125,9 +3667,9 @@
         const labels   = dept.list.filter(o => selected.has(o.id)).map(o => o.name).join(', ');
         return '<div class="rw-dep-dept" style="flex:1 1 0;min-width:0">'
             +   '<div class="pm-field pm-checkcombo" data-checkcombo data-person-dept-filter'
-            +     ' data-checkcombo-empty="All Department" style="width:100%">'
+            +     ' data-checkcombo-empty="" style="width:100%">'
             +     '<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger title="Department"' + (enabled ? '' : ' disabled') + '>'
-            +       '<span data-checkcombo-text>' + esc(labels || 'All Department') + '</span>'
+            +       '<span data-checkcombo-text>' + esc(labels) + '</span>'
             +       '<span class="pm-checkcombo-caret" aria-hidden="true"></span>'
             +     '</button>'
             +     '<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>'
@@ -3148,7 +3690,11 @@
     // ("All Asset Category", "All Department", "All Users", ...), else the
     // generic "Select...".
     function comboEmptyText(combo) {
-        return (combo && combo.getAttribute('data-checkcombo-empty')) || 'Select...';
+        // A present-but-empty data-checkcombo-empty means "show blank when
+        // nothing is selected" (Department / Users pickers). Only a MISSING
+        // attribute falls back to the generic "Select...".
+        const v = combo ? combo.getAttribute('data-checkcombo-empty') : null;
+        return v === null ? 'Select...' : v;
     }
 
     function comboMenuText(combo) {
@@ -3188,7 +3734,10 @@
                 const q = this.value.toLowerCase().trim();
                 combo.querySelectorAll('[data-checkcombo-option]').forEach(function (opt) {
                     const text = opt.querySelector('span').textContent.toLowerCase();
-                    opt.hidden = q && !text.includes(q);
+                    // Respect the cascade / intersection filter: an option
+                    // hidden by data-filtered-out stays hidden through a
+                    // search (Asset cascade, 2026-10-19).
+                    opt.hidden = (opt.dataset.filteredOut === '1') || (!!q && !text.includes(q));
                 });
             });
             document.addEventListener('mousedown', function (ev) {
@@ -3220,8 +3769,10 @@
             return;
         }
 
-        // Asset row: the three filter checkcombos narrow the asset
-        // picker. Selecting nothing on a filter means "no restriction".
+        // Asset row (2026-10-19, matching Risk Analysis's 2026-10-15
+        // change): Category -> Sub Category -> Type is a real cascade, and
+        // the asset picker shows only the already-mapped assets until a
+        // filter is picked -- not the whole register on first view.
         const catFilter    = row.querySelector('[data-asset-cat-filter]');
         const subFilter    = row.querySelector('[data-asset-subcat-filter]');
         const typeFilter   = row.querySelector('[data-asset-type-filter]');
@@ -3229,19 +3780,123 @@
         if (!catFilter && !subFilter && !typeFilter) return;
 
         const readTicks = combo => new Set([...combo.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value));
+
+        // Category -> Sub Category -> Type: a child option is pickable only
+        // while its data-parent is among the ticked parents. One that falls
+        // outside is UNticked (not just hidden), so it cannot go on
+        // narrowing downstream from behind a filter the reader cannot see.
+        const cascade = () => {
+            const narrow = (parentCombo, childCombo) => {
+                if (!childCombo) return;
+                const parentIds = parentCombo ? readTicks(parentCombo) : new Set();
+                let changed = false, anyVisible = false;
+                childCombo.querySelectorAll('[data-checkcombo-option]').forEach(function (opt) {
+                    const box = opt.querySelector('input[type="checkbox"]');
+                    const ok  = parentIds.size > 0 && parentIds.has(opt.dataset.parent || '');
+                    opt.dataset.filteredOut = ok ? '' : '1';
+                    opt.hidden = !ok;
+                    if (ok) anyVisible = true;
+                    if (!ok && box && box.checked) { box.checked = false; changed = true; }
+                });
+                const hint = childCombo.querySelector('[data-taxonomy-parent-hint]');
+                if (hint) hint.hidden = anyVisible;
+                if (changed) childCombo.querySelector('[data-checkcombo-text]').textContent = comboMenuText(childCombo);
+            };
+            narrow(catFilter, subFilter);    // Category -> Sub Category
+            narrow(subFilter, typeFilter);   // Sub Category -> Type
+        };
+
         const applyFilters = () => {
             if (!assetPicker) return;
             const cats  = catFilter  ? readTicks(catFilter)  : new Set();
             const subs  = subFilter  ? readTicks(subFilter)  : new Set();
             const types = typeFilter ? readTicks(typeFilter) : new Set();
+            // Nothing picked: only the already-mapped (checked) assets show
+            // -- the picker no longer starts with the whole register on view.
+            const noFilter = !cats.size && !subs.size && !types.size;
             assetPicker.querySelectorAll('[data-checkcombo-option]').forEach(function (opt) {
-                const okCat  = !cats.size  || cats.has(opt.dataset.assetCategory || '');
-                const okSub  = !subs.size  || subs.has(opt.dataset.assetSubcategory || '');
-                const okType = !types.size || types.has(opt.dataset.assetType || '');
-                opt.hidden = !(okCat && okSub && okType);
+                let show;
+                if (noFilter) {
+                    const box = opt.querySelector('input[type="checkbox"]');
+                    show = !!(box && box.checked);
+                } else {
+                    const okCat  = !cats.size  || cats.has(opt.dataset.assetCategory || '');
+                    const okSub  = !subs.size  || subs.has(opt.dataset.assetSubcategory || '');
+                    const okType = !types.size || types.has(opt.dataset.assetType || '');
+                    show = okCat && okSub && okType;
+                }
+                opt.dataset.filteredOut = show ? '' : '1';
+                opt.hidden = !show;
             });
+            // The "select a filter above" hint shows only while there is
+            // nothing else visible to look at.
+            const hint = assetPicker.querySelector('[data-asset-empty-hint]');
+            if (hint) {
+                const anyVisible = [...assetPicker.querySelectorAll('[data-checkcombo-option]')].some(o => !o.hidden);
+                hint.hidden = anyVisible;
+            }
         };
-        [catFilter, subFilter, typeFilter].forEach(f => { if (f) f.addEventListener('change', applyFilters); });
+
+        // Seed the three filters from the already-mapped (checked) assets
+        // so an existing selection shows its Category / Sub Category / Type
+        // instead of a blank "Select ..." (change request 2026-10-19). With
+        // nothing mapped, the filters stay empty and read "Select ...".
+        const seedFiltersFromMapped = () => {
+            if (!assetPicker) return;
+            const checked = [...assetPicker.querySelectorAll('[data-checkcombo-option] input[type="checkbox"]:checked')]
+                .map(cb => cb.closest('[data-checkcombo-option]'));
+            if (!checked.length) return;
+            const seed = (combo, attr) => {
+                if (!combo) return;
+                const want = new Set(checked.map(opt => opt.dataset[attr]).filter(Boolean));
+                if (!want.size) return;
+                let any = false;
+                combo.querySelectorAll('[data-checkcombo-option] input[type="checkbox"]').forEach(function (box) {
+                    if (want.has(box.value)) { box.checked = true; any = true; }
+                });
+                if (any) combo.querySelector('[data-checkcombo-text]').textContent = comboMenuText(combo);
+            };
+            seed(catFilter,  'assetCategory');
+            seed(subFilter,  'assetSubcategory');
+            seed(typeFilter, 'assetType');
+        };
+
+        const onFilterChange = () => { cascade(); applyFilters(); };
+        [catFilter, subFilter, typeFilter].forEach(f => { if (f) f.addEventListener('change', onFilterChange); });
+
+        // Reveal a child combo's options that belong to a ticked parent OR
+        // are themselves ticked, WITHOUT unchecking anything. Used only for
+        // the initial seed: the normal cascade() unchecks a child whose
+        // parent is not ticked (right for a user edit, but it would wipe a
+        // freshly seeded Sub Category / Type the instant it ran -- which is
+        // why Category seeded fine but Sub Category / Type did not). With
+        // nothing ticked it hides every child -- the "Select ..." collapse.
+        const revealSeeded = () => {
+            const reveal = (parentCombo, childCombo) => {
+                if (!childCombo) return;
+                const parentIds = parentCombo ? readTicks(parentCombo) : new Set();
+                let anyVisible = false;
+                childCombo.querySelectorAll('[data-checkcombo-option]').forEach(function (opt) {
+                    const box = opt.querySelector('input[type="checkbox"]');
+                    const ok = (parentIds.size > 0 && parentIds.has(opt.dataset.parent || '')) || !!(box && box.checked);
+                    opt.dataset.filteredOut = ok ? '' : '1';
+                    opt.hidden = !ok;
+                    if (ok) anyVisible = true;
+                });
+                const hint = childCombo.querySelector('[data-taxonomy-parent-hint]');
+                if (hint) hint.hidden = anyVisible;
+            };
+            reveal(catFilter, subFilter);
+            reveal(subFilter, typeFilter);
+        };
+
+        // Reflect an existing selection first (pre-fill Category / Sub
+        // Category / Type from the mapped assets), reveal those levels
+        // without unchecking the seed, then narrow the asset picker.
+        // Nothing mapped -> filters stay empty ("Select ...") and collapse.
+        seedFiltersFromMapped();
+        revealSeeded();
+        applyFilters();
     }
 
     // "Ticking" the row now only means "you intend this category to
@@ -3372,8 +4027,16 @@
             // (2026-09-28) -- the text names the control, so no label
             // sits above it. Other rows keep "Select..." under the
             // "Objects" column header.
+            // 2026-10-27: the Users / Department pickers showed "All Users"
+            // / "All Department" when nothing was picked, which reads as
+            // "everything is selected". They are left BLANK when empty now,
+            // in both the edit and the read-only (?mode=view) pages -- a
+            // selected value still shows the value; only the empty state
+            // changed. (Department on the Person row is a filter, not a
+            // saved dependency when a person is chosen, so after picking a
+            // user its box is genuinely empty and now reads blank.)
             const objectEmptyText = isAsset ? 'Select Assets'
-                                  : (categoryName === 'Person' ? 'All Users' : 'Select...');
+                                  : (categoryName === 'Person' ? '' : 'Select...');
             const objectComboHtml =
                   '<div class="rw-dep-object" style="flex:2 1 0;min-width:0">'
                 +   '<div class="pm-field pm-checkcombo" data-checkcombo'
@@ -3386,7 +4049,9 @@
                 +     '<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>'
                 +       '<input class="pm-checkcombo-search" type="search"'
                 +         ' placeholder="Search..." data-checkcombo-search>'
-                +       '<div class="pm-checkcombo-options">' + options + '</div>'
+                +       '<div class="pm-checkcombo-options">'
++         (isAsset ? '<p class="pm-hint" data-asset-empty-hint style="margin:6px">Select an Asset Category, Sub Category or Type above to load assets.</p>' : '')
++         options + '</div>'
                 +     '</div>'
                 +   '</div>'
                 + '</div>';

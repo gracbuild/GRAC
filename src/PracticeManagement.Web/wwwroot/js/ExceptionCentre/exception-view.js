@@ -197,7 +197,10 @@
     wrap.hidden = false;
     const parts = [];
     if (d.requestReason) parts.push(`<div><dt>Reason / Justification (requester)</dt><dd class="ev-block">${escapeHtml(d.requestReason)}</dd></div>`);
-    if (d.justification) parts.push(`<div><dt>Justification (analyst)</dt><dd class="ev-block">${escapeHtml(d.justification)}</dd></div>`);
+    // Heading text only, change request 2026-10-15: "(analyst)" removed
+    // from the label -- the field itself, and everything it shows, is
+    // unchanged.
+    if (d.justification) parts.push(`<div><dt>Justification</dt><dd class="ev-block">${escapeHtml(d.justification)}</dd></div>`);
     if (d.riskImpact)    parts.push(`<div><dt>Risk / Impact</dt><dd class="ev-block">${escapeHtml(d.riskImpact)}</dd></div>`);
     document.getElementById("evReasonFacts").innerHTML = parts.join("");
   }
@@ -407,13 +410,14 @@
       || d.requestTypeCode === "TASK_PRIORITY_REDUCTION");
 
     const items = window.gracExceptionActions.buildMenu(
-      { exceptionId: state.id, requestTypeCode: d.requestTypeCode, statusCode: d.statusCode, customGapId: d.customGapId },
+      { exceptionId: state.id, requestTypeCode: d.requestTypeCode, statusCode: d.statusCode, customGapId: d.customGapId,
+        designatedApproverEmployeeId: d.designatedApproverEmployeeId },
       {
         onAnalysis: () => {
           window.location.href = U("/Practice/Index/exception-analysis") + "?exceptionId=" + encodeURIComponent(state.id);
         },
         onApprove: isTaskType
-          ? () => window.gracExceptionActions.approveSlaQuick(state.id)
+          ? () => window.gracExceptionActions.approveSlaQuick(state.id, d.requestTypeCode)
           : () => window.gracExceptionActions.openApprove(state.id),
         onOpenSourceGap: () => {
           window.location.href = U("/Practice/Index/gap-detail")

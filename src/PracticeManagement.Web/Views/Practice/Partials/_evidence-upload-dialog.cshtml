@@ -1,0 +1,68 @@
+@*
+    Shared "Upload evidence" dialog for the Evidence Center item form.
+
+    Extracted verbatim from Views/Practice/Partials/evidence-center.cshtml
+    (migration 499): Operationalize's one-time evidence and Complete Task's
+    evidence both offer Direct Upload, and Direct Upload used to be a bare
+    file picker -- the file reached the Evidence Center with no title,
+    type, validity, classification, tags or owner, and the operator had to
+    describe it a second time on the Evidence Center screen.
+
+    All three screens now open THIS dialog, so there is exactly one
+    "Upload evidence" form in the product and one validation rule (the
+    file is required, everything else optional). Make a field mandatory
+    here and it is mandatory everywhere, which is what sir asked for.
+
+    Same arrangement as Partials/_evidence-picker-dialog.cshtml +
+    wwwroot/js/Shared/evidence-picker.js: include this partial once on a
+    page, load wwwroot/js/Shared/evidence-upload.js, and call
+    window.gracEvidenceUpload.open({ ... }). The HOST passes the submit
+    call, so the dialog never knows which endpoint stores the file --
+    the Evidence Center posts to its own /upload, Operationalize and
+    Complete Task post to their own attachments endpoints (which carry
+    the metadata through to sp_evidence_item_store since 499).
+
+    The element ids are unchanged from the Evidence Center original, so
+    nothing that already referenced them had to move.
+*@
+
+@* ======================= Upload / edit ======================= *@
+<div class="pm-modal" id="ecEditModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2 id="ecEditTitle">Upload evidence</h2>
+            <button class="pm-modal-close" type="button" data-close-ec="ecEditModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="ecEditForm" class="pm-form-grid">
+            <label class="full" id="ecEdFileRow"><span>File *</span><input type="file" id="ecEdFile" /></label>
+            <label class="full" id="ecEdVersionNoteRow" hidden><span>What changed</span><input type="text" id="ecEdVersionNote" maxlength="1000" /></label>
+            <label class="full" data-ec-meta><span>Title</span><input type="text" id="ecEdTitle" maxlength="300" placeholder="Defaults to the file name" /></label>
+            <label data-ec-meta><span>Evidence type</span><select id="ecEdType"><option value="">--</option></select></label>
+            <label data-ec-meta><span>Owner</span><select id="ecEdOwner"><option value="">Me</option></select></label>
+            <label data-ec-meta><span>Valid from</span><input type="date" id="ecEdValidFrom" /></label>
+            <label data-ec-meta><span>Valid to</span><input type="date" id="ecEdValidTo" /></label>
+            <label data-ec-meta><span>Classification</span><select id="ecEdClass">
+                <option value="Internal">Internal</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Restricted">Restricted (owner and admins only)</option>
+            </select></label>
+            <label data-ec-meta><span>Tags</span><input type="text" id="ecEdTags" maxlength="500" placeholder="Comma separated" /></label>
+            <label class="full" data-ec-meta><span>Description</span><textarea id="ecEdDescription" rows="3" maxlength="2000"></textarea></label>
+            <p class="ec-note full" id="ecEdNote"></p>
+            <p class="pm-message full" id="ecEditMessage" role="status" aria-live="polite" hidden></p>
+            @* 409 from the upload: the identical file is already in the Evidence Center. *@
+            <div class="pm-message info full" id="ecEdDuplicate" role="status" aria-live="polite" hidden>
+                <span id="ecEdDuplicateText"></span>
+                <div class="ec-actions" style="margin:8px 0 0">
+                    <button type="button" class="pm-button" id="ecEdDupOpen"><i class="fa-solid fa-folder-open"></i> Open existing</button>
+                    <button type="button" class="pm-button" id="ecEdDupUpload"><i class="fa-solid fa-upload"></i> Upload as a separate item</button>
+                </div>
+            </div>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-ec="ecEditModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="ecEdSubmit"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+

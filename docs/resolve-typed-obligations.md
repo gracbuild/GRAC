@@ -291,7 +291,7 @@ Now:
 
 | | Change |
 | --- | --- |
-| `.rw-split` | two equal columns, `minmax(0, 1fr)` each — **not** bare `1fr`, or one long locator would push its column past half and shove the other off. Stacks under 1000px |
+| `.rw-split` | one full-width column (2026-10-08): **As published** on top, **Your answers** below it. Was two equal columns; a long published value left a tall empty block beside the answers. `minmax(0, 1fr)`, **not** bare `1fr`, so one long locator cannot widen the card |
 | `.rw-answers` | new right-hand box, same chrome and heading style as `.rw-typed`, so the pair reads as two of a kind |
 | `.rw-typed dl` | `auto-fill` with a `minmax(170px, 220px)` cap — empty tracks kept, no value sprawls |
 | `.rw-answers .rw-fields` | two columns over 1000px. Scoped to this column: the profile box and the dialog use the same class and are not in a split |
@@ -1110,6 +1110,40 @@ holding `practiceInstanceObligationId = 0`, so the next Save was another
 > This is the same hazard 217 was written to avoid. It got past me here
 > because the `SELECT` looked like the procedure's own return value.
 
+### The same fault came back twice -- 340, 397, fixed by 463
+
+The rule above is easy to break by re-issuing the proc from the **wrong
+body**. It happened twice:
+
+* `340_local_obligation_evidence_description.sql` re-issued
+  `sp_resolve_local_obligation_evidence_sync` from the **232** body (its
+  header says *"Requires 232 (the proc this re-issues)"*), dropping 233's
+  three `INT OUTPUT` parameters and restoring the trailing `SELECT`.
+* `397_evidence_type_shared_id_standardization.sql` then re-issued
+  **340's** body (*"DEPENDS ON: 340 (current proc body)"*) and carried the
+  regression forward.
+
+The live proc was back to four parameters while `sp_resolve_local_obligation_save`
+and `sp_practice_obligation_fan_out` (both from **412**) still passed seven,
+so every obligation save carrying evidence failed with
+
+```
+Procedure or function sp_resolve_local_obligation_evidence_sync has too many
+arguments specified.
+```
+
+visible on Practice View -> Actions -> Add Obligation and on Operationalize ->
+Add / Edit obligation.
+
+`463_evidence_sync_output_params_restored.sql` re-issues 397's body -- the
+shared-id translation and the `evidence_description` writes kept verbatim --
+on 233's seven-parameter signature, with no caller change.
+
+> **Rule, restated:** before re-issuing a procedure, take the body from the
+> **latest** migration that defines it *and* check its **signature** against
+> every live `EXEC`. A body-only rebase silently changes the contract.
+
+
 ## The fix, in four places
 
 **Database (233).** The sync procedure takes `@evidence_added`,
@@ -1471,3 +1505,112 @@ rollback is a no-op; reverting the change means reverting
    the `0 / 1 resolved` badge and the one row adoption creates.
 5. Confirm the old path is unchanged: on an already-adopted obligation,
    edit an evidence row and press Save obligation — it saves as before.
+
+# Override inputs moved to "Your answers" (2026-10-08)
+
+**As published** is now read-only. The inputs that override published values
+used to sit inside it (migration 234, "Editing now lives inside the typed
+panel"). They now render at the top of the **Your answers** box, ahead of
+Owner / Assurance type / Implementation status:
+
+| Type + trigger                  | Inputs in Your answers                                  |
+| ------------------------------- | ------------------------------------------------------- |
+| Execution                       | Execution frequency, First occurrence                   |
+| Assurance + trigger Scheduled   | Assurance frequency, First occurrence                   |
+| Assurance + trigger EventDriven | Event, SLA value, SLA unit                              |
+
+* `answerOverrides(o)` renders them by calling the existing `overrideEditor`. The
+  overrides are stored per obligation, so only one set is rendered: the set from the
+  first published rule that has any.
+* `overrideRow` now delegates to `field()`, so these inputs carry the same
+  `[data-field][data-ob]` markup and styling as the other answers. Save, dirty
+  tracking and the view-mode lock work exactly as before.
+* `publishedBlock` no longer hides the overridable keys. The published frequency,
+  event and SLA are shown read-only there.
+* `editableOverrideKeys` was only used for that hiding, so it is removed.
+* The note "Leave a field blank to keep the published value." is removed.
+  * A blank option still means "as published".
+  * Its label still names the published value ("As published (Monthly)").
+* An organisation-defined obligation is unchanged: it shows no override inputs
+  (they are on its own form) and keeps its Edit / Remove buttons.
+* No API or database change.
+
+# Your answers on one row; First occurrence read back (2026-10-08, migration 457)
+
+## One row, a column per answer
+On screens wider than 1000px, `.rw-answers .rw-fields` is now laid out as a single row with one column per answer: `grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr)`. The column count therefore follows the obligation type:
+
+| Type | Answers | Layout |
+|---|---|---|
+| State / Constraint / ... | Owner, Implementation status | 1 row × 2 |
+| Execution | Execution frequency, First occurrence, Owner, Implementation status | 1 row × 4 |
+| Assurance, Scheduled | Assurance frequency, First occurrence, Owner, Assurance type, Implementation status | 1 row × 5 |
+| Assurance, EventDriven | Event, SLA value, SLA unit, Owner, Assurance type, Implementation status | 1 row × 6 |
+| Assurance + Automated | the above + Connection type, Connection URL (7-8) | 4 a row (`:has(> :nth-child(7))`) |
+
+At 1000px and below, the existing 170px auto-fill layout is unchanged. CSS only.
+
+## First occurrence was saved but never shown
+- **Save (unchanged, worked).**
+  1. `ResolveWorkspaceService.AdoptObligationsAsync` builds the anchors from `FirstOccurrenceDate`.
+  2. It passes them to `sp_pm_sync_instance_schedule_rules` (338).
+  3. That proc writes `practice_instance_obligation.first_occurrence_date` and the schedule rule's `anchor_date`.
+- **Read (the bug).** `sp_resolve_obligation_list` did not return the column, so the reloaded card rendered the date input empty.
+- **Fix.**
+  - Migration `457_obligation_first_occurrence_readback.sql` re-issues `sp_resolve_obligation_list` (from 412) with `FirstOccurrenceDate` on both branches.
+  - The API adds `ResolveObligationRow.FirstOccurrenceDate`: a `string`, `yyyy-MM-dd`, which is what an HTML date input takes. It is read with `HasColumn`, so a database without 457 still loads.
+- **No Web change.** The input already reads `val(o, 'firstOccurrenceDate')`.
+- **API response.** `GET` obligations for an instance: each row now carries `firstOccurrenceDate` (`"2026-10-15"` or `null`).
+- **Save semantics.** A blank date still means "keep the stored anchor" (338). The stored date is now shown and re-sent on each save, which leaves it unchanged.
+
+## Practice Details card on the Operationalize workspace (2026-10-08)
+
+The Operationalize workspace (`resolve-workspace.cshtml`) now shows the
+**Practice Details** card of the practice the instance belongs to, as the first
+panel -- above the instance facts strip (Owner / Department / Practice Type /
+Criticality / Implementation). The card is identical to Practice View's:
+Implementation Status, Practice Code, Origin, Practice Owner, Applicability,
+Status, Active Instances, Frameworks, Control Statement, Description.
+
+One implementation, shared by both pages:
+
+| Piece | File |
+|---|---|
+| Markup + styles | `Views/Practice/Partials/_practice-details-panel.cshtml` (panel `#pmPracticeDetailsPanel`, hidden until rendered) |
+| Load + render | `wwwroot/js/Shared/practice-details.js` -> `window.gracPracticeDetails.load({practiceId, organizationId, organizationRequirementId})` / `.render(practice)` |
+
+- Practice View's inline `renderPractice` field list, `frameworkChips`,
+  `sourceStatementChips` and the chip CSS were moved into these two files;
+  Practice View now includes the partial and calls the module. Its output is
+  unchanged.
+- The workspace calls `loadPracticeDetails()` after the instance loads, using
+  the instance's `PracticeId` (already returned by `sp_resolve_instance_detail`).
+  Best-effort: if the read fails, the card stays hidden and the rest of the
+  page works as before.
+- Data: existing `GET /practice/api/workflow/practice-configure/detail`
+  (`sp_practice_detail_get`). No API, procedure or database change.
+
+### Instance facts panel removed; Department moved into Practice Details (2026-10-08)
+
+The read-only instance facts panel (`#rwFacts`: Owner, Department, Practice
+Type, Criticality, Implementation) is removed from the Operationalize
+workspace, to avoid repeating what Instance Profile already shows (Practice
+type, Criticality, Owner). The instance's **Department** is now an extra row in
+the Practice Details card, after Active Instances:
+`gracPracticeDetails.render(practice, { extraRows: [['Department', dept]] })`.
+The `extraRows` option is new in `Shared/practice-details.js`; Practice View
+does not pass it, so its card is unchanged. The `.rw-facts` CSS was removed
+with the panel. UI-only; no API or database change.
+
+## "Adopted by" shows the employee name (2026-10-15)
+
+The note under **Save obligation** read "Adopted by employee:37." --
+`adopted_by` stores the actor stamp the API passes to the save procedures
+(`ResolveWorkspaceController.Actor` = `"employee:{caller employee id}"`).
+The stored value is unchanged. `ResolveWorkspaceService.ListObligationsAsync`
+now replaces it, for the card only, with `organization_employee.employee_name`
+(one lookup per load, `ResolveActorNamesAsync`): "Adopted by Ravi Kumar."
+A stamp whose employee no longer exists returns null, so the line is hidden
+rather than showing an id; `"system"` is shown as before. API-only change:
+the `AdoptedBy` field of `GET .../obligations` now carries the name. No
+database or UI change.

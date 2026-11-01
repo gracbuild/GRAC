@@ -18,6 +18,10 @@
         // Custom page (not the generic grid), so it renders its own partial.
         "ownership-management",
         "my-assignments", "gap-view", "handover", "auditor-workbench",
+        // Add Custom Gap full page (2026-10-25, gap-new.cshtml).
+        "gap-new",
+        // Edit Custom Gap (migration 495, gap-edit.cshtml -> gap-new.cshtml).
+        "gap-edit",
         "risk-register", "kri-dashboard", "adapter-bindings",
         // Workflow & Event-Driven Assurance Engine (BRD v1.0).
         // Each key resolves to Views/Practice/Partials/{key}.cshtml.
@@ -73,6 +77,9 @@
         "document-uploads",
         "document-acknowledgements",
         "my-acknowledgements",
+        // Evidence Center (migration 476): own partial, own JS, own proxy
+        // (practice/api/evidence-center).
+        "evidence-center",
         // Task Centre v2 Phase 4 (migrations 201-203) -- the in-app
         // dispatcher for SLA task notifications. Personal inbox, scoped to
         // the session's employee id.
@@ -92,6 +99,9 @@
         // it configures the organisation's approval authority, and the
         // Risk Centre reads it. Menu row is a child of nav-organization.
         "risk-acceptance-authority",
+        // Settings -> Risk Settings (458, 2026-10-08): the Risk Centre
+        // settings that used to open from a gear on the risk pages.
+        "risk-settings",
         // Task View / Exception View (326) -- dedicated read-only full-page
         // views. Same "route" screen convention as gap-view/gap-detail:
         // no menu row, reached only by ?taskId=/?exceptionId= links from
@@ -102,6 +112,13 @@
         // secure/query -- exactly the failure this entry prevents.
         "task-view",
         "exception-view",
+        // New Task / Edit Task / Complete Task -- full-page versions of
+        // the Task Board's dialogs (task-new.cshtml, task-edit.cshtml,
+        // task-complete.cshtml). Same reason as task-view above: without
+        // an entry here the route falls through to the generic grid.
+        "task-new",
+        "task-edit",
+        "task-complete",
         // Add Source Statements (Release -> Source Structure -> Source
         // Statements), added for Custom Release authoring without an
         // Organization selector. No menu row of its own -- reached only by
@@ -147,7 +164,14 @@
         // Phase 8.4a (migration 450): governance KPIs.
         "asset-governance",
         // Phase 8.5a (migration 452): report catalogue and exports.
-        "asset-reports"
+        "asset-reports",
+        // Third-Party Risk Management (migrations 486-490): own partials,
+        // own JS (js/Tprm), own proxy (practice/api/tprm). The dashboard is
+        // a management dashboard (handled above).
+        "tprm-third-parties",
+        "tprm-engagements",
+        "tprm-reviews",
+        "tprm-configuration"
     };
     // Risk Management submenus (migration 383). Each of these keys is its
     // own route/screen but REUSES the existing risk-centre partial, opened
@@ -325,6 +349,33 @@
                 <div class="pm-form-grid pm-form-grid-compact" id="setupAttributeFields" data-setup-readonly="@isOrganizationAdministration.ToString().ToLowerInvariant()"></div>
             </section>
             }
+            @* Single Sign-On (migration 466): the organization's own sign-in
+               policy. Organization Administration only (moved from
+               Organization Setup, 2026-10-13) -- the one editable card on
+               this otherwise read-only tab, so it carries its own Save,
+               shown with the screen's ADD/EDIT grant (same heading + button
+               pattern as the child tabs below). Saved through
+               /practice/api/org-sso. practice.js hides the card when the
+               caller cannot read it. *@
+            @if (isOrganizationAdministration)
+            {
+            <section class="pm-setup-card" id="setupSsoCard">
+                <div class="pm-section-heading inline">
+                    <div>
+                        <h2>Single Sign-On</h2>
+                        <p>Who in this organization may sign in with Microsoft or Google. Tenant IDs and email domains are comma separated.</p>
+                    </div>
+                    @if (permissions.Contains("EDIT") || permissions.Contains("ADD"))
+                    {
+                        <button class="pm-button primary small" type="button" id="saveSetupSso">Save</button>
+                    }
+                </div>
+                @* The card's own validation / save result, next to its Save
+                   button rather than in the page-level #setupMessage. *@
+                <div id="setupSsoMessage" class="pm-message" hidden></div>
+                <div class="pm-form-grid pm-form-grid-compact" id="setupSsoFields"></div>
+            </section>
+            }
         </div>
         @if (isOrganizationOnboarding)
         {
@@ -476,9 +527,17 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
            (2026-09-28, filled by practice.js openControlStatementsRelease). *@
         @if (Model.Key == "organization-requirements" || Model.Key == "organization-controls" || Model.Key == "source-statements")
         {
-            <select id="subscribedFrameworkFilter" title="Framework"><option value="">All subscribed frameworks</option></select>
+            @* Organization Practices has no "All" option (2026-10-18): practice.js
+               loadSubscribedFrameworks always selects one release. *@
+            <select id="subscribedFrameworkFilter" title="Framework"><option value="">@(Model.Key == "organization-requirements" ? "Loading frameworks..." : "All subscribed frameworks")</option></select>
         }
-        @if (Model.Key == "organization-controls")
+        @* Source filter: Standards & Frameworks and (2026-10-08) Control
+           Statements -- one "All sources" Repository / Organization filter
+           on both, instead of Control Statements' Origin filter (which also
+           offered Hybrid and did not filter anything there). Organization
+           Practices too (2026-10-08): there it filters the practice's
+           origin (Repository / Organization); Hybrid is not offered. *@
+        @if (Model.Key == "organization-controls" || Model.Key == "source-statements" || Model.Key == "organization-requirements")
         {
             <select id="sourceFilter"><option value="">All sources</option><option value="repository">Repository</option><option value="organization">Organization</option></select>
         }
@@ -487,11 +546,15 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         {
             <input id="search" placeholder="Search practices..." />
         }
-        <select id="originTypeFilter" @(usesApplicabilityFilters ? "hidden" : "")><option value="">All origins</option></select>
+        <select id="originTypeFilter" @(usesApplicabilityFilters || Model.Key == "source-statements" ? "hidden" : "")><option value="">All origins</option></select>
         <select id="criticalityFilter" @(Model.Key == "organization-requirements" || Model.Key == "organization-controls" ? "hidden" : "")><option value="">All criticalities</option></select>
         <input id="ownerFilter" placeholder="Owner..." @(usesApplicabilityFilters ? "hidden" : "") />
-        <input id="dateFromFilter" type="date" title="Entered from" @(usesApplicabilityFilters ? "hidden" : "") />
-        <input id="dateToFilter" type="date" title="Entered to" @(usesApplicabilityFilters ? "hidden" : "") />
+        @* Entered from / to (2026-10-08): also hidden on Control Statements
+           (source-statements). Its tree comes from release-statements/query,
+           which takes no date filter, so the two inputs showed blank and
+           did nothing. *@
+        <input id="dateFromFilter" type="date" title="Entered from" @(usesApplicabilityFilters || Model.Key == "source-statements" ? "hidden" : "") />
+        <input id="dateToFilter" type="date" title="Entered to" @(usesApplicabilityFilters || Model.Key == "source-statements" ? "hidden" : "") />
         @if (usesApplicabilityFilters)
         {
             <button class="pm-button" id="clearFilters" type="button">Clear Filter</button>
@@ -529,9 +592,19 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
                 <span id="workbenchHint">Showing Practice Instances assigned to you.</span>
             </div>
             }
+            @if (Model.Key == "organization-controls" || Model.Key == "source-statements")
+            {
+                @* Release owner first (2026-10-18): practice.js renderReleaseOwnerNotice
+                   shows this while the open release has no owner. *@
+                <div id="releaseOwnerMessage" class="pm-message info" hidden></div>
+            }
             <div class="pm-table-wrap" data-screen-key="@Model.Key">
                 <table>
-                    <thead id="practiceGridHead"><tr>@foreach (var column in Model.Columns) { <th>@column</th> }<th>Actions</th></tr></thead>
+                    @* Organization Practices: no server-rendered header -- practice.js
+                       draws the practice columns (practiceGridHeadings) before the
+                       first load, so the heading is the same before and after the
+                       rows arrive instead of flashing the screen-definition columns. *@
+                    <thead id="practiceGridHead">@if (Model.Key != "organization-requirements") {<tr>@foreach (var column in Model.Columns) { <th>@column</th> }<th>Actions</th></tr>}</thead>
                     <tbody id="practiceRows"><tr><td colspan="@(Model.Columns.Length + 1)" class="pm-empty">Loading...</td></tr></tbody>
                 </table>
             </div>

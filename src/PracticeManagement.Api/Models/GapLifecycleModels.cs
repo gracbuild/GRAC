@@ -67,7 +67,17 @@ public sealed record GapHeader(
     // a pre-367 header proc. gap-detail.js uses this, together with the
     // linked-artefacts "failed obligations" list, to gate the Analyze
     // action for Implementation-sourced gaps.
-    bool?   IsPracticeOperationalized = null);
+    bool?   IsPracticeOperationalized = null,
+    // Migration 491: the Add Gap narrative -- Current State / As-Is, Gap
+    // Identified / Finding, and Comments / Management Response (the
+    // remarks column). Null on a pre-491 header proc.
+    string? CurrentState = null,
+    string? GapFinding   = null,
+    string? Remarks      = null,
+    // Migration 496: the linked Practice Instance's description (its
+    // practice's -- an instance has none of its own). Null without an
+    // instance or on a pre-496 header proc.
+    string? PracticeInstanceDescription = null);
 
 // ---- Lifecycle state master ----------------------------------------
 public sealed record GapLifecycleStateRow(
@@ -174,7 +184,13 @@ public sealed record GapAnalysisSaveRequest(
     string? RemediationPossible,
     string? BusinessRiskPresent,
     long? AnalysedByEmployeeId,
-    string? CallerDisplayName);
+    string? CallerDisplayName,
+    // Migration 501: true only when the analyst deliberately chose
+    // Re-analyse on a gap that is already Analysed. The procedure's
+    // 55143 guard still refuses an accidental second save when this is
+    // false, which is every other caller. Optional and last, so no
+    // existing caller changes.
+    bool Reanalyse = false);
 
 // Migration 323: TaskCreated/ExceptionCreated/RiskCreated/*Error carry
 // sp_custom_gap_analysis_save's second result set -- whether each

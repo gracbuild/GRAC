@@ -67,8 +67,10 @@ public sealed record PracticeObligationListResult(
 // ---------- grac_practice.sp_practice_obligation_save ----------
 /// <summary>
 /// PracticeObligationId = 0 adds; anything else edits that definition.
-/// Retire = true removes it from the practice and, through the fan-out,
-/// from every instance.
+/// Retire = true RETIRES it on the practice and, through the fan-out, on
+/// every instance -- status only: nothing is deleted and the evidence
+/// produced against it stays attached. Restore = true (migration 464)
+/// is the way back.
 /// </summary>
 public sealed record PracticeObligationSaveRequest(
     long    PracticeId,
@@ -100,13 +102,31 @@ public sealed record PracticeObligationSaveRequest(
     /// display name) from the employee record. Optional and last so older
     /// payloads still bind.
     /// </summary>
-    long?   OwnerEmployeeId = null);
+    long?   OwnerEmployeeId = null,
+
+    /// <summary>
+    /// Migration 464: put a RETIRED definition back. The mirror of
+    /// <see cref="Retire"/> -- retiring never deleted anything, it set
+    /// practice_obligation.status to Retired and the fan-out retired every
+    /// instance copy, so this is a status flip plus the same fan-out call.
+    /// Requires <see cref="PracticeObligationId"/>; no other field is read.
+    /// <see cref="Retire"/> wins if both are set. Optional and last so
+    /// older payloads still bind.
+    /// </summary>
+    bool    Restore = false);
 
 public sealed record PracticeObligationEvidenceItem(
     int     EvidenceTypeId,
     bool    IsMandatory,
     string? RetentionPeriod,
-    string? Remarks);
+    string? Remarks,
+    /// <summary>
+    /// Migration 492: "Recurring" or "OneTime" -- the cadence Control
+    /// Management asks for published evidence (077), now asked for custom
+    /// obligation evidence too. Null = not given (read as Recurring).
+    /// Optional and last so older payloads still bind.
+    /// </summary>
+    string? EvidenceCadence = null);
 
 /// <summary>
 /// The fan-out counts travel back on the same row as the outcome, which

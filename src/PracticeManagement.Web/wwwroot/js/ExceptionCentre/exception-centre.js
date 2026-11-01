@@ -305,10 +305,10 @@
     const tbody = document.getElementById("excTableBody");
     if (!state.organizationId) {
       pager?.clear();
-      tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">Select an organization.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="pm-empty-row">Select an organization.</td></tr>`;
       return;
     }
-    tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">Loading...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="pm-empty-row">Loading...</td></tr>`;
     const qs = new URLSearchParams({ organizationId: state.organizationId });
     if (state.statusCode)  qs.set("statusCode",  state.statusCode);
     if (state.requestType) qs.set("requestType", state.requestType);
@@ -331,7 +331,7 @@
       // No status filter now means "all", so the label must not leave a
       // double space where the status word used to sit.
       const scope = state.statusCode ? `${escapeHtml(state.statusCode)} ` : "";
-      tbody.innerHTML = `<tr><td colspan="7" class="pm-empty-row">
+      tbody.innerHTML = `<tr><td colspan="8" class="pm-empty-row">
         No ${scope}exception requests.</td></tr>`;
       return;
     }
@@ -347,6 +347,7 @@
       const chip = statusChip(r.statusCode);
       const effective = formatEffective(r);
       tr.innerHTML = `
+        <td>${escapeHtml(r.exceptionNumber || "--")}</td>
         <td>${escapeHtml(displayRequestTitle(r.requestTitle))}</td>
         <td>${window.gracFormatDisplayDate(r.requestedOn)}</td>
         <td>${chip}</td>
@@ -358,6 +359,7 @@
                   data-exc-status="${r.statusCode}"
                   data-exc-type="${r.requestTypeCode || 'GAP_CANDIDATE'}"
                   data-exc-gap-id="${r.customGapId || ''}"
+                  data-exc-designated="${r.designatedApproverEmployeeId || ''}"
                   aria-haspopup="menu" aria-expanded="false" title="Actions">
             <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
           </button>
@@ -468,6 +470,7 @@
       // instead of sniffing the Gap column's rendered <a href> -- the
       // same value, read directly rather than re-derived from markup.
       const gapId = Number(trigger.dataset.excGapId) || null;
+      const designated = trigger.dataset.excDesignated || null;   // 498
 
       // Migration 257 / change request 2026-09-22: the item list and
       // every applicability/disabled rule now come from
@@ -481,7 +484,8 @@
         return;
       }
       const items = window.gracExceptionActions.buildMenu(
-        { exceptionId: id, requestTypeCode: reqType, statusCode: status, customGapId: gapId },
+        { exceptionId: id, requestTypeCode: reqType, statusCode: status, customGapId: gapId,
+          designatedApproverEmployeeId: designated },
         {
           onView: () => {
             window.location.href = U("/Practice/Index/exception-view")
@@ -492,7 +496,7 @@
               + "?exceptionId=" + encodeURIComponent(id);
           },
           onApprove: (reqType === "SLA_CANDIDATE" || reqType === "TASK_SLA_EXTENSION" || reqType === "TASK_PRIORITY_REDUCTION")
-            ? () => window.gracExceptionActions.approveSlaQuick(id)
+            ? () => window.gracExceptionActions.approveSlaQuick(id, reqType)
             : () => window.gracExceptionActions.openApprove(id),
           onOpenSourceGap: () => {
             window.location.href = U("/Practice/Index/gap-detail")

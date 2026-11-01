@@ -189,5 +189,14 @@
     .ev-hint { font-size: 11px; color: var(--fg-subtle); }
 </style>
 
+@* APPROVE is computed server-side from this role's permissions (same
+   source as the Add button above) and handed to exception-actions.js
+   as window.pmCanApprove. Inline here in the body so it does not depend
+   on the layout @section Scripts block. *@
+@{
+    var __excPerms = (ViewBag.Permissions as string[]) ?? System.Array.Empty<string>();
+    var __excCanApprove = System.Array.IndexOf(__excPerms, "APPROVE") >= 0;
+}
+<script>window.pmCanApprove = @(__excCanApprove ? "true" : "false");</script>
 <script src="~/js/ExceptionCentre/exception-view.js" asp-append-version="true"></script>
 <script src="~/js/Shared/exception-actions.js" asp-append-version="true"></script>

@@ -254,6 +254,9 @@
   const status = document.querySelector("#status");
   const organizationFilter = document.querySelector("#organizationFilter");
   const subscribedFrameworkFilter = document.querySelector("#subscribedFrameworkFilter");
+  // Set by loadSubscribedFrameworks when the release list could not be read,
+  // so Organization Practices says so instead of "no subscribed frameworks".
+  let subscribedFrameworksLoadFailed = false;
   const originTypeFilter = document.querySelector("#originTypeFilter");
   const criticalityFilter = document.querySelector("#criticalityFilter");
   const ownerFilter = document.querySelector("#ownerFilter");
@@ -286,6 +289,10 @@
   const setupOrganization = document.querySelector("#setupOrganization");
   const setupBasicFields = document.querySelector("#setupBasicFields");
   const setupAttributeFields = document.querySelector("#setupAttributeFields");
+  // Migration 466: Organization Setup -> Organization tab -> Single Sign-On.
+  const setupSsoCard = document.querySelector("#setupSsoCard");
+  const setupSsoFields = document.querySelector("#setupSsoFields");
+  const setupSsoMessage = document.querySelector("#setupSsoMessage");
   const setupMessage = document.querySelector("#setupMessage");
   const subscriptionTree = document.querySelector("#subscriptionTree");
   const subscriptionSearch = document.querySelector("#subscriptionSearch");
@@ -310,6 +317,13 @@
   const formEntity = () => state.formEntity || screen.Key;
   const isFormFor  = key => formEntity() === key;
   const state = { id: 0, mode: "add", records: [], lookups: {}, pageNumber: 1, pageSize: 25, navigationCode: query.get("code") || "", navigationContext: null, activeFormRecord: null, activeDependencies: [], activeEvidence: [], obligationRows: [], obligationFilters: {}, obligationSort: { key: "FrameworkRelease", direction: "asc" }, activeWorkbenchDependencyTypeId: "", activeWorkbenchLabel: "All Dependency Categories" };
+  // The initial bootstrap below loads the grid itself (loadSubscribedFrameworks
+  // + loadRows). loadLookups() also auto-picks the default organization and
+  // fires a synthetic "change", whose handler loads the grid AGAIN -- so every
+  // page did two identical loads. Keep the synthetic dispatch suppressed until
+  // the bootstrap finishes; a real user org change (a genuine change event) is
+  // never gated by this.
+  let orgAutoSelectArmed = false;
   // Applications and Tools tabs were retired on the organization-dependencies
   // page after the Asset taxonomy (migration 239-241) subsumed them. The
   // default tab is now Vendors, matching the new first setupChildTabs entry
@@ -357,7 +371,8 @@
     if (screen.Key === "organization-requirements") return true;
     return isSourceStatements
         && sourceStatementState.level === "statements"
-        && !sourceStatementState.isCustomRelease;
+        && !sourceStatementState.isCustomRelease
+        && !releaseOwnerMissing();
   }
 
   // A row can be ticked only while its applicability has not been decided.
@@ -472,13 +487,15 @@
   const statementTreeColumnDefs = [
     { label: "Statement Reference", cls: "pm-cell-ref" },
     { label: "Statement Title", cls: "pm-cell-title" },
+    // 2026-10-08: the statement's applicability owner (OwnerName -- the
+    // owner chosen in Mark / Update Applicability).
+    { label: "Owner", cls: "" },
     { label: "Applicability Status", cls: "" },
     { label: "Implementation Status", cls: "" },
     { label: "Practice Count", cls: "" },
     { label: "Actions", cls: "" }
   ];
   const statementTreeColumns = statementTreeColumnDefs.map(column => column.label);
-  const customStatementFlatColumns = ["Hierarchy", "Source Structure Node", "Statement Reference", "Statement Title", "Applicability Status", "Practice Count", "Actions"];
   // Source Structure state for custom releases
   const sourceStructureState = { nodes: [], active: false };
   // Statement Classification items for the currently-open Custom Release
@@ -495,6 +512,17 @@
   const permissionMatrixColumns = ["Menu", "View", "Add", "Edit", "Inactive", "Approve"];
   const permissionMatrixState = { roleId: "", menus: [], existing: [] };
   const workbenchColumns = ["Name", "OwningDepartment", "PrimaryOwner", "Frequency", "Register", "ResolvedDependencyName", "ResolutionStatus", "ResolutionOwner", "LastUpdated"];
+  // 2026-10-27. Columns carrying free text long enough to widen the whole
+  // grid -- .pm-table-wrap td is nowrap, so without this one long value
+  // pushes every other column off-screen. .pm-cell-text caps the width and
+  // wraps onto further lines (it shares .pm-cell-title's declarations).
+  // Keyed by screen on purpose: a bare "any column called Description"
+  // rule would silently re-wrap grids nobody asked about.
+  const wrappedColumnsByScreen = {
+    "roles": new Set(["Description"])
+  };
+  const cellClassFor = column =>
+    wrappedColumnsByScreen[screen.Key]?.has(column) ? ' class="pm-cell-text"' : "";
   const setupChildScreens = {
     "locations": { title: "Location", columns: ["Name", "LocationType", "LocationHead", "Region", "Status"] },
     "departments": { title: "Department", columns: ["Code", "Name", "HeadUser", "Status"] },
@@ -552,8 +580,28 @@
     return labels[column] || column.replace(/([a-z])([A-Z])/g, "$1 $2");
   }
 
+  // Organization Practices column headings (2026-10-08). One list for the
+  // header shown while the grid loads (renderGridHeader), the flat
+  // statement list and each Control group's header row, so the heading
+  // no longer changes from the screen-definition columns ("Code /
+  // Practice Instance Name / Practice Instance Count") to the practice
+  // columns once the rows arrive.
+  const practiceGridHeadings = ["Practice Code", "Practice Name", "Applicability Status", "Implementation Status", "Owner", "Origin Type"];
+
+  function practiceHeaderCells() {
+    return `${bulkHeaderCell()}${practiceGridHeadings.map(heading => `<th>${escapeHtml(heading)}</th>`).join("")}<th>Actions</th>`;
+  }
+
   function renderGridHeader() {
     if (!tableHead) return;
+    // Control Statements (2026-10-08): the statement-tree header from the
+    // first paint, so the loading header and the loaded one are the same
+    // (it showed the screen-definition columns until the rows arrived).
+    if (isSourceStatementDetail) { renderStatementTreeHeader(); return; }
+    if (screen.Key === "organization-requirements") {
+      tableHead.innerHTML = `<tr>${practiceHeaderCells()}</tr>`;
+      return;
+    }
     tableHead.innerHTML = `<tr>${currentColumns().map(column => `<th>${escapeHtml(columnLabel(column))}</th>`).join("")}<th>Actions</th></tr>`;
   }
 
@@ -607,7 +655,9 @@
   // below) but are no longer offered for Organization Practices
   // (organization-requirements / practices). See the optionsFor comment
   // for how an already-saved legacy value is still shown, just not
-  // re-selectable.
+  // re-selectable. Also the Statement Applicability form's options and the
+  // applicability FILTER on Control Statements / Organization Practices
+  // (2026-10-08).
   const PRACTICE_APPLICABILITY_STATUSES = ["Not Updated", "Applicable", "Not Applicable", "Retired"];
 
   // Location / Department / Teams status restriction (2026-09): the
@@ -641,13 +691,20 @@
     // Q13/Q14/Q15 v5 — Implementation Status catalog. Backend auto-syncs
     // implementation_status_id from this text value via trigger
     // tr_pm_practice_instance_impl_status_sync (migration 045).
+    // 456: Not Updated is the default -- listed so the read-only instance
+    // field can display it.
     "implementation-status": [
+      { value: "Not Updated",            label: "Not Updated" },
       { value: "Not Implemented",        label: "Not Implemented" },
       { value: "Partially Implemented",  label: "Partially Implemented" },
       { value: "Implemented",            label: "Implemented" },
       { value: "Not Applicable",         label: "Not Applicable" }
     ],
     "subscription-types": [{ value: "Automatic", label: "Automatic" }, { value: "Manual", label: "Manual" }],
+    // Migration 466 -- organization SSO policy. Codes must match
+    // organization_sso_setting's CHECK / sp_org_sso_setting_save.
+    "sso-login-modes": [{ value: "SSO_AND_PASSWORD", label: "SSO + Password" }, { value: "SSO_ONLY", label: "SSO Only" }],
+    "sso-providers": [{ value: "Microsoft", label: "Microsoft (Entra ID)" }, { value: "Google", label: "Google" }],
     "frequency-master": [{ value: "1", label: "Daily" }, { value: "2", label: "Weekly" }, { value: "3", label: "Monthly" }, { value: "4", label: "Quarterly" }, { value: "5", label: "Half-Yearly" }, { value: "6", label: "Annual" }, { value: "7", label: "Event Driven" }, { value: "8", label: "Continuous" }, { value: "9", label: "Custom" }],
     "frequency-units": [{ value: "Day", label: "Day" }, { value: "Week", label: "Week" }, { value: "Month", label: "Month" }, { value: "Quarter", label: "Quarter" }, { value: "Year", label: "Year" }],
     "frequency-units": [{ value: "Day", label: "Day" }, { value: "Week", label: "Week" }, { value: "Month", label: "Month" }, { value: "Year", label: "Year" }],
@@ -832,6 +889,23 @@
     { name: "geographic_presence", label: "Geographic Presence", type: "comboChecks", lookup: "countries" },
     { name: "business_functions", label: "Business Operations", type: "comboChecks", lookup: "business-function-types" },
     { name: "technology_landscape", label: "Technology Landscape", type: "comboChecks", lookup: "technology-landscape" }
+  ];
+  // Migration 466 -- the organization's single sign-on policy, shown on
+  // Organization Administration's Organization tab and saved by the card's
+  // own Save through /practice/api/org-sso (not a gateway save). Lists are
+  // comma separated.
+  const setupSsoSchema = [
+    { name: "ssoEnabled", label: "Enable Single Sign-On", type: "checkbox" },
+    select("loginMode", "Login Mode", "sso-login-modes", true),
+    { name: "providers", label: "Allowed Sign-in Providers", type: "checks", lookup: "sso-providers" },
+    text("microsoftTenantIds", "Microsoft Tenant ID(s)"),
+    text("allowedEmailDomains", "Allowed Email Domains"),
+    // 467 -- create a person the organization's tenant / domain vouched for
+    // on their first SSO sign-in, with this role, active at once or after
+    // an administrator approves them (Users tab -> Approve).
+    { name: "autoCreateUsers", label: "Auto-create Users on First SSO Sign-in", type: "checkbox" },
+    select("defaultRoleId", "Default Role for New Users", "roles"),
+    { name: "requireAdminApproval", label: "Admin Approval Before Activation", type: "checkbox" }
   ];
   const actionDefinitions = {
     "organizations": ["view", "edit", "manage", "inactive"],
@@ -1021,6 +1095,7 @@
   }
 
   function listColumnCount() {
+    if (screen.Key === "organization-requirements") return practiceGridHeadings.length + 1 + bulkColumnCount();
     return currentColumns().length + 1 + bulkColumnCount();
   }
 
@@ -1169,7 +1244,7 @@
     if (heading && state.navigationContext.displayCode) {
       heading.textContent = `${screen.Title} - ${state.navigationContext.displayCode}`;
     }
-    if ((screen.Key === "organization-requirements" && ["OrganizationControl", "FrameworkStatement"].includes(state.navigationContext.filterType))
+    if ((screen.Key === "organization-requirements" && ["OrganizationControl", "FrameworkStatement", "OrgStatement"].includes(state.navigationContext.filterType))
       || (screen.Key === "practices" && state.navigationContext.filterType === "OrganizationRequirement")
       || (screen.Key === "practice-instances" && ["Practice", "OrganizationRequirement"].includes(state.navigationContext.filterType))) {
       const panel = document.querySelector(".pm-panel");
@@ -1552,7 +1627,7 @@
           // gated on an empty selection. Fire it manually when the effective
           // value actually changed so downstream handlers (loadSubscribedFrameworks
           // + resetToFirstPage) run for the auto-picked organization.
-          if (previousValue !== nextValue) {
+          if (previousValue !== nextValue && orgAutoSelectArmed) {
             organizationFilter.dispatchEvent(new Event("change", { bubbles: true }));
           }
         }
@@ -1561,7 +1636,15 @@
     if (status) {
       const statusKey = screen.Key === "organization-requirements" || isSourceStatements ? "applicability-status" : "status-active";
       const emptyStatus = screen.Key === "organization-requirements" || isSourceStatements ? "All applicability statuses" : "All statuses";
-      status.innerHTML = `<option value="">${emptyStatus}</option>${(state.lookups[statusKey] || []).map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
+      // 2026-10-08: on Control Statements and Organization Practices the
+      // applicability filter offers only what Mark / Update Applicability
+      // can set (PRACTICE_APPLICABILITY_STATUSES). Not Implemented,
+      // Accepted Risk and Deferred are still in the shared master for
+      // Organization Controls, but nothing on these two screens can carry
+      // them, so filtering by them only ever returned an empty grid.
+      const statusItems = (state.lookups[statusKey] || [])
+        .filter(item => statusKey !== "applicability-status" || PRACTICE_APPLICABILITY_STATUSES.includes(item.label));
+      status.innerHTML = `<option value="">${emptyStatus}</option>${statusItems.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
       // Management dashboard drill-down (414): ?status= preselects the
       // applicability filter once, on the first fill -- the Governance
       // dashboard's per-release "Not updated" / "Applicable" counts open
@@ -1577,10 +1660,29 @@
     if (criticalityFilter) criticalityFilter.innerHTML = `<option value="">All criticalities</option>${(state.lookups.criticality || []).map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
   }
 
+  // Organization Practices (2026-10-18) has no "All subscribed frameworks"
+  // option: its rows are grouped under SOURCE STATEMENT headings, and a
+  // practice is mapped to statements of several frameworks, so with every
+  // framework at once there is no single heading to put it under. The
+  // filter always holds one release -- the first row of the list (the API
+  // orders it Authority -> Artifact -> Release, Custom releases last) unless
+  // the current choice is still offered (Clear Filter empties it first, so
+  // Clear Filter goes back to the first row). Standards & Frameworks keeps
+  // "All" -- it lists releases, not practices.
+  //
+  // A Control Statement drill is the one exception: the gateway scopes the
+  // query to that statement, the list is flat (no headings), and the filter
+  // only shows where the drill came from -- the context's release, locked;
+  // a custom statement's context carries no release, so the filter stays on
+  // the locked placeholder and sends nothing.
   async function loadSubscribedFrameworks() {
     if (!subscribedFrameworkFilter) return;
     const organizationId = organizationFilter?.value || "";
-    subscribedFrameworkFilter.innerHTML = `<option value="">All subscribed frameworks</option>`;
+    const singleRelease = screen.Key === "organization-requirements";
+    const allOption = `<option value="">All subscribed frameworks</option>`;
+    const previousReleaseId = String(subscribedFrameworkFilter.value || "");
+    subscribedFrameworksLoadFailed = false;
+    subscribedFrameworkFilter.innerHTML = singleRelease ? `<option value="">No subscribed frameworks</option>` : allOption;
     subscribedFrameworkFilter.disabled = !organizationId;
     if (!organizationId) return;
     try {
@@ -1590,14 +1692,36 @@
         body: JSON.stringify({ data: { organizationId: Number(organizationId), pageNumber: 1, pageSize: 500 } })
       });
       const frameworks = apiData(result);
-      subscribedFrameworkFilter.innerHTML = `<option value="">All subscribed frameworks</option>${frameworks.map(item => {
+      const releaseOptions = frameworks.map(item => {
         const value = item.ReleaseId ?? item.releaseId;
         const label = item.FrameworkRelease || item.frameworkRelease || item.ReleaseVersion || item.releaseVersion || `Release ${value}`;
         return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
-      }).join("")}`;
-      subscribedFrameworkFilter.disabled = false;
+      }).join("");
+      subscribedFrameworkFilter.innerHTML = singleRelease
+        ? (releaseOptions || `<option value="">No subscribed frameworks</option>`)
+        : `${allOption}${releaseOptions}`;
+      subscribedFrameworkFilter.disabled = singleRelease && !frameworks.length;
+      // Opened from a Control Statement (repository or custom release): show
+      // the statement's framework as selected and lock it, the same way the
+      // Organization filter is locked to the context's organization -- the
+      // gateway applies the context's releaseId to every query anyway, so a
+      // different selection here would only mislead.
+      const contextReleaseId = String(state.navigationContext?.releaseId || "");
+      const offered = value => [...subscribedFrameworkFilter.options].some(option => option.value === value);
+      if (contextReleaseId && offered(contextReleaseId)) {
+        subscribedFrameworkFilter.value = contextReleaseId;
+        subscribedFrameworkFilter.disabled = true;
+      } else if (singleRelease && isPracticeStatementDrill()) {
+        subscribedFrameworkFilter.innerHTML = allOption;
+        subscribedFrameworkFilter.disabled = true;
+      } else if (singleRelease && frameworks.length) {
+        subscribedFrameworkFilter.value = previousReleaseId && offered(previousReleaseId)
+          ? previousReleaseId
+          : subscribedFrameworkFilter.options[0].value;
+      }
       console.info("PracticeManagement Organization Practices subscribed frameworks", { organizationId, count: frameworks.length, frameworks });
     } catch (error) {
+      subscribedFrameworksLoadFailed = true;
       subscribedFrameworkFilter.innerHTML = `<option value="">Unable to load frameworks</option>`;
       subscribedFrameworkFilter.disabled = true;
       console.error("PracticeManagement subscribed frameworks failed", error);
@@ -1792,6 +1916,7 @@
     setupState.treeInitialized = true;
     renderSetupBasic(org);
     renderSetupAttributes();
+    await loadSetupSso(orgId);
     if (isOrganizationOnboarding) renderSubscriptionTree();
     if (isOrganizationAdministration) renderSubscribedReleasesReadonly();
     await loadSetupChildRows(setupState.activeTab);
@@ -1881,6 +2006,156 @@
   function renderSetupAttributes() {
     if (!setupAttributeFields) return;
     setupAttributeFields.innerHTML = setupAttributeSchema.map(field => setupFieldMarkup(field, setupState.attributes[field.name], isOrganizationAdministration)).join("");
+  }
+
+  // ---- Single Sign-On (migration 466) ----------------------------------
+  // GET/POST /practice/api/org-sso (OrganizationSsoSettingController ->
+  // sp_org_sso_setting_get / _save). Organization Administration only
+  // (moved from Organization Setup 2026-10-13). Fields are editable only
+  // with the screen's ADD/EDIT grant -- the same grant the proxy checks on
+  // save. A 403 read hides the card; any other failure is shown in it.
+  const ssoUrl = () => buildAppUrl("practice/api/org-sso");
+  const ssoDefaults = () => ({ ssoEnabled: false, allowMicrosoft: false, allowGoogle: false, microsoftTenantIds: "", allowedEmailDomains: "", loginMode: "SSO_AND_PASSWORD",
+    autoCreateUsers: false, defaultRoleId: "", requireAdminApproval: true });
+
+  async function loadSetupSso(orgId) {
+    if (!setupSsoFields) return;
+    showSsoMessage("");
+    let setting = ssoDefaults();
+    setupState.ssoAvailable = true;
+    if (orgId) {
+      let r;
+      try {
+        r = await fetch(`${ssoUrl()}?organizationId=${encodeURIComponent(orgId)}`, { credentials: "same-origin" });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error || body.message || ("HTTP " + r.status));
+        }
+        const b = await r.json();
+        setting = {
+          ssoEnabled: !!valueOf(b, "ssoEnabled"),
+          allowMicrosoft: !!valueOf(b, "allowMicrosoft"),
+          allowGoogle: !!valueOf(b, "allowGoogle"),
+          microsoftTenantIds: valueOf(b, "microsoftTenantIds") || "",
+          allowedEmailDomains: valueOf(b, "allowedEmailDomains") || "",
+          loginMode: valueOf(b, "loginMode") || "SSO_AND_PASSWORD",
+          // 467
+          autoCreateUsers: !!valueOf(b, "autoCreateUsers"),
+          defaultRoleId: String(valueOf(b, "defaultRoleId") || ""),
+          requireAdminApproval: valueOf(b, "requireAdminApproval") !== false
+        };
+      } catch (error) {
+        setupState.ssoAvailable = false;
+        // No organization-setup grant: the card is simply not offered.
+        // Anything else (466 not applied, API down) is SAID in the card,
+        // so a missing setup is visible instead of a silently absent card.
+        if (setupSsoCard) setupSsoCard.hidden = r?.status === 403;
+        setupSsoFields.innerHTML = `<div class="pm-field full"><div class="pm-message">Single sign-on settings could not be loaded (${escapeHtml(error.message)}). Check that database/466_organization_sso_settings.sql has been run and the API is up to date.</div></div>`;
+        return;
+      }
+    }
+    if (setupSsoCard) setupSsoCard.hidden = false;
+    setupState.ssoOriginal = JSON.stringify(setting);
+    const values = {
+      ssoEnabled: setting.ssoEnabled,
+      loginMode: setting.loginMode,
+      providers: [setting.allowMicrosoft ? "Microsoft" : null, setting.allowGoogle ? "Google" : null].filter(Boolean),
+      microsoftTenantIds: setting.microsoftTenantIds,
+      allowedEmailDomains: setting.allowedEmailDomains,
+      autoCreateUsers: setting.autoCreateUsers,
+      defaultRoleId: setting.defaultRoleId,
+      requireAdminApproval: setting.requireAdminApproval
+    };
+    const ssoReadonly = !(permissions.has("EDIT") || permissions.has("ADD"));
+    setupSsoFields.innerHTML = setupSsoSchema.map(field => setupFieldMarkup(field, values[field.name], ssoReadonly)).join("");
+  }
+
+  // The card's own message line, under its Save button (not the
+  // page-level #setupMessage at the top). kind: "" = error (the default
+  // .pm-message look), "success" / "info" = the existing variants.
+  function showSsoMessage(text, kind = "") {
+    if (!setupSsoMessage) return;
+    setupSsoMessage.className = "pm-message" + (kind ? " " + kind : "");
+    setupSsoMessage.textContent = text || "";
+    setupSsoMessage.hidden = !text;
+  }
+
+  // An Error that also names the input it is about, so the card can mark
+  // it -- the same error.field convention fetchJson uses for API errors.
+  function ssoError(field, message) {
+    const error = new Error(message);
+    error.field = field;
+    return error;
+  }
+
+  // The card's own Save (Organization Administration).
+  async function saveSsoCard() {
+    setupSsoFields?.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
+    try {
+      const setting = collectSetupSso();
+      if (!setting) {
+        showSsoMessage("No single sign-on changes to save.", "info");
+        return;
+      }
+      const note = (await saveSetupSso(Number(setupState.organizationId || 0), setting)).trim();
+      const saved = note === "Single sign-on settings saved.";
+      if (saved) await loadSetupSso(setupState.organizationId);
+      showSsoMessage(note, saved ? "success" : "");
+    } catch (error) {
+      if (error.field) setupSsoFields?.querySelector(`[name='${error.field}']`)?.classList.add("field-error");
+      showSsoMessage(error.message);
+    }
+  }
+
+  // Reads the card and applies the same rules sp_org_sso_setting_save
+  // enforces, so a mistake is reported BEFORE the organization is saved.
+  // Null when there is nothing to save (card hidden or unchanged).
+  function collectSetupSso() {
+    if (!setupSsoFields || !setupState.ssoAvailable) return null;
+    const raw = collectSetupFields(setupSsoFields);
+    const providers = new Set(raw.providers || []);
+    const setting = {
+      ssoEnabled: !!raw.ssoEnabled,
+      allowMicrosoft: providers.has("Microsoft"),
+      allowGoogle: providers.has("Google"),
+      microsoftTenantIds: String(raw.microsoftTenantIds || "").trim(),
+      allowedEmailDomains: String(raw.allowedEmailDomains || "").trim(),
+      loginMode: raw.loginMode || "SSO_AND_PASSWORD",
+      // 467
+      autoCreateUsers: !!raw.autoCreateUsers,
+      defaultRoleId: String(raw.defaultRoleId || ""),
+      requireAdminApproval: !!raw.requireAdminApproval
+    };
+    if (setting.autoCreateUsers) {
+      if (!setting.ssoEnabled) throw ssoError("autoCreateUsers", "Auto-create users needs single sign-on to be enabled.");
+      if (!setting.defaultRoleId) throw ssoError("defaultRoleId", "Select the default role for new users.");
+    }
+    if (setting.ssoEnabled) {
+      if (!setting.allowMicrosoft && !setting.allowGoogle) throw ssoError("providers", "Select at least one sign-in provider (Microsoft or Google).");
+      if (setting.allowMicrosoft && !setting.microsoftTenantIds) throw ssoError("microsoftTenantIds", "Enter the Microsoft Tenant ID of this organization to allow Microsoft sign-in.");
+      if (setting.allowGoogle && !setting.allowedEmailDomains) throw ssoError("allowedEmailDomains", "Enter the allowed email domain(s) to allow Google sign-in.");
+    }
+    if (setting.loginMode === "SSO_ONLY" && !setting.ssoEnabled) throw ssoError("loginMode", "SSO Only needs single sign-on to be enabled.");
+    return JSON.stringify(setting) === setupState.ssoOriginal ? null : setting;
+  }
+
+  // Returns "" on success, otherwise a sentence for the setup message.
+  async function saveSetupSso(organizationId, setting) {
+    if (!setting) return "";
+    if (!organizationId) return " Single sign-on settings were not saved: reopen the organization and save again.";
+    try {
+      const r = await fetch(ssoUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        credentials: "same-origin",
+        body: JSON.stringify({ organizationId: Number(organizationId), ...setting, defaultRoleId: Number(setting.defaultRoleId) || null })
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || b.message || ("HTTP " + r.status));
+      return " Single sign-on settings saved.";
+    } catch (error) {
+      return ` Single sign-on settings were not saved: ${error.message}`;
+    }
   }
 
   function repositoryTree() {
@@ -2006,14 +2281,14 @@
         }
       }
 
-      setupMessage.textContent = "Organization setup saved successfully." + provisioningNote;
-      setupMessage.hidden = false;
       await loadLookups();
       populateSetupOrganizationSelector();
       if (!setupOrganization.value) {
         const match = (state.lookups.organizations || []).find(item => String(item.label).includes(organization.code));
         if (match) setupOrganization.value = match.value;
       }
+      setupMessage.textContent = "Organization setup saved successfully." + provisioningNote;
+      setupMessage.hidden = false;
       await loadOrganizationSetup();
     } catch (error) {
       setupMessage.textContent = error.message;
@@ -2105,6 +2380,7 @@
     });
     setupTabs.forEach(tab => tab.addEventListener("click", () => activateSetupTab(tab.dataset.setupTab || "organization")));
     document.querySelector("#saveOrganizationSetup")?.addEventListener("click", saveOrganizationSetup);
+    document.querySelector("#saveSetupSso")?.addEventListener("click", saveSsoCard);
     recommendFrameworks?.addEventListener("click", loadFrameworkRecommendations);
     clearRecommendations?.addEventListener("click", clearFrameworkRecommendations);
     subscriptionTree?.addEventListener("click", event => {
@@ -2176,6 +2452,7 @@
       if (action.dataset.setupAction === "view") openSetupChildForm(entity, "view", valueOf(row, "Id"), row);
       if (action.dataset.setupAction === "edit") openSetupChildForm(entity, "edit", valueOf(row, "Id"), row);
       if (action.dataset.setupAction === "inactive") retireSetupChild(entity, valueOf(row, "Id"));
+      if (action.dataset.setupAction === "approveSso") approveSsoUser(row);
     });
 
     // 3-dot trigger inside the Organization Administration / Dependencies
@@ -2188,6 +2465,27 @@
       if (actionTrigger === trigger) { closeActionMenu(); return; }
       openSetupActionMenu(trigger);
     });
+  }
+
+  // 467: Users tab -> Approve. 'Pending Approval' -> Active through
+  // /practice/api/org-sso/approve-user (sp_org_sso_user_approve).
+  async function approveSsoUser(row) {
+    const name = valueOf(row, "EmployeeName") || valueOf(row, "Email");
+    if (!await window.gracUi.confirm(`Approve ${name}? The user can then sign in with single sign-on.`,
+          { title: "Approve user", confirmText: "Approve" })) return;
+    try {
+      const r = await fetch(`${ssoUrl()}/approve-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        credentials: "same-origin",
+        body: JSON.stringify({ organizationId: Number(setupState.organizationId || valueOf(row, "OrganizationId") || 0), employeeId: Number(valueOf(row, "Id") || 0) })
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || b.message || ("HTTP " + r.status));
+      await loadSetupChildRows("users");
+    } catch (error) {
+      alert(error.message || "Unable to approve the user.");
+    }
   }
 
   function openSetupActionMenu(trigger) {
@@ -2207,6 +2505,11 @@
     // replaces the removed entry; every other setup-child entity keeps it
     // unchanged.
     const showInactive = entity !== "locations" && entity !== "departments" && entity !== "teams" && entity !== "business-functions";
+    // 467: a user created by single sign-on that waits for approval. Reject
+    // is the existing Inactive action.
+    const showApprove = entity === "users"
+      && String(valueOf(record, "Status")) === "Pending Approval"
+      && (permissions.has("EDIT") || permissions.has("ADD"));
     actionMenu.innerHTML = `
       <button type="button" role="menuitem"
               data-setup-action="view"  data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
@@ -2215,7 +2518,11 @@
       <button type="button" role="menuitem"
               data-setup-action="edit"  data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
         <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
-      </button>${showInactive ? `
+      </button>${showApprove ? `
+      <button type="button" role="menuitem"
+              data-setup-action="approveSso" data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
+        <i class="fa-solid fa-user-check" aria-hidden="true"></i> Approve
+      </button>` : ""}${showInactive ? `
       <button type="button" role="menuitem"
               data-setup-action="inactive" data-setup-entity="${escapeHtml(entity)}" data-setup-index="${rowIndex}">
         <i class="fa-solid fa-ban" aria-hidden="true"></i> Inactive
@@ -2479,6 +2786,18 @@
       logListTrace("blocked", { reason: "organization-required" });
       return;
     }
+    // Organization Practices lists one release at a time (2026-10-18, see
+    // loadSubscribedFrameworks); without one there is nothing to group by.
+    if (screen.Key === "organization-requirements" && !isPracticeStatementDrill()
+      && subscribedFrameworkFilter && !subscribedFrameworkFilter.value) {
+      state.records = [];
+      setListMessage(subscribedFrameworksLoadFailed
+        ? "Unable to load the subscribed frameworks for the selected organization."
+        : "No subscribed frameworks found for the selected organization.");
+      renderPager();
+      logListTrace("blocked", { reason: "release-required" });
+      return;
+    }
     const payload = {
       search: search.value || "",
       status: status.value || "",
@@ -2486,7 +2805,10 @@
       pageSize: state.pageSize,
       owner: ownerFilter.value || "",
       criticality: criticalityFilter.value || "",
-      originType: originTypeFilter.value || "",
+      // Organization Practices filters origin with the shared "All sources"
+      // filter (#sourceFilter, Repository / Organization -- no Hybrid,
+      // 2026-10-08); the API's @origin_type takes either spelling.
+      originType: (screen.Key === "organization-requirements" ? sourceFilter?.value : originTypeFilter.value) || "",
       dateFrom: dateFromFilter.value || "",
       dateTo: dateToFilter.value || ""
     };
@@ -2517,12 +2839,16 @@
             ...data,
             // Statement-driven navigation: filter by FrameworkStatementId, never by
             // the removed Control concept.
-            organizationControlId: state.navigationContext?.filterType === "FrameworkStatement"
+            organizationControlId: ["FrameworkStatement", "OrgStatement"].includes(state.navigationContext?.filterType)
               ? undefined
               : (state.navigationContext?.organizationControlId || data.organizationControlId || undefined),
             frameworkStatementId: state.navigationContext?.filterType === "FrameworkStatement"
               ? (Number(state.navigationContext.filterId) || undefined)
               : (data.frameworkStatementId || undefined),
+            // Custom-release statement (no FrameworkStatementId): org_statement_id.
+            orgStatementId: state.navigationContext?.filterType === "OrgStatement"
+              ? (Number(state.navigationContext.filterId) || undefined)
+              : undefined,
             releaseId: data.releaseId || (Number(state.navigationContext?.releaseId) || undefined),
             organizationRequirementId: state.navigationContext?.organizationRequirementId || data.organizationRequirementId || undefined,
             practiceId: state.navigationContext?.filterType === "Practice" ? state.navigationContext.filterId : data.practiceId || undefined
@@ -2587,8 +2913,11 @@
       sourceStatementState.level = "releases";
       sourceStatementState.release = null;
       state.records = [];
-      renderReleaseSummaryHeader();
-      rows.innerHTML = `<tr><td colspan="${releaseSummaryColumns.length}" class="pm-empty">Please select an organization to view subscribed framework releases.</td></tr>`;
+      // Same reason as loadReleaseSummary: Control Statements keeps its own header.
+      if (isSourceStatementDetail) renderStatementTreeHeader();
+      else renderReleaseSummaryHeader();
+      const colspan = isSourceStatementDetail ? statementTreeColumns.length + bulkColumnCount() : releaseSummaryColumns.length;
+      rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">Please select an organization to view subscribed framework releases.</td></tr>`;
       renderPager();
       return;
     }
@@ -2648,11 +2977,20 @@
   }
 
   function updateAddButtonLabel() {
+    renderReleaseOwnerNotice();
     if (!isSourceStatements || !addButton) return;
     // Rule 4 — employees never see Add Release / Add Source Statement /
     // Manage Source Structure buttons. Only Applicability Marking is
     // allowed on the statement rows.
     if (isEmployeeScope) {
+      addButton.hidden = true;
+      const structureBtn = document.getElementById("manageSourceStructureBtn");
+      if (structureBtn) structureBtn.hidden = true;
+      return;
+    }
+    // No Add Control Statement / Manage Source Structure under a release
+    // without an owner (see releaseOwnerMissing).
+    if (releaseOwnerMissing()) {
       addButton.hidden = true;
       const structureBtn = document.getElementById("manageSourceStructureBtn");
       if (structureBtn) structureBtn.hidden = true;
@@ -2688,25 +3026,20 @@
   // same page the Governance menu opens -- one statement tree, one release
   // at a time, switched with the Framework filter.
   //
-  // A release is READY for Control Statements when its release owner is
-  // assigned and at least one of its statements has its applicability
-  // marked (Total - Not Updated > 0). Only ready releases are offered.
-  // Exception: a release opened explicitly from Standards & Frameworks
-  // that has an owner but nothing marked yet is offered as well --
-  // otherwise its first statement could never be marked.
+  // Every subscribed release is offered (2026-10-08). The page used to
+  // offer only "ready" releases -- release owner assigned AND at least one
+  // statement's applicability marked -- so a new organization, with no
+  // owner and nothing marked, got an empty Framework filter and "No
+  // framework is ready yet", although the same release opened fine from
+  // Standards & Frameworks. Neither condition is needed to LIST the
+  // statements; marking applicability is where the work starts.
   // -------------------------------------------------------------------
-  function releaseReadyForStatements(release) {
-    const ownerId = Number(valueOf(release, "OwnerId") || 0);
-    const total = Number(valueOf(release, "TotalStatementsCount") ?? 0) || 0;
-    const notUpdated = Number(valueOf(release, "NotUpdatedStatementsCount") ?? 0) || 0;
-    return ownerId > 0 && total - notUpdated > 0;
-  }
 
   // Migration 396: an approved Control Management retirement only flags the
   // organization's copy -- the row stays, marked.
   function retiredInRepositoryBadge(row) {
     return String(valueOf(row, "LifecycleStatus") || "").toLowerCase() === "retired"
-      ? ` <span class="pm-badge" title="Control Management retired this item; the organization's practices and instances are kept.">Retired in repository</span>`
+      ? ` <span class="pm-badge pm-badge-repo-retired" title="Control Management retired this item; the organization's practices and instances are kept.">Retired in repository</span>`
       : "";
   }
 
@@ -2739,8 +3072,21 @@
     renderPager();
   }
 
+  // Source filter (Standards & Frameworks, and Control Statements since
+  // 2026-10-08): Repository = positive ReleaseId (a subscribed repository
+  // release), Organization = negative ReleaseId (a custom release). One
+  // rule for both pages.
+  function releaseMatchesSourceFilter(release) {
+    const value = (sourceFilter?.value || "").toLowerCase();
+    const releaseId = Number(valueOf(release, "ReleaseId") || 0);
+    if (value === "repository") return releaseId > 0;
+    if (value === "organization") return releaseId < 0;
+    return true;
+  }
+
   async function openControlStatementsRelease(allReleases) {
-    let releases = allReleases;
+    // The Source filter narrows which frameworks the Framework filter offers.
+    let releases = allReleases.filter(releaseMatchesSourceFilter);
     // Employee scope: same narrowing the release summary applies.
     if (isEmployeeScope) {
       const empId = sessionEmployeeId ? Number(sessionEmployeeId) : 0;
@@ -2755,13 +3101,7 @@
       ? String(sourceStatementState.requestedReleaseId) : "";
     const requested = requestedId ? releases.find(release => String(valueOf(release, "ReleaseId")) === requestedId) : null;
 
-    if (requested && !(Number(valueOf(requested, "OwnerId") || 0) > 0)) {
-      if (subscribedFrameworkFilter) { subscribedFrameworkFilter.innerHTML = ""; subscribedFrameworkFilter.disabled = true; }
-      controlStatementsMessage(`${valueOf(requested, "FrameworkRelease") || "This release"} has no release owner. Assign the owner in Governance - Standards & Frameworks before working on its control statements.`);
-      return;
-    }
-
-    const ready = releases.filter(release => releaseReadyForStatements(release) || release === requested);
+    const ready = releases;
     sourceStatementState.releases = ready;
     const current = String(subscribedFrameworkFilter?.value || "");
     if (subscribedFrameworkFilter) {
@@ -2773,7 +3113,11 @@
       subscribedFrameworkFilter.disabled = !ready.length;
     }
     if (!ready.length) {
-      controlStatementsMessage("No framework is ready yet. A framework appears here once its release owner is assigned and at least one of its statements has its applicability marked. Open it from Governance - Standards & Frameworks to start.");
+      controlStatementsMessage(sourceFilter?.value
+        ? `No ${sourceFilter.value === "organization" ? "Organization (custom)" : "Repository"} framework for this organization. Choose All sources to see the others.`
+        : isEmployeeScope
+          ? "No framework release is assigned to you for this organization."
+          : "No framework is subscribed for this organization. Subscribe one in Governance - Standards & Frameworks.");
       return;
     }
 
@@ -2788,9 +3132,17 @@
   }
 
   async function loadReleaseSummary() {
-    renderReleaseSummaryHeader();
-    const colspan = releaseSummaryColumns.length;
-    rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">Loading subscribed framework releases...</td></tr>`;
+    // Control Statements (source-statements) only uses this call to pick a
+    // release and never shows the summary -- so it keeps its own statement-tree
+    // header while it loads. Painting the summary header here first made the
+    // Standards & Frameworks columns ("Framework / Release ... Governance
+    // Overview") flash on every Control Statements load, for every framework.
+    if (isSourceStatementDetail) renderStatementTreeHeader();
+    else renderReleaseSummaryHeader();
+    const colspan = isSourceStatementDetail
+      ? statementTreeColumns.length + bulkColumnCount()
+      : releaseSummaryColumns.length;
+    rows.innerHTML = `<tr><td colspan="${colspan}" class="pm-empty">${isSourceStatementDetail ? "Loading control statements..." : "Loading subscribed framework releases..."}</td></tr>`;
     state.records = [];
     try {
       const result = await fetchJson(`${api}/subscribed-frameworks/query`, {
@@ -2814,13 +3166,7 @@
       if (subscribedFrameworkFilter?.value) {
         releases = releases.filter(release => String(valueOf(release, "ReleaseId")) === String(subscribedFrameworkFilter.value));
       }
-      // Source filter: Repository = positive ReleaseId, Organization = negative ReleaseId
-      const sourceFilterValue = (sourceFilter?.value || "").toLowerCase();
-      if (sourceFilterValue === "repository") {
-        releases = releases.filter(release => Number(valueOf(release, "ReleaseId") || 0) > 0);
-      } else if (sourceFilterValue === "organization") {
-        releases = releases.filter(release => Number(valueOf(release, "ReleaseId") || 0) < 0);
-      }
+      releases = releases.filter(releaseMatchesSourceFilter);
       // Rule 4 — employee-scope users only see releases they own or are
       // assigned to. Server-side filtering via fn_visible_releases is the
       // source of truth; this client-side filter is a defence-in-depth
@@ -2949,10 +3295,13 @@
     // Build node lookup and hierarchy paths
     const nodes = new Map();
     allRows.filter(row => String(valueOf(row, "RowType")).toLowerCase() === "node").forEach(row => {
+      const order = valueOf(row, "SourceStructureDisplayOrder");
       nodes.set(String(valueOf(row, "SourceStructureNodeId")), {
         row,
         ref: String(valueOf(row, "SourceStructureReference") || "").trim(),
-        parentId: String(valueOf(row, "ParentSourceStructureNodeId") || "")
+        parentId: String(valueOf(row, "ParentSourceStructureNodeId") || ""),
+        // A node with no display order sorts after its ordered siblings.
+        order: order === null || order === undefined || order === "" ? Number.MAX_SAFE_INTEGER : Number(order)
       });
     });
 
@@ -2968,16 +3317,41 @@
       return path;
     }
 
+    // Sort key for a node (2026-10-08): the display orders from the ROOT
+    // node (parent_node_id NULL) down to this node, e.g. [2, 1, 3]. The
+    // root's display order decides first, then each level's below it --
+    // so the list follows the source structure as it is ordered, not the
+    // alphabetical/numeric order of the reference text. Each level falls
+    // back to its reference when two siblings share a display order.
+    const orderKeyCache = new Map();
+    function nodeOrderKey(nodeId) {
+      if (orderKeyCache.has(nodeId)) return orderKeyCache.get(nodeId);
+      const node = nodes.get(nodeId);
+      const key = !node ? []
+        : [...(node.parentId && nodes.has(node.parentId) ? nodeOrderKey(node.parentId) : []),
+           { order: node.order, ref: node.ref }];
+      orderKeyCache.set(nodeId, key);
+      return key;
+    }
+    function compareNodeKeys(a, b) {
+      for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        if (a[i].order !== b[i].order) return a[i].order - b[i].order;
+        const r = a[i].ref.localeCompare(b[i].ref, undefined, { numeric: true });
+        if (r !== 0) return r;
+      }
+      return a.length - b.length;   // a node's own statements before its children's
+    }
+
     // Collect statement rows only (no node rows as separate grid rows)
     const statements = allRows
       .filter(row => String(valueOf(row, "RowType")).toLowerCase() === "statement")
       .filter(row => !statusFilter || String(valueOf(row, "ApplicabilityStatus") || "Not Updated").toLowerCase() === statusFilter);
 
-    // Sort by hierarchy path then statement order
+    // Sort by the source structure's display order from the root node
+    // down (nodeOrderKey), then statement order.
     statements.sort((a, b) => {
-      const pathA = nodePath(String(valueOf(a, "SourceStructureNodeId")));
-      const pathB = nodePath(String(valueOf(b, "SourceStructureNodeId")));
-      const cmp = pathA.localeCompare(pathB, undefined, { numeric: true });
+      const cmp = compareNodeKeys(nodeOrderKey(String(valueOf(a, "SourceStructureNodeId"))),
+                                  nodeOrderKey(String(valueOf(b, "SourceStructureNodeId"))));
       if (cmp !== 0) return cmp;
       return Number(valueOf(a, "StatementDisplayOrder") || 0) - Number(valueOf(b, "StatementDisplayOrder") || 0)
         || String(valueOf(a, "StatementReference")).localeCompare(String(valueOf(b, "StatementReference")), undefined, { numeric: true });
@@ -3007,8 +3381,9 @@
         ${bulkCell(s)}
         <td class="pm-cell-ref" title="${escapeHtml(reference)}">${escapeHtml(reference)}</td>
         <td class="pm-cell-title">${escapeHtml(valueOf(s, "StatementTitle"))}${retiredInRepositoryBadge(s)}</td>
+        <td>${formatCell(valueOf(s, "OwnerName"))}</td>
         <td>${formatCell(valueOf(s, "ApplicabilityStatus") || "Not Updated")}</td>
-        <td>${formatCell(valueOf(s, "ImplementationStatus") || "Not Implemented")}</td>
+        <td>${formatCell(valueOf(s, "ImplementationStatus") || "Not Updated")}</td>
         <td>${escapeHtml(valueOf(s, "PracticeCount") || 0)}</td>
         <td>${actions(i)}</td>
       </tr>`;
@@ -3049,7 +3424,7 @@
     state.activeFormRecord = record;
     formMessage.hidden = true;
     const current = valueOf(record, "ApplicabilityStatus") || "Not Updated";
-    const statusOptions = ["Not Updated", "Applicable", "Not Applicable", "Retired"]
+    const statusOptions = PRACTICE_APPLICABILITY_STATUSES   // same set the list filter offers
       .map(value => `<option value="${value}"${value === current ? " selected" : ""}>${value}</option>`).join("");
     document.querySelector("#dialogTitle").textContent = `${current === "Not Updated" ? "Mark" : "Update"} Statement Applicability`;
     fieldsHost.innerHTML = `
@@ -3521,12 +3896,16 @@
   async function loadCustomReleaseStatements() {
     updateAddButtonLabel();
     const release = sourceStatementState.release;
+    // Same grid as a repository release (2026-10-08): renderStatementTreeHeader
+    // sets the statement-tree columns, widths and grid level. Drawn BEFORE the
+    // two lookups below, like loadReleaseStatements does -- drawing it after
+    // them left the previous screen's header (release summary columns) on
+    // screen for as long as those lookups took.
+    const cols = statementTreeColumns;
+    renderStatementTreeHeader();
+    rows.innerHTML = `<tr><td colspan="${cols.length}" class="pm-empty">Loading source statements...</td></tr>`;
     await loadSourceStructureNodes();
     await loadCustomStatementClassificationOptions();
-    const cols = customStatementFlatColumns;
-    setGridLevel("statements");
-    if (tableHead) tableHead.innerHTML = `<tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    rows.innerHTML = `<tr><td colspan="${cols.length}" class="pm-empty">Loading source statements...</td></tr>`;
     try {
       const result = await fetchJson(`${api}/custom-release-statements/query`, {
         method: "POST",
@@ -3549,8 +3928,15 @@
     return "";
   }
 
+  // Renders a Custom release with exactly the columns, cells and row-click
+  // of renderStatementTree (change request 2026-10-08 -- it used to be a
+  // separate flat grid with Hierarchy / Source Structure Node columns).
+  // Statement Reference is the custom Source Structure path + the statement's
+  // own reference, via the same statementReferencePath(); the server already
+  // returns rows in hierarchy order. Bulk stays off (bulkEnabled excludes
+  // custom releases), so bulkHeaderCell/bulkCell add no column here.
   function renderCustomStatementGrid() {
-    const cols = customStatementFlatColumns;
+    const cols = statementTreeColumns;
     const statusFilter = (status?.value || "").trim().toLowerCase();
     let stmts = sourceStatementState.rows || [];
     if (statusFilter) {
@@ -3559,21 +3945,32 @@
     state.records = stmts;
     closeActionMenu();
     const htmlRows = stmts.map((s, i) => {
-      const hierarchy = escapeHtml(valueOf(s, "Hierarchy") || valueOf(s, "StatementTitle") || "");
-      const structNode = valueOf(s, "StructureNodeReference") ? `${escapeHtml(valueOf(s, "StructureNodeReference"))} - ${escapeHtml(valueOf(s, "StructureNodeTitle"))}` : escapeHtml(valueOf(s, "StructureNodeTitle") || "");
-      return `<tr>
-        <td title="${hierarchy}">${hierarchy}</td>
-        <td>${structNode}</td>
-        <td>${escapeHtml(valueOf(s, "StatementReference"))}</td>
-        <td>${escapeHtml(valueOf(s, "StatementTitle"))}</td>
+      const reference = statementReferencePath(
+        valueOf(s, "StructureNodePath") || valueOf(s, "StructureNodeReference") || "",
+        valueOf(s, "StatementReference"));
+      // Same gating as renderStatementTree: Applicable, not employee scope,
+      // and the statement has its org_statement_id overlay to filter on.
+      const appText = String(valueOf(s, "ApplicabilityStatus") || "Not Updated").trim().toLowerCase();
+      const canOpenPractices = appText === "applicable"
+        && !isEmployeeScope
+        && Boolean(valueOf(s, "OrgStatementId"));
+      const rowAttrs = canOpenPractices
+        ? ` class="pm-row-clickable" data-statement-index="${i}" title="View Organization Practices mapped to this statement"`
+        : "";
+      return `<tr${rowAttrs}>
+        ${bulkCell(s)}
+        <td class="pm-cell-ref" title="${escapeHtml(reference)}">${escapeHtml(reference)}</td>
+        <td class="pm-cell-title">${escapeHtml(valueOf(s, "StatementTitle"))}</td>
+        <td>${formatCell(valueOf(s, "OwnerName"))}</td>
         <td>${formatCell(valueOf(s, "ApplicabilityStatus") || "Not Updated")}</td>
+        <td>${formatCell(valueOf(s, "ImplementationStatus") || "Not Updated")}</td>
         <td>${escapeHtml(valueOf(s, "PracticeCount") || 0)}</td>
         <td>${actions(i)}</td>
       </tr>`;
     });
     rows.innerHTML = customStatementBreadcrumbRow() + (htmlRows.length
       ? htmlRows.join("")
-      : `<tr><td colspan="${cols.length}" class="pm-empty">No control statements found for this custom release. Click "Add Control Statement" to create one.</td></tr>`);
+      : `<tr><td colspan="${cols.length + bulkColumnCount()}" class="pm-empty">No control statements found for this custom release. Click "Add Control Statement" to create one.</td></tr>`);
   }
 
   // Statement Classification options for the Add Control Statement form's
@@ -4619,19 +5016,19 @@
         : (workbenchScreens.has(screen.Key) || isOperationalizationWorkbench)
           ? "No Practice Instances are queued for this dependency workbench."
         : "No data found.";
-      rows.innerHTML = `<tr><td colspan="${screen.Columns.length + 1}" class="pm-empty">${escapeHtml(emptyMessage)}</td></tr>`;
+      setListMessage(emptyMessage);
       return;
     }
     closeActionMenu();
     if (screen.Key === "organization-requirements") {
-      if (state.navigationContext?.filterType === "FrameworkStatement") {
-        // Opened from a Source Statement: the heading already identifies the
+      if (isPracticeStatementDrill()) {
+        // Opened from a Source Statement (repository or custom release): the heading already identifies the
         // statement, so practices render as a flat list. The Control concept is
         // removed from this flow — no Control grouping headers.
         renderStatementPracticeRows();
         return;
       }
-      renderRequirementControlGroups();
+      renderRequirementStatementGroups();
       return;
     }
     // Q13/Q14/Q15 — expose a stable per-row identifier via data-record-id
@@ -4647,22 +5044,19 @@
       return `<tr data-record-id="${escapeHtml(rowId)}">${currentColumns().map(column => {
         const value = column === "Register" ? (valueOf(row, "Register") || valueOf(row, "DependencyCategory")) : valueOf(row, column);
         const title = column === "SourceFrameworkRelease" ? ` title="${escapeHtml(value)}"` : "";
-        return `<td${title}>${formatCell(value)}</td>`;
+        return `<td${cellClassFor(column)}${title}>${formatCell(value)}</td>`;
       }).join("")}<td>${actions(index)}</td></tr>`;
     }).join("");
   }
 
+  // Organization Practices opened from one Source Statement (repository or
+  // custom release) rather than from the menu.
+  function isPracticeStatementDrill() {
+    return ["FrameworkStatement", "OrgStatement"].includes(state.navigationContext?.filterType);
+  }
+
   function renderStatementPracticeRows() {
-    if (tableHead) tableHead.innerHTML = `<tr>
-      ${bulkHeaderCell()}
-      <th>Practice Code</th>
-      <th>Practice Name</th>
-      <th>Applicability Status</th>
-      <th>Implementation Status</th>
-      <th>Owner</th>
-      <th>Origin Type</th>
-      <th>Actions</th>
-    </tr>`;
+    if (tableHead) tableHead.innerHTML = `<tr>${practiceHeaderCells()}</tr>`;
     pruneBulkSelection(state.records);
     rows.innerHTML = state.records.map((record, index) => `<tr${practiceRowViewAttrs(index)}>
       ${bulkCell(record)}
@@ -4695,30 +5089,40 @@
   // latter is the value stored on the requirement and is what the edit form's
   // hidden field posts back, so the two must not be confused.
   //
-  // Falls back to "Not Implemented" the way the Source Statement grid does,
-  // so a row from an older API build that does not carry the column still
-  // renders a badge rather than an empty cell.
+  // Falls back to "Not Updated" (456: the default) the way the Source
+  // Statement grid does, so a row from an older API build that does not
+  // carry the column still renders a badge rather than an empty cell.
   function practiceImplementationStatus(record) {
-    return valueOf(record, "practiceImplementationStatus") || "Not Implemented";
+    return valueOf(record, "practiceImplementationStatus") || "Not Updated";
   }
 
-  function renderRequirementControlGroups() {
+  // Group heading = the SOURCE STATEMENT (2026-10-18; was the Control,
+  // which no longer exists as a concept). The API returns one row per
+  // (practice, statement of the selected release) -- GroupOrgStatementId /
+  // GroupStatementReference / GroupStatementTitle, see
+  // QueryOrganizationRequirementFallbackAsync -- so a practice mapped to two
+  // statements of the release is listed under both. A row without a group
+  // statement (an API build without the columns) falls back to the
+  // practice's own statement.
+  function renderRequirementStatementGroups() {
     if (tableHead) tableHead.innerHTML = "";
     pruneBulkSelection(state.records);
     const groups = new Map();
     state.records.forEach((record, index) => {
-      const controlId = valueOf(record, "OrganizationControlId") || valueOf(record, "ControlCode") || "unmapped";
-      if (!groups.has(controlId)) {
-        groups.set(controlId, {
-          code: valueOf(record, "ControlCode") || `Control ${controlId}`,
-          name: valueOf(record, "ControlName") || "",
+      const statementId = valueOf(record, "GroupOrgStatementId") || valueOf(record, "OrgStatementId") || "unmapped";
+      if (!groups.has(statementId)) {
+        const reference = valueOf(record, "GroupStatementReference") || valueOf(record, "FrameworkStatementReference");
+        const title = valueOf(record, "GroupStatementTitle") || valueOf(record, "FrameworkStatementTitle");
+        groups.set(statementId, {
+          code: reference || (title ? "" : "Not mapped to a source statement"),
+          name: title || "",
           rows: []
         });
       }
-      groups.get(controlId).rows.push({ record, index });
+      groups.get(statementId).rows.push({ record, index });
     });
     rows.innerHTML = [...groups.values()].map(group => {
-      const title = `${group.code}${group.name ? ` - ${group.name}` : ""}`;
+      const title = [group.code, group.name].filter(Boolean).join(" - ");
       const detailRows = group.rows.map(({ record, index }) => `<tr${practiceRowViewAttrs(index)}>
         ${bulkCell(record)}
         <td>${formatCell(valueOf(record, "Code"))}</td>
@@ -4729,17 +5133,8 @@
         <td>${formatCell(valueOf(record, "OriginType"))}</td>
         <td>${actions(index)}</td>
       </tr>`).join("");
-      return `<tr class="pm-control-group-row"><td colspan="${7 + bulkColumnCount()}">Control: ${escapeHtml(title)}</td></tr>
-        <tr class="pm-control-group-head">
-          ${bulkHeaderCell()}
-          <th>Practice Code</th>
-          <th>Practice Name</th>
-          <th>Applicability Status</th>
-          <th>Implementation Status</th>
-          <th>Owner</th>
-          <th>Origin Type</th>
-          <th>Actions</th>
-        </tr>${detailRows}`;
+      return `<tr class="pm-control-group-row"><td colspan="${listColumnCount()}">${escapeHtml(title)}</td></tr>
+        <tr class="pm-control-group-head">${practiceHeaderCells()}</tr>${detailRows}`;
     }).join("");
   }
 
@@ -4775,6 +5170,7 @@
 
   async function resetOrganizationRequirementFilters() {
     if (status) status.value = "";
+    if (sourceFilter) sourceFilter.value = "";
     if (subscribedFrameworkFilter) subscribedFrameworkFilter.value = "";
     // The search box (Organization Practices only, unhidden alongside this
     // filter set) is otherwise cleared by the generic branch of the
@@ -4869,8 +5265,35 @@
       organizationName: (organizationFilter?.selectedOptions?.[0]?.textContent || "").trim(),
       releaseVersion: valueOf(release, "ReleaseVersion") || "",
       title: valueOf(release, "FrameworkRelease") || valueOf(release, "ReleaseVersion"),
-      subscriptionType: valueOf(release, "SubscriptionType") || ""
+      subscriptionType: valueOf(release, "SubscriptionType") || "",
+      // 0 = no owner yet (see releaseOwnerMissing). A release object built
+      // elsewhere without this key is "unknown", and is not gated here --
+      // the API refuses the write anyway.
+      ownerId: Number(valueOf(release, "OwnerId") || 0)
     };
+  }
+
+  // Release owner first (change request 2026-10-18): until the open release
+  // has an owner, nothing under it can be changed -- no Mark / Update
+  // Applicability, no bulk applicability, no Edit / Inactivate, no Add
+  // Control Statement or Manage Source Structure. The API enforces the same
+  // rule (ReleaseOwnerMissingAsync); this keeps the page from offering
+  // actions that would only be refused.
+  function releaseOwnerMissing() {
+    return isSourceStatements
+      && sourceStatementState.level === "statements"
+      && sourceStatementState.release?.ownerId === 0;
+  }
+
+  const RELEASE_OWNER_GATED_ACTIONS = ["markApplicability", "updateApplicability", "edit", "inactive"];
+
+  function renderReleaseOwnerNotice() {
+    const notice = document.getElementById("releaseOwnerMessage");
+    if (!notice) return;
+    notice.hidden = !releaseOwnerMissing();
+    if (!notice.hidden) {
+      notice.textContent = "This release has no owner yet. Assign the release owner in Standards & Frameworks (Update Owner) - statements and their applicability can be updated only after that.";
+    }
   }
 
   function allowedActions(record = null) {
@@ -4889,7 +5312,14 @@
     if (isSourceStatements && sourceStatementState.isCustomRelease && sourceStatementState.level === "statements") {
       // Rule 4 — employees can only mark applicability on custom statements,
       // not edit / inactive them.
-      actions = isEmployeeScope ? ["view", "markApplicability"] : ["view", "edit", "inactive"];
+      // "practices" for an Applicable statement, as on a repository release
+      // (and only where the row-click is offered -- same gating).
+      const customApplicable = record
+        && String(valueOf(record, "ApplicabilityStatus") || "Not Updated").trim().toLowerCase() === "applicable"
+        && Boolean(valueOf(record, "OrgStatementId"));
+      actions = isEmployeeScope
+        ? ["view", "markApplicability"]
+        : [...(customApplicable ? ["practices"] : []), "view", "edit", "inactive"];
     } else if (isSourceStatements && sourceStatementState.level === "statements" && record) {
       const applicability = applicabilityStatus(record);
       const manuallyAdded = valueOf(record, "IsManuallyAdded") === true || String(valueOf(record, "IsManuallyAdded")).toLowerCase() === "true" || String(valueOf(record, "IsManuallyAdded")) === "1";
@@ -4898,7 +5328,10 @@
       const manualExtras = isEmployeeScope ? [] : (manuallyAdded ? ["edit", "inactive"] : []);
       const manualEditOnly = isEmployeeScope ? [] : (manuallyAdded ? ["edit"] : []);
       if (applicability === "not updated") actions = ["markApplicability", "view", ...manualExtras];
-      else if (applicability === "applicable") actions = [...(isEmployeeScope ? [] : ["practices"]), "view", ...manualEditOnly];
+      // 2026-10-08: an Applicable statement can be re-decided too (e.g.
+      // to Not Applicable) -- Update Applicability opens the same form,
+      // pre-filled. Before this an Applicable row had no way back.
+      else if (applicability === "applicable") actions = [...(isEmployeeScope ? [] : ["practices"]), "updateApplicability", "view", ...manualEditOnly];
       else actions = ["updateApplicability", "view", ...manualEditOnly];
     }
     if (screen.Key === "organization-requirements" && record) {
@@ -4932,6 +5365,7 @@
       else actions = ["updateApplicability", "view"];
     }
     return actions.filter(action => {
+      if (RELEASE_OWNER_GATED_ACTIONS.includes(action) && releaseOwnerMissing()) return false;
       if (action === "view") return permissions.has("VIEW");
       if (action === "viewOperationalization" || action === "dependencyIntelligence") return permissions.has("VIEW");
       if (action === "edit" || action === "configure" || action === "manage" || action === "map" || action === "subscribe" || action === "markApplicability" || action === "updateApplicability" || action === "resolveDependencies" || action === "modifyDependencies" || action === "bulkResolution" || action === "manageRoles" || action === "resendCredentials" || action === "newInstance") return permissions.has("EDIT") || permissions.has("ADD");
@@ -8147,38 +8581,10 @@
     });
   }
 
-  // Practice View -> Actions -> Mark / Update Applicability (2026-10-03).
-  // Practice View does not load this script, so its Actions menu sends the
-  // user here with ?applicabilityFor=<organization_requirement_id>
-  // &organizationId=<org> and this opens the SAME form the row's 3-dot
-  // "Mark / Update Applicability" opens -- openForm("applicability", id),
-  // which reads the record by id, so the row need not be on this page of
-  // the grid. Same permission gate as the menu item (allowedActions).
-  // When the dialog closes (saved or cancelled) the user goes back to that
-  // practice's View page with a FRESH navigation code -- navigation codes
-  // expire after 30 minutes, so the old URL is not reused.
-  async function openRequestedApplicability() {
-    if (screen.Key !== "organization-requirements") return;
-    const requirementId = Number(query.get("applicabilityFor") || 0);
-    if (!requirementId) return;
-    if (!(permissions.has("EDIT") || permissions.has("ADD"))) {
-      alert("You do not have permission to update applicability for this practice.");
-      return;
-    }
-    const organizationId = Number(query.get("organizationId") || 0) || null;
-    dialog.addEventListener("close", () => {
-      navigateWithContext("practice-view", "OrganizationRequirement", requirementId, "", "",
-        organizationId, null, "", requirementId)
-        .catch(error => alert(error.message));
-    }, { once: true });
-    // A failure here must not blank the grid (the init chain's catch
-    // replaces the rows with its message), so it is reported on its own.
-    try {
-      await openForm("applicability", requirementId);
-    } catch (error) {
-      alert(error.message || "The applicability form could not be opened.");
-    }
-  }
+  // Practice View -> Actions -> Mark / Update Applicability opens its own
+  // dialog on Practice View since 2026-10-08 (practice-view.cshtml,
+  // openApplicability); the ?applicabilityFor= hand-off that used to land
+  // here (openRequestedApplicability) was removed with it.
 
   async function navigateWithContext(targetArea, filterType, filterId, displayCode, displayName) {
     const code = await createNavigationCode({
@@ -8216,6 +8622,26 @@
       if (action === "view") return openCustomStatementView(record);
       if (action === "edit") return openCustomStatementForm(record);
       if (action === "inactive") return inactivateCustomStatement(record);
+      if (action === "practices") {
+        // Custom statement -> Practices. A custom statement has no
+        // FrameworkStatementId, so the context carries its org_statement_id
+        // (FilterType "OrgStatement"). releaseId is the custom release's
+        // synthetic id (-subscription_id) -- the same value the Practices
+        // Framework filter uses for it -- so that filter opens on this release
+        // and the API scopes to it (QueryOrganizationRequirementFallbackAsync).
+        return navigateWithContext(
+          "organization-requirements",
+          "OrgStatement",
+          valueOf(record, "OrgStatementId"),
+          valueOf(record, "StatementReference"),
+          valueOf(record, "StatementTitle"),
+          Number(sourceStatementState.release?.organizationId || organizationFilter?.value || 0) || null,
+          null,
+          valueOf(record, "ApplicabilityStatus"),
+          null,
+          Number(sourceStatementState.release?.releaseId || 0) || null
+        ).catch(error => alert(error.message));
+      }
       return placeholderAction(action);
     }
     if (isSourceStatements && sourceStatementState.level === "statements") {
@@ -8319,7 +8745,7 @@
   }
 
   if (screen.Key === "organizations" || isOrganizationWorkspace) {
-    loadLookups().then(initOrganizationSetup).catch(error => {
+    loadLookups().then(initOrganizationSetup).then(() => { orgAutoSelectArmed = true; }).catch(error => {
       if (setupMessage) {
         setupMessage.textContent = error.message || "Unable to load Organization Setup.";
         setupMessage.hidden = false;
@@ -8652,7 +9078,17 @@
     }
   });
   subscribedFrameworkFilter?.addEventListener("change", resetToFirstPage);
-  sourceFilter?.addEventListener("change", resetToFirstPage);
+  sourceFilter?.addEventListener("change", () => {
+    // Control Statements: a new Source means a new set of frameworks, so
+    // go back through release selection (openControlStatementsRelease)
+    // instead of reloading the release already open.
+    if (isSourceStatementDetail) {
+      sourceStatementState.level = "releases";
+      sourceStatementState.release = null;
+      sourceStatementState.hasAutoDrilled = false;
+    }
+    resetToFirstPage();
+  });
   if (isSourceStatements && pageBackBtn) {
     pageBackBtn.addEventListener("click", (e) => {
       // Control Statements is its own page now (2026-09-28): Back returns
@@ -8704,12 +9140,17 @@
     const id = Number(box.dataset.bulkId) || 0;
     if (!id) return;
     if (box.checked) bulkSelection.add(id); else bulkSelection.delete(id);
+    // Organization Practices lists a practice under every statement it is
+    // mapped to (2026-10-18), so the same practice can have several boxes.
+    rows.querySelectorAll("input.pm-row-select").forEach(other => {
+      if (Number(other.dataset.bulkId) === id) other.checked = box.checked;
+    });
     renderBulkButton();
   });
   bulkApplicabilityButton?.addEventListener("click", () => openBulkApplicabilityForm());
 
   if (isOrganizationWorkspace) {
-    loadLookups().then(initOrganizationSetup).catch(error => {
+    loadLookups().then(initOrganizationSetup).then(() => { orgAutoSelectArmed = true; }).catch(error => {
       if (setupMessage) {
         setupMessage.textContent = error.message || "Unable to load Organization Setup.";
         setupMessage.hidden = false;
@@ -8718,7 +9159,7 @@
     });
   } else {
     loadLookups().then(loadNavigationContext).then(loadSubscribedFrameworks).then(loadRows)
-      .then(openRequestedApplicability)
+      .then(() => { orgAutoSelectArmed = true; })
       .catch(error => {
         if (rows) {
           rows.innerHTML = `<tr><td colspan="${(screen.Columns?.length || 0) + 1}" class="pm-empty">${escapeHtml(error.message || "Unable to load Practice Management data.")}</td></tr>`;

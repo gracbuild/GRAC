@@ -95,10 +95,8 @@
     <button type="button" class="risk-tab" data-risk-tab="dashboard" role="tab" aria-selected="false">
         <i class="fa-solid fa-chart-pie"></i> Dashboard
     </button>
-    <button type="button" class="pm-button icon risk-tab-action" id="riskConfigBtn"
-            title="Risk Centre settings" aria-label="Risk Centre settings">
-        <i class="fa-solid fa-gear"></i>
-    </button>
+    @* The settings gear that sat here moved to Settings -> Risk Settings
+       (2026-10-08, migration 458; Partials/risk-settings.cshtml). *@
 </div>
 
 @* The organisation picker appears in EVERY tab's filter row, not in a
@@ -663,78 +661,9 @@
     </div>
 </section>
 
-@* ================= Settings modal (BRD §19, §22) ==================== *@
-<div class="pm-modal" id="riskConfigModal" hidden>
-    <div class="pm-modal-panel pm-modal-wide">
-        <header>
-            <h2>Risk Centre settings</h2>
-            <button class="pm-modal-close" type="button" data-close-risk-config aria-label="Close">&times;</button>
-        </header>
-        <form id="riskConfigForm">
-            <div class="pm-form-grid">
-                <label class="pm-form-grid-full risk-check">
-                    <input type="checkbox" id="cfgApprovalRequired" />
-                    <span>Require formal approval before a risk is registered</span>
-                </label>
-                <label>
-                    <span>Only for risks rated at or above</span>
-                    <select id="cfgMinRating">
-                        <option value="">Every risk</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Approver role</span>
-                    <select id="cfgApproverRole"><option value="">Any authorised user</option></select>
-                </label>
-                <label class="pm-form-grid-full risk-check">
-                    <input type="checkbox" id="cfgDefaultTreatment" />
-                    <span>Pre-tick "raise a treatment task" on the Risk Register</span>
-                </label>
-                <label class="pm-form-grid-full risk-check">
-                    <input type="checkbox" id="cfgNotifications" />
-                    <span>Record notification obligations for risk workflow events</span>
-                </label>
-                <label class="pm-form-grid-full risk-check">
-                    <input type="checkbox" id="cfgAllowLegacyAccept" />
-                    <span>
-                        Allow the legacy "Accept" triage
-                        <span class="pm-hint">superseded by Register — enable only while migrating</span>
-                    </span>
-                </label>
-                <label class="pm-form-grid-full risk-check">
-                    <input type="checkbox" id="cfgAllowOpenResidual" />
-                    <span>
-                        Allow residual risk analysis while treatment tasks are still open
-                        <span class="pm-hint">off: residual analysis opens only when every treatment task is closed</span>
-                    </span>
-                </label>
-                <label class="pm-form-grid-full">
-                    <span>Notes</span>
-                    <textarea id="cfgNotes" rows="2" maxlength="1000"></textarea>
-                </label>
-            </div>
-
-            <h3 class="risk-subhead">Who is notified (BRD §21)</h3>
-            <div class="pm-table-wrap">
-                <table id="cfgNotifyTable">
-                    <thead><tr><th>Event</th><th>Roles notified</th></tr></thead>
-                    <tbody id="cfgNotifyBody"></tbody>
-                </table>
-            </div>
-            <p class="pm-hint">
-                Configured through <code>grac_practice.org_risk_config_notify_role</code>.
-                Participants named by the workflow itself — the analyst, the risk owner,
-                the approver role — are always notified and need no configuration.
-            </p>
-
-            <p class="pm-form-message" id="cfgMessage" role="status" aria-live="polite"></p>
-            <footer class="pm-modal-footer">
-                <button type="button" class="pm-button" data-close-risk-config>Cancel</button>
-                <button type="submit" class="pm-button primary"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
-            </footer>
-        </form>
-    </div>
-</div>
+@* The Risk Centre settings modal (BRD §19, §22) moved to its own page,
+   Settings -> Risk Settings (2026-10-08, migration 458):
+   Partials/risk-settings.cshtml + js/RiskCentre/risk-settings.js. *@
 
 @* ================= Approval decision modal (BRD §19) ================ *@
 <div class="pm-modal" id="riskApprovalModal" hidden>
@@ -832,28 +761,14 @@
     </div>
 </div>
 
-@* ================= Candidate detail modal =========================== *@
-<div class="pm-modal" id="riskDetailModal" hidden>
-    <div class="pm-modal-panel pm-modal-wide">
-        <header>
-            <h2 id="riskDetailTitle">Risk candidate</h2>
-            <button class="pm-modal-close" type="button" data-close-risk-detail aria-label="Close">&times;</button>
-        </header>
-        <div style="padding:0 4px 8px;">
-            <dl class="risk-meta" id="riskDetailMeta"></dl>
-
-            @* BRD §20 — every retained analysis version. *@
-            <h3 class="risk-subhead">Assessment history</h3>
-            <div id="riskAnalysisHistory" class="risk-history"></div>
-
-            @* Task Centre integration (Task Centre BRD §15 / §14). *@
-            <div id="riskRelatedTasks" style="margin-top:14px;"></div>
-        </div>
-        <footer>
-            <button class="pm-button" type="button" data-close-risk-detail>Close</button>
-        </footer>
-    </div>
-</div>
+@* Candidate detail used to be its own quick-look modal here
+   (riskDetailModal). Change request, 2026-10-15: promoted to a full
+   page, riskCandidateDetailPageView (grouped with the other full pages
+   further down, right after riskDetailPageView -- the Register side's
+   own View page) -- uniformity with the Register side, which already
+   has a full read-only View page rather than a modal. Every element id
+   the modal used (riskDetailTitle, riskDetailMeta, riskAnalysisHistory,
+   riskRelatedTasks) moved into that section unchanged. *@
 
 @* Shared across Gap / Risk / Observation — see the partial's header. *@
 <partial name="Partials/_related-tasks-panel" />
@@ -1618,7 +1533,10 @@
 
            riskMapping.mount() fills this host with showHeading:false —
            the panel supplies the heading, and two headings for one
-           section is what a copied component looks like. *@
+           section is what a copied component looks like.
+           practiceGrid:true (2026-10-08) -- the mapped instances as the
+           Treatment page's list; a row click opens the instance in
+           Operationalize (new tab). *@
         <section class="pm-panel" id="rrScopePanel">
             <div class="pm-section-heading">
                 <h2>Existing Controls</h2>
@@ -1676,17 +1594,11 @@
             <dl class="pm-detail-grid" id="rrAcceptance"></dl>
         </section>
 
-        @* ---- History -------------------------------------------------
-           BRD §20 — every retained residual version, same table shape as
-           the candidate's analysis history. On a page it gets the full
-           width, so the eight columns stop wrapping. *@
-        <section class="pm-panel">
-            <div class="pm-section-heading">
-                <h2>Residual history</h2>
-                <p>Every retained version, newest first, each carrying the inherent rating as it stood at the time.</p>
-            </div>
-            <div class="pm-table-wrap" id="rrHistory"></div>
-        </section>
+        @* Residual history section removed (change request 2026-10-15).
+           The retained versions are still written by
+           sp_risk_residual_analysis_save (BRD §20) and still served by
+           GET /register/{id}/residual/history -- only this page stopped
+           showing them. *@
 
         @* ---- Action bar ----------------------------------------------
            Sticky, like the analysis page's: on a form this tall the
@@ -1874,7 +1786,11 @@
            Same panel, same heading and same host shape as the residual
            page's. A review is where a scope change is most likely to be
            noticed, so it is editable here exactly as it was in the
-           modal this replaces. *@
+           modal this replaces.
+           practiceGrid:true (2026-10-23) -- the same list as Treatment /
+           Residual / View Risk (Practice / Practice Instance, Tasks,
+           Status, unmap X); a row click opens the instance in
+           Operationalize (new tab). Was the per-instance cards. *@
         <section class="pm-panel" id="rvScopePanel">
             <div class="pm-section-heading">
                 <h2>Existing Controls</h2>
@@ -2156,7 +2072,8 @@
                 </p>
             </div>
             @* TWO hosts, ONE mount: this one takes "Mapped practices"
-               (each card listing its own dependencies read-only) and
+               (a list since 2026-10-08, practiceGrid; a row click opens
+               the instance in Operationalize, new tab) and
                #rdImpactScope above takes the Impact Details table.
                Mounted read-only, so it draws no Map button, no unmap
                control, no tick boxes and no save bar, and it skips the
@@ -2178,6 +2095,72 @@
                 <p>Who carried this risk forward, on what terms, and when it comes back for review.</p>
             </div>
             <div id="rdAcceptance"></div>
+        </section>
+    </div>
+</section>
+
+@* ================= Candidate View page (2026-10-15) =================
+   Promoted from the old riskDetailModal quick-look -- uniformity with
+   riskDetailPageView just above (the Register side's own View page):
+   same shell (pm-page-heading compact ra-head, Actions/Print/Back), same
+   Actions-button convention (buildCandidateMenu(), shared with the
+   Candidates grid's own row menu so the two rule sets cannot drift).
+   No flow rail -- a candidate has not reached any of View Risk's four
+   stages yet, so there is nothing to show one for; its own Status lives
+   in the meta list below, same as it did in the modal.
+=================================================================== *@
+<section id="riskCandidateDetailPageView" class="risk-page" hidden>
+    <div class="pm-page-heading compact ra-head">
+        <div>
+            <p class="pm-eyebrow">Risk Centre / Risk Candidates</p>
+            <h1 id="riskDetailTitle">Risk candidate</h1>
+            <p id="cdvPageSubtitle">Everything recorded for this candidate, read-only.</p>
+        </div>
+        <div class="ra-head-actions">
+            @* "View details" is not offered here: this page already IS
+               that view, same convention riskDetailPageView's own
+               Actions button uses for "View risk". data-cdv-menu alone
+               is enough for wireDelegation()'s selector (no other
+               element on this page carries it) -- same reasoning as
+               data-rd-menu above, including why this is NOT also
+               pm-action-trigger. *@
+            <button type="button" class="pm-button" id="cdvActionsBtn"
+                    data-cdv-menu="1" aria-haspopup="true" aria-expanded="false">
+                <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+                <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+            </button>
+            <button type="button" class="pm-button ghost" id="cdvPrintBtn">
+                <i class="fa-solid fa-print"></i> Print
+            </button>
+            <button type="button" class="pm-button ghost" id="cdvBackBtn">
+                <i class="fa-solid fa-arrow-left"></i> Back to candidates register
+            </button>
+        </div>
+    </div>
+
+    <div class="rd-body">
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Candidate details</h2>
+                <p>What was reported, and where it came from.</p>
+            </div>
+            <dl class="risk-meta" id="riskDetailMeta"></dl>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Assessment history</h2>
+                <p>BRD &sect;20 &mdash; every retained version of the initial risk analysis.</p>
+            </div>
+            <div id="riskAnalysisHistory" class="risk-history"></div>
+        </section>
+
+        <section class="pm-panel">
+            <div class="pm-section-heading">
+                <h2>Related tasks</h2>
+                <p>Work raised against this candidate from Task Centre.</p>
+            </div>
+            <div id="riskRelatedTasks"></div>
         </section>
     </div>
 </section>
@@ -2233,8 +2216,8 @@
            riskMapping.mount() fills this host (same component, new host id).
            showHeading:false -- the panel supplies the heading.
            practiceGrid:true (410) -- a grid (Practice / Practice Instance,
-           Tasks, Status, Actions); a row opens the card in
-           #riskMapPracticeDetailModal. *@
+           Tasks, Status, unmap X); a row click opens the instance in
+           Operationalize (new tab) -- 2026-10-08, was a popup. *@
         <section class="pm-panel" id="twScopePanel">
             <div class="pm-section-heading">
                 <h2>Existing Controls</h2>
@@ -2582,9 +2565,10 @@
                 @* Explicitly placed in column 2, spanning the four rows
                    the left column occupies. The four fields above are
                    auto-placed and flow down column 1 around it. *@
+                @* Mandatory since 2026-10-10 (UI + API). *@
                 <label class="ac-note">
-                    <span>Acceptance rationale</span>
-                    <textarea id="acNote" rows="3" maxlength="4000"
+                    <span>Acceptance rationale<span class="pm-required">*</span></span>
+                    <textarea id="acNote" rows="3" maxlength="4000" required
                               placeholder="Why is this level of risk acceptable to the organisation?"></textarea>
                 </label>
             </div>
@@ -2653,9 +2637,10 @@
                     <input type="date" id="baNextReview" required />
                     <span class="pm-hint">Must be in the future &mdash; it is what brings these risks back for review.</span>
                 </label>
+                @* Mandatory since 2026-10-10, as on the single form. *@
                 <label class="ac-note">
-                    <span>Acceptance rationale</span>
-                    <textarea id="baNote" rows="3" maxlength="4000"
+                    <span>Acceptance rationale<span class="pm-required">*</span></span>
+                    <textarea id="baNote" rows="3" maxlength="4000" required
                               placeholder="Why is this level of risk acceptable to the organisation?"></textarea>
                 </label>
             </div>
@@ -3229,7 +3214,6 @@
     .risk-trace-arrow { color: var(--fg-subtle); }
 
     /* ---- dashboard (BRD §23) ---- */
-    .risk-tab-action { margin-left: auto; align-self: center; }
     .risk-inline-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg-secondary); }
 
 
@@ -3306,10 +3290,6 @@
         font-size: 26px; line-height: 1; cursor: pointer; color: var(--fg-muted); }
     .pm-modal-close:hover { color: var(--danger-700); }
 
-    /* Existing Controls row popup (410): opened from a row far down the
-       Treatment page, so it sits lower than the shared .pm-modal's 40px,
-       clear of the top bar. */
-    #riskMapPracticeDetailModal { padding-top: 96px; }
 
     /* ==================================================================
        `pm-form-grid-full` — an alias, and why it is needed.
@@ -3365,14 +3345,16 @@
     .risk-page .ra-head { margin-bottom: 14px; }
     .risk-page .ra-head-actions { display: flex; align-items: center; gap: 10px; }
 
-    /* Split rows (residual analysis, treatment work). Risk context and
-       Inherent scoring no longer use this — they are full-width rows of
-       their own. minmax(0,...) on both tracks stops a long unbroken
-       value from widening its column and squeezing the controls beside
-       it — the classic CSS-grid overflow. */
+    /* Step-1 row of Residual, Review and Acceptance: "Risk summary" and
+       the card beside it. ONE column since 2026-10-08 -- side by side, a
+       short Risk summary next to a tall card (e.g. Inherent risk before
+       treatment with its impact analysis) left a large empty block under
+       the short one. Each card is now a full-width row, as Analysis and
+       Treatment already are. minmax(0, 1fr) stops a long unbroken value
+       from widening the page. */
     .risk-page .ra-row-split {
         display: grid;
-        grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 14px;
         align-items: start;
     }
@@ -3462,9 +3444,6 @@
         .risk-page .ra-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .risk-page .ra-span-2 { grid-column: span 2; }
     }
-    @@media (max-width: 1100px) {
-        .risk-page .ra-row-split { grid-template-columns: minmax(0, 1fr); }
-    }
     @@media (max-width: 1200px) {
         /* Four fields need ~230px each before "Inherent risk rating"
            and the rating text start wrapping. Below that, two rows of
@@ -3507,6 +3486,11 @@
     .risk-page .pm-detail-item { min-width: 0; }
     /* For the one value that is a sentence, not a field. */
     .risk-page .pm-detail-grid .pm-detail-span { grid-column: 1 / -1; }
+    /* Long-text fields (statement, analysis, remarks -- dd()'s
+       PROSE_LABELS in risk-centre.js, 2026-10-08): full row AND after the
+       short fields, in their own order, so the short fields share the
+       first rows instead of one of them sitting alone beside a paragraph. */
+    .risk-page .pm-detail-grid .pm-detail-prose { order: 1; }
     .risk-page .pm-detail-grid dt {
         font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
         color: var(--fg-muted); margin: 0 0 3px;
@@ -3648,13 +3632,15 @@
         .main-sidebar, .main-header, .main-footer, .pm-breadcrumb,
         .risk-tabs, .ra-head-actions, .pm-action-trigger { display: none !important; }
         .content-wrapper, body { background: var(--bg-surface) !important; margin: 0 !important; }
-        #riskDetailPageView .pm-panel {
+        #riskDetailPageView .pm-panel,
+        #riskCandidateDetailPageView .pm-panel {
             border: 1px solid var(--border-strong) !important; box-shadow: none !important;
             break-inside: avoid; page-break-inside: avoid;
         }
         #riskDetailPageView .rmp-card,
         #riskDetailPageView .risk-flow-step { break-inside: avoid; page-break-inside: avoid; }
-        #riskDetailPageView .pm-table-wrap { overflow: visible !important; }
+        #riskDetailPageView .pm-table-wrap,
+        #riskCandidateDetailPageView .pm-table-wrap { overflow: visible !important; }
     }
     /* Stacked, the arrows would point sideways between rows. */
     @@media (max-width: 900px) {
@@ -4160,23 +4146,6 @@
             <button type="button" class="pm-button primary" id="riskMapPickerConfirm">
                 <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice instance
             </button>
-        </footer>
-    </div>
-</div>
-
-@* Existing Controls row popup (410). The Treatment page lists mapped
-   practice instances as a grid; a row click shows that instance's full
-   card here -- the same practiceItem() markup the card list uses, so the
-   facts, dependencies, tasks and unmap control are unchanged. *@
-<div class="pm-modal" id="riskMapPracticeDetailModal" hidden>
-    <div class="pm-modal-panel pm-modal-wide">
-        <header>
-            <h2 id="riskMapPracticeDetailTitle">Practice instance</h2>
-            <button class="pm-modal-close" type="button" data-close-map-practice-detail aria-label="Close">&times;</button>
-        </header>
-        <div id="riskMapPracticeDetailBody" class="risk-map-host"></div>
-        <footer class="pm-modal-footer">
-            <button type="button" class="pm-button" data-close-map-practice-detail>Close</button>
         </footer>
     </div>
 </div>

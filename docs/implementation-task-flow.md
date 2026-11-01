@@ -18,7 +18,7 @@
    - **Implemented** *(pre-existing, display order harmonised)*
    - **N/A** *(new)*
    Legacy values (`Not Started`, `In Progress`, `Active`, `Inactive`) remain in the master for compatibility with existing insert paths but are remapped at read time for Practice Instance rows.
-3. When status = **Not Implemented**, the UI surfaces "Add Implementation Task" in two places:
+3. When status = **Not Implemented** (or **Not Updated**, the default since migration 456), the UI surfaces "Add Implementation Task" in two places:
    - A header button on the Practice Instances screen.
    - A row-level inline link in the action cell (best-effort — detects rows whose `ImplementationStatus` text is `Not Implemented` and decorates them).
 4. Clicking the button opens a modal with fields:
@@ -35,7 +35,7 @@
 
 - Guarded by `sp_practice_instance_open_implementation_task`:
   - **54301** Instance not found (HTTP 404)
-  - **54302** Instance not in `Not Implemented` state (HTTP 409)
+  - **54302** Instance not in `Not Updated` / `Not Implemented` / legacy `Not Started` state (HTTP 409; `Not Updated` accepted since 456)
   - **54303** Missing `subject_title` (HTTP 400)
 - Task-engine level:
   - Filtered unique index `ux_pm_practice_task_impl_dedup` on `(subject_entity_type='PracticeInstance', subject_entity_id)` where `closed_at IS NULL` — second call for the same instance returns the existing `task_id` instead of duplicating.

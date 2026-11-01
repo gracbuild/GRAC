@@ -77,7 +77,6 @@
     // source of truth for both analysis forms (see the header note).
     options: null,
     employees: [],
-    roles: [],
     // Phase B: the organisation's §19 / §22 switches. Loaded once per
     // organisation and consulted before the UI offers Accept or pre-ticks
     // the treatment checkbox — the server enforces both anyway, this only
@@ -157,17 +156,17 @@
     }
 
     // #candidateId=<id> -- companion deep-link for a Gap's risk that has
-    // NOT yet been registered. There is no separate full page for a
-    // candidate (openRiskDetailPage() opens a REGISTERED risk by
-    // risk_register_id, which a candidate doesn't have yet), so this
-    // reuses openDetailModal() -- the same read-only "View details" modal
-    // the candidate row menu's own eye icon opens -- rather than inventing
-    // a second, duplicate candidate-detail surface. Same independence as
-    // openRiskDetailPage above: openDetailModal() fetches the candidate
+    // NOT yet been registered. Change request, 2026-10-15: the candidate
+    // view used to be its own quick-look modal, promoted here to a full
+    // page (riskCandidateDetailPageView) for the same uniformity the
+    // Risk Register side already has with openRiskDetailPage() --
+    // openCandidateDetailPage() is the exact function the candidate row's
+    // own "View details" menu item and row click both call. Same
+    // independence as openRiskDetailPage above: it fetches the candidate
     // and its analysis history itself, so it is safe to call unconditionally.
     const candidateId = Number(hashParams.get("candidateId"));
     if (Number.isFinite(candidateId) && candidateId > 0) {
-      openDetailModal(candidateId);
+      openCandidateDetailPage(candidateId);
     }
   }
 
@@ -293,6 +292,12 @@
     // dialog already offers "Save as PDF", so this needs no route and no
     // library. The @@media print rules are in risk-centre.cshtml.
     on("rdPrintBtn", "click", () => window.print());
+
+    // ---- Read-only Candidate View page (2026-10-15) ------------------
+    // Same two buttons, same handlers -- the uniformity this page was
+    // built for.
+    on("cdvBackBtn",  "click", backFromFullPage);
+    on("cdvPrintBtn", "click", () => window.print());
 
     // ---- Treatment work, acceptance and review (261-264) ------------
     // 387: map an existing open Task Board task as treatment work.
@@ -470,13 +475,10 @@
     on("dupContinueBtn", "click", onDuplicateContinue);
 
     // ---- Phase B ----
-    on("riskConfigBtn", "click", openConfigModal);
-    on("riskConfigForm", "submit", onConfigSubmit);
     on("dashRefreshBtn", "click", refreshDashboard);
     on("riskApprovalForm", "submit", ev => onApprovalDecision(ev, "Approve"));
     on("apReturnBtn", "click", () => onApprovalDecision(null, "Return"));
     on("riskTreatmentForm", "submit", onTreatmentSubmit);
-    closers("risk-config",    "riskConfigModal");
     closers("risk-approval",  "riskApprovalModal");
     closers("risk-treatment", "riskTreatmentModal");
 
@@ -487,10 +489,13 @@
     closers("risk-custom",   "riskCustomModal");
     closers("reg-status",    "regStatusModal");
     closers("reg-owner",     "regOwnerModal");
-    // Detail modals clear their Related Tasks host, so they close through
-    // their own handler rather than hide().
-    document.querySelectorAll("[data-close-risk-detail]").forEach(el =>
-      el.addEventListener("click", () => closeDetailModal("riskDetailModal", "riskRelatedTasks")));
+    // The candidate quick-look modal this used to also wire
+    // ([data-close-risk-detail]) is gone -- riskCandidateDetailPageView
+    // (change request, 2026-10-15) leaves through backFromFullPage()
+    // like every other full page, not a close button. regDetailModal is
+    // a different, still-live modal (openRegisterDetail()'s own
+    // lighter quick-look) and keeps clearing its Related Tasks host the
+    // same way.
     document.querySelectorAll("[data-close-reg-detail]").forEach(el =>
       el.addEventListener("click", () => closeDetailModal("regDetailModal", "regRelatedTasks")));
 
@@ -550,6 +555,11 @@
   // tab -- which is the failure mode a per-page hide() invites.
   const FULL_PAGES = ["riskAnalysisPageView", "riskTreatmentPageView",
                       "riskResidualPageView", "riskDetailPageView",
+                      // Candidate View (change request, 2026-10-15): the
+                      // same promotion-from-modal every other page in
+                      // this list already had, for the same reason --
+                      // uniformity with the Register side.
+                      "riskCandidateDetailPageView",
                       // Review became a full page for the same reasons
                       // the residual analysis did: a full reassessment,
                       // the scope panel and the treatment options do not
@@ -627,6 +637,14 @@
     // Acceptance's, for the same reason. clear() empties the paired
     // impact host from the stored state, so acImpactScope goes with it.
     riskMapping.clear("acMapping");
+    // Candidate View's Related Tasks panel (2026-10-15): the same
+    // release closeDetailModal() used to do for the old modal. Harmless
+    // on every other full page's exit -- none of them ever mount into
+    // this host, and clear() is just an innerHTML reset.
+    {
+      const relHost = document.getElementById("riskRelatedTasks");
+      if (relHost && window.__gracRelatedTasks) window.__gracRelatedTasks.clear(relHost);
+    }
     hideAllFullPages();
     setTabChromeVisible(true);
     showTab(analysisReturnTab || "register");
@@ -746,6 +764,14 @@
     // incomparable, which is the one thing they must not be.
     fillSelect("rrLikelihood", state.options.likelihood, "code", "name", "-- select --");
     fillSelect("rrImpact",     state.options.impact,     "code", "name", "-- select --");
+
+    // Review Risk's reassessment (2026-10-24): the same scale and category
+    // list. These three were never filled, so openReviewPage's pre-fill
+    // of the current values had no option to select and the form opened
+    // empty.
+    fillSelect("rvCategory",   state.options.categories, "categoryCode", "categoryName", "-- select --");
+    fillSelect("rvLikelihood", state.options.likelihood, "code", "name", "-- select --");
+    fillSelect("rvImpact",     state.options.impact,     "code", "name", "-- select --");
   }
 
   // Threat / vulnerability / business function (migration 216).
@@ -1100,10 +1126,11 @@
     tbody.innerHTML = "";
     rows.forEach(r => {
       const tr = document.createElement("tr");
-      // Row click-to-View (change request, 2026-09-22): a candidate's
-      // "View" is its own quick-look modal (openDetailModal, the same
-      // one candTrigger's own "View details" menu item opens below) --
-      // a candidate has no full page of its own until it is registered.
+      // Row click-to-View: a candidate's "View" is its own full page
+      // (riskCandidateDetailPageView, change request 2026-10-15 --
+      // openCandidateDetailPage(), the same one candTrigger's own "View
+      // details" menu item opens below), same uniformity the Register
+      // grid's own row click already has with the full Risk View.
       tr.className = "pm-row-clickable";
       tr.setAttribute("data-cand-view", String(r.riskCandidateId));
       tr.innerHTML = `
@@ -1248,17 +1275,16 @@
   // prints its chip. This mirrors the Inherent column, which reaches the
   // same dash through severityChip(null) -> "--".
   //
-  // No residual rating (whether because inherent analysis is still
-  // pending, or inherent is done but residual is not) -> "--". Assessed
-  // -> the chip plus the likelihood x impact that produced it, same as
-  // the detail modal shows for the inherent rating. Deliberately reuses
-  // severityChip so the two rating columns are painted by one function.
+  // Change request, 2026-10-15: this column used to also print the
+  // likelihood x impact pair under the chip ("Rating koodathe
+  // likelihoodXimpact koodi kanikunnundu, athu venda") -- the register
+  // grid now shows Rating only here, exactly like the Inherent column
+  // beside it (plain severityChip(r.inherentRatingCode), no subtext).
+  // The Likelihood x Impact detail is not gone from the app: the risk's
+  // own Residual card (risk-centre.js's rdResidual block) and the
+  // Acceptance summary still show it where there is room to label it.
   function residualCell(r) {
-    if (!r.residualRatingCode) return "--";
-    return severityChip(r.residualRatingCode)
-      + (r.residualLikelihoodName && r.residualImpactName
-          ? `<br><span class="pm-hint">${escapeHtml(r.residualLikelihoodName)} x ${escapeHtml(r.residualImpactName)}</span>`
-          : "");
+    return r.residualRatingCode ? severityChip(r.residualRatingCode) : "--";
   }
 
   // ---- Register grid -------------------------------------------------
@@ -1671,6 +1697,41 @@
   // -- every one of these is a
   // raw field already returned by GET /register/{riskId} (state.activeRisk
   // on Risk View) or already carried on the Register grid row's own
+  // ===================================================================
+  // The candidate's two actions -- View details, Assessment -- one place
+  // for both the Candidates grid's own row menu and the candidate's full
+  // page (riskCandidateDetailPageView) own Actions button (change
+  // request, 2026-10-15), same reason buildRegisterMenu() just below is
+  // the one place the Register row menu's own rules live.
+  //
+  // handlers: { onView, onAssessment }. onView omitted means "View
+  // details" is not offered -- the candidate page itself does not pass
+  // it, since the page already IS that view, exactly as Risk View omits
+  // its own "View risk" from buildRegisterMenu().
+  // ===================================================================
+  function buildCandidateMenu(fields, handlers) {
+    fields = fields || {};
+    handlers = handlers || {};
+    const isOpen = OPEN_STATUSES.includes(fields.statusCode);
+    const items = [];
+
+    if (handlers.onView) {
+      items.push({ icon: "fa-eye", label: "View details", action: handlers.onView });
+    }
+
+    if (handlers.onAssessment) {
+      // A closed candidate will never be assessed again -- registered,
+      // rejected, withdrawn or duplicated, it is finished. Hidden rather
+      // than greyed: nothing the reader does brings it back.
+      items.push({
+        icon: "fa-magnifying-glass-chart", label: "Assessment",
+        applicable: isOpen, action: handlers.onAssessment
+      });
+    }
+
+    return items;
+  }
+
   // data-reg-* attributes; approvalRequired and allowResidualWithOpenTasks
   // are NOT part of the risk record (organization-level settings from
   // GET /config) -- see
@@ -1693,6 +1754,17 @@
     const openTasks = Number(fields.openTreatmentTaskCount || 0);
     const taskCount = Number(fields.treatmentTaskCount || 0);
     const reviewDue = !!fields.isReviewDue;
+    // Stage-applicability (2026-10-20, sir): an action is offered only in
+    // the lifecycle stage(s) it belongs to, per vw_pm_risk_workflow_stage
+    // (AnalysisDue -> TreatmentDue -> InTreatment -> ResidualDue ->
+    // AcceptanceDue -> Accepted -> ReviewDue). This is why "Review risk"
+    // no longer appears at Treatment-option-due, "Accept" only at
+    // Acceptance-due, and treatment only while it is actually being done.
+    // If the stage is somehow absent (the view always supplies it) the
+    // guard is skipped so nothing silently disappears -- the per-item
+    // prerequisite gate and the SQL still apply.
+    const stage = fields.workflowStageCode || "";
+    const inStage = set => !stage || set.indexOf(stage) !== -1;
     const items = [];
 
     if (handlers.onView) {
@@ -1709,16 +1781,23 @@
     }
 
     if (handlers.onResidual) {
+      let resGate = residualMenuGate({
+        status: fields.statusCode, analysisPending: fields.analysisPending,
+        option: regOption, openTasks,
+        allowOpenTasks: !!fields.allowResidualWithOpenTasks
+      });
+      // residualMenuGate still owns the 389 "residual while treatment is
+      // still open" nuance (an InTreatment case). The stage guard only
+      // stops an already-assessed residual from reappearing once the risk
+      // has moved on past it (Acceptance / Accepted / Review).
+      if (resGate.applicable !== false && !inStage(["InTreatment", "ResidualDue"]))
+        resGate = { applicable: false };
       items.push(Object.assign({
         icon: "fa-shield-halved",
         label: fields.residualPending === false
                  ? "Residual risk analysis" : "Residual risk analysis (not assessed)",
         action: handlers.onResidual
-      }, residualMenuGate({
-        status: fields.statusCode, analysisPending: fields.analysisPending,
-        option: regOption, openTasks,
-        allowOpenTasks: !!fields.allowResidualWithOpenTasks
-      })));
+      }, resGate));
     }
 
     if (handlers.onReviewAnalysis) {
@@ -1755,7 +1834,8 @@
         icon: "fa-list-check",
         label: openTasks > 0 ? `Risk treatment (${openTasks} open)`
              : taskCount > 0 ? "Risk treatment" : "Risk treatment (none raised)",
-        applicable: !regClosed && regOption !== "Tolerate",
+        applicable: !regClosed && regOption !== "Tolerate"
+                    && inStage(["TreatmentDue", "InTreatment"]),
         // The treatment option is CHOSEN on the Treatment page (it moved
         // there from Risk Analysis), so "no option yet" -- stage
         // Treatment option due -- is exactly when this page is needed.
@@ -1770,7 +1850,7 @@
     if (handlers.onAccept) {
       items.push({
         icon: "fa-circle-check", label: "Accept risk",
-        applicable: !regClosed,
+        applicable: !regClosed && inStage(["AcceptanceDue"]),
         disabled: !!fields.analysisPending || !regOption,
         disabledReason: fields.analysisPending
             ? "Complete the risk analysis before accepting this risk."
@@ -1783,7 +1863,7 @@
       items.push({
         icon: "fa-rotate-left",
         label: reviewDue ? "Review risk (due)" : "Review risk",
-        applicable: !regClosed,
+        applicable: !regClosed && inStage(["Accepted", "ReviewDue"]),
         disabled: !!fields.analysisPending,
         disabledReason: "Complete the risk analysis before reviewing this risk.",
         action: handlers.onReview
@@ -1797,7 +1877,21 @@
       });
     }
 
-    return items;
+    // Change request 2026-10-20 (sir): the Register / Risk View 3-dot menu
+    // shows ONLY the actions applicable to the risk's CURRENT stage. An
+    // action that is merely stage-premature -- marked `disabled` above
+    // because a lifecycle prerequisite is unmet (analysis not finished,
+    // risk still Active for residual, treatment work still open, no
+    // option chosen yet) -- is now HIDDEN rather than shown greyed, the
+    // same as an `applicable:false` item. So an analysis-pending risk no
+    // longer offers Residual / Review analysis / Treatment / Accept /
+    // Review at all; it offers only what can be done now (View, Analysis,
+    // Retire, Change owner, Practices & assets, Raise task). The per-item
+    // disabledReason text is kept above as the in-code mirror of each SQL
+    // THROW -- every gate is still enforced in SQL; this only changes what
+    // the menu presents. (openRowMenu still greys `disabled` items for the
+    // candidate and treatment-work menus, which are not risk-stage menus.)
+    return items.filter(it => !it.disabled);
   }
 
   // Delegated ONCE at module scope, for both grids and the register
@@ -1830,7 +1924,7 @@
       const openCand = ev.target.closest("[data-open-candidate]");
       if (openCand) {
         ev.preventDefault();
-        openDetailModal(Number(openCand.dataset.openCandidate));
+        openCandidateDetailPage(Number(openCand.dataset.openCandidate));
         return;
       }
 
@@ -1884,15 +1978,16 @@
         // "Awaiting approval" queue under this grid (moved from the
         // Dashboard, 2026-10-01), which is a worklist, not a per-row
         // afterthought.
-        openRowMenu(candTrigger, [
-          { icon: "fa-eye", label: "View details", action: () => openDetailModal(id) },
-          // A closed candidate will never be assessed again -- registered,
-          // rejected, withdrawn or duplicated, it is finished. Hidden
-          // rather than greyed: nothing the reader does brings it back.
-          { icon: "fa-magnifying-glass-chart", label: "Assessment",
-            applicable: isOpen,
-            action: () => openAnalysisModal(id) }
-        ]);
+        //
+        // buildCandidateMenu() (below), not an inline array -- the same
+        // two rules now have to be identical here and on the candidate's
+        // own full-page Actions button (change request, 2026-10-15), the
+        // same reason buildRegisterMenu() is the one place the Register
+        // row menu's rules live.
+        openRowMenu(candTrigger, buildCandidateMenu(
+          { statusCode: status },
+          { onView: () => openCandidateDetailPage(id), onAssessment: () => openAnalysisModal(id) }
+        ));
         return;
       }
 
@@ -1903,6 +1998,21 @@
       if (twToggle) {
         ev.preventDefault(); ev.stopPropagation();
         toggleTreatmentChildren(twToggle);
+        return;
+      }
+
+      // ---- View Risk's treatment grid: row click opens Task View ------
+      // Only rows rendered with linkToTaskView (taskRow()) carry both
+      // pm-row-clickable and data-task-id, so this is a no-op everywhere
+      // else -- the editable Treatment page's rows still rely on their
+      // own 3-dot menu, untouched. New tab, same as the Treatment page's
+      // own "Open in Task Board" row-menu item, so the View Risk page
+      // the reader came from stays open behind it.
+      const twRowLink = ev.target.closest("tr.pm-row-clickable[data-task-id]");
+      if (twRowLink) {
+        ev.preventDefault();
+        window.open(U(`/Practice/Index/task-view?taskId=${encodeURIComponent(twRowLink.dataset.taskId)}`),
+                    "_blank", "noopener");
         return;
       }
 
@@ -2017,6 +2127,7 @@
         const items = buildRegisterMenu(
           {
             riskRegisterId: id, statusCode: regStatus,
+            workflowStageCode: regTrigger.dataset.regStage || "",
             analysisPending: regTrigger.dataset.regPending === "1",
             residualPending: regTrigger.dataset.regResidualPending !== "0",
             treatmentOptionCode: regTrigger.dataset.regOption || "",
@@ -2101,21 +2212,33 @@
         return;
       }
 
-      // Row click-to-View (change request, 2026-09-22): every branch
-      // above already returns for its own trigger or link, so reaching
-      // here means the click landed elsewhere on the row. A Register row
-      // (data-reg-view, set in refreshRegister()) opens the full Risk
-      // View -- the same page its own Risk ID link and 3-dot "View risk"
-      // both open. A Candidates row (data-cand-view, refreshCandidates())
-      // opens its own quick-look modal instead -- a candidate has no
-      // full page until it is registered. !ev.target.closest("a") keeps
-      // the Risk ID link's own [data-open-risk] branch (above) as the
-      // one that handles it, not this fallback.
+      // Candidate View's own Actions button (change request, 2026-10-15)
+      // -- same machinery, same single-instance reasoning as rdTrigger
+      // just above.
+      const cdvTrigger = ev.target.closest("[data-cdv-menu]");
+      if (cdvTrigger) {
+        ev.preventDefault(); ev.stopPropagation();
+        openCandidateViewActionsMenu(cdvTrigger);
+        return;
+      }
+
+      // Row click-to-View (change request, 2026-09-22; candidate side
+      // promoted to a full page 2026-10-15): every branch above already
+      // returns for its own trigger or link, so reaching here means the
+      // click landed elsewhere on the row. A Register row (data-reg-view,
+      // set in refreshRegister()) opens the full Risk View -- the same
+      // page its own Risk ID link and 3-dot "View risk" both open. A
+      // Candidates row (data-cand-view, refreshCandidates()) now opens
+      // its own full page the same way -- riskCandidateDetailPageView,
+      // same one the row's own 3-dot "View details" item opens.
+      // !ev.target.closest("a") keeps the Risk ID link's own
+      // [data-open-risk] branch (above) as the one that handles it, not
+      // this fallback.
       if (!ev.target.closest("a")) {
         const regRow = ev.target.closest("tr[data-reg-view]");
         if (regRow) { openRiskDetailPage(Number(regRow.dataset.regView)); return; }
         const candRow = ev.target.closest("tr[data-cand-view]");
-        if (candRow) { openDetailModal(Number(candRow.dataset.candView)); return; }
+        if (candRow) { openCandidateDetailPage(Number(candRow.dataset.candView)); return; }
       }
 
       if (!openMenuEl) return;
@@ -2128,14 +2251,24 @@
     window.addEventListener("scroll", closeRowMenu, true);
   })();
 
-  // ---- Candidate detail ---------------------------------------------
-  async function openDetailModal(id) {
+  // ---- Candidate detail -----------------------------------------------
+  // Change request, 2026-10-15: promoted from its own quick-look modal
+  // (riskDetailModal) to a full page, riskCandidateDetailPageView --
+  // uniformity with the Register side's own View Risk page
+  // (openRiskDetailPage(), just below in this file). Every element id
+  // the modal used (riskDetailTitle, riskDetailMeta, riskAnalysisHistory,
+  // riskRelatedTasks) moved into the new page unchanged, so this
+  // function's own body needed no edit beyond how it is shown at the
+  // end -- same principle the View Risk/Treatment/Residual/Review/
+  // Acceptance promotions already used.
+  async function openCandidateDetailPage(id) {
     const cand = await apiGet(`/${id}`);
-    if (!cand) return;
+    if (!cand) { dlg.alert("Candidate not found.", { type: "error" }); return; }
     state.activeCandidate = cand;
+    analysisReturnTab = "candidates";
 
-    document.getElementById("riskDetailTitle").textContent =
-      cand.candidateTitle || `Risk candidate #${id}`;
+    setText("riskDetailTitle", cand.candidateTitle || `Risk candidate #${id}`);
+    setText("cdvPageSubtitle", "Everything recorded for this candidate, read-only.");
     document.getElementById("riskDetailMeta").innerHTML = metaOf(cand);
 
     // BRD §20 — every retained analysis version.
@@ -2156,7 +2289,42 @@
       : `<p class="pm-hint">No assessment yet. This candidate cannot be registered until one exists.</p>`;
 
     mountRelatedTasks("riskRelatedTasks", "Risk", id);
-    show("riskDetailModal");
+    // Shown last, once every fetch above has populated the page -- same
+    // order the old modal used (show() was its own final statement) and
+    // the same one openRiskDetailPage() uses (awaits everything, THEN
+    // showFullPage()), so the page never flashes half-filled.
+    showFullPage("riskCandidateDetailPageView");
+  }
+
+  // Assessment is now reachable from the candidate page's own Actions
+  // button while the page stays open underneath it (change request,
+  // 2026-10-15) -- the same situation View Risk already solved with
+  // refreshRiskViewIfShowing(), for the same reason: a save elsewhere
+  // must not leave this page showing what it looked like before that
+  // save. A no-op whenever this page is not the one open, or is open for
+  // a different candidate.
+  async function refreshCandidateViewIfShowing(id) {
+    const page = document.getElementById("riskCandidateDetailPageView");
+    if (page && !page.hidden && state.activeCandidate
+        && state.activeCandidate.riskCandidateId === id) {
+      await openCandidateDetailPage(id);
+    }
+  }
+
+  // The candidate page's own Actions button (change request, 2026-10-15)
+  // -- same buildCandidateMenu() the Candidates grid's row menu uses
+  // (above), so the two cannot drift. "View details" is not offered:
+  // this page already IS that view, same convention as Risk View's own
+  // Actions button omitting "View risk".
+  function openCandidateViewActionsMenu(trigger) {
+    const cand = state.activeCandidate;
+    if (!cand) return;
+    if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+    const id = cand.riskCandidateId;
+    openRowMenu(trigger, buildCandidateMenu(
+      { statusCode: cand.statusCode },
+      { onAssessment: () => openAnalysisModal(id) }
+    ));
   }
 
   function mountRelatedTasks(hostId, sourceTypeCode, sourceRecordId) {
@@ -2263,6 +2431,9 @@
     }
     hide("riskAnalysisModal");
     await refresh();
+    // Candidate View may be the page open underneath this modal (change
+    // request, 2026-10-15) -- a no-op whenever it isn't.
+    await refreshCandidateViewIfShowing(id);
     // The note was read from the form BEFORE this save, same as every
     // other field Save & register submits -- see startRegister's header
     // for why it no longer asks again afterwards.
@@ -2401,6 +2572,8 @@
         hide("riskDuplicateModal");
         dlg.alert("Candidate closed as duplicate.", { type: "success" });
         await refresh();
+        // Candidate View, if open underneath (2026-10-15).
+        await refreshCandidateViewIfShowing(candidateId);
       });
       tbody.appendChild(tr);
     });
@@ -2438,6 +2611,9 @@
     dlg.alert(`Registered as ${result.riskNumber}.`, { title: "Risk registered", type: "success" });
     await refresh();
     if (state.tab === "register") await refreshRegister();
+    // Candidate View, if open underneath (2026-10-15): the candidate is
+    // now Registered, with a registeredRiskNumber to show.
+    await refreshCandidateViewIfShowing(id);
   }
 
   // ---- Custom risk, Route B (BRD §4B, §11) ---------------------------
@@ -2729,13 +2905,10 @@
                  ? `${escapeHtml(risk.impactName)}${
                      risk.impactValue != null ? ` <span class="pm-hint">(${risk.impactValue})</span>` : ""}`
                  : null, true)}
-           ${ddReq("Score", risk.inherentRatingScore != null ? String(risk.inherentRatingScore) : null)}
            ${ddReq("Rating", risk.inherentRatingCode ? severityChip(risk.inherentRatingCode) : null, true)}
            ${dd("Assessed", risk.analysisOn
                  ? `${window.gracFormatDisplayDate(risk.analysisOn)}${
                      risk.analysedByName ? ` by ${escapeHtml(risk.analysedByName)}` : ""}` : null, true)}
-           ${dd("Approval", risk.analysisApprovalStatusCode
-                 ? `<span class="risk-status-chip">${escapeHtml(risk.analysisApprovalStatusCode)}</span>` : null, true)}
            ${dd("Potential consequence", risk.potentialConsequence)}
          </dl>`;
 
@@ -2753,7 +2926,11 @@
     if (showWork) {
       twState = await refreshTreatmentState(riskId, {
         gateId: "rdGate", tilesId: "rdTiles", bodyId: "rdTaskBody",
-        residualBtnId: null, colspan: 7, readOnly: true, sync: false, showSource: false
+        residualBtnId: null, colspan: 7, readOnly: true, sync: false, showSource: false,
+        // Change request: a row here opens that task's own Task View in
+        // a new tab -- see linkToTaskView on TW_HOSTS / taskRow() and the
+        // data-task-id click branch in wireDelegation() below.
+        linkToTaskView: true
       });
     }
 
@@ -2793,8 +2970,12 @@
          </dl>`;
 
     // ---- 4 + 5. Existing controls and dependencies -------------------
+    // practiceGrid (2026-10-08): the mapped instances as the same list
+    // the Treatment page uses -- a row click opens the instance in
+    // Operationalize (new tab). Read-only here, so no unmap column.
     await riskMapping.mount("rdMapping", riskId, { readOnly: true, showHeading: false,
-                                                   impactHostId: "rdImpactScope" });
+                                                   impactHostId: "rdImpactScope",
+                                                   practiceGrid: true });
 
     // ---- 6. Residual risk level --------------------------------------
     document.getElementById("rdResidual").innerHTML = !reach.residual
@@ -2811,7 +2992,6 @@
                  ? `${escapeHtml(risk.residualImpactName)}${
                      risk.residualImpactValue != null ? ` <span class="pm-hint">(${risk.residualImpactValue})</span>` : ""}`
                  : null, true)}
-           ${ddReq("Score", risk.residualRatingScore != null ? String(risk.residualRatingScore) : null)}
            ${ddReq("Rating", risk.residualRatingCode ? severityChip(risk.residualRatingCode) : null, true)}
            ${dd("Assessed", risk.residualAssessedOn
                  ? `${window.gracFormatDisplayDate(risk.residualAssessedOn)}${
@@ -2876,6 +3056,7 @@
     const items = buildRegisterMenu(
       {
         riskRegisterId: id, statusCode: risk.statusCode,
+        workflowStageCode: risk.workflowStageCode || "",
         analysisPending: risk.analysisPending,
         residualPending: risk.residualPending,
         treatmentOptionCode: risk.treatmentOptionCode || "",
@@ -2904,7 +3085,8 @@
     openRowMenu(trigger, items);
   }
 
-  // BRD §10 -- Risk Register -> Analysis -> Candidate -> Source.
+  // BRD §10 -- Risk Register -> Analysis -> Candidate -> Source, then
+  // (2026-10-08) the lifecycle stages the risk has reached.
   // Extracted from openRegisterDetail so the details page and the modal
   // render the SAME chain from one copy. A second trace builder would
   // have drifted the first time a source type was added.
@@ -2931,6 +3113,38 @@
       steps.push(`<span class="risk-trace-step">${escapeHtml(risk.sourceName || risk.sourceTypeCode)}${
         risk.sourceReference ? ` — ${escapeHtml(risk.sourceReference)}` : ""}</span>`);
     }
+
+    // Lifecycle steps (2026-10-08): after where the risk came from, how
+    // far it has gone -- Analysed, Treated, Residual analysed, Accepted,
+    // Reviewed, Retired -- each only once REACHED, with its date (and who, where
+    // the register records it). Gated by riskReach(), the same test View
+    // Risk uses for its sections, so the trail and the sections agree.
+    const reach = riskReach(risk);
+    const when = (on, by) => on
+      ? ` — ${escapeHtml(window.gracFormatDisplayDate(on))}${by ? ` by ${escapeHtml(by)}` : ""}`
+      : "";
+    const stage = (label, detail) =>
+      steps.push(`<span class="risk-trace-step"><strong>${escapeHtml(label)}</strong>${detail}</span>`);
+    if (reach.inherent)
+      stage("Analysed", when(risk.analysisOn, risk.analysedByName));
+    if (reach.treatment)
+      stage("Treated", (risk.treatmentOptionName ? ` — ${escapeHtml(risk.treatmentOptionName)}` : "")
+                       + (risk.treatmentDecidedOn ? `, ${escapeHtml(window.gracFormatDisplayDate(risk.treatmentDecidedOn))}` : ""));
+    if (reach.residual)
+      stage("Residual analysed", when(risk.residualAssessedOn, risk.residualAssessedByName));
+    if (reach.accepted)
+      stage("Accepted", when(risk.acceptedOn, risk.acceptedByName));
+    if (risk.lastReviewedOn || Number(risk.reviewCount) > 0)
+      stage("Reviewed", (risk.lastReviewedOn ? ` — ${escapeHtml(window.gracFormatDateOnly(risk.lastReviewedOn))}` : "")
+                        + (Number(risk.reviewCount) > 1 ? ` (${Number(risk.reviewCount)} reviews)` : ""));
+    // The end of the line: Retire risk (Register row menu / Risk View
+    // Actions) sets status Retired with closed_dt, the actor and the
+    // reason (sp_risk_register_status_set). Closed is the legacy terminal
+    // status, shown the same way under its own name.
+    if (risk.statusCode === "Retired" || risk.statusCode === "Closed")
+      stage(risk.statusCode, when(risk.closedOn, risk.closedByName)
+                             + (risk.closureReason ? ` — ${escapeHtml(risk.closureReason)}` : ""));
+
     return steps.join(`<span class="risk-trace-arrow"><i class="fa-solid fa-arrow-right"></i></span>`);
   }
 
@@ -3407,10 +3621,12 @@
     // assessment may find the risk now reaches different practices) but
     // Impact Details does not -- it was established at Analysis and is
     // revised at Review. See mount()'s header.
+    // practiceGrid (2026-10-08): list, as on the Treatment page.
     await riskMapping.mount("rrMapping", riskId, { readOnly: false, showHeading: false,
                                                    impactHostId: "rrImpactScope",
-                                                   impactReadOnly: true });
-    await renderResidualHistory(riskId);
+                                                   impactReadOnly: true,
+                                                   practiceGrid: true });
+    // Residual history is no longer shown on this page (2026-10-15).
   }
 
   // ---- The Inherent -> Treatment -> Residual rail ---------------------
@@ -3541,29 +3757,6 @@
       + severityChip(cell.ratingCode)
       + (move ? ` <span class="pm-hint">exposure ${move}`
                 + (move !== "unchanged" ? ` (${before} &rarr; ${after})` : "") + `</span>` : "");
-  }
-
-  // BRD §20 — every retained version. Each row carries the inherent
-  // rating AS IT STOOD at the time, frozen by the migration, so an old
-  // version still reads correctly after the inherent risk is re-scored.
-  async function renderResidualHistory(riskId) {
-    const host = document.getElementById("rrHistory");
-    if (!host) return;
-    const rows = await apiGet(`/register/${riskId}/residual/history`) || [];
-    host.innerHTML = rows.length
-      ? `<table><thead><tr><th>Ver</th><th>Likelihood</th><th>Impact</th>
-           <th>Inherent</th><th>Residual</th><th>Treatment</th><th>Assessed</th><th>By</th></tr></thead><tbody>` +
-        rows.map(v => `<tr${v.isCurrent ? ' style="font-weight:600"' : ""}>
-            <td>v${v.residualVersion}</td>
-            <td>${escapeHtml(v.residualLikelihoodName || "--")}</td>
-            <td>${escapeHtml(v.residualImpactName || "--")}</td>
-            <td>${v.inherentRatingCode ? severityChip(v.inherentRatingCode) : "--"}</td>
-            <td>${v.residualRatingCode ? severityChip(v.residualRatingCode) : "--"}</td>
-            <td>${escapeHtml(v.treatmentSummary || "--")}</td>
-            <td>${window.gracFormatDisplayDate(v.assessedOn)}</td>
-            <td>${escapeHtml(v.assessedByName || "--")}</td>
-          </tr>`).join("") + `</tbody></table>`
-      : `<p class="pm-hint">No residual assessment yet for this risk.</p>`;
   }
 
   // thenAccept: the "Save & accept risk" button. It saves FIRST and then
@@ -3705,8 +3898,9 @@
         // as a GRID (Practice / Practice Instance, Tasks, Status, Actions)
         // instead of one full card each -- with many controls mapped the
         // cards made the Treatment page very long. A row click opens the
-        // same card (practiceItem) in #riskMapPracticeDetailModal. Only the
-        // Treatment mount passes it; every other mount keeps the cards.
+        // instance's Operationalize view in a new tab (2026-10-08). Passed
+        // by the Treatment, View Risk (rdMapping) and Residual (rrMapping)
+        // mounts; the others keep the cards.
         practiceGrid: !!opts.practiceGrid
       });
       host.innerHTML = `<p class="pm-hint">Loading practices and assets...</p>`;
@@ -3881,13 +4075,24 @@
       // Asset cascade to narrow and no picker to fill, so both would be
       // fetches whose results nothing reads -- five of them plus the
       // taxonomy, on Residual as well as View Risk and Accept.
-      const taxonomyPromise = st.impactReadOnly ? Promise.resolve(null) : loadAssetTaxonomy();
+      //
+      // EXCEPT Asset (change request, 2026-10-15): its whole register
+      // was the first thing this eager fetch pulled down, cascade or
+      // not -- the Category/Sub-category/Type combos only ever hid rows
+      // in an already-downloaded list, never avoided downloading them.
+      // Asset now starts empty and loads from reloadAssetPicker() once
+      // the reader actually ticks one of the three filters, UNLESS the
+      // taxonomy itself is missing (241 not deployed here) -- then there
+      // is no cascade to drive a fetch with, and the row falls back to
+      // exactly the flat, fully-loaded picker every other category uses.
+      const assetTaxonomy = st.impactReadOnly ? null : await loadAssetTaxonomy();
+      const hasAssetTaxonomy = !!assetTaxonomy && assetTaxonomy.cats.length > 0;
+      const isAssetCat = c => /^asset$/i.test(c.dependencyTypeName || "") || /^asset$/i.test(c.dependencyTypeCode || "");
       const lists = await Promise.all(categories.map(async c =>
-        (!st.impactReadOnly && c.isSelectable && st.orgId)
+        (!st.impactReadOnly && c.isSelectable && st.orgId && !(hasAssetTaxonomy && isAssetCat(c)))
           ? [c.dependencyTypeId, await loadDependencyObjects(st.orgId, c.dependencyTypeId)]
           : [c.dependencyTypeId, []]));
       const objectsByCat = new Map(lists);
-      const assetTaxonomy = await taxonomyPromise;
 
       // Department (385, 2026-09-26) is its own Impact category -- saved
       // as department ids -- but on an EDITABLE table it has no row of
@@ -4034,25 +4239,28 @@
       // Person rows with a Department picker (385): apply the department
       // narrowing and the "All" trigger text to the freshly rendered row.
       [host, impactHost].forEach(h => h && h.querySelectorAll(".risk-person-row").forEach(applyPersonFilters));
+      // Asset rows (change request, 2026-10-15): Sub Category/Type start
+      // hidden behind their parent exactly as they will after any later
+      // tick -- applyAssetTaxonomyCascade() is a no-op on a row that
+      // isn't an Asset row (its three filter combos are simply absent).
+      [host, impactHost].forEach(h => h && h.querySelectorAll(".risk-asset-row").forEach(applyAssetTaxonomyCascade));
 
       // Remember what this panel already has mapped, so the dialog can
       // exclude them without re-reading the DOM.
       st.mappedPracticeIds = (practices || []).map(p => p.practiceId);
       // 387: what the picker excludes now is the mapped INSTANCES.
       st.mappedInstanceIds = (practices || []).map(p => p.practiceInstanceId).filter(Boolean);
-      // 410: what the grid's row popup and row menu read -- the rows
-      // already on screen, never a second fetch.
+      // 410: what the grid's row click reads -- the rows already on
+      // screen, never a second fetch.
       st.practiceRows = practices;
-      st.depsByPractice = depsByPractice;
     }
 
     // ------------------------------------------------------------------
     // Existing Controls as a grid (410). One row per mapped practice
     // instance: the practice with its instance under it, the task count
     // and the instance's implementation status (the Operationalize value,
-    // sp_risk_mapping_get's PracticeInstanceStatus). Everything the card
-    // showed is one row click away, in the SAME card (practiceItem) inside
-    // #riskMapPracticeDetailModal -- nothing is reimplemented.
+    // sp_risk_mapping_get's PracticeInstanceStatus). A row click opens the
+    // instance in Operationalize (2026-10-08; was a popup of the card).
     // ------------------------------------------------------------------
     // The tasks of ONE mapped row (411): its instance's tasks; for a
     // practice-level row -- or tasks returned without an instance, i.e.
@@ -4069,6 +4277,12 @@
       return g.get("P" + Number(p.practiceId)) || [];
     }
 
+    // 2026-10-08: a row click opens the instance's Operationalize view in
+    // a new tab (practiceViewUrl) -- no popup, no 3-dot menu. A
+    // practice-level row has no instance to open, so it is not clickable.
+    // On an editable mount (Treatment, Residual) the last cell keeps the
+    // card's unmap X (same data-map-practice-remove handler); View Risk is
+    // read-only and has no such column.
     function practiceGrid(hostId, practices, st) {
       const rows = practices.map(p => {
         const tasks = practiceTasksOf(st, p);
@@ -4076,22 +4290,26 @@
           ? escapeHtml((p.practiceInstanceCode ? p.practiceInstanceCode + " - " : "")
                        + (p.practiceInstanceName || `#${p.practiceInstanceId}`))
           : "Practice-level (no active instance)";
+        const canRemove = !st.readOnly && !p.isPrimary;
         return `
-        <tr class="pm-row-clickable" data-map-grid-row="${escapeHtml(hostId)}"
-            data-map-id="${p.riskPracticeMapId}" title="View details">
+        <tr${p.practiceInstanceId
+              ? ` class="pm-row-clickable" data-map-grid-row="${escapeHtml(hostId)}"
+                  data-map-id="${p.riskPracticeMapId}" title="Open the practice instance in a new tab"`
+              : ` title="Practice-level row: the practice has no active instance to open"`}>
           <td>${escapeHtml(p.practiceName || `#${p.practiceId}`)}
               <br><span class="pm-hint">${instance}</span></td>
           <td>${tasks.length}</td>
           <td>${p.practiceInstanceStatus
                  ? `<span class="pm-badge t-status">${escapeHtml(p.practiceInstanceStatus)}</span>`
                  : `<span class="rmp-dash">--</span>`}</td>
-          <td>
-            <button type="button" class="pm-action-trigger" data-map-grid-menu="${escapeHtml(hostId)}"
-                    data-map-id="${p.riskPracticeMapId}"
-                    aria-haspopup="menu" aria-expanded="false" title="Actions">
-              <i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
-            </button>
-          </td>
+          ${st.readOnly ? "" : `<td>
+            <button type="button" class="rmp-remove"
+                    title="${canRemove ? "Unmap this practice instance" : "The primary practice instance cannot be unmapped here"}"
+                    ${canRemove ? "" : "disabled"}
+                    data-map-practice-remove="${escapeHtml(hostId)}" data-practice-id="${p.practiceId}"
+                    data-map-id="${p.riskPracticeMapId}">
+              <i class="fa-solid fa-xmark"></i></button>
+          </td>`}
         </tr>`;
       }).join("");
       return `
@@ -4101,7 +4319,7 @@
               <th>Practice / Practice Instance</th>
               <th style="width:90px">Tasks</th>
               <th style="width:170px">Status</th>
-              <th style="width:60px"></th>
+              ${st.readOnly ? "" : `<th style="width:50px"></th>`}
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -4116,21 +4334,6 @@
         + "?instanceId=" + encodeURIComponent(p.practiceInstanceId)
         + "&organizationId=" + encodeURIComponent(st.orgId || state.organizationId || 0)
         + "&mode=view";
-    }
-
-    function openPracticeDetail(hostId, st, p) {
-      const body = document.getElementById("riskMapPracticeDetailBody");
-      const title = document.getElementById("riskMapPracticeDetailTitle");
-      if (!body) return;
-      if (title) title.textContent = p.practiceName || "Practice instance";
-      body.innerHTML = practiceItem(hostId, p, st,
-                                    (st.depsByPractice && st.depsByPractice.get(Number(p.riskPracticeMapId))) || []);
-      show("riskMapPracticeDetailModal");
-    }
-
-    function closePracticeDetail() {
-      const m = document.getElementById("riskMapPracticeDetailModal");
-      if (m && !m.hidden) hide("riskMapPracticeDetailModal");
     }
 
     function gridRowOf(hostId, mapId) {
@@ -4276,6 +4479,31 @@
     // practice still vouches for it), so those checkboxes are locked and
     // say why on hover.
 
+    // One option <label>, shared by categoryRow()'s initial render and
+    // reloadAssetPicker()'s incremental append (change request,
+    // 2026-10-15) -- same markup, same data attributes, one place to
+    // keep them agreeing rather than two copies drifting apart.
+    function dependencyOptionLabel(o, mappedById) {
+      const d        = mappedById.get(o.id);
+      const checked  = !!d;
+      const locked   = !!d && !d.isDirect;         // inherited-only
+      const why      = d && d.sourcePractices ? `Inherited via ${d.sourcePractices}` : "";
+      return `<label data-checkcombo-option${locked ? ' class="is-locked"' : ""}${
+               why ? ` title="${escapeHtml(why)}"` : ""}`
+           + (o.assetCategoryId    != null ? ` data-asset-category="${escapeHtml(String(o.assetCategoryId))}"` : "")
+           + (o.assetSubcategoryId != null ? ` data-asset-subcategory="${escapeHtml(String(o.assetSubcategoryId))}"` : "")
+           + (o.assetTypeId        != null ? ` data-asset-type="${escapeHtml(String(o.assetTypeId))}"` : "")
+           + (o.locationId         != null ? ` data-person-location="${escapeHtml(String(o.locationId))}"` : "")
+           + (o.departmentId       != null ? ` data-person-department="${escapeHtml(String(o.departmentId))}"` : "")
+           + `>`
+           + `<input type="checkbox" value="${o.id}"`
+           // Bare name, never the role-suffixed label: this attribute
+           // is what saveDependencies persists as the object name.
+           + ` data-object-name="${escapeHtml(o.name)}"`
+           + `${checked ? " checked" : ""}${locked ? " disabled" : ""}> `
+           + `<span>${escapeHtml(personWithRole(o.name, o.roleNames))}${locked ? " &middot; inherited" : ""}</span></label>`;
+    }
+
     function categoryRow(hostId, cat, mapped, list, st, assetTaxonomy) {
       const mappedById = new Map(mapped.map(d => [d.dependencyObjectId, d]));
 
@@ -4325,26 +4553,7 @@
 
       // The three taxonomy ids ride on each option as data attributes;
       // the cascade filters below match on them without another fetch.
-      const options = all.map(o => {
-        const d        = mappedById.get(o.id);
-        const checked  = !!d;
-        const locked   = !!d && !d.isDirect;         // inherited-only
-        const why      = d && d.sourcePractices ? `Inherited via ${d.sourcePractices}` : "";
-        return `<label data-checkcombo-option${locked ? ' class="is-locked"' : ""}${
-                 why ? ` title="${escapeHtml(why)}"` : ""}`
-             + (o.assetCategoryId    != null ? ` data-asset-category="${escapeHtml(String(o.assetCategoryId))}"` : "")
-             + (o.assetSubcategoryId != null ? ` data-asset-subcategory="${escapeHtml(String(o.assetSubcategoryId))}"` : "")
-             + (o.assetTypeId        != null ? ` data-asset-type="${escapeHtml(String(o.assetTypeId))}"` : "")
-             + (o.locationId         != null ? ` data-person-location="${escapeHtml(String(o.locationId))}"` : "")
-             + (o.departmentId       != null ? ` data-person-department="${escapeHtml(String(o.departmentId))}"` : "")
-             + `>`
-             + `<input type="checkbox" value="${o.id}"`
-             // Bare name, never the role-suffixed label: this attribute
-             // is what saveDependencies persists as the object name.
-             + ` data-object-name="${escapeHtml(o.name)}"`
-             + `${checked ? " checked" : ""}${locked ? " disabled" : ""}> `
-             + `<span>${escapeHtml(personWithRole(o.name, o.roleNames))}${locked ? " &middot; inherited" : ""}</span></label>`;
-      }).join("");
+      const options = all.map(o => dependencyOptionLabel(o, mappedById)).join("");
 
       // Same format in the collapsed trigger text as in the open list.
       const selectedLabels = all.filter(o => mappedById.has(o.id))
@@ -4357,7 +4566,7 @@
       const isAsset = /^asset$/i.test(cat.dependencyTypeName || "")
                    || /^asset$/i.test(cat.dependencyTypeCode || "");
       const showAssetFilters = isAsset && !st.impactReadOnly && assetTaxonomy
-                            && assetTaxonomy.cats.length > 0 && all.length > 0;
+                            && assetTaxonomy.cats.length > 0;
 
       // Person row (change request 2026-09-26, 385): a multi-select
       // Department picker beside the Person picker.
@@ -4378,7 +4587,17 @@
       // "Select Assets", the Person picker beside Department "All Users"
       // (2026-09-28) -- the text names the control, no label above it.
       const emptyText = showAssetFilters ? "Select Assets" : (showPersonFilters ? "All Users" : "Select...");
-      const combo = all.length
+      // Asset with its cascade showing but nothing loaded yet (change
+      // request, 2026-10-15): neither "no records" (there may be
+      // thousands, just not fetched) nor a bare empty combo (looks
+      // broken). A hint line inside the SAME options box reloadAssetPicker()
+      // fills in later -- its own marker, data-asset-empty-hint, so that
+      // function (and applyAssetFilters()'s hide/show) can find and
+      // toggle it without mistaking it for a real option.
+      const assetEmptyHint = (showAssetFilters && !all.length)
+        ? `<p class="pm-hint" data-asset-empty-hint style="margin:6px">Select an Asset Category, Sub Category or Type above to load assets.</p>`
+        : "";
+      const combo = (all.length || showAssetFilters)
         ? `<div class="risk-dep-object pm-field pm-checkcombo" data-checkcombo data-checkcombo-empty="${escapeHtml(emptyText)}" style="width:100%">
              <button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger>
                <span data-checkcombo-text>${escapeHtml(selectedLabels || emptyText)}</span>
@@ -4386,7 +4605,7 @@
              </button>
              <div class="pm-checkcombo-menu" data-checkcombo-menu hidden>
                <input class="pm-checkcombo-search" type="search" placeholder="Search..." data-checkcombo-search>
-               <div class="pm-checkcombo-options">${options}</div>
+               <div class="pm-checkcombo-options">${assetEmptyHint}${options}</div>
              </div>
            </div>`
         // Was a bare <span class="pm-hint">, which has no border and no
@@ -4395,6 +4614,9 @@
         // picker. Same message, rendered in the box the picker would
         // have occupied. Static text, not a control: nothing is focused
         // and nothing is submitted, so the save path is untouched.
+        // Asset only falls through to it when showAssetFilters is ALSO
+        // false (no taxonomy -- the flat fallback), matching the
+        // eager-load decision in refresh() above.
         : `<div class="pm-field-empty">No active ${escapeHtml(cat.dependencyTypeName.toLowerCase())} records for this organization yet.</div>`;
 
       const picker = showAssetFilters
@@ -4640,12 +4862,32 @@
       return assetTaxonomyCache;
     }
 
-    // Three filter combos, same markup as buildAssetFilterCells().
-    // No selection means no restriction. The trigger text names the
-    // filter ("All Asset Category") instead of a label above it
-    // (2026-09-28); data-checkcombo-empty is that text.
+    // Three filter combos, same markup as buildAssetFilterCells(). The
+    // trigger text names the filter ("Select Asset Category") instead of
+    // a label above it (2026-09-28; reworded from "All Asset Category" on
+    // 2026-10-15 -- since the cascade now LOADS the asset list rather
+    // than narrowing one already on screen, "All" read as "nothing
+    // picked still shows everything", which is no longer true).
+    // data-checkcombo-empty is that text.
+    //
+    // No selection means no restriction only for Category, the top of
+    // the hierarchy. Sub Category and Type instead require their own
+    // parent (Category, Sub Category) to have a tick at all -- change
+    // request, 2026-10-15: "category selection illathe thanne asset leku
+    // pokam, athu venda" -- so until then applyAssetTaxonomyCascade()
+    // keeps every one of their options hidden, same as a freshly loaded
+    // Sub Category combo before Category is ever touched.
     function assetFilterCells(tax) {
-      const bucket = (label, dataAttr, items) =>
+      // Sub Category and Type each name the filter they depend on
+      // (change request, 2026-10-15): until that parent has a tick,
+      // applyAssetTaxonomyCascade() hides every one of their own
+      // options (see below), so an empty-looking combo needs this same
+      // explanation categoryRow()'s assetEmptyHint already gives the
+      // asset picker itself -- not "no records", just "nothing to pick
+      // from yet". data-taxonomy-parent-hint is its own marker, kept
+      // out of [data-checkcombo-option] so neither the cascade nor the
+      // search handler mistakes it for a real option.
+      const bucket = (label, dataAttr, items, parentHint) =>
           `<div class="risk-asset-filter">`
         +   `<div class="pm-field pm-checkcombo" data-checkcombo ${dataAttr} data-checkcombo-empty="${escapeHtml(label)}">`
         +     `<button class="pm-checkcombo-trigger" type="button" data-checkcombo-trigger title="${escapeHtml(label)}">`
@@ -4655,16 +4897,20 @@
         +     `<div class="pm-checkcombo-menu" data-checkcombo-menu hidden>`
         +       `<input class="pm-checkcombo-search" type="search" placeholder="Search..." data-checkcombo-search>`
         +       `<div class="pm-checkcombo-options">`
-        +         items.map(o => `<label data-checkcombo-option>`
+        +         (parentHint ? `<p class="pm-hint" data-taxonomy-parent-hint style="margin:6px">${escapeHtml(parentHint)}</p>` : "")
+        +         items.map(o => `<label data-checkcombo-option${
+                      o.parent != null ? ` data-parent="${escapeHtml(String(o.parent))}"` : ""}>`
                     + `<input type="checkbox" value="${o.id}"> `
                     + `<span>${escapeHtml(o.name)}</span></label>`).join("")
         +       `</div>`
         +     `</div>`
         +   `</div>`
         + `</div>`;
-      return bucket("All Asset Category",     "data-asset-cat-filter",    tax.cats)
-           + bucket("All Asset Sub Category", "data-asset-subcat-filter", tax.subs)
-           + bucket("All Asset Type",         "data-asset-type-filter",   tax.types);
+      return bucket("Select Asset Category",     "data-asset-cat-filter",    tax.cats,  null)
+           + bucket("Select Asset Sub Category", "data-asset-subcat-filter", tax.subs,
+                    "Select an Asset Category above first.")
+           + bucket("Select Asset Type",         "data-asset-type-filter",   tax.types,
+                    "Select an Asset Sub Category above first.");
     }
 
     // Department picker for the Person row (385, 2026-09-26). Same combo
@@ -4705,8 +4951,19 @@
     }
 
     const depObjectCache = new Map();
-    async function loadDependencyObjects(orgId, typeId) {
-      const key = `${orgId}:${typeId}`;
+    // assetFilters (optional): { categoryIds, subcategoryIds, typeIds },
+    // each an array of asset taxonomy ids. Read by the asset source
+    // table only (see QueryDependencyOptionsFallbackAsync's
+    // assetFilterWhere on the API side) -- every other dependencyTypeId
+    // ignores them, so this stays the one fetch function every category
+    // uses, filtered or not. The filter combination rides in the cache
+    // key too, so a Category-only fetch and a Category+Type fetch for
+    // the same org/type never collide.
+    async function loadDependencyObjects(orgId, typeId, assetFilters) {
+      const f = assetFilters || {};
+      const sig = ["categoryIds", "subcategoryIds", "typeIds"]
+        .map(k => (f[k] || []).slice().sort((a, b) => a - b).join(",")).join("|");
+      const key = `${orgId}:${typeId}:${sig}`;
       if (depObjectCache.has(key)) return depObjectCache.get(key);
       try {
         const r = await fetch(U("/practice-management-gateway/dependency-options/query"), {
@@ -4715,7 +4972,10 @@
           headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
           body: JSON.stringify({ data: {
             organizationId: Number(orgId), dependencyTypeId: Number(typeId),
-            pageNumber: 1, pageSize: 500
+            pageNumber: 1, pageSize: 500,
+            assetCategoryIds: f.categoryIds || [],
+            assetSubcategoryIds: f.subcategoryIds || [],
+            assetTypeIds: f.typeIds || []
           }})
         });
         if (!r.ok) {
@@ -4773,39 +5033,15 @@
     // panel listeners would have to be torn down on clear(), and a
     // missed teardown is a leak that only shows up after a few opens.
     document.addEventListener("click", async ev => {
-      // ---- Existing Controls grid (410) ------------------------------
-      const gridMenu = ev.target.closest("[data-map-grid-menu]");
-      if (gridMenu) {
-        ev.preventDefault(); ev.stopPropagation();
-        if (openMenuTrigger === gridMenu) { closeRowMenu(); return; }
-        const hostId = gridMenu.dataset.mapGridMenu;
-        const { st, p } = gridRowOf(hostId, gridMenu.dataset.mapId);
-        if (!st || !p) return;
-        const canRemove = !st.readOnly && !p.isPrimary;
-        openRowMenu(gridMenu, [
-          { icon: "fa-arrow-up-right-from-square", label: "View practice",
-            disabled: !p.practiceInstanceId,
-            disabledReason: "This row is practice-level: the practice has no active instance to open.",
-            action: () => window.open(practiceViewUrl(st, p), "_blank", "noopener") },
-          // Same unmap as the card's X: one function, unmapPractice().
-          { icon: "fa-link-slash", label: "Unmap",
-            applicable: !st.readOnly,
-            disabled: !canRemove,
-            disabledReason: "The primary practice instance cannot be unmapped here.",
-            action: () => unmapPractice(hostId, Number(p.riskPracticeMapId)) }
-        ]);
-        return;
-      }
+      // ---- Existing Controls grid (410; 2026-10-08) -----------------
+      // Row click -> the instance's Operationalize view, new tab. The
+      // unmap X in the row is handled by [data-map-practice-remove] below.
       const gridRow = ev.target.closest("tr[data-map-grid-row]");
       if (gridRow && !ev.target.closest("a, button")) {
         const hostId = gridRow.dataset.mapGridRow;
         const { st, p } = gridRowOf(hostId, gridRow.dataset.mapId);
-        if (st && p) openPracticeDetail(hostId, st, p);
-        return;
-      }
-      if (ev.target.closest("[data-close-map-practice-detail]")) {
-        ev.preventDefault();
-        closePracticeDetail();
+        if (st && p && p.practiceInstanceId)
+          window.open(practiceViewUrl(st, p), "_blank", "noopener");
         return;
       }
 
@@ -4882,8 +5118,8 @@
 
     });
 
-    // Unmap one practice instance -- the card's X and the grid's row menu
-    // (410) both come here. 387: unmap by the mapping ROW, since a
+    // Unmap one practice instance -- the card's X and the grid row's X
+    // both come here. 387: unmap by the mapping ROW, since a
     // practice can now be on the risk once per instance.
     async function unmapPractice(hostId, mapId) {
         const st = hosts.get(hostId); if (!st) return;
@@ -4894,9 +5130,6 @@
               { title: "Unmap practice instance", confirmText: "Unmap" })) return;
         const res = await apiPost(`/register/${st.riskId}/practice-map/${mapId}`, null, "DELETE");
         if (!res || res.success === false) { msg(hostId, (res && res.error) || "Could not unmap.", true); return; }
-        // 410: the card may be open in the grid's popup -- it describes a
-        // row that no longer exists.
-        closePracticeDetail();
         await refresh(hostId);
         if (typeof window.__riskTreatmentRefresh === "function") window.__riskTreatmentRefresh(st.riskId);
         msg(hostId, `Practice instance unmapped. ${res.dependenciesRemoved} dependenc${res.dependenciesRemoved === 1 ? "y" : "ies"} removed, `
@@ -4935,7 +5168,7 @@
     }
 
     // Text a combo shows with nothing ticked: its data-checkcombo-empty
-    // ("All Asset Category", "All Department", "All Users", ...), else the
+    // ("Select Asset Category", "All Department", "All Users", ...), else the
     // generic "Select...".
     function comboEmptyText(combo) {
       return (combo && combo.getAttribute("data-checkcombo-empty")) || "Select...";
@@ -4975,9 +5208,74 @@
       if (text) text.textContent = comboText(combo);
 
       // Changing a filter re-narrows the asset picker in the same row.
-      if (personRow) applyPersonFilters(personRow);
-      else if (combo.closest(".risk-asset-row")) applyAssetFilters(combo.closest(".risk-asset-row"));
+      if (personRow) {
+        applyPersonFilters(personRow);
+      } else if (combo.closest(".risk-asset-row")) {
+        const assetRow = combo.closest(".risk-asset-row");
+        const onTaxonomyFilter = cb.closest(
+          "[data-asset-cat-filter],[data-asset-subcat-filter],[data-asset-type-filter]");
+        // Category -> Sub-category -> Type BEFORE the asset picker is
+        // touched (change request, 2026-10-15): a Category tick (or
+        // several -- the combo is multi-select) has to narrow which
+        // Sub-categories can still be ticked, and clear any that no
+        // longer apply, before anything downstream reads what is ticked.
+        if (onTaxonomyFilter) applyAssetTaxonomyCascade(assetRow);
+        applyAssetFilters(assetRow);
+        // A tick on Category/Sub-category/Type (not on an asset itself)
+        // is what now drives the fetch (change request, 2026-10-15) --
+        // ticking an actual asset in the picker only needs the
+        // re-narrow above, same as before.
+        if (onTaxonomyFilter) reloadAssetPicker(assetRow);
+      }
     });
+
+    // Category -> Sub-category -> Type is a real hierarchy
+    // (dependency_asset_subcategory_master.asset_category_id,
+    // dependency_asset_type_master.subcategory_id -- sp_get_asset_taxonomy_
+    // lookup's Parent column, carried onto each option as data-parent
+    // above). Change request, 2026-10-15: ticking a Category (multi-select,
+    // so one or more) now narrows which Sub-categories can be ticked, and
+    // ticking a Sub-category narrows Type the same way, one level at a
+    // time. A tick that falls outside its new parent set is UNCHECKED, not
+    // just hidden -- a hidden-but-still-checked Sub-category would
+    // otherwise go on narrowing Type, and go on narrowing the asset fetch
+    // itself (reloadAssetPicker), from behind a filter the reader can no
+    // longer see.
+    function applyAssetTaxonomyCascade(row) {
+      if (!row) return;
+      const checkedValues = combo => combo
+        ? new Set([...combo.querySelectorAll("input[type='checkbox']:checked")].map(cb => cb.value))
+        : new Set();
+
+      function narrow(parentCombo, childCombo) {
+        if (!childCombo) return;
+        const parentIds = checkedValues(parentCombo);
+        let changed = false;
+        let anyVisible = false;
+        childCombo.querySelectorAll("[data-checkcombo-option]").forEach(opt => {
+          const box = opt.querySelector("input[type='checkbox']");
+          const ok = parentIds.size > 0 && parentIds.has(opt.dataset.parent || "");
+          opt.hidden = !ok;
+          opt.dataset.filteredOut = ok ? "" : "1";
+          if (ok) anyVisible = true;
+          if (!ok && box && box.checked) { box.checked = false; changed = true; }
+        });
+        const hint = childCombo.querySelector("[data-taxonomy-parent-hint]");
+        if (hint) hint.hidden = anyVisible;
+        if (changed) {
+          const text = childCombo.querySelector("[data-checkcombo-text]");
+          if (text) text.textContent = comboText(childCombo);
+        }
+      }
+
+      const catCombo  = row.querySelector("[data-asset-cat-filter]");
+      const subCombo  = row.querySelector("[data-asset-subcat-filter]");
+      const typeCombo = row.querySelector("[data-asset-type-filter]");
+
+      narrow(catCombo, subCombo);    // Category -> Sub-category
+      narrow(subCombo, typeCombo);   // Sub-category -> Type, using subCombo's
+                                      // now-corrected ticks from the line above
+    }
 
     // Person row (385, 2026-09-26): ticked departments narrow the Person
     // list to their employees (no department = every person). A person
@@ -5022,12 +5320,78 @@
       const cats  = ticks("[data-asset-cat-filter]");
       const subs  = ticks("[data-asset-subcat-filter]");
       const types = ticks("[data-asset-type-filter]");
+      // Change request, 2026-10-15: the picker no longer starts with the
+      // whole register loaded, so "nothing ticked" can no longer mean
+      // "show everything" -- there is no everything sitting in the DOM,
+      // only whatever reloadAssetPicker() fetched for an earlier filter
+      // and left behind (hidden rather than removed, so a pending tick
+      // on one of them survives). Clearing every filter has to hide that
+      // leftover again too, or it would read as "show the last search"
+      // rather than "nothing chosen" -- only what is actually selected
+      // (mapped or freshly ticked) stays visible.
+      const noFilter = !cats.size && !subs.size && !types.size;
       picker.querySelectorAll("[data-checkcombo-option]").forEach(opt => {
+        if (noFilter) {
+          const box = opt.querySelector("input[type='checkbox']");
+          opt.hidden = !(box && box.checked);
+          return;
+        }
         const okCat  = !cats.size  || cats.has(opt.dataset.assetCategory || "");
         const okSub  = !subs.size  || subs.has(opt.dataset.assetSubcategory || "");
         const okType = !types.size || types.has(opt.dataset.assetType || "");
         opt.hidden = !(okCat && okSub && okType);
       });
+      // The "select a filter above" hint (categoryRow()'s assetEmptyHint)
+      // shows only while there is nothing else visible to look at.
+      const hint = picker.querySelector("[data-asset-empty-hint]");
+      if (hint) {
+        const anyVisible = [...picker.querySelectorAll("[data-checkcombo-option]")].some(o => !o.hidden);
+        hint.hidden = anyVisible;
+      }
+    }
+
+    // The cascade filters used to only hide/show an already-downloaded
+    // register; now they are what triggers the download, one
+    // Category/Sub-category/Type combination at a time, never the whole
+    // asset register (change request, 2026-10-15 -- see
+    // loadDependencyObjects() above and QueryDependencyOptionsFallbackAsync's
+    // assetFilterWhere on the API side). Only ids NOT ALREADY in the DOM
+    // are appended: anything already there -- mapped from the initial
+    // render, or fetched under an earlier filter in this same session --
+    // is left exactly as it is, checked or not, so a pending tick on one
+    // of them survives a filter change instead of being rebuilt away.
+    const EMPTY_MAPPED = new Map();
+    async function reloadAssetPicker(row) {
+      if (!row) return;
+      const picker = row.querySelector(".risk-dep-object[data-checkcombo]");
+      const optionsHost = picker && picker.querySelector(".pm-checkcombo-options");
+      const typeId = Number(row.closest("[data-dep-cat]")?.dataset.depCat || 0);
+      const orgId = state.organizationId;
+      if (!picker || !optionsHost || !typeId || !orgId) return;
+
+      const ticks = sel => {
+        const c = row.querySelector(sel);
+        return c ? [...c.querySelectorAll("input[type='checkbox']:checked")].map(cb => Number(cb.value)) : [];
+      };
+      const categoryIds    = ticks("[data-asset-cat-filter]");
+      const subcategoryIds = ticks("[data-asset-subcat-filter]");
+      const typeIds        = ticks("[data-asset-type-filter]");
+      // Nothing ticked any more: applyAssetFilters() above already put
+      // every unticked row back behind [hidden] -- there is nothing new
+      // to fetch for "no filter".
+      if (!categoryIds.length && !subcategoryIds.length && !typeIds.length) return;
+
+      const existingIds = new Set([...optionsHost.querySelectorAll("[data-checkcombo-option] input[type='checkbox']")]
+        .map(cb => Number(cb.value)));
+
+      const list = await loadDependencyObjects(orgId, typeId, { categoryIds, subcategoryIds, typeIds });
+      const fresh = (list || []).filter(o => o.id && !existingIds.has(o.id));
+      if (fresh.length)
+        optionsHost.insertAdjacentHTML("beforeend", fresh.map(o => dependencyOptionLabel(o, EMPTY_MAPPED)).join(""));
+
+      // Re-apply the hide/show narrowing (the row may have changed
+      // further while the fetch was in flight) and the hint toggle.
+      applyAssetFilters(row);
     }
 
     document.addEventListener("input", ev => {
@@ -5282,7 +5646,16 @@
     // 387: the Treatment page shows where each row came from (its own
     // treatment task, a mapped instance's gap, or a linked open task).
     // The read-only callers keep their narrower tables.
-    showSource: true
+    showSource: true,
+    // View Risk's read-only grid (rdTaskBody) is the only caller that
+    // turns this on -- see its own refreshTreatmentState() call below.
+    // A row then opens the task's own Task View page, the same
+    // destination Task Center's own row-click-to-View already uses
+    // (change request 2026-09-22), via the same pm-row-clickable
+    // affordance class. Off by default so the editable Treatment page
+    // (whose rows already have a 3-dot action menu) and the other
+    // read-only callers (Residual, Acceptance) are unaffected.
+    linkToTaskView: false
   };
 
   async function refreshTreatmentState(riskId, opts) {
@@ -5371,18 +5744,19 @@
 
     const ro = o.readOnly;
     const src = !!o.showSource;
+    const linkView = !!o.linkToTaskView;
     body.innerHTML = parents.map(p => {
       const kids = children.filter(c => c.parentTaskId === p.taskId);
       const isOpen = expanded.has(p.taskId);
-      return taskRow(p, { kidCount: kids.length, expanded: isOpen, readOnly: ro, showSource: src })
-           + kids.map(c => taskRow(c, { parentTaskId: p.taskId, expanded: isOpen, readOnly: ro, showSource: src })).join("");
+      return taskRow(p, { kidCount: kids.length, expanded: isOpen, readOnly: ro, showSource: src, linkToTaskView: linkView })
+           + kids.map(c => taskRow(c, { parentTaskId: p.taskId, expanded: isOpen, readOnly: ro, showSource: src, linkToTaskView: linkView })).join("");
     }).join("")
     // Children whose parent is not in this list (raised against the
     // legacy candidate source, say) have no parent row to expand, so
     // hiding them behind a toggle that does not exist would lose them
     // entirely. They stay visible and say why they stand alone.
     + children.filter(c => !parents.some(p => p.taskId === c.parentTaskId))
-              .map(c => taskRow(c, { orphan: true, readOnly: ro, showSource: src })).join("");
+              .map(c => taskRow(c, { orphan: true, readOnly: ro, showSource: src, linkToTaskView: linkView })).join("");
 
     return st;
   }
@@ -5409,10 +5783,19 @@
 
     // Hidden via the attribute, not a class: [hidden] cannot be beaten by
     // the table's own display rules the way a utility class can.
+    // linkToTaskView (View Risk's read-only grid only): same
+    // pm-row-clickable affordance class and data-task-id attribute Task
+    // Center's own grid uses for row-click-to-View, so the click wiring
+    // below reads the one convention the rest of the app already has.
+    const linkView = !!opt.linkToTaskView;
+    const clickClass = linkView ? " pm-row-clickable" : "";
+    const taskIdAttr = linkView ? ` data-task-id="${t.taskId}"` : "";
     const rowAttrs = isChild
-      ? `class="tw-sub${opt.orphan ? " tw-orphan" : ""}"`
+      ? `class="tw-sub${opt.orphan ? " tw-orphan" : ""}${clickClass}"`
         + (opt.orphan ? "" : ` data-tw-parent="${opt.parentTaskId}"${open ? "" : " hidden"}`)
-      : `class="tw-parent${open && kids > 0 ? " is-open" : ""}" data-tw-row="${t.taskId}"`;
+        + taskIdAttr
+      : `class="tw-parent${open && kids > 0 ? " is-open" : ""}${clickClass}" data-tw-row="${t.taskId}"`
+        + taskIdAttr;
 
     // A childless parent gets a spacer so its task number lines up with
     // the ones that do have a toggle.
@@ -6089,6 +6472,12 @@
     if (new Date(next) <= new Date(isoDate(new Date()))) {
       msg.textContent = "The next review date must be in the future."; return;
     }
+    // 2026-10-10: the rationale is mandatory (the API refuses without it).
+    if (!String(val("acNote") || "").trim()) {
+      msg.textContent = "Acceptance rationale is required — say why this level of risk is acceptable.";
+      document.getElementById("acNote")?.focus();
+      return;
+    }
 
     const res = await apiPost(`/register/${riskId}/acceptance`, {
       nextReviewDate:       next,
@@ -6322,6 +6711,12 @@
     if (!next) { msg.textContent = "A next review date is required — without one these risks never return for review."; return; }
     if (new Date(next) <= new Date(isoDate(new Date()))) {
       msg.textContent = "The next review date must be in the future."; return;
+    }
+    // 2026-10-10: mandatory, as on the single Accept Risk form.
+    if (!String(val("baNote") || "").trim()) {
+      msg.textContent = "Acceptance rationale is required — say why this level of risk is acceptable.";
+      document.getElementById("baNote")?.focus();
+      return;
     }
 
     document.getElementById("baSubmit").disabled = true;
@@ -6794,32 +7189,36 @@
     // Their VALUES are not: onReviewSubmit carries them forward from
     // state.activeRisk, because a review writes a new analysis version
     // and omitting them would blank the live assessment.
-    setVal("rvRemarks",     "");
+    // 485: the applied assessment's analyst remark, to revise or keep.
+    setVal("rvRemarks",     risk.analystRemarks || "");
     setVal("rvNextReview",  "");
     setRadio("rvTreatment", "");
     // 299. The reviewer proposes a cadence; it travels to the Accept
     // screen with the date.
     //
-    // Opens UNSET today: this page reads /register/{id}, and that payload
-    // (RiskRegisterDetail) does not carry the frequency -- only
-    // sp_risk_acceptance_get does, which is why the Accept modal can
-    // preselect and this cannot. The resolve call is written anyway so
-    // that adding the two columns to sp_risk_register_get is the only
-    // change needed to light it up; until then it resolves to null and
-    // the select simply opens empty.
+    // 485: sp_risk_register_get now returns ReviewFrequencyId / Name, so
+    // the risk's current cadence is preselected, and the next review date
+    // is RECALCULATED from it (today + the frequency, the rule the
+    // frequency select itself applies on change) rather than copied from
+    // the old date, which is the one this review is replacing.
     await loadReviewFrequencies();
     fillReviewFrequencySelect(
       "rvReviewFrequency",
       resolveReviewFrequencyId(risk.reviewFrequencyId, risk.reviewFrequencyName),
       "-- select --");
+    applyReviewFrequencyToDate("rvReviewFrequency", "rvNextReview");
     renderRating("rv");
     renderReviewFlow();
 
     // showHeading:false like the other three. #rvScopePanel supplies its
     // own "Existing Controls" heading and prose, so the default (true)
     // rendered both -- two headings for one section.
+    // practiceGrid (2026-10-23): the same list as Treatment / Residual /
+    // View Risk -- a row click opens the instance in Operationalize (new
+    // tab), the X column unmaps (not on the Primary row).
     await riskMapping.mount("rvMapping", riskId, { readOnly: false, showHeading: false,
-                                                   impactHostId: "rvImpactScope" });
+                                                   impactHostId: "rvImpactScope",
+                                                   practiceGrid: true });
     showReviewPage();
   }
 
@@ -7301,6 +7700,8 @@
     }
     hide("riskRejectModal");
     await refresh();
+    // Candidate View, if open underneath (2026-10-15).
+    await refreshCandidateViewIfShowing(id);
   }
 
   // ===================================================================
@@ -7314,117 +7715,10 @@
     state.config = await apiGet(`/config?organizationId=${state.organizationId}`);
   }
 
-  async function openConfigModal() {
-    if (!state.organizationId) { dlg.alert("Select an organization first.", { type: "warning" }); return; }
-    if (!state.options) await loadOptions();
-    await loadConfig();
-    const c = state.config;
-    if (!c) { dlg.alert("Settings unavailable.", { type: "error" }); return; }
-
-    // Threshold options come from the org's OWN matrix, deduplicated and
-    // ordered by score, so a framework using colour bands or 1-4 offers
-    // its own words rather than a hardcoded Low/Medium/High/Critical.
-    const ratings = [];
-    (state.options?.matrix || []).forEach(cell => {
-      if (!ratings.some(x => x.code === cell.ratingCode))
-        ratings.push({ code: cell.ratingCode, name: cell.ratingName, score: cell.ratingScore ?? 0 });
-    });
-    ratings.sort((a, b) => a.score - b.score);
-    const minSel = document.getElementById("cfgMinRating");
-    minSel.innerHTML = `<option value="">Every risk</option>`;
-    ratings.forEach(x => {
-      const o = document.createElement("option");
-      o.value = x.code; o.textContent = x.name;
-      minSel.appendChild(o);
-    });
-    minSel.value = c.approvalMinRatingCode || "";
-
-    await loadRoles();
-    const roleSel = document.getElementById("cfgApproverRole");
-    roleSel.innerHTML = `<option value="">Any authorised user</option>`;
-    state.roles.forEach(r => {
-      const o = document.createElement("option");
-      o.value = r.roleId; o.textContent = r.roleName;
-      roleSel.appendChild(o);
-    });
-    roleSel.value = c.approverRoleId || "";
-
-    check("cfgApprovalRequired",   c.approvalRequired);
-    check("cfgDefaultTreatment",   c.defaultRaiseTreatmentTask);
-    check("cfgNotifications",      c.notificationsEnabled);
-    check("cfgAllowLegacyAccept",  c.allowLegacyAccept);
-    check("cfgAllowOpenResidual",  c.allowResidualWithOpenTasks);
-    setVal("cfgNotes", c.notes || "");
-    document.getElementById("cfgMessage").textContent = "";
-
-    // §21 matrix, read-only here: adding a role to an event is an admin
-    // action against org_risk_config_notify_role, and inventing a second
-    // editing surface for it would be a second source of truth.
-    const events = [
-      ["CANDIDATE_ASSIGNED",      "New candidate assigned for assessment"],
-      ["CLARIFICATION_REQUESTED", "Clarification requested"],
-      ["ANALYSIS_COMPLETED",      "Assessment completed"],
-      ["APPROVAL_REQUIRED",       "Approval required"],
-      ["RISK_APPROVED",           "Risk approved for registration"],
-      ["CANDIDATE_REJECTED",      "Candidate rejected"],
-      ["RISK_OWNER_ASSIGNED",     "Risk owner assignment"],
-      ["RISK_REGISTERED",         "Risk registered"]
-    ];
-    document.getElementById("cfgNotifyBody").innerHTML = events.map(([code, label]) => {
-      const roles = (c.notifyRoles || []).filter(r => r.notifyEventCode === code);
-      return `<tr><td>${escapeHtml(label)}</td><td>${
-        roles.length
-          ? roles.map(r => `<span class="risk-source-chip">${escapeHtml(r.roleName || `#${r.roleId}`)}</span>`).join(" ")
-          : `<span class="pm-hint">participants only</span>`}</td></tr>`;
-    }).join("");
-
-    show("riskConfigModal");
-  }
-
-  async function loadRoles() {
-    if (state.roles.length || !state.organizationId) return;
-    try {
-      const r = await fetch(U(`/practice/api/roles?organizationId=${state.organizationId}`),
-        { credentials: "same-origin" });
-      if (r.ok) {
-        const b = await r.json();
-        const rows = Array.isArray(b) ? b : (b?.data || b?.Data || []);
-        state.roles = rows.map(x => ({
-          roleId:   x.roleId   ?? x.RoleId,
-          roleName: x.roleName ?? x.RoleName
-        })).filter(x => x.roleId);
-      }
-    } catch (_) { state.roles = []; }
-  }
-
-  async function onConfigSubmit(ev) {
-    ev.preventDefault();
-    const msg = document.getElementById("cfgMessage");
-    msg.textContent = "";
-    const minRating = val("cfgMinRating");
-    const roleId    = val("cfgApproverRole");
-    const result = await apiPost(`/config?organizationId=${state.organizationId}`, {
-      approvalRequired:         isChecked("cfgApprovalRequired"),
-      approvalMinRatingCode:    minRating || null,
-      approverRoleId:           roleId ? Number(roleId) : null,
-      defaultRaiseTreatmentTask: isChecked("cfgDefaultTreatment"),
-      allowLegacyAccept:        isChecked("cfgAllowLegacyAccept"),
-      allowResidualWithOpenTasks: isChecked("cfgAllowOpenResidual"),
-      notificationsEnabled:     isChecked("cfgNotifications"),
-      notes:                    val("cfgNotes") || null,
-      // Empty select = "un-set it", which is a different instruction from
-      // "leave it alone" — see sp_risk_config_save.
-      clearMinRating:           !minRating,
-      clearApproverRole:        !roleId
-    });
-    if (!result || result.success === false) {
-      msg.textContent = (result && result.error) || "Save failed.";
-      return;
-    }
-    await loadConfig();
-    hide("riskConfigModal");
-    await refresh();
-  }
+  // The settings modal (openConfigModal / loadRoles / onConfigSubmit)
+  // moved to Settings -> Risk Settings (2026-10-08, migration 458):
+  // js/RiskCentre/risk-settings.js. loadConfig above stays -- this page
+  // still READS the settings (treatment pre-tick, residual gate).
 
   // ---- 208: approval workflow (§19) ---------------------------------
   async function submitForApproval(id) {
@@ -7915,9 +8209,24 @@
   // cls is an OPTIONAL extra class on the item -- "pm-detail-span" spans
   // the grid, for a value that is prose rather than a word. Fourth
   // parameter, so every existing three-argument call is untouched.
+  //
+  // Long-text fields (2026-10-08): a value that is prose -- a statement,
+  // an analysis, a remark -- always takes a full row (pm-detail-span) and
+  // sits AFTER the short fields of its grid (pm-detail-prose, CSS order),
+  // so a paragraph never stretches one row of one-word fields. Keyed on
+  // the label here, in the one place every risk page renders a field,
+  // rather than on ~20 call sites. #rdContext / #raMeta / #twMeta already
+  // put these last as full rows, so they render exactly as before.
+  const PROSE_LABELS = new Set([
+    "Statement", "Impact analysis", "Potential consequence", "Consequence",
+    "Threat", "Vulnerability", "Treatment plan", "Controls now in place",
+    "Analyst remark", "Analyst remarks", "Justification", "Rationale",
+    "Summary", "Source observation", "Clarification"
+  ]);
   function dd(label, value, isHtml, cls) {
     if (value == null || value === "") return "";
-    return `<div class="pm-detail-item${cls ? " " + cls : ""}">`
+    const prose = PROSE_LABELS.has(label) ? " pm-detail-span pm-detail-prose" : "";
+    return `<div class="pm-detail-item${cls ? " " + cls : ""}${prose}">`
          + `<dt>${escapeHtml(label)}</dt>`
          + `<dd>${isHtml ? value : escapeHtml(value)}</dd>`
          + `</div>`;

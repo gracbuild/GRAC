@@ -1,0 +1,131 @@
+@*
+    Risk Settings -- migration 458 (2026-10-08).
+
+    Screen key : `risk-settings`
+    Group      : Organization
+    Menu       : nav-organization (Settings) -> Risk Settings
+
+    The Risk Centre settings (BRD §19, §22) used to open in a modal from a
+    gear icon at the right of the Risk Candidate / Risk Register tab strip.
+    They are organisation configuration, so they now live under Settings,
+    beside Risk Acceptance Approval Authority, and follow that page's
+    conventions: pm-page-heading compact, an org picker in a pm-toolbar,
+    one pm-panel.
+
+    The fields, their ids (cfg*) and the save payload are the modal's,
+    unchanged. Nothing about the settings themselves changed.
+
+    Backend (unchanged):
+        GET  /practice/api/risk-centre/config?organizationId=
+        POST /practice/api/risk-centre/config?organizationId=
+        GET  /practice/api/risk-centre/scoring-options?organizationId=
+        GET  /practice/api/roles?organizationId=
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>
+            Approval before a risk is registered, the treatment-task default,
+            notifications and the residual-analysis rule for an organization.
+        </p>
+    </div>
+</div>
+
+<section class="pm-panel" id="rsRoot">
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label class="pm-field">
+            <span>Organization</span>
+            <select class="pm-input" id="rsPickOrg" style="min-width:260px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <div style="display:flex; gap:6px;">
+            <button class="pm-button" id="rsReloadBtn" type="button">Reload</button>
+        </div>
+    </div>
+
+    <form id="riskConfigForm" style="margin-top:12px;">
+        <div class="pm-form-grid">
+            <label class="full rs-check">
+                <input type="checkbox" id="cfgApprovalRequired" />
+                <span>Require formal approval before a risk is registered</span>
+            </label>
+            <label>
+                <span>Only for risks rated at or above</span>
+                <select id="cfgMinRating">
+                    <option value="">Every risk</option>
+                </select>
+            </label>
+            <label>
+                <span>Approver role</span>
+                <select id="cfgApproverRole"><option value="">Any authorised user</option></select>
+            </label>
+            <label class="full rs-check">
+                <input type="checkbox" id="cfgDefaultTreatment" />
+                <span>Pre-tick "raise a treatment task" on the Risk Register</span>
+            </label>
+            <label class="full rs-check">
+                <input type="checkbox" id="cfgNotifications" />
+                <span>Record notification obligations for risk workflow events</span>
+            </label>
+            <label class="full rs-check">
+                <input type="checkbox" id="cfgAllowLegacyAccept" />
+                <span>
+                    Allow the legacy "Accept" triage
+                    <span class="pm-hint">superseded by Register — enable only while migrating</span>
+                </span>
+            </label>
+            <label class="full rs-check">
+                <input type="checkbox" id="cfgAllowOpenResidual" />
+                <span>
+                    Allow residual risk analysis while treatment tasks are still open
+                    <span class="pm-hint">off: residual analysis opens only when every treatment task is closed</span>
+                </span>
+            </label>
+            <label class="full">
+                <span>Notes</span>
+                <textarea id="cfgNotes" rows="2" maxlength="1000"></textarea>
+            </label>
+        </div>
+
+        <h3 class="risk-subhead">Who is notified (BRD §21)</h3>
+        <div class="pm-table-wrap">
+            <table id="cfgNotifyTable">
+                <thead><tr><th>Event</th><th>Roles notified</th></tr></thead>
+                <tbody id="cfgNotifyBody">
+                    <tr><td colspan="2" class="pm-empty">Select an organization.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="pm-hint">
+            Configured through <code>grac_practice.org_risk_config_notify_role</code>.
+            Participants named by the workflow itself — the analyst, the risk owner,
+            the approver role — are always notified and need no configuration.
+        </p>
+
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:12px;">
+            <p class="pm-form-message" id="cfgMessage" role="status" aria-live="polite" style="margin:0 auto 0 0;"></p>
+            <button type="button" class="pm-button" id="rsResetBtn">Discard changes</button>
+            <button type="submit" class="pm-button primary" id="rsSaveBtn"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
+        </div>
+    </form>
+</section>
+
+<style>
+    /* Declared here rather than borrowed from Risk Centre's .risk-check /
+       .risk-source-chip: those live in risk-centre.cshtml's own style
+       block, which this page never loads (same reason as
+       risk-acceptance-authority's .raa-note). Same values. */
+    #rsRoot .rs-check { display: flex; align-items: flex-start; gap: 8px; }
+    #rsRoot .rs-check input { margin-top: 3px; }
+    #rsRoot .rs-chip {
+        display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
+        background: var(--bg-subtle); color: var(--neutral-700); font-size: 11px; font-weight: 600;
+    }
+</style>
+
+<partial name="Partials/_workflow-common" />
+<script src="~/js/RiskCentre/risk-settings.js" asp-append-version="true"></script>

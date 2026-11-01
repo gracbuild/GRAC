@@ -73,7 +73,7 @@ UNION ALL SELECT 'practice_instance_obligation.connection_type_id (244)',
 UNION ALL SELECT 'sp_resolve_local_obligation_save (227/232/233/242/244)',
        CASE WHEN OBJECT_ID('grac_practice.sp_resolve_local_obligation_save','P')
                  IS NULL THEN 'MISSING' ELSE 'present' END
-UNION ALL SELECT 'sp_resolve_local_obligation_evidence_sync (232/233)',
+UNION ALL SELECT 'sp_resolve_local_obligation_evidence_sync (232/233/340/397/463)',
        CASE WHEN OBJECT_ID('grac_practice.sp_resolve_local_obligation_evidence_sync','P')
                  IS NULL THEN 'MISSING' ELSE 'present' END
 UNION ALL SELECT 'sp_resolve_obligation_type_fields (227)',
@@ -153,7 +153,7 @@ instance-specific custom obligations working exactly as they do today.
 
 | Procedure | Job |
 | --- | --- |
-| `sp_practice_obligation_save` | add / edit / retire one definition, then fan out. Validation copied in spirit from 227 (name required, type must exist in `obligation_type_master`, `ISJSON` on the detail, assurance type in Manual/Automated) |
+| `sp_practice_obligation_save` | add / edit / retire / **restore** one definition, then fan out. Validation copied in spirit from 227 (name required, type must exist in `obligation_type_master`, `ISJSON` on the detail, assurance type in Manual/Automated) — `@retire` and `@restore` (**464**) are id-only modes and skip all of it |
 | `sp_practice_obligation_fan_out` | the propagation rule. `@practice_obligation_id` NULL = every definition on the practice; `@practice_instance_id` NULL = every active instance. Idempotent |
 | `sp_practice_obligation_list` | the definitions for the Practice View panel, with a per-definition instance count |
 
@@ -161,13 +161,64 @@ instance-specific custom obligations working exactly as they do today.
 
 | Procedure | Latest body lives in | Change |
 | --- | --- | --- |
-| `sp_resolve_local_obligation_evidence_sync` | **233** | `+ @suppress_result BIT = 0` (the 298 pattern) so fan-out can call it per instance without spraying a result set per call at the client |
+| `sp_resolve_local_obligation_evidence_sync` | **233**, then **397**, now **463** | 233 replaced its trailing `SELECT` with `@evidence_added` / `@evidence_removed` / `@evidence_kept` **`INT OUTPUT`** (seven parameters) so fan-out can call it per instance without spraying a result set per call at the client. It does **not** take `@suppress_result`. 340_local_obligation_evidence_description and 397 re-issued it from the 232 body and dropped those three OUTPUT parameters, which broke every caller with *"has too many arguments specified"*; **463** restores the seven-parameter signature on 397's body. |
 | `sp_resolve_local_obligation_save` | **244** | `AND source_practice_obligation_id IS NULL` on the edit and retire `WHERE` — a practice-owned copy cannot be edited or retired through the instance door. Enforced in the procedure, not just hidden in the UI |
 | `sp_resolve_obligation_list` | **244** | project `SourcePracticeObligationId` so the workspace can badge the row and disable its Edit / Remove actions |
 
 `sp_resolve_obligation_type_fields` and `sp_resolve_obligation_type_list`
 (both 227) are **reused unchanged** — the add form asks for exactly what
 Control Management asks for, on both screens.
+
+---
+
+## Retire and Restore (464)
+
+The Practice View card's button said **Remove**, which it never was.
+
+`@retire = 1` writes `practice_obligation.status = N'Retired'` and the
+fan-out's branch 3c writes `N'Retired'` onto every instance copy. Nothing
+is deleted on either side — *"Retired, never deleted"* — and the evidence
+produced against the obligation stays attached to a row that still exists.
+
+What was missing was the way back. Until **464** the only path that set a
+retired definition Active again was a full edit-and-save (the edit branch
+writes `status = N'Active'`), which needs the whole payload and reads as
+"I changed this obligation", not "I am putting it back".
+
+**464** adds `@restore BIT = 0`: a status flip to `N'Active'` followed by
+the same `sp_practice_obligation_fan_out` call retire makes. No new
+propagation logic — the fan-out already does all of it:
+
+| Branch | On restore |
+| --- | --- |
+| 3a | brings every retired copy back `Active` (it writes `status = N'Active'` for an active definition and does not filter on the copy's current status), instead of duplicating it beside itself |
+| 3b | creates a copy on any instance added while the definition was retired |
+| 3d | re-syncs the declared evidence per copy, reviving a retired evidence row of the same type and leaving anything somebody filled in alone |
+
+`@retire` wins if both flags arrive. `@restore` is idempotent: restoring
+an already-Active definition writes the same status and refreshes the
+copies.
+
+`sp_practice_obligation_list` needed **no change** — it has taken
+`@include_retired BIT = 0` and projected `po.status AS Status_` since
+307/412.
+
+### UI
+
+Named to match the instance lifecycle 287/355 established, so the two
+screens read the same way:
+
+| | Active card | Retired card |
+| --- | --- | --- |
+| Actions | **Edit**, **Retire** (`fa-box-archive`) | **Restore** (`fa-box-open`) — Edit is deliberately absent, because the edit branch writes `status = N'Active'` and would silently un-retire it |
+| Card | `.pm-card` | `.pm-card.pv-retired` — muted ground, dashed border, `Retired` badge |
+| Group | "Organization defined" | "Retired", below it |
+
+The Obligations panel header carries an **Active only** / **Include
+Retired** dropdown — the same control, wording and default as
+`resolve.cshtml`'s `#rvIncludeRetired` (287). Off by default, and it
+refetches rather than filtering client-side, because retired rows are only
+on the wire when the server was asked for them.
 
 ---
 
@@ -186,7 +237,8 @@ Control Management asks for, on both screens.
    deleted, the same treatment 227 gives a retired local obligation.
 3. **Evidence per instance** — `EXEC sp_resolve_local_obligation_evidence_sync`
    with that copy's `practice_instance_obligation_id`, the definition's
-   `evidence_json` and `@suppress_result = 1`. Reused, not reimplemented:
+   `evidence_json` and the three `OUTPUT` count parameters (**not**
+   `@suppress_result` -- the proc has never had one). Reused, not reimplemented:
    it already knows the NOT NULL columns, already revives a retired row of
    the same type instead of duplicating it, and already refuses to retire
    an evidence row somebody has filled in.

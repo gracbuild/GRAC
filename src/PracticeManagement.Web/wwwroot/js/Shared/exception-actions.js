@@ -75,6 +75,21 @@
     return isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toISOString().slice(0, 10);
   }
 
+  // Whether this role may APPROVE on Exceptions & Waivers. ActionsFor does
+  // not emit "APPROVE" by itself, so PracticeController adds it to the
+  // permissions array when the role holds the APPROVE grant on this screen's
+  // area (the same IsAllowed check the server approve guard uses). "*" is the
+  // wildcard (full-access / admin) grant.
+  function canApproveHere() {
+    // Set inline by the exception partials (server-computed from the role's
+    // APPROVE grant). Fall back to the permissions array if ever absent.
+    if (window.pmCanApprove === true) return true;
+    try {
+      var perms = window.pmPermissions || [];
+      return perms.indexOf("APPROVE") !== -1 || perms.indexOf("*") !== -1;
+    } catch (_e) { return false; }
+  }
+
   async function apiGet(path) {
     var url = U(base + (path.charAt(0) === "/" ? path : "/" + path));
     try {
@@ -149,7 +164,17 @@
     }
 
     var canDecide = isTaskType ? (fields.statusCode === "Pending") : (fields.statusCode === "SubmittedForApproval");
-    if (canDecide && handlers.onApprove) {
+    // Approve shows only when the request is decidable AND this role holds
+    // the APPROVE grant on the Exceptions & Waivers menu (Role Master ->
+    // Approve checkbox). Status alone is not enough.
+    // 498: once an exception names a designated approver (at
+    // submit-for-approval), ONLY that employee may approve it -- strict, no
+    // admin override. Requests without one (older rows, task-governance)
+    // fall back to the APPROVE-permission gate.
+    var designated = fields.designatedApproverEmployeeId;
+    var isDesignated = !designated
+                     || String(designated) === String(window.pmEmployeeId || "");
+    if (canDecide && canApproveHere() && isDesignated && handlers.onApprove) {
       items.push({ icon: "fa-check", label: "Approve", action: handlers.onApprove });
     }
 
@@ -399,20 +424,64 @@
   }
 
   // ==== SLA quick-approve (task-side types, no dialog) ==================
-  async function approveSlaQuick(id) {
-    var confirmFn = window.gracConfirm || function (msg) { return Promise.resolve(confirm(msg)); };
+  // POST to a Task API route (/practice/api/tasks...), mirroring apiPost's
+  // credentials / result shape. The task-governance approves live under
+  // the Task API, not the Exception Centre base.
+  async function apiPostTask(path, body) {
+    var url = U("/practice/api/tasks" + (path.charAt(0) === "/" ? path : "/" + path));
+    try {
+      var r = await fetch(url, {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+      });
+      var data = await r.json().catch(function () { return {}; });
+      if (!r.ok) return { success: false, error: data.error || ("HTTP " + r.status) };
+      return Object.assign({ success: data.success !== false }, data);
+    } catch (err) { return { success: false, error: err.message }; }
+  }
+
+  // Quick-approve for the task-governance / SLA-candidate request types.
+  // Each type is approved by a DIFFERENT procedure because they apply the
+  // change to different places:
+  //   TASK_PRIORITY_REDUCTION -> tasks/requests/{id}/approve-priority-reduction
+  //                              (sp_task_priority_reduction_approve: sets the task priority)
+  //   TASK_SLA_EXTENSION      -> tasks/requests/{id}/approve-sla-extension
+  //                              (sp_task_sla_extension_approve: sets the task due date)
+  //   SLA_CANDIDATE (default) -> exception-centre/{id}/approve-sla (gap SLA override)
+  // Routing all three to approve-sla (the old behaviour) made the task
+  // requests hit the SLA-override procedure, which could not find them --
+  // the "request not found" the Exception Centre showed on approve.
+  async function approveSlaQuick(id, reqType) {
+    var isPriority = reqType === "TASK_PRIORITY_REDUCTION";
+    var isSla      = reqType === "TASK_SLA_EXTENSION";
+    var confirmFn  = window.gracConfirm || function (msg) { return Promise.resolve(confirm(msg)); };
     var ok = await confirmFn({
       type:        "confirm",
-      title:       "Approve SLA override",
-      message:     "Approve this SLA override and apply the requested days to the gap?",
+      title:       isPriority ? "Approve priority reduction"
+                 : isSla      ? "Approve SLA extension"
+                 :              "Approve SLA override",
+      message:     isPriority ? "Approve this priority reduction and apply the new priority to the task?"
+                 : isSla      ? "Approve this SLA extension and apply the new due date to the task?"
+                 :              "Approve this SLA override and apply the requested days to the gap?",
       confirmText: "Approve",
       cancelText:  "Cancel"
     });
     if (!ok) return;
-    var result = await apiPost("/" + id + "/approve-sla", {
-      approvedByEmployeeId: Number(window.pmEmployeeId || 0) || null,
-      callerDisplayName:    window.pmEmail || "system"
-    });
+
+    var result;
+    if (isPriority || isSla) {
+      result = await apiPostTask("/requests/" + id + (isPriority ? "/approve-priority-reduction" : "/approve-sla-extension"), {
+        exceptionRequestId:   Number(id),
+        // The server stamps the approver from the signed-in caller; this
+        // is a fallback for callers that still send it.
+        approvedByEmployeeId: Number(window.pmEmployeeId || 0) || null
+      });
+    } else {
+      result = await apiPost("/" + id + "/approve-sla", {
+        approvedByEmployeeId: Number(window.pmEmployeeId || 0) || null,
+        callerDisplayName:    window.pmEmail || "system"
+      });
+    }
     if (!result.success) {
       (window.gracAlert || alert)({ type: "error", title: "Approve failed", message: result.error || "Unknown error." });
       return;

@@ -112,6 +112,13 @@
             <span>Effective to<span class="pm-required">*</span></span>
             <input type="date" id="exaEffectiveTo" />
         </label>
+        @* 498: the designated approver. Mandatory to submit. Only this person
+           can approve this exception; the list shows only users whose role
+           holds Approve on Exceptions & Waivers. *@
+        <label>
+            <span>Designated approver<span class="pm-required">*</span></span>
+            <select id="exaApprover"><option value="">-- select approver --</option></select>
+        </label>
         <p class="pm-hint pm-form-grid-full">
             The exception window you are requesting. The approver can change it before approving.
         </p>

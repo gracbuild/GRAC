@@ -4,6 +4,7 @@
 // Facade over the migration-395 procedures:
 //   sp_repository_change_detect                 DetectAsync (worker)
 //   sp_repository_change_list / _counts         review page, badge
+//   sp_repository_change_display                review page "Details"
 //   sp_repository_change_apply                  DecideAsync
 //   sp_repository_change_notification_list /
 //   sp_repository_change_notification_mark_read Home
@@ -23,6 +24,9 @@ public interface IRepositoryChangeService
     Task<RepositoryChangeDetectResult> DetectAsync(long? organizationId, CancellationToken cancellationToken);
     Task<List<Dictionary<string, object?>>> ListAsync(long organizationId, long? releaseId, string? status, int pageNumber, int pageSize, CancellationToken cancellationToken);
     Task<List<Dictionary<string, object?>>> CountsAsync(long organizationId, CancellationToken cancellationToken);
+    /// <summary>The readable field list behind "Details" (migration 500).
+    /// null means the procedure is not in this database yet.</summary>
+    Task<List<Dictionary<string, object?>>?> DisplayAsync(long organizationId, long changeId, CancellationToken cancellationToken);
     Task<RepositoryChangeDecisionResult> DecideAsync(long changeId, string decision, string? remark, long? callerEmployeeId, bool callerIsAdmin, string actor, CancellationToken cancellationToken);
     Task<List<Dictionary<string, object?>>> NotificationsAsync(long recipientEmployeeId, long? organizationId, CancellationToken cancellationToken);
     Task<int> MarkNotificationsReadAsync(long recipientEmployeeId, long organizationId, CancellationToken cancellationToken);
@@ -76,6 +80,35 @@ public sealed class RepositoryChangeService(IConfiguration configuration) : IRep
         command.CommandText = "grac_practice.sp_repository_change_counts";
         AddParam(command, "@organization_id", DbType.Int64, organizationId);
         return await ReadRowsAsync(command, cancellationToken);
+    }
+
+    public async Task<List<Dictionary<string, object?>>?> DisplayAsync(long organizationId, long changeId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_repository_change_display";
+            AddParam(command, "@organization_id", DbType.Int64, organizationId);
+            AddParam(command, "@change_id", DbType.Int64, changeId);
+            return await ReadRowsAsync(command, cancellationToken);
+        }
+        // 2812 "Could not find stored procedure": migration 500 has not been
+        // run here. null tells the page to fall back to its own raw diff
+        // instead of showing the operator an error.
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            return null;
+        }
+        // 53931 / 53932: the procedure's own refusals -- a missing argument,
+        // or a change that does not belong to this organization. Both mean
+        // there is nothing to show, and 53932 must not confirm that the
+        // change exists elsewhere.
+        catch (SqlException ex) when (ex.Number is 53931 or 53932)
+        {
+            return new List<Dictionary<string, object?>>();
+        }
     }
 
     public async Task<RepositoryChangeDecisionResult> DecideAsync(long changeId, string decision, string? remark, long? callerEmployeeId, bool callerIsAdmin, string actor, CancellationToken cancellationToken)

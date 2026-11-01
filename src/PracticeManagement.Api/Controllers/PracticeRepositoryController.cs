@@ -93,7 +93,9 @@ public sealed class PracticeRepositoryController(
         // Pre-session auth. Reached with a short-lived PM_LOGIN bootstrap token
         // that carries NO entity permissions, so it is inert on every data path
         // above (Manage/Query enforce IsAllowed, which is false for PM_LOGIN).
-        "authenticate", "set-password", "resolve-identity"
+        "authenticate", "set-password", "resolve-identity",
+        // Single sign-on (2026-10-12): same bootstrap transport as authenticate.
+        "authenticate-external"
     };
 
     [HttpGet]
@@ -186,12 +188,47 @@ public sealed class PracticeRepositoryController(
             if (string.IsNullOrWhiteSpace(loginId) || string.IsNullOrWhiteSpace(password))
                 return new PracticeRepositoryResult(false, "User ID/email and password are required.");
 
-            var user = await authenticationService.AuthenticateAsync(loginId, password, cancellationToken);
+            var outcome = await authenticationService.AuthenticateAsync(loginId, password, cancellationToken);
             // Uniform message on failure — the specific reason is logged inside
             // the service, not returned, to avoid a user-enumeration oracle.
-            return user is null
+            // The one exception (migration 466) is "sso-required" in Field:
+            // the password WAS correct, so it tells the caller nothing new.
+            if (outcome.Failure == SignInFailures.SsoRequired)
+                return new PracticeRepositoryResult(false, "Your organization signs in with single sign-on.", null, SignInFailures.SsoRequired);
+            return outcome.User is null
                 ? new PracticeRepositoryResult(false, "Invalid user ID/email or password.")
-                : new PracticeRepositoryResult(true, "Authenticated.", user);
+                : new PracticeRepositoryResult(true, "Authenticated.", outcome.User);
+        });
+
+    // Single sign-on (2026-10-12). The Web tier calls this only from its
+    // OpenID Connect callback, AFTER Microsoft / Google authenticated the
+    // person, with the provider's verified email. Same bootstrap-token
+    // transport and trust model as resolve-identity: never reachable with a
+    // visitor-typed value. Unknown email = blocked (no account is created).
+    [HttpPost("secure/authenticate-external")]
+    public Task<IActionResult> AuthenticateExternal([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var email = JsonString(request.Data, "email");
+            var provider = JsonString(request.Data, "provider");
+            var subject = JsonString(request.Data, "subject");
+            // Migration 466: the Microsoft token's tid, checked against the
+            // employee organization's allowed tenants.
+            var tenantId = JsonString(request.Data, "tenantId");
+            // Migration 467: the token's name, used only when an organization
+            // auto-creates the user on this first sign-in.
+            var displayName = JsonString(request.Data, "displayName");
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(provider))
+                return new PracticeRepositoryResult(false, "Email and provider are required.");
+
+            var outcome = await authenticationService.AuthenticateExternalAsync(email, provider, subject, tenantId, displayName, cancellationToken);
+            if (outcome.Failure == SignInFailures.SsoNotAllowed)
+                return new PracticeRepositoryResult(false, "Single sign-on is not enabled for this account's organization.", null, SignInFailures.SsoNotAllowed);
+            if (outcome.Failure == SignInFailures.SsoPending)
+                return new PracticeRepositoryResult(false, "Your account is waiting for administrator approval.", null, SignInFailures.SsoPending);
+            return outcome.User is null
+                ? new PracticeRepositoryResult(false, "No active GRAC account matches this sign-in.")
+                : new PracticeRepositoryResult(true, "Authenticated.", outcome.User);
         });
 
     // Password-free identity lookup for the bootstrap (ReviewLogin) sign-in,

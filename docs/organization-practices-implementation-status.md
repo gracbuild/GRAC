@@ -9,7 +9,7 @@ Implementation Status rule beyond sharing the same query.
 
 **Backend:** `PracticeRepositoryService.QueryOrganizationRequirementFallbackAsync`
 **Frontend:** `practice.js` — `practiceImplementationStatus`,
-`renderRequirementControlGroups`, `renderStatementPracticeRows`,
+`renderRequirementStatementGroups` (was `renderRequirementControlGroups`), `renderStatementPracticeRows`,
 `resetOrganizationRequirementFilters`
 **Sibling:** `docs/repository-subscriptions-grid.md`, "Implementation Status is
 derived, never stored"
@@ -48,10 +48,11 @@ for `organization-requirements`. Nothing else needed to change:
   the same query, evaluated after the `WHERE` (so after `@p_search`) and before
   `OFFSET`/`FETCH` — a search narrows it exactly like any other filter, and
   `pm-grid`'s "Page N of M" already reads it off the first row. No change needed.
-* **Grouping under Controls.** `renderRequirementControlGroups` groups whatever
-  rows are already on the fetched page, by `OrganizationControlId` — it has no
-  idea a search ran and does not need one. A search narrows which rows arrive;
-  which Control each surviving row groups under is unaffected.
+* **Grouping.** `renderRequirementStatementGroups` (was
+  `renderRequirementControlGroups`, grouping by Control; by source statement
+  since 2026-10-18, see `organization-practices-statement-grouping.md`) groups
+  whatever rows are already on the fetched page. It has no idea a search ran
+  and does not need one.
 * **No API or database change.** This was a UI-only change: one Razor conditional
   in `Manage.cshtml` (the `hidden` attribute became a placeholder switch) and one
   line in `resetOrganizationRequirementFilters`.
@@ -63,7 +64,8 @@ for `organization-requirements`. Nothing else needed to change:
 | `Implemented` | Practice is `Applicable`, has **at least one** instance, and **every** instance is `Implemented`. One unfinished instance holds the whole Practice back. |
 | `Partially Implemented` | Applicable, at least one instance `Implemented`, but not all. |
 | `Not Applicable` | Practice applicability is `Not Applicable`, `Deferred`, `Accepted Risk`, `Not Implemented` or `Retired`. |
-| `Not Implemented` | Everything else — including `Not Updated` practices and Applicable practices with **no instances at all**. |
+| `Not Implemented` | Applicable, and **at least one** instance has been updated (its status is anything but `Not Updated` / legacy `Not Started`), but none is `Implemented`. |
+| `Not Updated` | Everything else — the default (migration 456, 2026-10-08): `Not Updated` applicability, no instances, or no instance updated yet. Was `Not Implemented` before 456. See `docs/implementation-status-not-updated-default.md`. |
 
 "Every instance is Implemented" means
 `practice_instance.implementation_status_id` resolving to
@@ -151,10 +153,28 @@ Three places must stay in step, or the loading / empty row will not span the gri
 1. `PracticeScreen.cs` — `organization-requirements` `Columns` (six entries;
    `Manage.cshtml` appends *Actions*). This is the pre-hydration header and the source
    of `listColumnCount()`.
-2. `renderRequirementControlGroups` — its `<th>` row **and** the
+2. `renderRequirementStatementGroups` (was `renderRequirementControlGroups`) — its `<th>` row **and** the
    `colspan` on the `pm-control-group-row` band.
 3. `renderStatementPracticeRows` — its `<th>` row.
 
 All three are now seven cells. The `Columns` array and the rendered headers still use
 different labels (`PracticeInstanceCount` vs *Origin Type*) — a pre-existing mismatch,
 harmless because the renderers overwrite the header, and left alone here.
+
+## Source filter (2026-10-08)
+
+Organization Practices now has the same **All sources** filter as Standards & Frameworks and Control Statements: Repository / Organization. **Hybrid is not offered**; a Hybrid practice appears under *All sources* only.
+
+- **Markup:** `Manage.cshtml` renders `#sourceFilter` for `organization-requirements` too.
+- **Request:** `practice.js` sends `originType` from that filter on this screen. `QueryOrganizationRequirementFallbackAsync` already filtered `AND (@origin_type IS NULL OR q.origin_type=@origin_type)`, so there is no API change. The comparison is case-insensitive under the default collation.
+- **Behaviour:** a change reloads page 1, like the other filters. **Clear Filter** (`resetOrganizationRequirementFilters`) clears it.
+
+UI only.
+
+## Control group heading without "Control:" prefix (2026-10-08)
+
+The control-statement group row on Organization Practices
+(`renderStatementPracticeRows` in `practice.js`, `tr.pm-control-group-row`) used to read
+`Control: 4.1 - Understanding the organization and its context`. The literal
+`Control: ` prefix is removed; the row now shows `<ControlCode> - <ControlName>`
+only. UI-only; no API or database change.

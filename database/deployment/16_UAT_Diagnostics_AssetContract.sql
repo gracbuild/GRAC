@@ -1,11 +1,11 @@
 -- =====================================================================
--- 16  UAT diagnostics -- Asset & Contract Management (migrations 420-453)
+-- 16  UAT diagnostics -- Asset & Contract Management (migrations 420-453, 461)
 --
 -- Phase 9 (regression, permission, workflow and reconciliation testing).
 -- Run after every deployment of the asset module, and whenever a screen,
 -- the dashboard and a report disagree about a number.
 --
---   1. Migrations present (one object each, 420-453) and the run order.
+--   1. Migrations present (one object each, 420-453; 461 by definition) and the run order.
 --   2. Menu rows and grants of the asset screens (who can open what).
 --   3. Configuration health (report catalogue, schedules, deliveries,
 --      scheduler, governance snapshots).
@@ -35,7 +35,7 @@ GO
 
 PRINT '';
 PRINT '=====================================================================';
-PRINT ' 1. MIGRATIONS PRESENT (run 420 to 453 in order; a MISSING row names';
+PRINT ' 1. MIGRATIONS PRESENT (run 420 to 453 in order, then 461; a MISSING row names';
 PRINT '    the first script to run)';
 PRINT '=====================================================================';
 SELECT v.migration AS Migration, v.object_name AS ProbeObject,
@@ -53,6 +53,11 @@ SELECT v.migration AS Migration, v.object_name AS ProbeObject,
                ('451', N'sp_dashboard_asset_contract'), ('452', N'asset_report_definition'), ('453', N'asset_report_schedule')
        ) v(migration, object_name)
  ORDER BY v.migration;
+GO
+-- 461 re-issues a 436 procedure (no new object): probe its definition.
+SELECT '461' AS Migration, N'sp_asset_contract_renewal_action (approval message)' AS ProbeObject,
+       CASE WHEN OBJECT_DEFINITION(OBJECT_ID(N'grac_practice.sp_asset_contract_renewal_action')) LIKE N'%sign-in linked to an employee%'
+            THEN 'present' ELSE 'MISSING' END AS State;
 GO
 
 PRINT '';

@@ -20,6 +20,20 @@
 //   POST /resolve/retire                     retire the instance     (222)
 //   GET  /resolve/instances/{id}/dependency-types  declared categories (222)
 //   POST /resolve/dependency-types           declare / undeclare      (222)
+//   GET  /resolve/instances/{id}/evidence-attachments          files on
+//                                            one-time evidence      (473)
+//   POST /resolve/instances/{id}/evidence/{evidenceId}/attachments
+//                                            attach one (multipart) (473)
+//   GET  /resolve/instances/{id}/evidence-attachments/{aid}    download
+//   POST /resolve/evidence-attachments/remove                  soft remove
+//                                            (476: unlink -- the file
+//                                            stays in the Evidence Center)
+//   GET  /resolve/instances/{id}/evidence/{evidenceId}/evidence-center
+//                                            Select from Evidence Center
+//                                            picker list            (476)
+//   POST /resolve/evidence-links             link an existing item  (476)
+//   POST /resolve/evidence-links/refresh     move a link to the latest
+//                                            version                (476)
 //
 // CALLER IDENTITY
 // ---------------
@@ -79,6 +93,13 @@ public sealed class ResolveWorkspaceController(
         // own rows but never reach into someone else's.
         [FromQuery] long?   ownerEmployeeId = null,
         [FromQuery] string? status = null,
+        // 465. Operationalize Framework filter. Signed, exactly like the
+        // Framework filter on the other Governance pages: positive = a
+        // repository release_id, negative = -1 * a Custom release's
+        // subscription_id; null/absent = all subscribed frameworks. The
+        // procedure applies it on top of ownership scoping, so it can only
+        // narrow a caller's own rows, never widen them.
+        [FromQuery] long?   releaseId = null,
         CancellationToken cancellationToken = default)
     {
         if (organizationId <= 0)
@@ -95,7 +116,8 @@ public sealed class ResolveWorkspaceController(
             PracticeId:       practiceId,
             OrganizationRequirementId: organizationRequirementId,
             OwnerEmployeeId:  ownerEmployeeId,
-            ImplementationStatus: status), cancellationToken);
+            ImplementationStatus: status,
+            ReleaseId:        releaseId), cancellationToken);
 
         if (!result.Success)
         {
@@ -452,6 +474,163 @@ public sealed class ResolveWorkspaceController(
         if (body is null) return BadRequest(new { error = "Request body is required." });
 
         var result = await resolveService.SaveEvidenceAsync(
+            body with { Actor = Actor }, cancellationToken);
+
+        return result.Success
+            ? Ok(new { success = true, message = result.Message })
+            : BadRequest(new { error = result.Error });
+    }
+
+    // ============================================================
+    // Evidence attachments (migration 473) -- one-time evidence is
+    // attached here, at implementation. Recurring evidence is attached to
+    // each scheduled task instead (Task Centre).
+    // ============================================================
+    [HttpGet("instances/{practiceInstanceId:long}/evidence-attachments")]
+    public async Task<IActionResult> ListEvidenceAttachments(
+        long practiceInstanceId,
+        // Checked against the caller by the Web proxy before it gets here.
+        [FromQuery] long? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await resolveService.ListEvidenceAttachmentsAsync(practiceInstanceId, organizationId, cancellationToken);
+
+        return result.Success
+            ? Ok(new { data = result.Attachments })
+            : StatusCode(StatusCodes.Status500InternalServerError, new { error = result.Error });
+    }
+
+    /// <summary>Multipart, so the browser posts the file as-is rather than
+    /// base64-inflating it through JSON -- the Task Centre upload's shape.</summary>
+    [HttpPost("instances/{practiceInstanceId:long}/evidence/{evidenceId:long}/attachments")]
+    [RequestSizeLimit(52_428_800)] // 50 MB -- matches Task Centre and Document Upload
+    public async Task<IActionResult> UploadEvidenceAttachment(
+        long practiceInstanceId,
+        long evidenceId,
+        [FromForm] IFormFile? file,
+        [FromForm] string? attachmentDescription,
+        // Migration 499: the Evidence Center fields the shared upload
+        // dialog captures. All optional -- an older screen that posts only
+        // the file still works, and the service binds them only when the
+        // procedure declares them.
+        [FromForm] string?   evidenceTitle,
+        [FromForm] int?      evidenceTypeId,
+        [FromForm] string?   evidenceDescription,
+        [FromForm] long?     ownerEmployeeId,
+        [FromForm] DateTime? validFrom,
+        [FromForm] DateTime? validTo,
+        [FromForm] string?   classification,
+        [FromForm] string?   tags,
+        [FromQuery] long? organizationId,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { error = "A non-empty file is required." });
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, cancellationToken);
+
+        // The uploader is the caller the Web tier stamped from the session,
+        // never a value the browser posted.
+        var metadata = new EvidenceUploadMetadata(
+            evidenceTitle, evidenceTypeId, evidenceDescription, ownerEmployeeId,
+            validFrom, validTo, classification, tags);
+
+        var result = await resolveService.AddEvidenceAttachmentAsync(
+            practiceInstanceId, evidenceId, file.FileName, file.ContentType, ms.ToArray(),
+            attachmentDescription, CallerEmployeeId, organizationId, Actor, CallerIsAdmin, cancellationToken,
+            metadata.HasAny ? metadata : null);
+
+        return result.Success
+            ? StatusCode(StatusCodes.Status201Created,
+                         new { success = true, evidenceAttachmentId = result.SavedId, message = result.Message })
+            : BadRequest(new { error = result.Error });
+    }
+
+    [HttpGet("instances/{practiceInstanceId:long}/evidence-attachments/{evidenceAttachmentId:long}")]
+    public async Task<IActionResult> DownloadEvidenceAttachment(
+        long practiceInstanceId, long evidenceAttachmentId,
+        [FromQuery] long? organizationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var file = await resolveService.GetEvidenceAttachmentAsync(
+                practiceInstanceId, evidenceAttachmentId, organizationId, cancellationToken);
+            return file is null
+                ? NotFound(new { error = $"Attachment {evidenceAttachmentId} was not found on this practice instance." })
+                : File(file.FileData, file.ContentType ?? "application/octet-stream", file.FileName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Evidence attachment {AttachmentId} download failed.", evidenceAttachmentId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = ex.Message });
+        }
+    }
+
+    // ============================================================
+    // Evidence Center (migration 476) -- "Select from Evidence Center"
+    // on a one-time evidence row, and "newer version - update".
+    // ============================================================
+    [HttpGet("instances/{practiceInstanceId:long}/evidence/{evidenceId:long}/evidence-center")]
+    public async Task<IActionResult> ListEvidenceLinkCandidates(
+        long practiceInstanceId,
+        long evidenceId,
+        [FromQuery] long    organizationId,
+        [FromQuery] string? search,
+        [FromQuery] int?    evidenceTypeId,
+        [FromQuery] int     pageNumber = 1,
+        [FromQuery] int     pageSize   = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+
+        var result = await resolveService.ListEvidenceLinkCandidatesAsync(
+            practiceInstanceId, evidenceId, organizationId, CallerEmployeeId, CallerIsAdmin,
+            search, evidenceTypeId, pageNumber, pageSize, cancellationToken);
+
+        return result.Success
+            ? Ok(new { data = result.Rows, totalRows = result.TotalRows })
+            : BadRequest(new { error = result.Error });
+    }
+
+    [HttpPost("evidence-links")]
+    public async Task<IActionResult> LinkEvidenceItem(
+        [FromBody] ResolveEvidenceLinkRequest body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+
+        var result = await resolveService.LinkEvidenceItemAsync(
+            body, CallerEmployeeId, CallerIsAdmin, Actor, cancellationToken);
+
+        return result.Success
+            ? Ok(new { success = true, evidenceAttachmentId = result.SavedId, message = result.Message })
+            : BadRequest(new { error = result.Error });
+    }
+
+    [HttpPost("evidence-links/refresh")]
+    public async Task<IActionResult> RefreshEvidenceLink(
+        [FromBody] ResolveEvidenceLinkRefreshRequest body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+
+        var result = await resolveService.RefreshEvidenceLinkAsync(body, Actor, cancellationToken);
+
+        return result.Success
+            ? Ok(new { success = true, message = result.Message })
+            : BadRequest(new { error = result.Error });
+    }
+
+    [HttpPost("evidence-attachments/remove")]
+    public async Task<IActionResult> RemoveEvidenceAttachment(
+        [FromBody] ResolveEvidenceAttachmentRemoveRequest body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+
+        var result = await resolveService.RemoveEvidenceAttachmentAsync(
             body with { Actor = Actor }, cancellationToken);
 
         return result.Success

@@ -124,6 +124,25 @@
     return r.json().catch(() => ({}));
   }
 
+  // Every row of a gateway query, page by page (2026-10-26). The repository
+  // procedure caps a page at 200 rows (`IF @page_size>200 SET @page_size=200`),
+  // so the single pageSize 1000 / 500 requests below were silently cut at
+  // 200: role-menu-permissions/query returns the WHOLE organisation's rows
+  // ordered by role name, and any role past the first 200 rows opened on
+  // Edit with nothing ticked. Pages until a short page or TotalRows.
+  const QUERY_PAGE_SIZE = 200;
+  async function queryAll(path, data) {
+    const all = [];
+    for (let pageNumber = 1; pageNumber <= 200; pageNumber++) {
+      const res  = await postJson(path, { data: Object.assign({}, data, { pageNumber, pageSize: QUERY_PAGE_SIZE }) });
+      const rows = rowsOf(res);
+      all.push(...rows);
+      const total = Number(val(rows[0], "TotalRows") || 0);
+      if (rows.length < QUERY_PAGE_SIZE || (total && all.length >= total)) break;
+    }
+    return all;
+  }
+
   // Build Parent -> Child sections from Menu Master's own hierarchy. A parent
   // that is a real screen (has a url) also gets its own permission row; pure
   // containers (# / empty url) are headers only.
@@ -239,19 +258,20 @@
     const orgId = resolveOrg();
     loadViewScope(section, opts, orgId);
     try {
-      const [menuRes, permRes] = await Promise.all([
-        postJson("menu-master/query", { data: { pageNumber: 1, pageSize: 500 } }),
+      // 2026-10-26: every page (queryAll), not the first 200 rows.
+      const [menuRows, permRows] = await Promise.all([
+        queryAll("menu-master/query", {}),
         (opts.roleId && orgId)
-          ? postJson("role-menu-permissions/query", { data: { organizationId: orgId, pageNumber: 1, pageSize: 1000 } })
-          : Promise.resolve({})
+          ? queryAll("role-menu-permissions/query", { organizationId: orgId })
+          : Promise.resolve([])
       ]);
-      state.menus = rowsOf(menuRes)
+      state.menus = menuRows
         .filter(m => !EXCLUDED_KEYS.has(String(val(m, "MenuKey"))))
         .sort((a, b) => Number(val(a, "DisplayOrder") || 0) - Number(val(b, "DisplayOrder") || 0));
       state.menus.forEach(m => state.byId.set(String(val(m, "Id")), m));
 
       const existing = opts.roleId
-        ? rowsOf(permRes).filter(p => String(val(p, "RoleId")) === String(opts.roleId))
+        ? permRows.filter(p => String(val(p, "RoleId")) === String(opts.roleId))
         : [];
       const existingByMenu = new Map(existing.map(p => [String(val(p, "MenuId")), p]));
       state.menus.forEach(m => {

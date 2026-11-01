@@ -1,0 +1,100 @@
+@*
+    Complete Task  (dedicated full page, 2026-10-23)
+
+    Route: /Practice/Index/task-complete?taskId=NNN[&from=view]
+
+    The Task Board / Task View "Complete" used to open a modal. Since
+    482/483 it lists every recurring evidence row with the three evidence
+    options, which outgrew a dialog. This is the SAME shared Complete
+    surface (Shared/task-actions.js + the Complete dialog in
+    _task-action-dialogs.cshtml) rendered inline on its own page via
+    openComplete(taskId, null, null, { host:"page" }) -- the task-edit.cshtml
+    pattern: no duplicate form, no duplicate logic, same API. Cancel and a
+    successful completion return to the Task Board (or to Task View when
+    opened from there, from=view).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>Complete Task</h1>
+        <p class="pm-hint">Provide the evidence and complete the task &mdash; or go back.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <a class="pm-button" id="taskCompleteBack" href="~/Practice/Index/tasks">
+            <i class="fa-solid fa-arrow-left"></i> Back to Task Board
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="taskCompleteNoId" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2>No task selected.</h2>
+        <p>Open this page from the Task Board's row menu or Task View's Complete action.</p>
+    </div>
+</section>
+
+@* THE shared dialogs + actions module, the Complete dialog reused inline (host:"page"). *@
+<partial name="Partials/_task-action-dialogs" />
+<script src="~/js/Shared/task-actions.js" asp-append-version="true"></script>
+
+<style>
+    /* Full-page host: the shared Complete dialog rendered inline as a
+       panel rather than a centred modal (same rules as task-edit.cshtml's
+       #taskDetailDialog.tdd--page). !important only where it must beat the
+       dialog's inline max-width / width. */
+    #taskCompleteDialog.tcd--page {
+        position: static !important;
+        display: block !important;
+        width: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        margin: 0;
+        border: 1px solid var(--border-subtle, var(--neutral-200));
+        border-radius: var(--radius-md);
+        box-shadow: none;
+    }
+    #taskCompleteDialog.tcd--page::backdrop { display: none; }
+    #taskCompleteDialog.tcd--page h2 { display: none; }   /* the page heading says it */
+</style>
+
+<script>
+(function () {
+    const U = p => String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p;
+    const q = new URLSearchParams(location.search);
+    const taskId = Number(q.get("taskId")) || 0;
+
+    if (!taskId) {
+        document.getElementById("taskCompleteNoId").hidden = false;
+        const dlg = document.getElementById("taskCompleteDialog");
+        if (dlg) dlg.style.display = "none";
+        return;
+    }
+
+    const fromView = q.get("from") === "view";
+
+    // The layout sets window.appBasePath in a trailing inline script that
+    // runs AFTER RenderBody, so anything called at parse time here builds
+    // its URLs without the deployment's PathBase and every request 404s.
+    // Localhost has no PathBase, which is why this only broke on the
+    // deployed site. Deferred, the same way gaps.cshtml and
+    // repository-updates.cshtml do it.
+    function start() {
+        const backUrl = fromView
+            ? U("/Practice/Index/task-view") + "?taskId=" + encodeURIComponent(taskId)
+            : U("/Practice/Index/tasks");
+        const back = document.getElementById("taskCompleteBack");
+        if (back && fromView) {
+            back.href = backUrl;
+            back.innerHTML = '<i class="fa-solid fa-arrow-left"></i> Back to Task View';
+        }
+
+        window.gracTaskActions.init({ onChanged: function () {} });
+        window.gracTaskActions.openComplete(taskId, null, null, { host: "page", backUrl: backUrl });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+    else start();
+})();
+</script>

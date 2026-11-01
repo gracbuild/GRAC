@@ -26,21 +26,39 @@ body.login-split {
   align-items: stretch;
 }
 
+/* 2026-10-29 restyle. The panel was a centred logo on a navy field and
+   nothing else; it now carries the logo, the positioning line and the
+   requirement -> evidence diagram, as one left-aligned column. Markup:
+   Views/Login/_BrandPanel.cshtml.
+
+   The brand colours are the design-system's own -- --grac-navy-deep and
+   --grac-gold -- not the mock's literal #0E1326 / #E2A43F. The two pairs
+   are indistinguishable, and this panel is precisely the brand-only
+   surface --grac-gold's token comment reserves it for. */
 .brand-panel {
   display: flex;
+  flex-direction: column;
   min-height: calc(100vh - 48px);
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 36px;
+  padding: clamp(32px, 5vw, 56px) clamp(28px, 6vw, 64px);
   border-radius: 20px;
   background: var(--grac-navy-deep);
+  color: #fff;
   animation: slide-in-left 1s cubic-bezier(.4, 0, .2, 1) .4s both;
+}
+
+/* The column itself. Capped so the lead does not run the full width of a
+   wide panel, which is what makes it read as a column rather than a page. */
+.brand-inner {
+  width: 100%;
+  max-width: 480px;
 }
 
 .brand-logo {
   position: relative;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .brand-logo img {
@@ -67,6 +85,41 @@ body.login-split {
   content: "";
   transform: translate(-50%, -50%) translateX(-100%);
   animation: shimmer 1.2s ease-in-out;
+}
+
+/* The positioning line. 900 is the weight the mock uses and Lato carries
+   it (--font-ui); the gold picks out the one word the sentence turns on. */
+.brand-title {
+  margin: 40px 0 0;
+  font-size: clamp(24px, 2.4vw, 32px);
+  font-weight: 900;
+  line-height: 1.2;
+  color: #fff;
+}
+
+.brand-title span {
+  color: var(--grac-gold);
+}
+
+.brand-lead {
+  max-width: 460px;
+  margin: 16px 0 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #A9B1C7;
+}
+
+/* The diagram scales with the column; it carries its own viewBox, so the
+   height follows the width and nothing is cropped at any panel size. */
+.brand-art {
+  width: 100%;
+  margin: 40px 0 0;
+}
+
+.brand-art svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .form-panel {
@@ -150,6 +203,54 @@ body.login-split {
   border-color: var(--primary-600);
 }
 
+/* Single sign-on (2026-10-12): divider + one outline button per
+   provider, same height / radius / font as .btn-signin above. */
+.sso-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 16px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.sso-divider::before,
+.sso-divider::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--neutral-200);
+}
+
+.sso-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-sso {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 46px;
+  border: 1px solid var(--neutral-300);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all .25s ease;
+}
+
+.btn-sso:hover,
+.btn-sso:focus {
+  border-color: var(--primary-500);
+  color: var(--primary-600);
+  text-decoration: none;
+}
+
 .forgot-link {
   display: inline-flex;
   color: var(--primary-600);
@@ -198,8 +299,29 @@ body.login-split {
     grid-template-columns: 1fr;
   }
 
+  /* Stacked above the form, so the panel is a banner rather than a
+     column: centre it, and drop the diagram. 280px of brand before the
+     sign-in box is already generous on a phone, and the flow it draws is
+     a desktop-sized picture -- shrunk to a phone width its labels are
+     unreadable, so showing it would cost height and give nothing. The
+     logo, the line and the lead all stay. */
   .brand-panel {
     min-height: 280px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .brand-logo {
+    justify-content: center;
+  }
+
+  .brand-lead {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .brand-art {
+    display: none;
   }
 
   .form-panel {

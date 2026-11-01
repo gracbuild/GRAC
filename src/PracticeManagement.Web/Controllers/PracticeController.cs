@@ -135,7 +135,14 @@ public sealed class PracticeController(
         ViewBag.AppBasePath = ModuleRouteBase();
         ViewBag.Screens = await VisibleScreens(cancellationToken);
         ViewBag.MenuItems = await VisibleMenu(cancellationToken);
-        ViewBag.Permissions = ActionsFor(areaKey);
+        // ActionsFor does NOT emit APPROVE, so add it explicitly when the role
+        // holds the APPROVE grant on this screen's area (the same IsAllowed
+        // check the server approve guard uses). This keeps the whole permission
+        // set on the one window.pmPermissions array the UI already reads.
+        var __perms = new List<string>(ActionsFor(areaKey));
+        if (permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(areaKey), "APPROVE") && !__perms.Contains("APPROVE"))
+            __perms.Add("APPROVE");
+        ViewBag.Permissions = __perms.ToArray();
         // Rules 3 + 4 — Source Statements needs to render actions and
         // filter releases based on the caller's role scope, not just
         // permissions. Expose the session identity to the view layer.
@@ -165,7 +172,14 @@ public sealed class PracticeController(
         ViewBag.ApiBaseUrl = $"{ModuleRouteBase()}/practice-management-gateway";
         ViewBag.Screens = await VisibleScreens(cancellationToken);
         ViewBag.MenuItems = await VisibleMenu(cancellationToken);
-        ViewBag.Permissions = ActionsFor(areaKey);
+        // ActionsFor does NOT emit APPROVE, so add it explicitly when the role
+        // holds the APPROVE grant on this screen's area (the same IsAllowed
+        // check the server approve guard uses). This keeps the whole permission
+        // set on the one window.pmPermissions array the UI already reads.
+        var __perms = new List<string>(ActionsFor(areaKey));
+        if (permissionPolicy.IsAllowed(Roles(), ScreenPermissionArea(areaKey), "APPROVE") && !__perms.Contains("APPROVE"))
+            __perms.Add("APPROVE");
+        ViewBag.Permissions = __perms.ToArray();
         ViewBag.DataScope = HttpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION";
         ViewBag.RoleName = HttpContext.Session.GetString(PracticeSessionIdentity.RoleNameKey) ?? "";
         ViewBag.EmployeeId = HttpContext.Session.GetString(PracticeSessionIdentity.EmployeeIdKey) ?? "";
@@ -239,7 +253,8 @@ public sealed class PracticeController(
 
     private async Task<IReadOnlyList<PracticeMenuItem>> VisibleMenu(CancellationToken cancellationToken)
     {
-        if (!IsOrganizationManagementModule()) return await menuService.GetVisibleMenuAsync(Token(), Roles(), cancellationToken);
+        if (!IsOrganizationManagementModule())
+            return PermittedMenu(await menuService.GetVisibleMenuAsync(Token(), Roles(), cancellationToken));
 
         var screens = await VisibleScreens(cancellationToken);
         var byKey = screens.ToDictionary(screen => screen.Key, StringComparer.OrdinalIgnoreCase);
@@ -259,7 +274,45 @@ public sealed class PracticeController(
                 : null)
             .Where(item => item is not null)
             .Cast<PracticeMenuItem>()
+            .Where(item => CanViewScreen(item.MenuKey))
             .ToArray();
+    }
+
+    // Sidebar = only what the caller may open (2026-10-09). The menu
+    // service returns every active menu_master row (it is role-agnostic and
+    // memoized per request); before this, a role with no grants still saw
+    // the whole tree and was refused only on click. Filtered here with the
+    // SAME check every page applies before it renders (CanViewScreen ->
+    // permissionPolicy + ScreenPermissionArea, management dashboards via
+    // ManagementDashboards.CanOpen), so the sidebar and the pages cannot
+    // disagree:
+    //   * Home (menu key "dashboard") is always kept -- Dashboard() has no
+    //     grant check; it is the landing page of every signed-in user.
+    //   * A row with children keeps the children the caller may open; it
+    //     stays if any remain (a pure group, or a page-parent such as Audit
+    //     Definition, 276), else it is dropped -- no empty groups.
+    //   * A leaf stays only with VIEW on its own menu key.
+    // PM_ADMIN ("*:*") matches every key, so the full tree is unchanged
+    // for it.
+    private IReadOnlyList<PracticeMenuItem> PermittedMenu(IReadOnlyList<PracticeMenuItem> items)
+    {
+        var result = new List<PracticeMenuItem>();
+        foreach (var item in items)
+        {
+            if (item.MenuKey.Equals("dashboard", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(item);
+                continue;
+            }
+            if (item.Children.Count > 0)
+            {
+                var children = PermittedMenu(item.Children);
+                if (children.Count > 0) result.Add(item with { Children = children });
+                continue;
+            }
+            if (CanViewScreen(item.MenuKey)) result.Add(item);
+        }
+        return result;
     }
 
     // VIEW on a screen. A module dashboard (414) is its "Dashboard"
@@ -357,12 +410,18 @@ public sealed class PracticeController(
         // organisation's Admin opening Gap Details). Each follows the
         // centre it belongs to, same rule as practice-view above:
         //   gap-detail, gap-view            -> gaps (Gap Register)
+        //   gap-new, gap-edit (491 / 495)   -> gaps
         //   task-view                       -> tasks (Task Board)
         //   exception-analysis, -view       -> exception-centre
         if (screenKey.Equals("gap-detail", StringComparison.OrdinalIgnoreCase)
-            || screenKey.Equals("gap-view", StringComparison.OrdinalIgnoreCase))
+            || screenKey.Equals("gap-view", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("gap-new", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("gap-edit", StringComparison.OrdinalIgnoreCase))
             return "gaps";
-        if (screenKey.Equals("task-view", StringComparison.OrdinalIgnoreCase))
+        if (screenKey.Equals("task-view", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("task-new", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("task-edit", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("task-complete", StringComparison.OrdinalIgnoreCase))
             return "tasks";
         if (screenKey.Equals("exception-analysis", StringComparison.OrdinalIgnoreCase)
             || screenKey.Equals("exception-view", StringComparison.OrdinalIgnoreCase))

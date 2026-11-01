@@ -4,6 +4,7 @@
 // Route: /api/practice/repository-changes/...
 //   GET  /                         pending (or any status) changes of an organization
 //   GET  /counts                   pending count per release (badge)
+//   GET  /{id}/details             the readable field list behind "Details"
 //   POST /{id}/decision            approve / reject one change
 //   POST /decisions                the same decision for several changes
 //   GET  /notifications            one recipient's open notices (Home)
@@ -79,6 +80,30 @@ public sealed class RepositoryChangeController(
         catch (Exception ex)
         {
             logger.LogError(ex, "RepositoryChangeController.Counts failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>Migration 500. One change's fields with their labels and,
+    /// for the id columns, the name they point at. "resolved": false means
+    /// the database has not been migrated and the page should fall back to
+    /// its own raw diff of the stored snapshots.</summary>
+    [HttpGet("{id:long}/details")]
+    public async Task<IActionResult> Details(long id, [FromQuery] long organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var rows = await changeService.DisplayAsync(organizationId, id, cancellationToken);
+            return Ok(new
+            {
+                data = rows ?? new List<Dictionary<string, object?>>(),
+                resolved = rows is not null
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "RepositoryChangeController.Details failed for change {ChangeId}", id);
             return StatusCode(500, new { error = ex.Message });
         }
     }

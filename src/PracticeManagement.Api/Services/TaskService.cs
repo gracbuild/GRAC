@@ -42,6 +42,7 @@ public interface ITaskService
     Task<TaskCommandResult> AssignAsync(TaskAssignRequest request, CancellationToken cancellationToken);
     Task<TaskCommandResult> TransitionAsync(TaskTransitionRequest request, CancellationToken cancellationToken);
     Task<TaskCommandResult> CloseAsync(TaskCloseRequest request, CancellationToken cancellationToken);
+    Task<TaskCommandResult> ReopenAsync(TaskReopenRequest request, CancellationToken cancellationToken);
 
     // ---- Task Centre v2 (192-196) -----------------------------------
     Task<TaskCountsResult> CountsAsync(long? organizationId, CancellationToken cancellationToken);
@@ -58,8 +59,19 @@ public interface ITaskService
     Task<TaskCommandResult> AddActivityAsync(TaskActivityAddRequest request, CancellationToken cancellationToken);
     Task<TaskOwnerResolveResult> ResolveOwnerAsync(TaskOwnerResolveQuery query, CancellationToken cancellationToken);
     Task<IReadOnlyList<TaskSourceTaskRow>> SourceTasksAsync(string sourceTypeCode, long sourceRecordId, long? organizationId, CancellationToken cancellationToken);
-    Task<TaskCommandResult> AddAttachmentAsync(long taskId, string fileName, string? contentType, byte[] fileData, string? evidenceDescription, long? uploadedByEmployeeId, CancellationToken cancellationToken);
+    // 499: metadata = the Evidence Center fields the upload dialog captured; optional and last.
+    Task<TaskCommandResult> AddAttachmentAsync(long taskId, string fileName, string? contentType, byte[] fileData, string? evidenceDescription, long? uploadedByEmployeeId, bool callerIsAdmin, long? instanceEvidenceId, CancellationToken cancellationToken, EvidenceUploadMetadata? metadata = null);
     Task<TaskAttachmentContent?> GetAttachmentAsync(long taskAttachmentId, CancellationToken cancellationToken);
+    // 477: Select from Evidence Center on a task.
+    Task<TaskEvidenceCandidateResult> ListEvidenceCandidatesAsync(long taskId, long organizationId, long? callerEmployeeId, bool callerIsAdmin,
+                                                                  string? search, int? evidenceTypeId, int pageNumber, int pageSize,
+                                                                  CancellationToken cancellationToken);
+    Task<TaskCommandResult> LinkEvidenceAsync(long taskId, TaskEvidenceLinkRequest request, long? callerEmployeeId, bool callerIsAdmin,
+                                              string callerDisplayName, CancellationToken cancellationToken);
+    // 482: recurring evidence on Complete Task.
+    Task<TaskRecurringEvidenceResult> ListRecurringEvidenceAsync(long taskId, long organizationId, CancellationToken cancellationToken);
+    Task<TaskCommandResult> SaveRecurringEvidenceAsync(long taskId, TaskRecurringEvidenceSaveRequest request, long? callerEmployeeId,
+                                                       string callerDisplayName, CancellationToken cancellationToken);
 
     // ---- Task edit (269) --------------------------------------------
     // The single update path. The four single-field commands above stay
@@ -293,6 +305,32 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
         }
     }
 
+    public async Task<TaskCommandResult> ReopenAsync(TaskReopenRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_reopen";
+
+            AddParam(command, "@task_id",           DbType.Int64,   request.TaskId);
+            AddParam(command, "@actor_employee_id", DbType.Int64,   (object?)request.ActorEmployeeId ?? DBNull.Value);
+            AddParam(command, "@actor_role_code",   DbType.String,  (object?)request.ActorRoleCode ?? DBNull.Value, 60);
+            AddParam(command, "@is_admin",          DbType.Boolean, request.IsAdmin);
+            AddParam(command, "@reason_text",       DbType.String,  (object?)request.ReasonText ?? DBNull.Value, 1000);
+            AddParam(command, "@correlation_id",    DbType.Guid,    (object?)request.CorrelationId ?? DBNull.Value);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return new TaskCommandResult(true, request.TaskId);
+        }
+        catch (SqlException ex)
+        {
+            return HandleSqlError(ex, nameof(ReopenAsync));
+        }
+    }
+
     // =================================================================
     // Task Centre v2
     // =================================================================
@@ -414,7 +452,14 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
                     EvidenceDescription:  reader["EvidenceDescription"]  as string,
                     UploadedByEmployeeId: reader["UploadedByEmployeeId"] as long?,
                     UploadedByName:       reader["UploadedByName"]       as string,
-                    UploadedDt:           Convert.ToDateTime(reader["UploadedDt"])));
+                    UploadedDt:           Convert.ToDateTime(reader["UploadedDt"]),
+                    // 477 -- absent before the migration.
+                    EvidenceItemId:       GetLong(reader, ColumnSet(reader), "EvidenceItemId"),
+                    EvidenceTitle:        GetString(reader, ColumnSet(reader), "EvidenceTitle"),
+                    VersionNo:            GetInt(reader, ColumnSet(reader), "VersionNo"),
+                    PeriodDate:           GetDate(reader, ColumnSet(reader), "PeriodDate"),
+                    // 482 -- absent before the migration.
+                    InstanceEvidenceId:   GetLong(reader, ColumnSet(reader), "InstanceEvidenceId")));
         }
 
         // ---- 4. children ----
@@ -771,15 +816,24 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
         return rows;
     }
 
+    // Migration 499: metadata is the Evidence Center description the shared
+    // upload dialog captured. Optional and last, so existing callers are
+    // unchanged.
     public async Task<TaskCommandResult> AddAttachmentAsync(
         long taskId, string fileName, string? contentType, byte[] fileData,
-        string? evidenceDescription, long? uploadedByEmployeeId, CancellationToken cancellationToken)
+        string? evidenceDescription, long? uploadedByEmployeeId, bool callerIsAdmin, long? instanceEvidenceId,
+        CancellationToken cancellationToken, EvidenceUploadMetadata? metadata = null)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return Fail("fileName is required.");
         if (fileData is null || fileData.Length == 0) return Fail("File content is empty.");
 
         try
         {
+            // 477: the file becomes an Evidence Center item, or links the
+            // identical one the uploader can already see -- "can see" reads
+            // the View Data Scope policy, so this POST runs as a read.
+            Infrastructure.CallerViewScope.BeginRead(uploadedByEmployeeId);
+
             await using var connection = await OpenAsync(cancellationToken);
             await using var command    = connection.CreateCommand();
             command.CommandType = CommandType.StoredProcedure;
@@ -791,6 +845,41 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             AddParam(command, "@file_data",               DbType.Binary, fileData, -1);
             AddParam(command, "@evidence_description",    DbType.String, (object?)evidenceDescription ?? DBNull.Value, 1000);
             AddParam(command, "@uploaded_by_employee_id", DbType.Int64,  (object?)uploadedByEmployeeId ?? DBNull.Value);
+            // 477. Bound only when declared, so a database without 477
+            // still attaches (the 193 way).
+            if (await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                    connection, "sp_task_attachment_add", "@caller_is_admin", cancellationToken))
+                AddParam(command, "@caller_is_admin", DbType.Boolean, callerIsAdmin);
+            // 482: the recurring evidence row this file answers. Same rule.
+            if (instanceEvidenceId is > 0
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       connection, "sp_task_attachment_add", "@instance_evidence_id", cancellationToken))
+                AddParam(command, "@instance_evidence_id", DbType.Int64, instanceEvidenceId);
+
+            // 499: the Evidence Center metadata. 499 adds all eight
+            // parameters together, so one probe answers for the set. Note
+            // the description parameter is @evidence_detail here --
+            // @evidence_description was already taken by the link note on
+            // this procedure (it is the attachment's note, not the item's).
+            if (metadata is not null
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       connection, "sp_task_attachment_add", "@evidence_title", cancellationToken))
+            {
+                AddParam(command, "@evidence_title",   DbType.String,
+                         (object?)metadata.EvidenceTitle ?? DBNull.Value, 300);
+                AddParam(command, "@evidence_type_id", DbType.Int32,
+                         metadata.EvidenceTypeId is > 0 ? metadata.EvidenceTypeId : DBNull.Value);
+                AddParam(command, "@evidence_detail",  DbType.String,
+                         (object?)metadata.EvidenceDescription ?? DBNull.Value, 2000);
+                AddParam(command, "@owner_employee_id", DbType.Int64,
+                         metadata.OwnerEmployeeId is > 0 ? metadata.OwnerEmployeeId : DBNull.Value);
+                AddParam(command, "@valid_from",       DbType.Date, (object?)metadata.ValidFrom ?? DBNull.Value);
+                AddParam(command, "@valid_to",         DbType.Date, (object?)metadata.ValidTo ?? DBNull.Value);
+                AddParam(command, "@classification",   DbType.String,
+                         (object?)metadata.Classification ?? DBNull.Value, 30);
+                AddParam(command, "@tags",             DbType.String,
+                         (object?)metadata.Tags ?? DBNull.Value, 500);
+            }
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -800,7 +889,8 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             return new TaskCommandResult(
                 Success:    true,
                 TaskId:     GetLong(reader, cols, "TaskAttachmentId"),
-                StatusCode: "Uploaded");
+                StatusCode: "Uploaded",
+                Message:    GetString(reader, cols, "Message"));
         }
         catch (SqlException ex)
         {
@@ -826,6 +916,189 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             ContentType:      reader["ContentType"] as string,
             FileSizeBytes:    Convert.ToInt64(reader["FileSizeBytes"]),
             FileData:         (byte[])reader["FileData"]);
+    }
+
+    // -----------------------------------------------------------------
+    // 477: Select from Evidence Center on a task. The procedures check
+    // the task (this organisation, still open), the item (visible to the
+    // caller, active) and that its validity covers the task's period.
+    // -----------------------------------------------------------------
+    public async Task<TaskEvidenceCandidateResult> ListEvidenceCandidatesAsync(
+        long taskId, long organizationId, long? callerEmployeeId, bool callerIsAdmin,
+        string? search, int? evidenceTypeId, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        if (taskId <= 0 || organizationId <= 0)
+            return new TaskEvidenceCandidateResult(false, [], 0, "Organization and task are both required.");
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_evidence_candidates";
+            AddParam(command, "@task_id",            DbType.Int64,   taskId);
+            AddParam(command, "@organization_id",    DbType.Int64,   organizationId);
+            AddParam(command, "@caller_employee_id", DbType.Int64,   callerEmployeeId is > 0 ? callerEmployeeId : DBNull.Value);
+            AddParam(command, "@caller_is_admin",    DbType.Boolean, callerIsAdmin);
+            AddParam(command, "@search",             DbType.String,  string.IsNullOrWhiteSpace(search) ? DBNull.Value : search.Trim(), 200);
+            AddParam(command, "@evidence_type_id",   DbType.Int32,   evidenceTypeId is > 0 ? evidenceTypeId : DBNull.Value);
+            AddParam(command, "@page_number",        DbType.Int32,   pageNumber);
+            AddParam(command, "@page_size",          DbType.Int32,   pageSize);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var rows = await ReadRowsAsync(reader, cancellationToken);
+            var total = rows.Count > 0 && rows[0]["TotalRows"] is { } t ? Convert.ToInt32(t) : 0;
+            return new TaskEvidenceCandidateResult(true, rows, total);
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            logger.LogWarning(ex, "sp_task_evidence_candidates is not installed (run 477).");
+            return new TaskEvidenceCandidateResult(false, [], 0, "The Evidence Center is not installed for tasks yet (database migration 477).");
+        }
+        catch (SqlException ex) when (ex.Number is >= 51000 and <= 52999)
+        {
+            return new TaskEvidenceCandidateResult(false, [], 0, ex.Message);
+        }
+    }
+
+    public async Task<TaskCommandResult> LinkEvidenceAsync(
+        long taskId, TaskEvidenceLinkRequest request, long? callerEmployeeId, bool callerIsAdmin,
+        string callerDisplayName, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (taskId <= 0 || request.OrganizationId <= 0 || request.EvidenceItemId <= 0)
+            return new TaskCommandResult(false, null, "Organization, task and evidence item are all required.", "VALIDATION_ERROR");
+        try
+        {
+            // Visibility of the item is part of the rule (see AddAttachmentAsync).
+            Infrastructure.CallerViewScope.BeginRead(callerEmployeeId);
+
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_evidence_link_add";
+            AddParam(command, "@task_id",             DbType.Int64,   taskId);
+            AddParam(command, "@organization_id",     DbType.Int64,   request.OrganizationId);
+            AddParam(command, "@evidence_item_id",    DbType.Int64,   request.EvidenceItemId);
+            AddParam(command, "@link_note",           DbType.String,  string.IsNullOrWhiteSpace(request.LinkNote) ? DBNull.Value : request.LinkNote.Trim(), 1000);
+            AddParam(command, "@caller_employee_id",  DbType.Int64,   callerEmployeeId is > 0 ? callerEmployeeId : DBNull.Value);
+            AddParam(command, "@caller_is_admin",     DbType.Boolean, callerIsAdmin);
+            AddParam(command, "@caller_display_name", DbType.String,  callerDisplayName, 100);
+            // 482: the recurring evidence row this item answers.
+            if (request.InstanceEvidenceId is > 0
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       connection, "sp_task_evidence_link_add", "@instance_evidence_id", cancellationToken))
+                AddParam(command, "@instance_evidence_id", DbType.Int64, request.InstanceEvidenceId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return new TaskCommandResult(true, taskId, StatusCode: "Linked");
+            var cols = ColumnSet(reader);
+            return new TaskCommandResult(
+                Success:    true,
+                TaskId:     GetLong(reader, cols, "TaskAttachmentId"),
+                StatusCode: "Linked",
+                Message:    GetString(reader, cols, "Message"));
+        }
+        catch (SqlException ex)
+        {
+            return HandleSqlError(ex, nameof(LinkEvidenceAsync));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 482: recurring evidence on Complete Task. The list is the recurring
+    // evidence of the scheduled task's obligation (empty for any other
+    // task); the save records the option chosen per row and, for
+    // External, the location and locator. Nothing is required.
+    // -----------------------------------------------------------------
+    public async Task<TaskRecurringEvidenceResult> ListRecurringEvidenceAsync(
+        long taskId, long organizationId, CancellationToken cancellationToken)
+    {
+        if (taskId <= 0 || organizationId <= 0)
+            return new TaskRecurringEvidenceResult(false, [], "Organization and task are both required.");
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_recurring_evidence_list";
+            AddParam(command, "@task_id",         DbType.Int64, taskId);
+            AddParam(command, "@organization_id", DbType.Int64, organizationId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var rows = await ReadRowsAsync(reader, cancellationToken);
+            // 483: result 2, the general row -- absent before 483.
+            Dictionary<string, object?>? general = null;
+            if (await reader.NextResultAsync(cancellationToken))
+                general = (await ReadRowsAsync(reader, cancellationToken)).FirstOrDefault();
+            return new TaskRecurringEvidenceResult(true, rows, General: general);
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            // A database without 482: the dialog simply lists nothing.
+            logger.LogWarning(ex, "sp_task_recurring_evidence_list is not installed (run 482).");
+            return new TaskRecurringEvidenceResult(true, []);
+        }
+        catch (SqlException ex) when (ex.Number is >= 51000 and <= 52999)
+        {
+            return new TaskRecurringEvidenceResult(false, [], ex.Message);
+        }
+    }
+
+    public async Task<TaskCommandResult> SaveRecurringEvidenceAsync(
+        long taskId, TaskRecurringEvidenceSaveRequest request, long? callerEmployeeId,
+        string callerDisplayName, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (taskId <= 0 || request.OrganizationId <= 0)
+            return new TaskCommandResult(false, null, "Organization and task are both required.", "VALIDATION_ERROR");
+        var items = request.Items ?? [];
+        if (items.Count == 0)
+            return new TaskCommandResult(true, taskId, StatusCode: "Saved", Message: "Nothing to save.");
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_evidence_response_save";
+            var payload = System.Text.Json.JsonSerializer.Serialize(items.Select(i => new
+            {
+                evidenceId       = i.EvidenceId,
+                evidenceSource   = i.EvidenceSource,
+                evidenceLocation = i.EvidenceLocation,
+                evidenceLocator  = i.EvidenceLocator
+            }));
+            AddParam(command, "@task_id",             DbType.Int64,  taskId);
+            AddParam(command, "@organization_id",     DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@payload_json",        DbType.String, payload, -1);
+            AddParam(command, "@caller_employee_id",  DbType.Int64,  callerEmployeeId is > 0 ? callerEmployeeId : DBNull.Value);
+            AddParam(command, "@caller_display_name", DbType.String, callerDisplayName, 100);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return new TaskCommandResult(true, taskId, StatusCode: "Saved");
+            var cols = ColumnSet(reader);
+            return new TaskCommandResult(true, taskId, StatusCode: "Saved", Message: GetString(reader, cols, "Message"));
+        }
+        catch (SqlException ex)
+        {
+            return HandleSqlError(ex, nameof(SaveRecurringEvidenceAsync));
+        }
+    }
+
+    // Column-name rows (477 candidates, 482 recurring evidence).
+    private static async Task<List<Dictionary<string, object?>>> ReadRowsAsync(
+        DbDataReader reader, CancellationToken cancellationToken)
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+            rows.Add(row);
+        }
+        return rows;
     }
 
     // -----------------------------------------------------------------
@@ -1033,6 +1306,12 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             53521 => "REASON_REQUIRED",
             53752 => "TWO_GATE_NOT_PASSED",
 
+            // task reopen (479)
+            53760 => "VALIDATION_ERROR",
+            53761 => "TASK_NOT_FOUND",
+            53762 => "TASK_NOT_CLOSED",
+            53763 => "REOPEN_FORBIDDEN",
+
             // priority governance (193) — BRD §7
             55619 => "CHILD_PRIORITY_LOCKED",
             55620 => "REASON_REQUIRED",
@@ -1068,11 +1347,24 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             // validation failure rather than a server fault
             >= 55600 and <= 55799 => "VALIDATION_ERROR",
             >= 56700 and <= 56719 => "VALIDATION_ERROR",
+            // 476 / 477: Evidence Center sentences (link to a task).
+            >= 52780 and <= 52869 => "VALIDATION_ERROR",
+            // 482: recurring evidence on a task.
+            >= 52920 and <= 52929 => "VALIDATION_ERROR",
 
             _     => "SQL_ERROR"
         };
         logger.LogWarning(ex, "TaskService.{Op} failed with SQL error {Number}: {Message}", op, ex.Number, ex.Message);
-        return new TaskCommandResult(false, null, ex.Message, reason);
+        // A few validation THROWs are shown straight to the user, so give
+        // them a plain sentence instead of the raw "sp_...: ... (BRD §N)"
+        // procedure text. The rest keep the procedure message (dev-facing).
+        var message = ex.Number switch
+        {
+            56710 => "To reduce a task's priority, add a reason. The change is sent to Exceptions & Waivers for approval and the priority stays the same until it is approved.",
+            56711 => "To change a task's due date, add a reason. The change is sent to Exceptions & Waivers for approval and the due date stays the same until it is approved.",
+            _     => ex.Message
+        };
+        return new TaskCommandResult(false, null, message, reason);
     }
 
     private static TaskCommandResult Fail(string error) => new(false, null, error);

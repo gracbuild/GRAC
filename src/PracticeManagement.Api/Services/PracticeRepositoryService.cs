@@ -130,6 +130,16 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             shim = isManage
                 ? "grac_practice.sp_org_team_repository_manage"
                 : "grac_practice.sp_org_team_repository_get";
+        // Role Master (migration 465): the monolith never read '$.roleCode'
+        // on save and never projected RoleCode on read, so the Role Code
+        // typed on the Add form was dropped and the grid and the Edit form
+        // both showed it blank -- the same pair of gaps 419 fixed for
+        // assets. Same split as users/teams above; RETIRE still goes back
+        // to the monolith inside the manage shim.
+        else if (entityType.Equals("roles", StringComparison.OrdinalIgnoreCase))
+            shim = isManage
+                ? "grac_practice.sp_org_role_repository_manage"
+                : "grac_practice.sp_org_role_repository_get";
         // Location (change request 2026-09-20, migration 361): needs the
         // new Time Zone + address columns the monolith's fixed 'locations'
         // projection does not know about. Same split as users/teams above.
@@ -450,6 +460,18 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 var directTables = await QueryPracticeStatementMappingsAsync(connection, payload, cancellationToken);
                 CaptureSqlDiagnostic(procedure, entityType, action, id, search, status, payload, directTables);
                 return new(true, "Success", directTables);
+            }
+            // Release owner first (change request 2026-10-18): nothing under a
+            // subscribed release -- statement applicability (single and bulk),
+            // custom statements, their source structure and classifications --
+            // may be written until the release has an Owner. One check here,
+            // ahead of all five handlers, so bulk refuses once up front instead
+            // of reporting every statement as skipped.
+            if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
+                && ReleaseOwnerGatedEntityTypes.Contains(entityType)
+                && await ReleaseOwnerMissingAsync(connection, payload, cancellationToken))
+            {
+                return new(false, ReleaseOwnerRequiredMessage);
             }
             if (procedure.Equals("dbo.pm_manage_practice_repository", StringComparison.OrdinalIgnoreCase)
                 && entityType.Equals("statement-applicability", StringComparison.OrdinalIgnoreCase))
@@ -1360,7 +1382,10 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             statement_implementation AS (
                 SELECT m.framework_statement_id FrameworkStatementId,
                        COUNT(DISTINCT pi.practice_instance_id) InstanceCount,
-                       COUNT(DISTINCT CASE WHEN ism.status_code=N'Implemented' THEN pi.practice_instance_id END) ImplementedInstanceCount
+                       COUNT(DISTINCT CASE WHEN ism.status_code=N'Implemented' THEN pi.practice_instance_id END) ImplementedInstanceCount,
+                       -- 456: instances someone has actually updated (anything
+                       -- but the Not Updated / legacy Not Started default).
+                       COUNT(DISTINCT CASE WHEN COALESCE(ism.status_code,pi.implementation_status,N'Not Updated') NOT IN (N'Not Updated',N'Not Started') THEN pi.practice_instance_id END) UpdatedInstanceCount
                 FROM grac_practice.organization_statement_practice_mapping m
                 JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
                     AND q.status='Active'
@@ -1419,6 +1444,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                    -- is deliberately the same test Level 1 uses to count a statement
                    -- as Implemented (Applicable + at least one instance + every
                    -- instance Implemented).
+                   -- 456: the default is Not Updated. Not Implemented only once
+                   -- at least one mapped instance has been updated.
                    CASE
                        WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
                             AND COALESCE(si.InstanceCount,0)>0
@@ -1426,7 +1453,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                        WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
                             AND COALESCE(si.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
                        WHEN COALESCE(aps.status_name,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
-                       ELSE N'Not Implemented'
+                       WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
+                            AND COALESCE(si.UpdatedInstanceCount,0)>0 THEN N'Not Implemented'
+                       ELSE N'Not Updated'
                    END ImplementationStatus,
                    ofs.owner_id OwnerId,
                    owner.employee_name OwnerName,
@@ -1455,6 +1484,11 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             WHERE fs.organization_id=@organization_id
               AND fs.release_id=@release_id
               AND fs.source_type=N'Repository'
+              -- 460: View Data Scope on Control Statements: the statement
+              -- owner, or a mapped practice the reader may see. Node rows
+              -- (the first SELECT) are a lookup for the tree, not grid rows.
+              AND EXISTS (SELECT 1 FROM grac_practice.fn_pm_view_scope_statement(
+                              ofs.owner_id, fs.organization_id, fs.framework_statement_id, ofs.org_statement_id))
               AND fs.copied_dt IS NOT NULL
               AND (@p_search=''
                    OR ISNULL(fs.statement_reference,N'') LIKE N'%'+@p_search+N'%'
@@ -1513,8 +1547,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         command.CommandText = """
             DECLARE @organization_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.organizationId'));
             DECLARE @custom_release_name NVARCHAR(200)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.customReleaseName'))),N'');
-            DECLARE @effective_dt DATE=TRY_CONVERT(DATE,JSON_VALUE(@payload,'$.effectiveDate'));
-            DECLARE @end_dt DATE=TRY_CONVERT(DATE,JSON_VALUE(@payload,'$.endDate'));
+            DECLARE @effective_dt DATE=TRY_CONVERT(DATE,NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.effectiveDate'))),N''));
+            DECLARE @end_dt DATE=TRY_CONVERT(DATE,NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.endDate'))),N''));
             DECLARE @custom_release_notes NVARCHAR(MAX)=NULLIF(LTRIM(RTRIM(JSON_VALUE(@payload,'$.releaseNotes'))),N'');
             DECLARE @subscription_id BIGINT=TRY_CONVERT(BIGINT,JSON_VALUE(@payload,'$.subscriptionId'));
             -- Owner, added to the Add/Edit Custom Release form itself so a
@@ -1671,6 +1705,65 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 WHERE cs.subscription_id=@subscription_id
                   AND cs.organization_id=@organization_id
                   AND cs.status=N'Active'
+            ),
+            -- Control Statements grid parity (2026-10-08): the custom release
+            -- now renders with the standard statement-tree columns, so it
+            -- needs the same three values QueryReleaseStatementsAsync gives a
+            -- repository statement. The Source Structure path is the custom
+            -- structure's own hierarchy (same recursion as the source-structure
+            -- query); practice counts and the implementation roll-up use the
+            -- same rules as the repository CTEs, keyed on the 347 overlay's
+            -- org_statement_id instead of framework_statement_id (a custom
+            -- statement has none).
+            node_path AS (
+                SELECT n.structure_node_id,
+                       CAST(COALESCE(n.node_reference, n.node_title) AS NVARCHAR(MAX)) NodePath
+                FROM grac_practice.custom_release_source_structure n
+                WHERE n.subscription_id=@subscription_id
+                  AND n.organization_id=@organization_id
+                  AND n.status=N'Active'
+                  AND n.parent_node_id IS NULL
+                UNION ALL
+                SELECT n.structure_node_id,
+                       CAST(np.NodePath + N' / ' + COALESCE(n.node_reference, n.node_title) AS NVARCHAR(MAX))
+                FROM grac_practice.custom_release_source_structure n
+                JOIN node_path np ON np.structure_node_id=n.parent_node_id
+                WHERE n.subscription_id=@subscription_id
+                  AND n.organization_id=@organization_id
+                  AND n.status=N'Active'
+            ),
+            statement_practice_counts AS (
+                SELECT m.org_statement_id OrgStatementId,
+                       COUNT(DISTINCT m.org_practice_id) PracticeCount,
+                       COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,q.applicability_status)=N'Applicable' THEN m.org_practice_id END) ApplicablePracticeCount
+                FROM grac_practice.organization_statement_practice_mapping m
+                JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
+                    AND q.status='Active'
+                LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=q.applicability_status_id
+                WHERE m.organization_id=@organization_id
+                  AND m.status='Active'
+                  AND m.org_statement_id IS NOT NULL
+                GROUP BY m.org_statement_id
+            ),
+            statement_implementation AS (
+                SELECT m.org_statement_id OrgStatementId,
+                       COUNT(DISTINCT pi.practice_instance_id) InstanceCount,
+                       COUNT(DISTINCT CASE WHEN ism.status_code=N'Implemented' THEN pi.practice_instance_id END) ImplementedInstanceCount,
+                       COUNT(DISTINCT CASE WHEN COALESCE(ism.status_code,pi.implementation_status,N'Not Updated') NOT IN (N'Not Updated',N'Not Started') THEN pi.practice_instance_id END) UpdatedInstanceCount
+                FROM grac_practice.organization_statement_practice_mapping m
+                JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
+                    AND q.status='Active'
+                JOIN grac_practice.practice p ON p.organization_requirement_id=q.organization_requirement_id
+                    AND p.organization_id=m.organization_id
+                    AND p.status='Active'
+                JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                    AND pi.organization_id=m.organization_id
+                    AND pi.status='Active'
+                LEFT JOIN grac_practice.implementation_status_master ism ON ism.implementation_status_id=pi.implementation_status_id
+                WHERE m.organization_id=@organization_id
+                  AND m.status='Active'
+                  AND m.org_statement_id IS NOT NULL
+                GROUP BY m.org_statement_id
             )
             SELECT
                 cs.custom_statement_id CustomStatementId,
@@ -1687,19 +1780,46 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 cs.classification Classification,
                 cs.practice_mapping PracticeMapping,
                 COALESCE(aps.status_name,N'Not Updated') ApplicabilityStatus,
+                COALESCE(aps.status_code,N'Not Updated') ApplicabilityStatusCode,
+                -- 2026-10-08: Owner column on Control Statements, as the
+                -- repository query's OwnerName -- the organization copy's
+                -- owner, else the custom statement's own (032).
+                stmt_owner.employee_name OwnerName,
                 h.HierarchyPath Hierarchy,
-                0 PracticeCount,
+                COALESCE(spc.PracticeCount,0) PracticeCount,
+                COALESCE(spc.ApplicablePracticeCount,0) ApplicablePracticeCount,
+                -- Same CASE as QueryReleaseStatementsAsync's ImplementationStatus.
+                CASE
+                    WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
+                         AND COALESCE(si.InstanceCount,0)>0
+                         AND si.InstanceCount=si.ImplementedInstanceCount THEN N'Implemented'
+                    WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
+                         AND COALESCE(si.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
+                    WHEN COALESCE(aps.status_name,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
+                    WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
+                         AND COALESCE(si.UpdatedInstanceCount,0)>0 THEN N'Not Implemented'
+                    ELSE N'Not Updated'
+                END ImplementationStatus,
                 cs.structure_node_id StructureNodeId,
                 ssn.node_reference StructureNodeReference,
-                ssn.node_title StructureNodeTitle
+                ssn.node_title StructureNodeTitle,
+                np.NodePath StructureNodePath
             FROM grac_practice.custom_release_statement cs
             JOIN hierarchy h ON h.custom_statement_id=cs.custom_statement_id
             LEFT JOIN grac_practice.organization_framework_statements ofs ON ofs.source_type=N'Custom' AND ofs.custom_statement_id=cs.custom_statement_id
             LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=cs.applicability_status_id
+            LEFT JOIN grac_practice.organization_employee stmt_owner ON stmt_owner.employee_id=COALESCE(ofs.owner_id,cs.owner_id)
             LEFT JOIN grac_practice.custom_release_source_structure ssn ON ssn.structure_node_id=cs.structure_node_id AND ssn.status=N'Active'
+            LEFT JOIN node_path np ON np.structure_node_id=cs.structure_node_id
+            LEFT JOIN statement_practice_counts spc ON spc.OrgStatementId=ofs.org_statement_id
+            LEFT JOIN statement_implementation si ON si.OrgStatementId=ofs.org_statement_id
             WHERE cs.subscription_id=@subscription_id
               AND cs.organization_id=@organization_id
               AND cs.status=N'Active'
+              -- 460: View Data Scope on Control Statements (custom release):
+              -- the statement owner, or a mapped practice the reader may see.
+              AND EXISTS (SELECT 1 FROM grac_practice.fn_pm_view_scope_statement(
+                              COALESCE(ofs.owner_id,cs.owner_id), cs.organization_id, NULL, ofs.org_statement_id))
               AND (@p_search=N''
                    OR ISNULL(cs.statement_reference,N'') LIKE N'%'+@p_search+N'%'
                    OR ISNULL(cs.statement_title,N'') LIKE N'%'+@p_search+N'%'
@@ -2748,6 +2868,123 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         )
         """;
 
+    // PERF (2026-10-07): set-based replacement for the per-row correlated
+    // PracticeStatementScopeSql, used ONLY by the Practices grid query
+    // (QueryOrganizationRequirementFallbackAsync). Measured on UAT org 3
+    // (404 requirements): the old correlated gate cost 841,754 logical reads
+    // / 2,588 ms because it re-scanned the organization's framework statements
+    // once per requirement; this form builds the org's Applicable-statement set
+    // ONCE into #applicable and the gate is a membership test -> 44,715 reads /
+    // 135 ms, returning the IDENTICAL requirement set (verified 404 == 404, 0
+    // diffs both directions). The three scope rules are unchanged; only how
+    // the "an Applicable statement backs this practice" rule is evaluated moved
+    // from per-row EXISTS to a precomputed set. PracticeStatementScopeSql (the
+    // correlated form) is kept for the single-record applicability guard in
+    // PracticeStatementsAllowApplicableAsync, where only one requirement is
+    // tested and building a temp table would not pay off.
+    private const string ApplicableStatementsBuildSql = """
+        SET NOCOUNT ON;
+        IF OBJECT_ID('tempdb..#applicable') IS NOT NULL DROP TABLE #applicable;
+        SELECT sofs.org_statement_id, sofs.organization_id
+        INTO #applicable
+        FROM grac_practice.organization_framework_statements sofs
+        JOIN grac_practice.applicability_status_master saps
+            ON saps.applicability_status_id=sofs.applicability_status_id
+           AND saps.status_name=N'Applicable'
+        WHERE sofs.status='Active'
+          AND (@organization_id IS NULL OR sofs.organization_id=@organization_id)
+          AND (NOT EXISTS(
+                   SELECT 1 FROM grac_practice.repository_subscription ss0
+                   WHERE ss0.organization_id=sofs.organization_id
+                     AND ss0.release_id=sofs.release_id)
+               OR EXISTS(
+                   SELECT 1 FROM grac_practice.repository_subscription ss
+                   WHERE ss.organization_id=sofs.organization_id
+                     AND ss.release_id=sofs.release_id
+                     AND ss.status='Active'
+                     AND ISNULL(ss.subscription_status,'Active')='Active'
+                     AND ss.owner_id IS NOT NULL));
+        CREATE CLUSTERED INDEX ix_app ON #applicable(organization_id, org_statement_id);
+
+        """;
+
+    private const string PracticeStatementScopeSetBasedSql = """
+        (
+            ISNULL(q.origin_type,N'')<>N'Repository'
+            OR (q.org_statement_id IS NULL
+                AND NOT EXISTS(
+                    SELECT 1 FROM grac_practice.organization_statement_practice_mapping lm
+                    WHERE lm.org_practice_id=q.organization_requirement_id
+                      AND lm.organization_id=q.organization_id
+                      AND lm.status='Active'))
+            OR EXISTS(
+                SELECT 1 FROM #applicable a
+                WHERE a.organization_id=q.organization_id
+                  AND a.org_statement_id=q.org_statement_id)
+            OR EXISTS(
+                SELECT 1 FROM grac_practice.organization_statement_practice_mapping sm
+                JOIN #applicable a ON a.organization_id=sm.organization_id
+                    AND a.org_statement_id=sm.org_statement_id
+                WHERE sm.org_practice_id=q.organization_requirement_id
+                  AND sm.organization_id=q.organization_id
+                  AND sm.status='Active')
+        )
+        """;
+
+    // Writes that sit UNDER a subscribed release (repository or custom). See
+    // the dispatch guard in ExecuteAsync.
+    private static readonly HashSet<string> ReleaseOwnerGatedEntityTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "statement-applicability",
+        "statement-applicability-bulk",
+        "custom-statement",
+        "custom-release-source-structure",
+        "custom-statement-classification"
+    };
+
+    private const string ReleaseOwnerRequiredMessage =
+        "This release has no owner. Assign the release owner in Standards & Frameworks first; statements and their applicability can be updated only after that.";
+
+    // True when the payload's release (subscriptionId for a Custom release,
+    // organizationId + releaseId for a repository release) is actively
+    // subscribed but no active subscription row of it carries an owner --
+    // the same "has an owner" reading as the subscribed-frameworks summary
+    // (MAX(owner_id)) and the Practices scope gate (#applicable). A release
+    // that cannot be resolved returns false: each handler's own validation
+    // already rejects an unknown or unsubscribed release with its own message.
+    private static async Task<bool> ReleaseOwnerMissingAsync(
+        DbConnection connection, string payload, CancellationToken cancellationToken)
+    {
+        var organizationId = JsonInt(payload, "organizationId");
+        var subscriptionId = JsonInt(payload, "subscriptionId");
+        var releaseId = JsonInt(payload, "releaseId");
+        if (organizationId is null || (subscriptionId is null && releaseId is null)) return false;
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            ;WITH release_subscription AS (
+                SELECT s.owner_id
+                FROM grac_practice.repository_subscription s
+                WHERE s.organization_id=@organization_id
+                  AND ((@subscription_id IS NOT NULL AND s.subscription_id=@subscription_id)
+                    OR (@subscription_id IS NULL AND s.release_id=@release_id))
+                  AND s.status='Active'
+                  AND ISNULL(s.subscription_status,'Active')='Active'
+            )
+            SELECT CASE
+                WHEN EXISTS(SELECT 1 FROM release_subscription)
+                 AND NOT EXISTS(SELECT 1 FROM release_subscription WHERE owner_id IS NOT NULL) THEN 1
+                ELSE 0
+            END;
+            """;
+        command.CommandType = CommandType.Text;
+        Add(command, "@organization_id", organizationId);
+        Add(command, "@subscription_id", subscriptionId);
+        Add(command, "@release_id", releaseId);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result) == 1;
+    }
+
     private const string PracticeNotInStatementScopeMessage =
         "This practice cannot be marked Applicable: none of its control statements is Applicable under a release with an owner. Mark the statement Applicable in Control Statements first.";
 
@@ -2776,8 +3013,37 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         var organizationControlId = JsonInt(payload, "organizationControlId");
         var releaseId = JsonInt(payload, "releaseId");
         var frameworkStatementId = JsonInt(payload, "frameworkStatementId");
+        // Custom-statement drill (Control Statements -> Practices on a Custom
+        // release, 2026-10-08): a custom statement has no framework_statement_id,
+        // only its 347 overlay row, so it is filtered by org_statement_id.
+        var orgStatementId = JsonInt(payload, "orgStatementId");
 
-        if (organizationId is not null && releaseId is not null)
+        // The Framework filter lists Custom releases too, with the synthetic
+        // ReleaseId = -1 * subscription_id that QuerySubscribedFrameworksAsync
+        // gives them. Their repository_subscription row has release_id NULL, so
+        // the repository check below 51042'd "not subscribed" on every one of
+        // them. Validate a Custom release against its own subscription row.
+        if (organizationId is not null && releaseId is not null && releaseId < 0)
+        {
+            await using var customCheck = connection.CreateCommand();
+            customCheck.CommandText = """
+                IF NOT EXISTS(
+                    SELECT 1
+                    FROM grac_practice.repository_subscription s
+                    WHERE s.organization_id=@organization_id
+                      AND s.subscription_id=@subscription_id
+                      AND s.subscription_type=N'Custom'
+                      AND s.status='Active'
+                      AND ISNULL(s.subscription_status,'Active')='Active'
+                )
+                    THROW 51042, 'The selected custom release is not found for this organization.', 1;
+                """;
+            customCheck.CommandType = CommandType.Text;
+            Add(customCheck, "@organization_id", organizationId);
+            Add(customCheck, "@subscription_id", -releaseId.Value);
+            await customCheck.ExecuteNonQueryAsync(cancellationToken);
+        }
+        else if (organizationId is not null && releaseId is not null)
         {
             // 393: this used to sync statements and import practices at read
             // time, straight from grac_new. Subscribing now copies both
@@ -2802,7 +3068,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         }
 
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = (ApplicableStatementsBuildSql + """
             ;WITH requirement_statement AS (
                 SELECT
                     q.organization_requirement_id OrganizationRequirementId,
@@ -2833,6 +3099,13 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 q.origin_type OriginType,
                 q.repository_requirement_id RepositoryRequirementId,
                 q.org_statement_id OrgStatementId,
+                -- 2026-10-18: the grid's group heading is the SOURCE STATEMENT
+                -- the practice is shown under (grp below), not a Control. One
+                -- row per (practice, statement of the selected release).
+                grp.GroupOrgStatementId,
+                grp.GroupFrameworkStatementId,
+                grp.GroupStatementReference,
+                grp.GroupStatementTitle,
                 COALESCE(filter_oc.organization_control_id,q.organization_control_id) OrganizationControlId,
                 COALESCE(filter_oc.control_code,oc.control_code,ofs.statement_reference) ControlCode,
                 COALESCE(filter_oc.control_name,oc.control_name,ofs.statement_title) ControlName,
@@ -2878,8 +3151,10 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 -- QueryReleaseStatementsAsync, one level down: Implemented only
                 -- when the Practice has instances and EVERY one of them is
                 -- Implemented, so a single unfinished instance holds the whole
-                -- Practice back. A Practice with no instances has nothing
-                -- Implemented and falls through to Not Implemented.
+                -- Practice back. 456: the default is Not Updated -- a Practice
+                -- is Not Implemented only once at least one of its instances
+                -- has been updated; with no instances, or none updated, it
+                -- stays Not Updated.
                 CASE
                     WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated')=N'Applicable'
                          AND COALESCE(pic.PracticeInstanceCount,0)>0
@@ -2887,7 +3162,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated')=N'Applicable'
                          AND COALESCE(pic.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
                     WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
-                    ELSE N'Not Implemented'
+                    WHEN COALESCE(aps.status_name,q.applicability_status,N'Not Updated')=N'Applicable'
+                         AND COALESCE(pic.UpdatedInstanceCount,0)>0 THEN N'Not Implemented'
+                    ELSE N'Not Updated'
                 END PracticeImplementationStatus,
                 COALESCE(owner.employee_name,p.practice_owner,N'') PracticeOwner,
                 -- Added so Update Applicability opens pre-filled: the requirement's
@@ -2934,6 +3211,77 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=q.applicability_status_id
             LEFT JOIN grac_practice.implementation_status_master ims ON ims.implementation_status_id=q.implementation_status_id
             LEFT JOIN requirement_statement rsmap ON rsmap.OrganizationRequirementId=q.organization_requirement_id
+            -- 2026-10-18: Organization Practices groups by source statement.
+            -- A practice is unique (one organization_requirement per
+            -- repository requirement) and is linked to statements through its
+            -- own org_statement_id AND organization_statement_practice_mapping
+            -- -- possibly several statements of the same release, and
+            -- statements of other releases. With a release selected, this
+            -- yields one row per statement OF THAT RELEASE the practice is
+            -- linked to, so the practice is listed under each of them (the
+            -- same rule the Control Statements drill already follows). The
+            -- screen always sends a release now ("All" was removed), so the
+            -- heading is never ambiguous.
+            --   Repository release: the organization's copied statements of
+            --     the release (copied_dt set, Active structure node -- the
+            --     same rows requirement_statement and the Control Statements
+            --     tree read).
+            --   Custom release (@custom_subscription_id): that subscription's
+            --     custom statements.
+            -- A Repository practice is listed only under statements that pass
+            -- the grid's own scope gate (#applicable: Applicable under a
+            -- release with an owner), so it never appears under a Not
+            -- Applicable statement heading. A statement drill
+            -- (@framework_statement_id / @org_statement_id) is narrowed to
+            -- that one statement and is not re-gated, so the drill lists
+            -- exactly what it did before.
+            -- No release (@release_id NULL) or a single-record read (@p_id)
+            -- -> no rows -> OUTER APPLY keeps the one practice row with NULL
+            -- group columns, i.e. the previous behaviour.
+            OUTER APPLY (
+                SELECT gs.org_statement_id GroupOrgStatementId,
+                       gs.framework_statement_id GroupFrameworkStatementId,
+                       gs.statement_reference GroupStatementReference,
+                       gs.statement_title GroupStatementTitle,
+                       gn.display_order GroupNodeDisplayOrder,
+                       gs.display_order GroupStatementDisplayOrder
+                FROM grac_practice.organization_framework_statements gs
+                LEFT JOIN grac_practice.organization_statement_structure_node gn ON gn.organization_id=gs.organization_id
+                    AND gn.structure_node_id=gs.structure_node_id
+                    AND gn.status='Active'
+                WHERE @release_id IS NOT NULL
+                  AND @p_id=0
+                  AND gs.organization_id=q.organization_id
+                  AND gs.status='Active'
+                  AND ((@custom_subscription_id IS NULL
+                        AND gs.release_id=@release_id
+                        AND gs.source_type=N'Repository'
+                        AND gs.copied_dt IS NOT NULL
+                        AND gn.structure_node_id IS NOT NULL)
+                    OR (@custom_subscription_id IS NOT NULL
+                        AND gs.source_type=N'Custom'
+                        AND gs.subscription_id=@custom_subscription_id))
+                  AND (gs.org_statement_id=q.org_statement_id
+                       OR EXISTS(
+                           SELECT 1
+                           FROM grac_practice.organization_statement_practice_mapping gm
+                           WHERE gm.org_practice_id=q.organization_requirement_id
+                             AND gm.organization_id=q.organization_id
+                             AND gm.status='Active'
+                             AND (gm.org_statement_id=gs.org_statement_id
+                                  OR (gm.org_statement_id IS NULL
+                                      AND gs.framework_statement_id IS NOT NULL
+                                      AND gm.framework_statement_id=gs.framework_statement_id))))
+                  AND (@framework_statement_id IS NULL OR gs.framework_statement_id=@framework_statement_id)
+                  AND (@org_statement_id IS NULL OR gs.org_statement_id=@org_statement_id)
+                  AND (@framework_statement_id IS NOT NULL
+                       OR @org_statement_id IS NOT NULL
+                       OR ISNULL(q.origin_type,N'')<>N'Repository'
+                       OR EXISTS(
+                           SELECT 1 FROM #applicable ga
+                           WHERE ga.organization_id=gs.organization_id
+                             AND ga.org_statement_id=gs.org_statement_id))
+            ) grp
             OUTER APPLY (
                 SELECT TOP (1) p.practice_id,p.practice_owner_id,p.practice_owner,p.exclusion_justification
                 FROM grac_practice.practice p
@@ -2951,7 +3299,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 -- same two joins as the count, so asking twice would scan the
                 -- instances twice for one row of grid.
                 SELECT COUNT_BIG(1) PracticeInstanceCount,
-                       COUNT_BIG(CASE WHEN ism_pi.status_code=N'Implemented' THEN 1 END) ImplementedInstanceCount
+                       COUNT_BIG(CASE WHEN ism_pi.status_code=N'Implemented' THEN 1 END) ImplementedInstanceCount,
+                       -- 456: instances past the Not Updated default.
+                       COUNT_BIG(CASE WHEN COALESCE(ism_pi.status_code,pi.implementation_status,N'Not Updated') NOT IN (N'Not Updated',N'Not Started') THEN 1 END) UpdatedInstanceCount
                 FROM grac_practice.practice_instance pi
                 JOIN grac_practice.practice pp ON pp.practice_id=pi.practice_id
                 LEFT JOIN grac_practice.implementation_status_master ism_pi
@@ -2991,6 +3341,11 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
               )
               AND (@p_id=0 OR q.organization_requirement_id=@p_id)
               AND (@organization_id IS NULL OR q.organization_id=@organization_id)
+              -- 460: View Data Scope (415) on Organization Practices -- a
+              -- restricted reader sees a practice they own, or one with an
+              -- instance they may see. Applies to a single-record read too,
+              -- as 415's policy does. Unrestricted readers: no effect.
+              AND EXISTS (SELECT 1 FROM grac_practice.fn_pm_view_scope_requirement(q.organization_requirement_id))
               -- 2026-09-28: the Practices grid lists a statement-linked practice
               -- only when one of its statements is Applicable under a release
               -- with an owner (see PracticeStatementScopeSql). A single-record
@@ -3010,7 +3365,30 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                        WHERE m.organization_requirement_id=q.organization_requirement_id
                          AND m.organization_control_id=@organization_control_id
                          AND m.status='Active'))
-              AND (@release_id IS NULL OR COALESCE(ofs.release_id,filter_oc.release_id,oc.release_id)=@release_id)
+              -- Release filter (2026-10-18): the practice is in the selected
+              -- release when grp found at least one statement of it -- its own
+              -- statement OR a mapped one. Previously only the practice's own
+              -- statement's release (or its Control's) counted, so a practice
+              -- whose first statement sits in another framework was missing
+              -- from every framework it is only MAPPED into. Custom release
+              -- (negative id, see the check above): grp reads that
+              -- subscription's custom statements, which is the same rule the
+              -- old custom branch applied. A single-record read (@p_id) is not
+              -- release-filtered, so an open form still loads.
+              -- @custom_subscription_id is computed in C#, not by negating the
+              -- release id here: an absent releaseId arrives as an untyped NULL
+              -- (nvarchar), and unary minus on nvarchar is SQL error 8117.
+              AND (@release_id IS NULL OR @p_id<>0 OR grp.GroupOrgStatementId IS NOT NULL)
+              -- Custom-statement drill: same two links as above, for one statement.
+              AND (@org_statement_id IS NULL
+                   OR q.org_statement_id=@org_statement_id
+                   OR EXISTS(
+                       SELECT 1
+                       FROM grac_practice.organization_statement_practice_mapping om
+                       WHERE om.org_practice_id=q.organization_requirement_id
+                         AND om.organization_id=q.organization_id
+                         AND om.org_statement_id=@org_statement_id
+                         AND om.status='Active'))
               -- Statement-scoped view: resolve statement membership through
               -- organization_statement_practice_mapping so a practice linked to
               -- multiple applicable statements appears under each of them.
@@ -3027,15 +3405,17 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
               AND (@origin_type IS NULL OR q.origin_type=@origin_type)
               AND (@date_from IS NULL OR q.entered_dt>=@date_from)
               AND (@date_to IS NULL OR q.entered_dt<DATEADD(DAY,1,@date_to))
-              AND (@p_search='' OR ISNULL(q.requirement_code,'') LIKE '%'+@p_search+'%' OR ISNULL(q.requirement_name,'') LIKE '%'+@p_search+'%' OR ISNULL(filter_oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(filter_oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(ofs.statement_reference,'') LIKE '%'+@p_search+'%' OR ISNULL(ofs.statement_title,'') LIKE '%'+@p_search+'%')
-            ORDER BY COALESCE(rsmap.SourceStructureDisplayOrder,2147483647),COALESCE(rsmap.FrameworkStatementDisplayOrder,2147483647),COALESCE(ofs.statement_reference,filter_oc.control_code,oc.control_code),q.requirement_code OFFSET @offset ROWS FETCH NEXT @page_size ROWS ONLY;
-            """.Replace("/*PRACTICE_STATEMENT_SCOPE*/", PracticeStatementScopeSql);
+              AND (@p_search='' OR ISNULL(q.requirement_code,'') LIKE '%'+@p_search+'%' OR ISNULL(q.requirement_name,'') LIKE '%'+@p_search+'%' OR ISNULL(filter_oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(filter_oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_code,'') LIKE '%'+@p_search+'%' OR ISNULL(oc.control_name,'') LIKE '%'+@p_search+'%' OR ISNULL(ofs.statement_reference,'') LIKE '%'+@p_search+'%' OR ISNULL(ofs.statement_title,'') LIKE '%'+@p_search+'%' OR ISNULL(grp.GroupStatementReference,'') LIKE '%'+@p_search+'%' OR ISNULL(grp.GroupStatementTitle,'') LIKE '%'+@p_search+'%')
+            ORDER BY COALESCE(grp.GroupNodeDisplayOrder,rsmap.SourceStructureDisplayOrder,2147483647),COALESCE(grp.GroupStatementDisplayOrder,rsmap.FrameworkStatementDisplayOrder,2147483647),COALESCE(grp.GroupStatementReference,ofs.statement_reference,filter_oc.control_code,oc.control_code),grp.GroupOrgStatementId,q.requirement_code OFFSET @offset ROWS FETCH NEXT @page_size ROWS ONLY;
+            """).Replace("/*PRACTICE_STATEMENT_SCOPE*/", PracticeStatementScopeSetBasedSql);
         command.CommandType = CommandType.Text;
         Add(command, "@p_id", id);
         Add(command, "@organization_id", organizationId);
         Add(command, "@organization_control_id", organizationControlId);
         Add(command, "@release_id", releaseId);
         Add(command, "@framework_statement_id", frameworkStatementId);
+        Add(command, "@org_statement_id", orgStatementId);
+        Add(command, "@custom_subscription_id", releaseId is < 0 ? (int?)(-releaseId.Value) : null);
         Add(command, "@p_status", status ?? "");
         Add(command, "@origin_type", JsonText(payload, "originType"));
         Add(command, "@date_from", JsonDate(payload, "dateFrom"));
@@ -3243,6 +3623,31 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         if (!organizationId.HasValue) throw new InvalidOperationException("Organization context is required to load dependency objects.");
         if (!dependencyTypeId.HasValue) throw new InvalidOperationException("Dependency Type is required to load dependency objects.");
 
+        // Risk Analysis -> Impact Details (change request, 2026-10-15):
+        // the Asset picker used to fetch up to pageSize objects up front
+        // and filter the already-downloaded list client side by Category
+        // / Sub-category / Type. On an organisation with a large asset
+        // register that first fetch WAS the full register in practice,
+        // the thing the Category/Sub-category/Type cascade was supposed
+        // to avoid -- the cascade only ever narrowed what was shown, not
+        // what was downloaded. These three are optional and apply ONLY
+        // to the asset source table below; every other dependency type
+        // ignores them exactly as it did before.
+        // Arrays, not scalars: the cascade combos are the SAME
+        // pm-checkcombo multi-select as every other Impact Details
+        // filter, so a reader can tick more than one Category/Sub-
+        // category/Type at once -- JsonIntArray is the existing helper
+        // for exactly that shape (definitionIds, allowedOrganizationIds
+        // above). Re-serialised to a JSON array string for OPENJSON,
+        // the same CSV/array-down-into-SQL idiom @allowed already uses
+        // a few hundred lines up.
+        var assetCategoryIds = JsonIntArray(payload, "assetCategoryIds");
+        var assetSubcategoryIds = JsonIntArray(payload, "assetSubcategoryIds");
+        var assetTypeIds = JsonIntArray(payload, "assetTypeIds");
+        var assetCategoryIdsJson = assetCategoryIds.Length > 0 ? JsonSerializer.Serialize(assetCategoryIds) : null;
+        var assetSubcategoryIdsJson = assetSubcategoryIds.Length > 0 ? JsonSerializer.Serialize(assetSubcategoryIds) : null;
+        var assetTypeIdsJson = assetTypeIds.Length > 0 ? JsonSerializer.Serialize(assetTypeIds) : null;
+
         await using var configCommand = connection.CreateCommand();
         configCommand.CommandText = """
             SELECT TOP 1
@@ -3374,6 +3779,16 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             ? ", asset_category_id AssetCategoryId, asset_subcategory_id AssetSubcategoryId, asset_type_id AssetTypeId"
             : ", CAST(NULL AS INT) AssetCategoryId, CAST(NULL AS INT) AssetSubcategoryId, CAST(NULL AS INT) AssetTypeId";
 
+        // Same guard as extraSelect above: only the asset table has these
+        // columns, so the filter is only ever applied there. A NULL
+        // filter value means "not narrowed yet" and matches every row,
+        // same as the client-side cascade used to.
+        var assetFilterWhere = isAssetSource
+            ? " AND (@asset_category_ids IS NULL OR EXISTS (SELECT 1 FROM OPENJSON(@asset_category_ids) WHERE TRY_CONVERT(INT,[value])=asset_category_id))"
+            + " AND (@asset_subcategory_ids IS NULL OR EXISTS (SELECT 1 FROM OPENJSON(@asset_subcategory_ids) WHERE TRY_CONVERT(INT,[value])=asset_subcategory_id))"
+            + " AND (@asset_type_ids IS NULL OR EXISTS (SELECT 1 FROM OPENJSON(@asset_type_ids) WHERE TRY_CONVERT(INT,[value])=asset_type_id))"
+            : "";
+
         // The Person category resolves to organization_employee, and its
         // picker reads "Vinod - Risk Owner". The roles are a SEPARATE
         // column, never folded into Label: the option label is what the
@@ -3429,7 +3844,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     CAST({QuoteName(statusColumn)} AS NVARCHAR(80))=@active_status
                     OR (@active_status=N'Active' AND CAST({QuoteName(statusColumn)} AS NVARCHAR(80)) IN (N'1',N'True',N'true'))
                   )
-              AND (@search_text=N'' OR CAST({QuoteName(displayColumn)} AS NVARCHAR(300)) LIKE N'%'+@search_text+N'%')
+              AND (@search_text=N'' OR CAST({QuoteName(displayColumn)} AS NVARCHAR(300)) LIKE N'%'+@search_text+N'%'){assetFilterWhere}
             ORDER BY {QuoteName(sortColumn)}
             OFFSET 0 ROWS FETCH NEXT @page_size ROWS ONLY;
 
@@ -3458,6 +3873,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         Add(command, "@is_multi_select_allowed", isMultiSelectAllowed ? 1 : 0);
         Add(command, "@search_text", search ?? "");
         Add(command, "@page_size", pageSize);
+        Add(command, "@asset_category_ids", (object?)assetCategoryIdsJson ?? DBNull.Value);
+        Add(command, "@asset_subcategory_ids", (object?)assetSubcategoryIdsJson ?? DBNull.Value);
+        Add(command, "@asset_type_ids", (object?)assetTypeIdsJson ?? DBNull.Value);
         var tables = await ReadTablesAsync(command, cancellationToken);
         if (tables.Count > 1 && tables[1].Count > 0) tables[1][0]["RecordsReturned"] = tables.FirstOrDefault()?.Count ?? 0;
         return tables;

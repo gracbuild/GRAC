@@ -782,7 +782,12 @@ public sealed record RiskRegisterDetail(
     // added to sp_risk_register_get so the Risk View detail page can
     // show every mapped category without a second round trip. Null on
     // a database not yet migrated to 376.
-    string? RiskCategoryNames = null);
+    string? RiskCategoryNames = null,
+    // 485. What Review Risk pre-fills: the applied assessment's analyst
+    // remark and the review cadence. Null on a database without 485.
+    string? AnalystRemarks = null,
+    int? ReviewFrequencyId = null,
+    string? ReviewFrequencyName = null);
 
 // =====================================================================
 // Residual Risk Analysis — migration 258 (BRD §9.1, §17, §20, §22)

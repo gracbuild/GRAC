@@ -1,0 +1,577 @@
+@*
+    Add Custom Gap  (dedicated full page, 2026-10-25)
+
+    Route: /Practice/Index/gap-new?orgId=NNN&orgName=...
+
+    The Gap Register's "Add Gap" opened a popup. With the two new narrative
+    fields (migration 491) the form needs the width of the page, so the
+    SAME form and its handlers moved here from gaps.cshtml (nothing is
+    left behind there): Organization, Title, Description, Current State /
+    As-Is (new), Gap Identified / Finding (new), Comments / Management
+    Response (was Remarks), Severity, Status, Owner, Due Date, Detection
+    Method and the mapped practice instances. Same API (POST
+    /practice/api/gaps/custom). Create or Cancel returns to the Gap
+    Register (Custom source, this organization).
+
+    Edit Custom Gap (migration 495, 2026-10-27)
+    Route: /Practice/Index/gap-edit?gapId=NNN&orgId=NNN[&orgName=...][&from=view]
+    gap-edit.cshtml renders THIS page in edit mode (Model.Key = gap-edit):
+    the same form, filled from the gap's header (GET
+    /practice/api/gap-lifecycle/gaps/{id}/header) and its mapped practice
+    instances (GET /practice/api/gaps/custom/{id}/practices), saved with
+    POST /practice/api/gaps/custom/{id}/edit (sp_custom_gap_edit). Status is
+    not on the edit form -- it moves through the lifecycle actions. Who may
+    edit when is window.gracGapActions.editBlockedReason (Shared/
+    gap-actions.js), the rule the menus disable Edit with; the procedure
+    enforces it. Save or Cancel returns to Gap View (from=view) or the
+    Gap Register.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    // 495: the same page edits a gap when opened as gap-edit.
+    var gnIsEdit = string.Equals(Model.Key, "gap-edit", StringComparison.OrdinalIgnoreCase);
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@(gnIsEdit ? "Edit Custom Gap" : "Add Custom Gap")</h1>
+        <p class="pm-hint">@(gnIsEdit
+            ? "Change the gap's details and the practice instances it concerns, and save them — or go back."
+            : "Record the gap, map the practice instances it concerns, and create it — or go back to the register.")</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <a class="pm-button" id="newGapBack" href="~/Practice/Index/gaps">
+            <i class="fa-solid fa-arrow-left"></i> <span id="newGapBackText">Back to Gap Register</span>
+        </a>
+    </div>
+</div>
+
+@* 495: edit mode only -- no gap given, not found, or not editable. *@
+<section class="pm-panel" id="newGapUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="newGapUnavailableTitle">This gap cannot be edited.</h2>
+        <p id="newGapUnavailableBody"></p>
+    </div>
+</section>
+
+<section class="pm-panel" id="newGapNoOrg" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2>Select an organization first.</h2>
+        <p>Open this page from the Gap Register's Add Gap button so the gap is created in an organization.</p>
+    </div>
+</section>
+
+@* ---------- Add Custom Gap form (was the #newCustomGapDialog popup in
+     gaps.cshtml, moved here unchanged apart from the marked parts) ---------- *@
+<section class="pm-panel" id="newCustomGapPanel" hidden>
+    <form id="newCustomGapForm" style="margin:0;">
+        <div class="pm-message" id="newGapMessage" style="display:none;"></div>
+        <div style="background:var(--neutral-50); border:1px solid var(--border); border-radius:var(--radius-md); padding:8px 12px; margin-bottom:14px;">
+            <div style="font-size:11px; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.04em;">Organization</div>
+            <div id="newGapOrgLabel" style="font-weight:600; color:var(--fg-strong);">-</div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr; gap:8px;">
+            <div style="display:grid; grid-template-columns:170px 1fr; gap:10px; align-items:end;">
+                <label class="pm-field">Gap Type
+                    <input class="pm-input" id="newGapType" type="text" value="Custom" readonly
+                           style="background:var(--bg-subtle);" />
+                </label>
+                <label class="pm-field"><span>Title <span class="required">*</span></span>
+                    <input class="pm-input" id="newGapTitle" type="text" maxlength="250" required
+                           />
+                </label>
+            </div>
+            @* 491 (2026-10-25): two new narrative fields, and Remarks relabelled
+               "Comments / Management Response" (same column, same API name,
+               remarks). Two per row, four rows high, now that the page has
+               the width the popup did not. *@
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label class="pm-field">Description
+                    <textarea class="pm-input" id="newGapDescription" rows="4" maxlength="4000"
+                             ></textarea>
+                </label>
+                <label class="pm-field">Current State / As-Is
+                    <textarea class="pm-input" id="newGapCurrentState" rows="4" maxlength="4000"
+                              placeholder="How things stand today"></textarea>
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label class="pm-field">Gap Identified / Finding
+                    <textarea class="pm-input" id="newGapFinding" rows="4" maxlength="4000"
+                              placeholder="What falls short, and against what"></textarea>
+                </label>
+                <label class="pm-field">Comments / Management Response
+                    <textarea class="pm-input" id="newGapRemarks" rows="4" maxlength="1000"
+                             ></textarea>
+                </label>
+            </div>
+            @* 2026-10-25: Priority removed -- Severity is the one rank a
+               Custom gap carries, and the one its SLA is matched on
+               (sp_custom_gap_apply_sla). Severity takes Priority's place in
+               this row and is required; the payload still sends priority =
+               severity so custom_gap.priority stays in step for every
+               reader that falls back to it. *@
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label class="pm-field"><span>Severity <span class="required">*</span></span>
+                    <select class="pm-input" id="newGapSeverity" required>
+                        <option value="Low">Low</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </label>
+                @* 495: not on the edit form -- an existing gap's status moves
+                   through the lifecycle actions (Close Gap, Start, ...). *@
+                @if (!gnIsEdit)
+                {
+                <label class="pm-field">Status
+                    <select class="pm-input" id="newGapStatus">
+                        <option value="Open" selected>Open</option>
+                        <option value="InProgress">In Progress</option>
+                        <option value="Closed">Closed</option>
+                        <option value="Cancelled">Cancelled</option>
+                    </select>
+                </label>
+                }
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label class="pm-field">Owner
+                    <select class="pm-input" id="newGapOwner">
+                        <option value="">Loading employees...</option>
+                    </select>
+                </label>
+                <label class="pm-field">Due Date
+                    <input class="pm-input" id="newGapDueDate" type="date"
+                           />
+                </label>
+            </div>
+            @* Migration 250: Detection Method + Severity captured at Add
+               time. For a Custom gap the analysis form no longer has to
+               fake "auto" values -- these flow through the header and
+               pre-fill the analysis card the first time it opens. Both
+               dropdowns match the vocabularies the analysis form uses,
+               so a value picked here maps 1:1 to the analysis field.
+               (Severity moved up, into Priority's place, 2026-10-25.) *@
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <label class="pm-field">Detection Method
+                    <select class="pm-input" id="newGapDetectionMethod">
+                        <option value="">--</option>
+                        <option value="Manual">Manual review</option>
+                        <option value="Assurance">Assurance observation</option>
+                        <option value="Audit">Audit finding</option>
+                        <option value="AutoScan">Automated scan</option>
+                        <option value="External">External report</option>
+                    </select>
+                </label>
+            </div>
+            @* Migration 382: map relevant Practice(s), reusing the same
+               cascading Practice Picker used by Risk Analysis. *@
+            <div style="margin-top:6px;">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <label style="font-size:12px; color:var(--fg-secondary); font-weight:600;">Mapped Practice Instances <span class="required">*</span></label>
+                    <button type="button" id="newGapMapPracticeBtn" class="pm-button" style="padding:4px 10px; font-size:12px;">
+                        <i class="fa-solid fa-diagram-project" aria-hidden="true"></i> Map practice instance
+                    </button>
+                </div>
+                <div id="newGapPracticeList" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
+                    <span class="pm-hint" style="font-size:12px; color:var(--fg-subtle);">No practices mapped yet.</span>
+                </div>
+            </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+            <button type="button" id="newGapCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="newGapSubmit" class="pm-button primary">@(gnIsEdit ? "Save Changes" : "Create Gap")</button>
+        </div>
+    </form>
+</section>
+
+@* Migration 382: Map-a-practice dialog for the Add Custom Gap form.
+   Reuses the shared cascading Practice Picker (practice-picker.js,
+   migration 282) exactly as Risk Centre's #riskMapPracticeModal does. *@
+<dialog id="gapMapPracticeModal" style="max-width:720px; width:94%; max-height:92vh; overflow:auto;">
+    <div style="padding:20px 24px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <h2 style="margin:0; font-size:18px;">Map a practice instance</h2>
+            <button class="pm-icon-button" type="button" data-close-gap-map aria-label="Close">&times;</button>
+        </div>
+        <p class="pm-hint" style="font-size:12px; color:var(--fg-muted);">
+            Choose the framework, then narrow down to the practice and its instance. Each list loads only
+            what sits under the selection above it. Instances already mapped to this gap are not offered.
+        </p>
+        <div id="gapMapPickerHost"></div>
+        <p class="pm-form-message" id="gapMapPickerMessage" role="status" aria-live="polite"></p>
+        <div class="pm-dialog-actions">
+            <button type="button" class="pm-button" data-close-gap-map>Cancel</button>
+            <button type="button" class="pm-button primary" id="gapMapPickerConfirm">
+                <i class="fa-solid fa-link" aria-hidden="true"></i> Map practice instance
+            </button>
+        </div>
+    </div>
+</dialog>
+<script src="~/js/practice-picker.js" asp-append-version="true"></script>
+@* 495: editBlockedReason + editUrl -- the Edit rule shared with the menus. *@
+<script src="~/js/Shared/gap-actions.js" asp-append-version="true"></script>
+
+@* Shared banner / escape helpers -- window.__wfCommon (setGapMsg uses it). *@
+<partial name="Partials/_workflow-common" />
+
+<script>
+(function () {
+    'use strict';
+    const U = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const params = new URLSearchParams(location.search);
+    const selectedOrgId   = Number(params.get('orgId')) || null;
+    const selectedOrgName = params.get('orgName') || null;
+    const registerUrl = U('/Practice/Index/gaps') + '?source=Custom'
+                      + (selectedOrgId ? '&organizationId=' + encodeURIComponent(selectedOrgId) : '');
+    // 495: edit mode (gap-edit). Save / Cancel return to Gap View when the
+    // page was opened from there, otherwise to the Gap Register.
+    const isEdit = @(gnIsEdit ? "true" : "false");
+    const editGapId = Number(params.get('gapId')) || null;
+    const returnUrl = (isEdit && editGapId && params.get('from') === 'view')
+        ? U('/Practice/Index/gap-view') + '?gapId=' + encodeURIComponent(editGapId)
+              + '&orgId=' + encodeURIComponent(selectedOrgId || '')
+        : registerUrl;
+    // Migration 382: practices mapped in the Add Custom Gap form.
+    let selectedPractices = [];
+    let gapMapPicker = null;
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    function init() {
+        const back = document.getElementById('newGapBack');
+        if (back) back.href = returnUrl;
+        if (returnUrl !== registerUrl) {
+            const bt = document.getElementById('newGapBackText');
+            if (bt) bt.textContent = 'Back to Gap View';
+        }
+        if (isEdit) {
+            if (!editGapId || !selectedOrgId) {
+                showUnavailable('No gap was specified.', "Open this page from the Gap Register's or Gap View's Edit action.");
+                return;
+            }
+            wireAddGapForm();
+            openEditGapForm();
+            return;
+        }
+        if (!selectedOrgId) { document.getElementById('newGapNoOrg').hidden = false; return; }
+        document.getElementById('newCustomGapPanel').hidden = false;
+        wireAddGapForm();
+        openAddGapForm();
+    }
+    // 495: edit mode cannot go ahead -- say why instead of the form.
+    function showUnavailable(title, body) {
+        document.getElementById('newCustomGapPanel').hidden = true;
+        document.getElementById('newGapUnavailable').hidden = false;
+        document.getElementById('newGapUnavailableTitle').textContent = title;
+        document.getElementById('newGapUnavailableBody').textContent  = body || '';
+    }
+
+    // 495: `current` / `currentName` keep an edited gap's owner selected --
+    // added as an option when no longer in the active list.
+    async function loadGapOwnerOptions(orgId, current, currentName) {
+        const sel = document.getElementById('newGapOwner');
+        sel.innerHTML = '<option value="">Loading employees...</option>';
+        sel.disabled  = true;
+        try {
+            const r = await fetch(U('/practice/api/organizations/') + encodeURIComponent(orgId) + '/employees',
+                                  { credentials: 'same-origin' });
+            const arr = r.ok ? await r.json() : [];
+            sel.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = (arr && arr.length) ? '(no owner)' : 'No active employees for this organization';
+            sel.appendChild(placeholder);
+            (arr || []).forEach(function (emp) {
+                const opt = document.createElement('option');
+                opt.value = String(emp.employeeId);
+                let label = emp.employeeName || '';
+                if (emp.employeeCode) label += ' (' + emp.employeeCode + ')';
+                opt.textContent = label;
+                if (emp.email) opt.title = emp.email;
+                sel.appendChild(opt);
+            });
+            if (current) {
+                if (!Array.prototype.some.call(sel.options, function (o) { return o.value === String(current); })) {
+                    const opt = document.createElement('option');
+                    opt.value = String(current);
+                    opt.textContent = currentName || ('Employee #' + current);
+                    sel.appendChild(opt);
+                }
+                sel.value = String(current);
+            }
+        } catch (_) {
+            sel.innerHTML = '<option value="">Failed to load employees</option>';
+        } finally { sel.disabled = false; }
+    }
+    // Was called throughout the Add Gap dialog's own handlers below
+    // (openAddGapDialog, and the form's submit handler) but never
+    // defined -- clicking Add Gap threw "setGapMsg is not defined"
+    // before the dialog could even open. #newGapMessage is the
+    // dialog's own message banner (line ~117); _workflow-common.cshtml
+    // (included below, line ~209) already exposes the same ok/error/info
+    // banner logic as window.__wfCommon.setMessage(id, text, kind) --
+    // used the same way by wirePagers()/updatePager() just below -- so
+    // this reuses that instead of a third copy of the colour rules
+    // (gap-detail.js's showSlaMsg is the second).
+    function setGapMsg(text, kind) {
+        const wf = window.__wfCommon;
+        if (!wf) { console.error('__wfCommon missing - _workflow-common partial not rendered'); return; }
+        wf.setMessage('newGapMessage', text, kind);
+    }
+    // ---- Migration 382: mapped-practices helpers (reuse __practicePicker) ----
+    function gapEsc(v) {
+        return (window.__wfCommon && window.__wfCommon.escape) ? window.__wfCommon.escape(v) : String(v == null ? '' : v);
+    }
+    function renderGapPractices() {
+        const list = document.getElementById('newGapPracticeList');
+        if (!list) return;
+        if (!selectedPractices.length) {
+            list.innerHTML = '<span class="pm-hint" style="font-size:12px; color:var(--fg-subtle);">No practice instances mapped yet.</span>';
+            return;
+        }
+        list.innerHTML = selectedPractices.map(function (pr) {
+            return '<span style="display:inline-flex; align-items:center; gap:6px; background:var(--primary-50); border:1px solid var(--primary-200); color:var(--primary-800); border-radius:12px; padding:2px 10px; font-size:12px;">'
+                + gapEsc(pr.practiceName) + (pr.practiceInstanceName ? ' - ' + gapEsc(pr.practiceInstanceName) : '')
+                + ' <button type="button" data-remove-practice="' + pr.practiceInstanceId + '" aria-label="Remove practice instance" style="background:none; border:none; cursor:pointer; color:var(--primary-800); font-size:14px; line-height:1;">&times;</button></span>';
+        }).join('');
+    }
+    function closeGapMapPractice() {
+        const m = document.getElementById('gapMapPracticeModal');
+        if (!m) return;
+        if (typeof m.close === 'function' && m.open) m.close();
+        else { m.removeAttribute('open'); m.style.display = 'none'; }
+    }
+    function openGapMapPractice() {
+        const modal = document.getElementById('gapMapPracticeModal');
+        const host  = document.getElementById('gapMapPickerHost');
+        const msg   = document.getElementById('gapMapPickerMessage');
+        if (!modal || !host) return;
+        if (msg) { msg.textContent = ''; msg.className = 'pm-form-message'; }
+        const showMap = function () { if (typeof modal.showModal === 'function') modal.showModal(); else { modal.setAttribute('open','open'); modal.style.display='block'; } };
+        if (!window.__practicePicker) { host.innerHTML = '<span class="pm-hint">Practice picker unavailable - practice-picker.js did not load.</span>'; showMap(); return; }
+        if (!selectedOrgId) { host.innerHTML = '<span class="pm-hint">Select an organization first.</span>'; showMap(); return; }
+        // Fresh instance each open: exclude what is already mapped so the
+        // same practice INSTANCE cannot be added twice (388 -- same
+        // behaviour as Risk Analysis since 387). Another instance of an
+        // already-mapped practice can still be added.
+        const excluded = selectedPractices.map(function (pr) { return pr.practiceInstanceId; });
+        try { if (gapMapPicker && gapMapPicker.destroy) gapMapPicker.destroy(); } catch (e) {}
+        gapMapPicker = window.__practicePicker.attach({
+            host: host,
+            organizationId: Number(selectedOrgId),
+            excludePracticeInstanceIds: excluded
+        });
+        showMap();
+    }
+    function confirmGapMapPractice() {
+        const msg = document.getElementById('gapMapPickerMessage');
+        const st  = (gapMapPicker && gapMapPicker.getState) ? gapMapPicker.getState() : null;
+        const pid = st && st.practiceId ? Number(st.practiceId) : null;
+        const iid = st && st.practiceInstanceId ? Number(st.practiceInstanceId) : null;
+        // 388: the picker ends at the practice instance (isComplete).
+        if (!pid || !iid || !st.isComplete) { if (msg) { msg.textContent = 'Select a practice instance first.'; msg.className = 'pm-form-message error'; } return; }
+        if (!selectedPractices.some(function (pr) { return pr.practiceInstanceId === iid; })) {
+            selectedPractices.push({
+                practiceId: pid, practiceName: st.practiceName || ('Practice #' + pid),
+                practiceInstanceId: iid, practiceInstanceName: st.practiceInstanceName || ('Instance #' + iid)
+            });
+            renderGapPractices();
+        }
+        closeGapMapPractice();
+    }
+
+    // Was openAddGapDialog (gaps.cshtml): prepares the form, now on its
+    // own page, for the organization the Gap Register passed in.
+    function openAddGapForm() {
+        setGapMsg(null);
+        ['newGapTitle','newGapDescription','newGapCurrentState','newGapFinding','newGapDueDate','newGapRemarks'].forEach(function (id) {
+            const el = document.getElementById(id); if (el) el.value = '';
+        });
+        const sv = document.getElementById('newGapSeverity'); if (sv) sv.value = 'Medium';
+        const st = document.getElementById('newGapStatus');   if (st) st.value = 'Open';
+        const sub = document.getElementById('newGapSubmit');  if (sub) sub.disabled = false;
+        const lbl = document.getElementById('newGapOrgLabel');
+        if (lbl) lbl.textContent = selectedOrgName || ('Organization ' + selectedOrgId);
+        loadGapOwnerOptions(selectedOrgId);
+        selectedPractices = [];
+        renderGapPractices();
+        setTimeout(function () { const t = document.getElementById('newGapTitle'); if (t) t.focus(); }, 40);
+    }
+    // 495: edit mode -- fill the form from the gap. Header (the same call
+    // Gap View makes) for the fields, the mapping list for the practice
+    // instances. A gap that cannot be edited shows why, not the form.
+    async function openEditGapForm() {
+        setGapMsg(null);
+        let h = null, rows = [];
+        try {
+            const r = await fetch(U('/practice/api/gap-lifecycle/gaps/') + encodeURIComponent(editGapId) + '/header',
+                                  { credentials: 'same-origin' });
+            if (r.ok) h = await r.json();
+        } catch (_) { /* reported below */ }
+        if (!h || Number(h.organizationId) !== Number(selectedOrgId)) {
+            showUnavailable('Could not load this gap.', 'Gap #' + editGapId + ' was not found in this organization.');
+            return;
+        }
+        if ((h.sourceModuleCode || 'Custom') !== 'Custom') {
+            showUnavailable('This gap cannot be edited.', 'Only a Custom gap is edited here; this one belongs to its source module.');
+            return;
+        }
+        const blocked = window.gracGapActions
+            ? window.gracGapActions.editBlockedReason({
+                  statusCode: h.statusCode || '', lifecycleStateCode: h.lifecycleStateCode || '',
+                  isLifecycleTerminal: !!h.lifecycleIsTerminal })
+            : '';
+        if (blocked) { showUnavailable('This gap cannot be edited.', blocked); return; }
+        try {
+            const r = await fetch(U('/practice/api/gaps/custom/') + encodeURIComponent(editGapId)
+                                  + '/practices?organizationId=' + encodeURIComponent(selectedOrgId),
+                                  { credentials: 'same-origin' });
+            if (r.ok) { const b = await r.json(); rows = (b && (b.data || b.Data)) || []; }
+        } catch (_) { rows = []; }
+
+        document.getElementById('newCustomGapPanel').hidden = false;
+        const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+        set('newGapTitle',           h.title);
+        set('newGapDescription',     h.description);
+        set('newGapCurrentState',    h.currentState);
+        set('newGapFinding',         h.gapFinding);
+        set('newGapRemarks',         h.remarks);
+        set('newGapSeverity',        h.severityCode || h.priority || 'Medium');
+        set('newGapDueDate',         h.dueDate ? String(h.dueDate).substring(0, 10) : '');
+        set('newGapDetectionMethod', h.detectionMethodCode || '');
+        const lbl = document.getElementById('newGapOrgLabel');
+        if (lbl) lbl.textContent = selectedOrgName || ('Organization ' + selectedOrgId);
+        // Mapped instances become the chips. A practice-level mapping with
+        // no instance (gaps mapped before 388) has nothing to keep here;
+        // saving replaces it with the instances chosen.
+        selectedPractices = rows
+            .filter(function (x) { return (x.practiceInstanceId || x.PracticeInstanceId); })
+            .map(function (x) {
+                return {
+                    practiceId:           Number(x.practiceId || x.PracticeId),
+                    practiceName:         x.practiceName || x.PracticeName || ('Practice #' + (x.practiceId || x.PracticeId)),
+                    practiceInstanceId:   Number(x.practiceInstanceId || x.PracticeInstanceId),
+                    practiceInstanceName: x.practiceInstanceName || x.PracticeInstanceName || ''
+                };
+            });
+        renderGapPractices();
+        await loadGapOwnerOptions(selectedOrgId, h.ownerEmployeeId, h.ownerName);
+        setTimeout(function () { const t = document.getElementById('newGapTitle'); if (t) t.focus(); }, 40);
+    }
+    // Cancel / after a save: back where the page was opened from (the Gap
+    // Register for Add; Gap View or the Gap Register for Edit, 495).
+    function backToRegister() { window.location.assign(returnUrl); }
+    function wireAddGapForm() {
+        const canB   = document.getElementById('newGapCancel');
+        const form   = document.getElementById('newCustomGapForm');
+        if (canB)   canB.addEventListener('click',   backToRegister);
+        // Migration 382: mapped-practices controls.
+        const mapBtn = document.getElementById('newGapMapPracticeBtn');
+        if (mapBtn) mapBtn.addEventListener('click', openGapMapPractice);
+        const list = document.getElementById('newGapPracticeList');
+        if (list) list.addEventListener('click', function (e) {
+            const rm = e.target.closest('[data-remove-practice]');
+            if (!rm) return;
+            const iid = Number(rm.getAttribute('data-remove-practice'));
+            selectedPractices = selectedPractices.filter(function (pr) { return pr.practiceInstanceId !== iid; });
+            renderGapPractices();
+        });
+        const mapModal = document.getElementById('gapMapPracticeModal');
+        if (mapModal) {
+            mapModal.querySelectorAll('[data-close-gap-map]').forEach(function (b) { b.addEventListener('click', closeGapMapPractice); });
+            mapModal.addEventListener('click', function (e) { if (e.target === mapModal) closeGapMapPractice(); });
+        }
+        const mapConfirm = document.getElementById('gapMapPickerConfirm');
+        if (mapConfirm) mapConfirm.addEventListener('click', confirmGapMapPractice);
+        if (!form) return;
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const title = document.getElementById('newGapTitle').value.trim();
+            if (!title) { setGapMsg('Title is required.', 'error'); return; }
+            if (!selectedPractices.length) { setGapMsg('Map at least one Practice Instance.', 'error'); return; }
+            const submit = document.getElementById('newGapSubmit');
+            submit.disabled = true; setGapMsg('Saving...');
+            const owner = document.getElementById('newGapOwner').value;
+            const due   = document.getElementById('newGapDueDate').value;
+            // Migration 250: detection method + severity flow through
+            // the Add-Gap payload. 2026-10-25: Severity is required (the
+            // Priority field is gone) and is sent as the priority too.
+            const detMeth = document.getElementById('newGapDetectionMethod').value;
+            const sev     = document.getElementById('newGapSeverity').value;
+            if (!sev) { setGapMsg('Severity is required.', 'error'); submit.disabled = false; return; }
+            const payload = {
+                organizationId:  Number(selectedOrgId),
+                gapTypeCode:     'Custom',
+                title:           title,
+                description:     document.getElementById('newGapDescription').value.trim() || null,
+                priority:        sev,   // 2026-10-25: = severity (no Priority field)
+                ownerEmployeeId: owner ? Number(owner) : null,
+                dueDate:         due ? new Date(due + 'T00:00:00Z').toISOString() : null,
+                // 495: the Status field is not on the edit form.
+                status:          (document.getElementById('newGapStatus') || {}).value || 'Open',
+                remarks:         document.getElementById('newGapRemarks').value.trim() || null,
+                // 491: the two narrative fields.
+                currentState:    document.getElementById('newGapCurrentState').value.trim() || null,
+                gapFinding:      document.getElementById('newGapFinding').value.trim() || null,
+                severityCode:         sev     || null,
+                severityName:         sev     || null,
+                detectionMethodCode:  detMeth || null,
+                // Same label the analysis form's dropdown carries; kept
+                // for parity in downstream reports.
+                detectionMethodName:  detMeth || null,
+                // Migration 382: mapped practices saved with the gap
+                // (distinct -- two instances can share a practice).
+                practiceIds:          selectedPractices.map(function (p) { return p.practiceId; })
+                                          .filter(function (v, i, a) { return a.indexOf(v) === i; }),
+                // Migration 388: the mapped practice instances.
+                practiceInstanceIds:  selectedPractices.map(function (p) { return p.practiceInstanceId; })
+            };
+            // 495: edit mode saves the same fields (no status) through
+            // POST /gaps/custom/{id}/edit -- sp_custom_gap_edit, which
+            // keeps priority equal to severity itself.
+            const editPayload = isEdit ? {
+                organizationId:      payload.organizationId,
+                title:               payload.title,
+                description:         payload.description,
+                currentState:        payload.currentState,
+                gapFinding:          payload.gapFinding,
+                remarks:             payload.remarks,
+                severityCode:        payload.severityCode,
+                ownerEmployeeId:     payload.ownerEmployeeId,
+                dueDate:             payload.dueDate,
+                detectionMethodCode: payload.detectionMethodCode,
+                detectionMethodName: payload.detectionMethodName,
+                practiceInstanceIds: payload.practiceInstanceIds
+            } : null;
+            try {
+                const r = await fetch(isEdit
+                        ? U('/practice/api/gaps/custom/') + encodeURIComponent(editGapId) + '/edit'
+                        : U('/practice/api/gaps/custom'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify(isEdit ? editPayload : payload)
+                });
+                const b = await r.json().catch(function () { return {}; });
+                if (r.ok) {
+                    setGapMsg('Custom Gap #' + (b.customGapId || '?') + (isEdit ? ' saved.' : ' created.'), 'ok');
+                    // Back to the Gap Register on the Custom source, in this
+                    // organization, where the gap is listed (or, for an edit
+                    // opened from Gap View, back to that view -- 495).
+                    setTimeout(backToRegister, 700);
+                } else {
+                    setGapMsg((b.error || 'Request failed'), 'error');
+                    submit.disabled = false;
+                }
+            } catch (err) {
+                setGapMsg('Network error: ' + err.message, 'error');
+                submit.disabled = false;
+            }
+        });
+    }
+
+})();
+</script>

@@ -741,7 +741,9 @@
         const kids = r.childCount || 0;
         tr.innerHTML = [
             '<td>' + treeCell(r, kids, depth, tabKey) + '</td>',
-            '<td>' + escape(r.subjectTitle) + pendingBadges(r) + '</td>',
+            // 2026-10-26: pm-cell-title -- a long task name wraps within a
+            // capped width instead of widening the grid.
+            '<td class="pm-cell-title">' + escape(r.subjectTitle) + pendingBadges(r) + '</td>',
             // Migration 255: Source is the column that replaced
             // the three type tabs. The task type stays visible
             // beneath it -- merging the tabs removed the type as
@@ -1227,6 +1229,7 @@
         const taskTitle   = tr.getAttribute('data-task-title') || '';
         const taskNumber  = tr.getAttribute('data-task-number') || ('#' + taskId);
         const taskType    = tr.getAttribute('data-task-type') || '';
+        const rawStatus   = tr.getAttribute('data-task-state') || '';
 
         // ---------------------------------------------------------------
         // The item list itself -- what shows, what is hidden, what is
@@ -1251,13 +1254,15 @@
         // ---------------------------------------------------------------
         return window.gracTaskActions.buildMenu(
             { taskId: taskId, taskNumber: taskNumber, taskTitle: taskTitle, taskType: taskType,
-              isTerminal: isTerminal, isChild: isChild, isEligible: isEligible },
+              isTerminal: isTerminal, isChild: isChild, isEligible: isEligible,
+              rawStatusCode: rawStatus },
             {
                 onView: function () {
                     window.location.href = U('/Practice/Index/task-view') + '?taskId=' + encodeURIComponent(taskId);
                 },
-                onEdit:        function () { window.gracTaskActions.openEdit(taskId); },
-                onComplete:    function () { window.gracTaskActions.openComplete(taskId, taskNumber, taskTitle); },
+                onEdit:        function () { window.location.href = U('/Practice/Index/task-edit') + '?taskId=' + encodeURIComponent(taskId); },
+                // 2026-10-23: Complete is a full page (task-complete.cshtml).
+                onComplete:    function () { window.location.href = U('/Practice/Index/task-complete') + '?taskId=' + encodeURIComponent(taskId); },
                 onAddChild:    function () { openAddChildTask(taskId); },
                 onAddEvidence: function () { window.gracTaskActions.openEvidenceUpload(taskId, taskNumber); },
                 onAddUpdate:   function () { window.gracTaskActions.openAddUpdate(taskId); },
@@ -1267,7 +1272,8 @@
                 // zero further code changes here, the day either flag flips.
                 onViewAssuranceActivity: function () { /* wired when Assurance drill-down lands */ },
                 onViewWorkflowHistory:   function () { /* wired when workflow-history viewer lands */ },
-                onClose:       function () { window.gracTaskActions.openClose(taskId, taskNumber, taskTitle); }
+                onClose:       function () { window.gracTaskActions.openClose(taskId, taskNumber, taskTitle); },
+                onReopen:      function () { window.gracTaskActions.openReopen(taskId, taskNumber, taskTitle); }
             }
         );
     }
@@ -1528,13 +1534,12 @@
         }
         const orgSel = document.getElementById('taskFilterOrganization');
         const orgName = (orgSel && orgSel.options[orgSel.selectedIndex]
-                         && orgSel.options[orgSel.selectedIndex].textContent) || null;
-        window.gracTaskForm.open({
-            mode: 'task',
-            organizationId: Number(selectedOrgId),
-            organizationName: orgName,
-            onSaved: function () { refreshCounts(); reloadCurrentTab(); }
-        });
+                         && orgSel.options[orgSel.selectedIndex].textContent) || '';
+        // Full-page New Task (was a modal). The page hosts the shared
+        // creation form and returns to the board on save/cancel.
+        window.location.href = U('/Practice/Index/task-new')
+            + '?orgId=' + encodeURIComponent(selectedOrgId)
+            + '&orgName=' + encodeURIComponent(orgName);
     }
 })();
 </script>

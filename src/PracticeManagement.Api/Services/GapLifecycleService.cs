@@ -14,6 +14,7 @@
 using System.Data;
 using System.Data.Common;
 using Microsoft.Data.SqlClient;
+using PracticeManagement.Api.Infrastructure;
 using PracticeManagement.Api.Models;
 
 namespace PracticeManagement.Api.Services;
@@ -142,7 +143,13 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
             HasColumn(r, "IdentifiedDate") && r["IdentifiedDate"] != DBNull.Value ? Convert.ToDateTime(r["IdentifiedDate"]) : (DateTime?)null,
             // Migration 367: Practice Instance Operationalized flag.
             // Guarded so a pre-367 header proc still binds.
-            HasColumn(r, "IsPracticeOperationalized") && r["IsPracticeOperationalized"] != DBNull.Value ? Convert.ToBoolean(r["IsPracticeOperationalized"]) : (bool?)null);
+            HasColumn(r, "IsPracticeOperationalized") && r["IsPracticeOperationalized"] != DBNull.Value ? Convert.ToBoolean(r["IsPracticeOperationalized"]) : (bool?)null,
+            // Migration 491. Guarded so a pre-491 header proc still binds.
+            HasColumn(r, "CurrentState") ? r["CurrentState"] as string : null,
+            HasColumn(r, "GapFinding")   ? r["GapFinding"]   as string : null,
+            HasColumn(r, "Remarks")      ? r["Remarks"]      as string : null,
+            // Migration 496. Guarded so a pre-496 header proc still binds.
+            HasColumn(r, "PracticeInstanceDescription") ? r["PracticeInstanceDescription"] as string : null);
     }
 
     // Tolerant column-presence check for forward/back compatibility with
@@ -325,6 +332,14 @@ public sealed class GapLifecycleService(IConfiguration configuration, ILogger<Ga
                      string.IsNullOrWhiteSpace(request.BusinessRiskPresent) ? (object)DBNull.Value : request.BusinessRiskPresent!, 1);
             AddParam(cmd, "@analysed_by_employee_id",   DbType.Int64,  (object?)request.AnalysedByEmployeeId ?? DBNull.Value);
             AddParam(cmd, "@caller_display_name",       DbType.String, request.CallerDisplayName ?? "system", 100);
+            // Migration 501: bound only when the procedure declares it.
+            // Sending it unconditionally would fail with "has too many
+            // arguments specified" on a database still on 372 -- the same
+            // break 463 caused -- so this uses the shared probe instead.
+            // On such a database the Re-analyse option simply still hits
+            // 55143, which is the honest answer until 501 is run.
+            if (await ProcParameterProbe.HasParameterAsync(conn, "sp_custom_gap_analysis_save", "@reanalyse", ct))
+                AddParam(cmd, "@reanalyse",             DbType.Boolean, request.Reanalyse);
 
             await using var r = await cmd.ExecuteReaderAsync(ct);
             if (await r.ReadAsync(ct)) { /* consume CustomGapId result set */ }

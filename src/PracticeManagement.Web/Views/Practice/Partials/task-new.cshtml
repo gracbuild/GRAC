@@ -1,0 +1,71 @@
+@*
+    New Task  (dedicated full page)
+
+    Route: /Practice/Index/task-new?orgId=NNN&orgName=...
+
+    The Task Board's "+ New Task" used to open a modal. This is the SAME
+    shared creation form (Shared/task-form.js + _task-form-dialog.cshtml)
+    rendered inline on its own page via the form's host:"page" mode -- no
+    duplicate form markup, no duplicate business logic. Save or Cancel
+    returns to the Task Board.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>New Task</h1>
+        <p class="pm-hint">Create a Custom task. Fill the form and Create &mdash; or go back to the board.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <a class="pm-button" href="~/Practice/Index/tasks">
+            <i class="fa-solid fa-arrow-left"></i> Back to Task Board
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="taskNewNoOrg" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2>Select an organization first.</h2>
+        <p>Open this page from the Task Board's New Task button so the Assigned To list is scoped to an organization.</p>
+    </div>
+</section>
+
+@* THE shared Task creation form, reused inline (host: "page"). *@
+<partial name="Partials/_task-form-dialog" />
+<script src="~/js/Shared/task-form.js" asp-append-version="true"></script>
+<script>
+(function () {
+    const U = p => String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p;
+    const params  = new URLSearchParams(location.search);
+    const orgId   = Number(params.get("orgId")) || 0;
+    const orgName = params.get("orgName") || null;
+
+    if (!orgId) {
+        document.getElementById("taskNewNoOrg").hidden = false;
+        const dlg = document.getElementById("gracTaskFormDialog");
+        if (dlg) dlg.style.display = "none";
+        return;
+    }
+
+    // The layout sets window.appBasePath in a trailing inline script that
+    // runs AFTER RenderBody, so anything called at parse time here builds
+    // its URLs without the deployment's PathBase and every request 404s.
+    // Localhost has no PathBase, which is why this only broke on the
+    // deployed site. Deferred, the same way gaps.cshtml and
+    // repository-updates.cshtml do it.
+    function start() {
+        window.gracTaskForm.open({
+            mode:             "task",
+            host:             "page",
+            backUrl:          U("/Practice/Index/tasks"),
+            organizationId:   orgId,
+            organizationName: orgName
+            // onSaved omitted: page mode navigates back to the board on save.
+        });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+    else start();
+})();
+</script>

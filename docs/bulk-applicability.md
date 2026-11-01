@@ -119,7 +119,7 @@ Every colspan adds `bulkColumnCount()`. Four places must stay in step:
 1. `listColumnCount()` — the loading / empty / error row.
 2. `renderStatementTreeHeader` and the statement tree's empty row.
 3. `renderStatementPracticeRows` header.
-4. `renderRequirementControlGroups` — its header **and** the `colspan` on the
+4. `renderRequirementStatementGroups` (was `renderRequirementControlGroups`) — its header **and** the `colspan` on the
    `pm-control-group-row` band.
 
 ## The two status vocabularies stay apart

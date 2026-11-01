@@ -401,7 +401,7 @@ Repointed to the copy:
   - Obligation approved: the evidence listed in its copied `evidence_json` is synced, and `practice_instance_obligation.obligation_name` is updated where `organization_modified = 0`.
 - **Record keeping:** every decision goes to `practice_audit_trace` (entity `repository-change`). When nothing is left pending for the organization and release, its notices are Cleared.
 
-**Read procedures:** `sp_repository_change_list`, `sp_repository_change_counts`, `sp_repository_change_notification_list`, `sp_repository_change_notification_mark_read`.
+**Read procedures:** `sp_repository_change_list`, `sp_repository_change_counts`, `sp_repository_change_display` (500), `sp_repository_change_notification_list`, `sp_repository_change_notification_mark_read`.
 
 ### 11.2 API
 
@@ -409,12 +409,14 @@ Repointed to the copy:
 |---|---|---|
 | GET | `?organizationId&releaseId&status&pageNumber&pageSize` | review list (`status` Pending / Approved / Rejected / Superseded / All) |
 | GET | `/counts?organizationId` | pending count per release |
+| GET | `/{id}/details?organizationId` | the readable field list behind **Details** (500). Returns `{ data, resolved }`; `resolved: false` means 500 has not been run on this database and the page falls back to its own raw diff. |
 | POST | `/{id}/decision` body `{decision, remark}` | Approve / Reject one change. 400 carries the procedure's message. |
 | POST | `/decisions` body `{changeIds[], decision, remark}` | same decision for several changes, applied one by one in the order given; returns per-id results |
 | GET | `/notifications?recipientEmployeeId&organizationId` | open notices for Home |
 | POST | `/notifications/mark-read?recipientEmployeeId&organizationId` | the recipient opened the review page |
 
 - **No detect endpoint** (decision 9). `RepositoryChangeDetectWorker` runs `sp_repository_change_detect` every `RepositoryChangeDetect:IntervalSeconds` (default 86400), starting `StartupDelaySeconds` (default 300) after start-up. Set `RepositoryChangeDetect:Enabled = false` to schedule the procedure from SQL Agent instead.
+- **SQL Agent job (474, 2026-10-18):** `database/474_repository_change_detect_agent_job.sql`, run in the Practice Management database, creates the Agent job `GRAC - Repository Change Detect (<db>)`. The job runs `sp_repository_change_detect @actor='sql-agent'` daily at 02:00 server time; edit `@run_time` in the script to change that. Re-running the script replaces the job. When the job is used, set `RepositoryChangeDetect:Enabled = false` in the API. Rollback: `474_..._rollback.sql`.
 - **Registration:** `Program.cs` registers `AddPracticeRepositoryChangeService()` and `AddPracticeRepositoryChangeDetectWorker()`.
 - **Web proxy:** `/practice/api/repository-changes` (plus `/me/notifications` and `/me/notifications/mark-read`) checks the session and organization, and stamps `X-PM-Caller-Employee-Id` and `X-PM-Caller-Is-Admin` from the session.
 
@@ -423,7 +425,7 @@ Repointed to the copy:
 - **Repository Updates page** (`Practice/Index/repository-updates?organizationId&releaseId`, no menu row, VIEW through organization-controls):
   - Release and status filters.
   - Item, kind, change, release, detected date and status for each row.
-  - **Details** shows a field-by-field diff: this organization vs the repository.
+  - **Details** opens with one sentence saying what the change is and what approving it does, then a field-by-field diff: this organization vs the repository, read from `/{id}/details` with the field names labelled and every id column resolved to the name it points at (500).
   - Approve / Reject per row, and Approve selected / Reject selected. Bulk actions apply in repository order. Reject asks for a remark.
   - Opening the page marks the caller's notices Read.
 - **Home → Needs your attention:** one line per release with pending updates for the signed-in owner or admin. Needs VIEW on organization-controls and an employee record.
@@ -441,3 +443,31 @@ Repointed to the copy:
   - The statement tree returns `LifecycleStatus` and shows the badge. The practice statement picker no longer offers retired statements.
   - The Standards & Frameworks counts exclude retired statements. They stay in the tree.
   - The API reads the new column as optional (`ResolveObligationRow.RepositoryLifecycleStatus`).
+  - **493 (2026-10-26):** `dbo.sp_pm_view_obligations_typed` (394 body) also returns `RepositoryLifecycleStatus`. Practice View's published obligation cards show the same "Retired in repository" badge as the Operationalize card. The API passes the column through unchanged (generic read, `evidence-obligations-typed`), so no API change. Rollback: `493_practice_view_obligation_retired_badge_rollback.sql`.
+  - The badge is red everywhere it is drawn (Operationalize card, Practice View, statement tree): `.pm-badge.pm-badge-repo-retired` in `practice-management.css`, using the `--danger-100` / `--danger-700` tokens like the Expired chips.
+  - Still no badge: retired **evidence** (`organization_obligation_evidence.lifecycle_status`) is not shown anywhere.
+
+### 11.6 Multi-select statement classification (478, 2026-10-18)
+- Control Management 079 moved a statement's classification to `GRAC_New.framework_statement_classification_map` (many per statement) and retired `framework_statement.classification_id`.
+- `478_statement_classification_multi.sql` rebuilds `vw_repo_src_framework_statement` without the retired column. It adds `classification_ids` / `classification_names` from the junction, so they are part of the content hash and of the Repository Updates diff.
+- The statement copy (`organization_framework_statements`) carries both columns through `sp_repository_copy_statements`. Copies that were in step are re-baselined, so the rebuild raises no flood of Changed items.
+- After re-running 391, re-run 478. Details: `docs/statement-classification-multi-478.md`.
+
+### 11.7 Details shown as text, not ids (500, 2026-10-29)
+The **Details** diff was rendered in the browser straight from `old_snapshot_json` / `new_snapshot_json`, so the approver saw raw column names and bare foreign keys (`control_id 418`, `requirement_id 1902`) plus hashes, `copied_by` and the copy row's own primary key. `grac_new`'s DDL is not in this repository (9.1), so the readable names cannot live in the page.
+
+`500_repository_change_display_text.sql` adds:
+- **`repository_change_field_config`** — one row per snapshot field name: `display_label`, `is_hidden`, and `lookup_table` / `lookup_key` / `lookup_text_sql` for the id columns. Seeded only with tables and columns 391/392/395 already read (`label_sql`, `scope_sql`, `sp_repository_change_list`): control, source_structure_node, requirement, framework_statement, requirement_obligation, release, artifact, authority, `grac_practice.evidence_type_master`, `grac_practice.organization_employee`. A seeded lookup whose table or key column is absent is set to `Inactive` by the sweep at the end of the file, and reactivated when the file is re-run.
+- **`fn_repo_field_label`** — the fallback label for every other field: underscores to spaces, a trailing `_id` / `_json` dropped, first letter capitalised.
+- **`sp_repository_change_display(@organization_id, @change_id)`** — the resolved field list for one change: `FieldName`, `FieldLabel`, `ValueKind`, `OldValue`, `NewValue`, `OldText`, `NewText`, `DisplayOrder`. It reads the stored snapshots only (the lookups read the referenced item's *current* name, which is what identifies it), hides the plumbing columns, and for a `Changed` row returns only the fields that actually differ. Scoped by organization as well as by change id (53931 / 53932).
+
+**Above the diff**, the page writes one sentence from the row's own action, kind and status -- no extra read:
+- *Added*: "This source statement is new in the repository and is not in this organization yet. Approving copies it into this organization."
+- *Changed*: "3 fields changed in the repository: Is mandatory, Statement text and Assurance specifications. Approving updates this organization's copy." One field reads "1 field"; more than six are capped with "and N more"; when no visible field differs it reads "The content of this obligation changed in the repository."
+- *Retired*: "This obligation is no longer active in the repository. Approving flags this organization's copy as Retired."
+
+The "Approving ..." clause appears only while the row is Pending -- a decided row already names who decided and when in its Status cell. On the fallback path the field list is not available, so the sentence drops it rather than duplicating the diff's own key extraction.
+
+The page reads the field list lazily, once per change, when Details is first opened; the list query and payload are unchanged. The old client-side diff is kept as the fallback when the endpoint reports `resolved: false` or fails, so the page still works against a database where 500 has not been run. Booleans render as Yes/No, dates through `gracFormatDateOnly`, and the 7 typed-detail JSON columns as one `- key: value; key: value` line per spec.
+
+Display only: detection, approval, the stored snapshots and `sp_repository_change_list` are untouched. Rollback: `500_repository_change_display_text_rollback.sql`.

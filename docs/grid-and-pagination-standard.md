@@ -348,3 +348,79 @@ heading.
   wrap), not to the page. So it is never above or over the page heading.
   If the page is scrolled further, the heading (z 50) covers the grid
   like any other content.
+
+## Long free-text columns wrap; they do not widen the grid (2026-10-27)
+
+`.pm-table-wrap td` is `white-space: nowrap`, so one long value in one cell
+pushes every other column off the right edge and the operator scrolls
+sideways to read a Status badge.
+
+Two classes cap the width and wrap instead. They **share one declaration
+block** (`max-width: 360px; min-width: 200px; white-space: normal;
+word-break: break-word; overflow-wrap: anywhere`) — add a name to that
+selector list, do not copy the declarations:
+
+| Class | For |
+| --- | --- |
+| `.pm-cell-title` | a long title or name cell (statement tree, Task Board's Task Name) |
+| `.pm-cell-text` | a long free-text cell — Role Master's Description |
+
+`practice.js` emits them from the generic cell loop through
+`wrappedColumnsByScreen`, keyed by screen key:
+
+```js
+const wrappedColumnsByScreen = { "roles": new Set(["Description"]) };
+```
+
+Keyed by screen on purpose — a blanket "any column named Description" rule
+would silently re-wrap grids nobody asked about.
+
+**Use a class, not `nth-child`.** The positional rules for
+`organization-controls` / `source-statements` further down
+`practice-management.css` had to be re-commented every time a column order
+moved, and the statement tree was converted to classes for exactly that
+reason.
+
+---
+
+## `.pm-table-wrap` is positioned (2026-10-08)
+
+**Symptom:** Control Statements showed a large white area below the grid and a tiny page scrollbar. The page measured `documentHeight` 7002px, while `.content-wrapper` ended at 1200px.
+
+**Cause:** each grid row carries a screen-reader label, `<span class="visually-hidden">Actions</span>` (or "Show sub tasks" on Task Board), and that label is `position: absolute`.
+- Nothing between it and `<body>` was positioned, so its containing block was the page.
+- The label therefore escaped the wrap's `overflow: auto` clip and stayed where its row would be without the cap.
+- With hundreds of rows, those labels stretched the document thousands of pixels below the capped grid.
+
+**Fix:** `position: relative` added to `.pm-table-wrap` in `practice-management.css`. The wrap is now the containing block, so the labels clip and scroll with their rows.
+
+This applies to every grid that uses `.pm-table-wrap`, which is any long list. Row menus are unaffected: they are portaled to `<body>` as `.pm-action-menu` (`position: fixed`). The only other absolutely positioned table content is Operationalize's tree line, and it has its own relative `td`.
+
+CSS only.
+
+## Blank date filters are dropped at the gateway (2026-10-12)
+
+Symptom: Audit Traceability showed no rows although
+`grac_practice.practice_audit_trace` had 3,528 rows; the same query with no
+date keys returned them.
+
+Cause: `practice.js loadRows` sends `dateFrom` / `dateTo` as `""` inside
+`data` when the date inputs are empty. The generic query procedure
+(`dbo.pm_get_practice_repository`, latest body 404) reads them with
+`TRY_CONVERT(DATETIME2, JSON_VALUE(@p_payload,'$.dateTo'))`, which converts
+`""` to `1900-01-01`, not NULL -- so `entered_dt < 1900-01-02` removed every
+row. Any monolith branch with a date filter was affected the same way.
+
+Fix (Web): `PracticeManagementGatewayController.NormalizeQueryPayload` removes
+`dateFrom` / `dateTo` from the query payload when blank (`IsBlankJsonValue`),
+so SQL receives NULL = no date filter. A real date is passed through
+unchanged. No API or database change.
+
+## Long title cells wrap (2026-10-26)
+
+Grid cells are `white-space: nowrap` (`.pm-table-wrap td`), so one long free-text
+value widened the whole grid and its horizontal scrollbar. `.pm-cell-title`
+(practice-management.css), previously scoped to the statement tree, is now a
+generic grid class: `max-width: 360px; min-width: 200px`, wrapping. The
+statement tree keeps its own 420px. Applied to Task Board's **Task Name**
+(`tasks.cshtml`). Add `class="pm-cell-title"` to a `<td>` to use it elsewhere.

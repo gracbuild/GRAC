@@ -21,6 +21,24 @@ namespace PracticeManagement.Web.Security;
 public sealed class CallerIdentityHandler(IHttpContextAccessor httpContextAccessor) : DelegatingHandler
 {
     public const string CallerEmployeeHeader = "X-PM-Caller-Employee-Id";
+    public const string CallerAdminHeader    = "X-PM-Caller-Is-Admin";
+
+    /// <summary>
+    /// The organisation-admin flag the API reads as X-PM-Caller-Is-Admin:
+    /// session data scope GLOBAL or ORGANIZATION (the rule the Workflow,
+    /// Repository Change and Management Dashboard proxies apply). Set from
+    /// the session, overwriting anything the browser sent. Not stamped by
+    /// the handler itself on every call: proxies that never sent it keep
+    /// their behaviour; a proxy that needs it calls this (Evidence Center
+    /// and the Task Centre's evidence routes, migrations 476 / 477).
+    /// </summary>
+    public static void StampAdminFlag(HttpContext httpContext, HttpRequestMessage request)
+    {
+        request.Headers.Remove(CallerAdminHeader);
+        var dataScope = (httpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION")
+            .Trim().ToUpperInvariant();
+        request.Headers.TryAddWithoutValidation(CallerAdminHeader, dataScope is "GLOBAL" or "ORGANIZATION" ? "1" : "0");
+    }
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

@@ -181,6 +181,22 @@
     }
     .gtf::backdrop { background: rgba(15, 23, 42, .45); }
 
+    /* Full-page host (task-new.cshtml): the SAME form rendered inline on
+       its own page instead of as a modal. Reuses every field and the JS;
+       only the chrome changes. Added with the full-page New/Edit Task
+       change (2026-10-15). */
+    .gtf.gtf--page {
+        position: static;
+        display: block;
+        width: 100%;
+        max-width: none;
+        max-height: none;
+        box-shadow: none;
+        border: 1px solid var(--border-subtle, var(--neutral-200));
+    }
+    .gtf.gtf--page .gtf-form { max-height: none; }
+    .gtf.gtf--page .gtf-head { display: none; }   /* the page heading already names it */
+
     /* The form is the flex column: head and actions hold their size, the
        body is the only part allowed to scroll -- and only when the
        viewport is genuinely too short. */
@@ -257,6 +273,8 @@
         border-radius: var(--radius-sm);
         font: inherit;
         font-size: 13px;
+        /* Normal weight: AdminLTE makes every <label> bold (700) and `font: inherit` carried that weight into the control inside it (2026-10-26). */
+        font-weight: 400;
         color: var(--fg-strong);
         background: var(--bg-surface);
     }

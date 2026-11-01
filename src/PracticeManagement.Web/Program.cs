@@ -1,5 +1,8 @@
 using ControlManagement.Security;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using PracticeManagement.Web.Security;
 using PracticeManagement.Web.Services;
 using System.Threading.RateLimiting;
@@ -44,6 +47,93 @@ builder.Services.AddSession(options =>
     options.IdleTimeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Security:TokenLifetimeMinutes", 30));
 });
 
+// ---------------------------------------------------------------------
+// Single sign-on (2026-10-12) -- Microsoft Entra ID and Google, OpenID
+// Connect. Docs: docs/single-sign-on.md.
+//
+// The GRAC sign-in is still the SESSION (LoginController.SignIn); nothing
+// here replaces it. ASP.NET authentication is used only to talk to the
+// identity provider: the provider's answer lands in a short-lived external
+// cookie, LoginController.ExternalCallback reads it, asks the API which
+// GRAC employee owns that verified email, signs the session in exactly as a
+// password sign-in does, and deletes the external cookie.
+//
+// Authorization-code flow + PKCE with response_mode=query, so the provider
+// returns with a top-level GET: the correlation / nonce / external cookies
+// can be SameSite=Lax (form_post would need SameSite=None). A provider is
+// registered only when its Sso:* settings are filled in.
+// ---------------------------------------------------------------------
+var ssoProviders = SsoProviders.Enabled(builder.Configuration);
+if (ssoProviders.Count > 0)
+{
+    var auth = builder.Services.AddAuthentication()
+        .AddCookie(SsoProviders.ExternalScheme, options =>
+        {
+            options.Cookie.Name = ".PracticeManagement.External";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+            options.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+        });
+
+    void Configure(OpenIdConnectOptions o, string authority, string clientId, string clientSecret, string callbackPath, bool multiTenantMicrosoft = false)
+    {
+        o.SignInScheme = SsoProviders.ExternalScheme;
+        o.Authority = authority;
+        o.ClientId = clientId;
+        o.ClientSecret = clientSecret;
+        o.CallbackPath = callbackPath;
+        o.ResponseType = OpenIdConnectResponseType.Code;
+        o.ResponseMode = OpenIdConnectResponseMode.Query;
+        o.UsePkce = true;
+        o.Scope.Clear();
+        o.Scope.Add("openid");
+        o.Scope.Add("profile");
+        o.Scope.Add("email");
+        o.SaveTokens = false;
+        o.GetClaimsFromUserInfoEndpoint = false;
+        o.MapInboundClaims = false;   // keep the raw claim names: email, email_verified, oid, sub, preferred_username, tid
+        // Organization-wise SSO (migration 466): Microsoft is multi-tenant, so
+        // the issuer is checked against the token's own tid (SsoProviders
+        // .IsValidMicrosoftIssuer); the API then checks that tid against the
+        // employee organization's allowed tenants.
+        if (multiTenantMicrosoft)
+            o.TokenValidationParameters.IssuerValidator = (issuer, token, _) =>
+            {
+                string? tid = null;
+                if (token is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt) jwt.TryGetPayloadValue("tid", out tid);
+                else if (token is System.IdentityModel.Tokens.Jwt.JwtSecurityToken legacy) tid = legacy.Payload.TryGetValue("tid", out var t) ? t?.ToString() : null;
+                if (SsoProviders.IsValidMicrosoftIssuer(issuer, tid)) return issuer;
+                throw new Microsoft.IdentityModel.Tokens.SecurityTokenInvalidIssuerException($"Issuer '{issuer}' does not match the token tenant.");
+            };
+        var secure = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+        o.CorrelationCookie.SameSite = SameSiteMode.Lax;
+        o.CorrelationCookie.SecurePolicy = secure;
+        o.NonceCookie.SameSite = SameSiteMode.Lax;
+        o.NonceCookie.SecurePolicy = secure;
+        // Cancel / provider error / expired correlation: back to the login
+        // page with a message, never an unhandled exception page.
+        o.Events.OnRemoteFailure = context =>
+        {
+            var pathBase = context.Request.PathBase.Value?.TrimEnd('/') ?? "";
+            context.Response.Redirect($"{pathBase}/Login?sso=failed");
+            context.HandleResponse();
+            return Task.CompletedTask;
+        };
+    }
+
+    var c = builder.Configuration;
+    if (SsoProviders.IsMicrosoftConfigured(c))
+        auth.AddOpenIdConnect(SsoProviders.Microsoft, o => Configure(o,
+            SsoProviders.MicrosoftAuthority(c),
+            c["Sso:Microsoft:ClientId"]!, c["Sso:Microsoft:ClientSecret"]!, "/signin-oidc-microsoft",
+            multiTenantMicrosoft: true));
+    if (SsoProviders.IsGoogleConfigured(c))
+        auth.AddOpenIdConnect(SsoProviders.Google, o => Configure(o,
+            "https://accounts.google.com",
+            c["Sso:Google:ClientId"]!, c["Sso:Google:ClientSecret"]!, "/signin-oidc-google"));
+}
+
 var app = builder.Build();
 app.UseForwardedHeaders();
 var pathBase = app.Configuration["Hosting:PathBase"];
@@ -73,6 +163,9 @@ app.Use(async (context, next) =>
 
 app.UseStaticFiles();
 app.UseRouting();
+// SSO (2026-10-12): handles the /signin-oidc-* callbacks. Only added when a
+// provider is configured, so a deployment without SSO is unchanged.
+if (ssoProviders.Count > 0) app.UseAuthentication();
 app.UseSession();
 
 // Idle timeout. The access token is signed with a fixed expiry

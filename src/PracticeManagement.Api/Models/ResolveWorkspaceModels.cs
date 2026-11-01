@@ -33,7 +33,13 @@ public sealed record ResolveInstanceQuery(
     // first, independently); ImplementationStatus matches the same
     // free-text value the grid's Status badge already renders.
     long?   OwnerEmployeeId = null,
-    string? ImplementationStatus = null);
+    string? ImplementationStatus = null,
+    // 465. Operationalize Framework filter. NULL = all subscribed
+    // frameworks (the default). Signed, exactly like the Framework
+    // filter on the other Governance pages: a positive value is a
+    // repository release_id, a negative value is -1 * the Custom
+    // release's subscription_id (see subscribed-frameworks/query).
+    long?   ReleaseId = null);
 
 public sealed record ResolveInstanceRow(
     long    PracticeInstanceId,
@@ -241,7 +247,23 @@ public sealed record ResolveObligationRow(
     /// Migration 412: the owner employee behind Responsibility. Null on a
     /// row still carrying a legacy role name, or with no owner yet.
     /// </summary>
-    long?   OwnerEmployeeId = null);
+    long?   OwnerEmployeeId = null,
+    /// <summary>
+    /// Migration 457: the stored first-occurrence anchor (338) as
+    /// yyyy-MM-dd -- the value an HTML date input takes. Null when none is
+    /// stored, or on a database without 457.
+    /// </summary>
+    string? FirstOccurrenceDate = null,
+    /// <summary>
+    /// Migration 473: the obligation text as published (the organisation's
+    /// copy). <see cref="ObligationDescription"/> is what this instance
+    /// works to -- the edited text when <see cref="IsDescriptionOverridden"/>,
+    /// otherwise this same text. Null on organisation-defined obligations
+    /// and on a database without 473.
+    /// </summary>
+    string? PublishedObligationDescription = null,
+    /// <summary>Migration 473: the description was edited for this instance.</summary>
+    bool    IsDescriptionOverridden = false);
 
 public sealed record ResolveObligationResult(
     bool Success, IReadOnlyList<ResolveObligationRow> Obligations, string? Error = null);
@@ -411,7 +433,14 @@ public sealed record ResolveLocalEvidenceItem(
     int     EvidenceTypeId,
     bool    IsMandatory,
     string? RetentionPeriod,
-    string? Remarks);
+    string? Remarks,
+    /// <summary>
+    /// Migration 492: "Recurring" or "OneTime" -- the cadence Control
+    /// Management asks for published evidence (077), now asked for custom
+    /// obligation evidence too. Null = not given (read as Recurring).
+    /// Optional and last so older payloads still bind.
+    /// </summary>
+    string? EvidenceCadence = null);
 
 // ---------- grac_practice.sp_resolve_obligation_adopt ----------
 /// <summary>
@@ -487,7 +516,16 @@ public sealed record ResolveObligationDecision(
     /// display name) from the employee record. Optional and last so older
     /// payloads still bind.
     /// </summary>
-    long?   OwnerEmployeeId = null);
+    long?   OwnerEmployeeId = null,
+    /// <summary>
+    /// Migration 473: the description the organisation wants for this
+    /// obligation on this instance. Null = not edited (the stored text is
+    /// kept); empty, or the published text, = back to as published; any
+    /// other text is stored. Saved after the adopt, by
+    /// sp_resolve_obligation_description_save, not by
+    /// sp_resolve_obligation_adopt.
+    /// </summary>
+    string? ObligationDescription = null);
 
 public sealed record ResolveObligationAdoptRequest(
     long PracticeInstanceId,
@@ -729,7 +767,31 @@ public sealed record ResolveEvidenceRow(
     /// eligibility applies, so this cannot say ready where assurance
     /// would then refuse.
     /// </summary>
-    bool    IsResolved);
+    bool    IsResolved,
+    /// <summary>
+    /// Migration 473 (Control Management 077): "Recurring" -- produced
+    /// again for every scheduled occurrence and attached to that task --
+    /// or "OneTime" -- produced once and attached here, at implementation.
+    /// Null on a database without 473.
+    /// </summary>
+    string? EvidenceCadence = null,
+    /// <summary>Migration 473: the display label ("Recurring", "One-time").</summary>
+    string? EvidenceCadenceLabel = null,
+    /// <summary>
+    /// Migration 473: "Published" (read from the organisation's copy of the
+    /// spec) or "Default" (nothing published -- organisation-defined
+    /// evidence -- treated as Recurring).
+    /// </summary>
+    string? EvidenceCadenceSource = null,
+    /// <summary>Migration 473: files attached to this row at implementation.</summary>
+    int     AttachmentCount = 0,
+    /// <summary>
+    /// Migration 481: how the one-time evidence is provided --
+    /// "DirectUpload", "EvidenceCenter" or "External"; null = not chosen
+    /// yet (or a database without 481). IsResolved follows it: External
+    /// needs location and locator, the other two an attached / linked file.
+    /// </summary>
+    string? EvidenceSource = null);
 
 public sealed record ResolveEvidenceResult(
     bool Success, IReadOnlyList<ResolveEvidenceRow> Evidence, string? Error = null);
@@ -755,4 +817,96 @@ public sealed record ResolveEvidenceSaveRequest(
     string? EvidenceLocator,
     /// <summary>Migration 254. Null means "unchanged", as above.</summary>
     string? EvidenceName,
-    string? Actor);
+    string? Actor,
+    /// <summary>
+    /// Migration 473. True sets the organisation's description back to
+    /// NULL, so the published evidence description shows again -- the one
+    /// way to say "remove", since a null EvidenceDescription means
+    /// "unchanged". Optional and last so older callers still bind.
+    /// </summary>
+    bool    ClearEvidenceDescription = false,
+    /// <summary>
+    /// Migration 481: "DirectUpload", "EvidenceCenter" or "External".
+    /// Null means "unchanged". Bound only when the database has 481.
+    /// </summary>
+    string? EvidenceSource = null);
+
+// ---------- migration 473: evidence attached at implementation ----------
+/// <summary>
+/// One file attached to a ONE-TIME evidence row on Operationalize
+/// (grac_practice.practice_instance_evidence_attachment). Metadata only --
+/// the bytes come from the download endpoint.
+/// </summary>
+public sealed record ResolveEvidenceAttachmentRow(
+    long      EvidenceAttachmentId,
+    long      EvidenceId,
+    string    FileName,
+    string?   ContentType,
+    long      FileSizeBytes,
+    string?   AttachmentDescription,
+    long?     UploadedByEmployeeId,
+    string?   UploadedByName,
+    DateTime? UploadedDt,
+    // Migration 476: the attachment is an Evidence Center link now
+    // (EvidenceAttachmentId = evidence_link_id). The file above is the
+    // version the link is PINNED to. Null on a database without 476.
+    long?     EvidenceItemId        = null,
+    string?   EvidenceTitle         = null,
+    string?   EvidenceItemStatus    = null,
+    int?      VersionNo             = null,
+    int?      CurrentVersionNo      = null,
+    bool      NewerVersionAvailable = false,
+    DateTime? ValidTo               = null,
+    string?   ValidityState         = null,
+    string?   LinkedByName          = null,
+    DateTime? LinkedDt              = null);
+
+public sealed record ResolveEvidenceAttachmentResult(
+    bool Success, IReadOnlyList<ResolveEvidenceAttachmentRow> Attachments, string? Error = null);
+
+/// <summary>The file itself, for sp_resolve_evidence_attachment_get.</summary>
+public sealed record ResolveEvidenceAttachmentContent(
+    long   EvidenceAttachmentId,
+    long   EvidenceId,
+    string FileName,
+    string? ContentType,
+    long   FileSizeBytes,
+    byte[] FileData);
+
+public sealed record ResolveEvidenceAttachmentRemoveRequest(
+    long    PracticeInstanceId,
+    long    EvidenceAttachmentId,
+    string? Actor = null,
+    /// <summary>
+    /// The organisation the Web tier checked the caller against (its
+    /// catch-all POST verifies a body organizationId). When given, the
+    /// attachment must belong to it.
+    /// </summary>
+    long?   OrganizationId = null);
+
+// ---------- migration 476: Select from Evidence Center ----------
+/// <summary>
+/// The picker list for one ONE-TIME evidence row
+/// (sp_evidence_link_candidates): Evidence Center items the caller can
+/// see, column-name rows like the Evidence Center grid.
+/// </summary>
+public sealed record ResolveEvidenceLinkCandidateResult(
+    bool Success,
+    IReadOnlyList<Dictionary<string, object?>> Rows,
+    int TotalRows,
+    string? Error = null);
+
+/// <summary>Link an existing Evidence Center item (pins its current version).</summary>
+public sealed record ResolveEvidenceLinkRequest(
+    long    PracticeInstanceId,
+    long    EvidenceId,
+    long    EvidenceItemId,
+    string? LinkNote = null,
+    /// <summary>The organisation the Web tier checked the caller against.</summary>
+    long?   OrganizationId = null);
+
+/// <summary>Move a link to the item's latest version.</summary>
+public sealed record ResolveEvidenceLinkRefreshRequest(
+    long    PracticeInstanceId,
+    long    EvidenceAttachmentId,
+    long?   OrganizationId = null);

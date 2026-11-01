@@ -79,6 +79,27 @@
 // are produced in the API, so there is no SQL Agent equivalent;
 // AssetReportDeliveryEnabled=false stops scheduled deliveries ("Run now" on
 // the screen still works).
+//
+// EVIDENCE EXPIRY (migration 477)
+// -------------------------------
+// A fifth pass: every EvidenceExpiryIntervalMinutes (default 60) it runs
+// grac_practice.sp_evidence_expiry_sweep, which raises an "expiring" notice
+// for Evidence Center items whose validity ends within EvidenceExpiryDays
+// (default 30) and an "expired" one when it has ended, addressed to the
+// item's owner and uploader (My Notifications). Idempotent.
+// EvidenceExpiryEnabled=false leaves it to SQL Agent:
+//     EXEC grac_practice.sp_evidence_expiry_sweep;
+//
+// TPRM MONITORING (migrations 486-490)
+// ------------------------------------
+// A sixth pass: every TprmMonitoringIntervalMinutes (default 60) it runs
+// grac_practice.sp_tprm_monitoring_sweep, which raises third-party reviews
+// that are due: periodic reviews, contract / certification / risk
+// acceptance expiry, reassessment flags, overdue remediation and new
+// assurance findings on a live engagement's vendor or practice instances.
+// Each review is raised once per source key, so the pass is idempotent.
+// TprmMonitoringEnabled=false leaves it to SQL Agent:
+//     EXEC grac_practice.sp_tprm_monitoring_sweep;
 // =====================================================================
 namespace PracticeManagement.Api.Services;
 
@@ -126,6 +147,16 @@ public sealed class TaskNotificationOptions
 
     /// <summary>453: minutes between delivery passes (schedules are per day).</summary>
     public int AssetReportDeliveryIntervalMinutes { get; set; } = 60;
+    /// <summary>477: raise Evidence Center expiry notices.</summary>
+    public bool EvidenceExpiryEnabled { get; set; } = true;
+    /// <summary>477: minutes between expiry passes (validity is per day).</summary>
+    public int EvidenceExpiryIntervalMinutes { get; set; } = 60;
+    /// <summary>477: "expiring" = valid-to within this many days.</summary>
+    public int EvidenceExpiryDays { get; set; } = 30;
+    /// <summary>486-490: raise due Third-Party Risk reviews.</summary>
+    public bool TprmMonitoringEnabled { get; set; } = true;
+    /// <summary>486-490: minutes between monitoring passes (dates are per day).</summary>
+    public int TprmMonitoringIntervalMinutes { get; set; } = 60;
 }
 
 public sealed class TaskNotificationWorker(
@@ -138,7 +169,8 @@ public sealed class TaskNotificationWorker(
         var options = new TaskNotificationOptions();
         configuration.GetSection(TaskNotificationOptions.SectionName).Bind(options);
 
-        if (!options.Enabled && !options.AssetSchedulerEnabled && !options.ScheduledObligationTasksEnabled && !options.AssetReportDeliveryEnabled)
+        if (!options.Enabled && !options.AssetSchedulerEnabled && !options.ScheduledObligationTasksEnabled && !options.AssetReportDeliveryEnabled
+            && !options.EvidenceExpiryEnabled && !options.TprmMonitoringEnabled)
         {
             logger.LogInformation(
                 "TaskNotificationWorker disabled by configuration; SLA notifications must be swept manually via sp_task_notification_sweep.");
@@ -153,6 +185,10 @@ public sealed class TaskNotificationWorker(
         DateTime? lastObligationRun = null;   // 449
         var reportInterval = TimeSpan.FromMinutes(Math.Clamp(options.AssetReportDeliveryIntervalMinutes, 5, 1440));
         DateTime? lastReportRun = null;   // 453
+        var evidenceInterval = TimeSpan.FromMinutes(Math.Clamp(options.EvidenceExpiryIntervalMinutes, 5, 1440));
+        DateTime? lastEvidenceRun = null;   // 477
+        var tprmInterval = TimeSpan.FromMinutes(Math.Clamp(options.TprmMonitoringIntervalMinutes, 5, 1440));
+        DateTime? lastTprmRun = null;   // 486-490
 
         var interval = TimeSpan.FromSeconds(Math.Clamp(options.IntervalSeconds, 30, 86400));
 
@@ -282,6 +318,58 @@ public sealed class TaskNotificationWorker(
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Asset report delivery pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 477: Evidence Center expiry notices, at most every evidenceInterval.
+            if (options.EvidenceExpiryEnabled && (lastEvidenceRun is null || DateTime.UtcNow - lastEvidenceRun.Value >= evidenceInterval))
+            {
+                lastEvidenceRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var evidence = scope.ServiceProvider.GetService<IEvidenceCenterService>();
+                    if (evidence is not null)
+                    {
+                        var run = await evidence.RunExpirySweepAsync(options.OrganizationId, options.EvidenceExpiryDays, stoppingToken);
+                        if (run.ExpiringRaised > 0 || run.ExpiredRaised > 0)
+                            logger.LogInformation(
+                                "Evidence expiry pass: {Expiring} expiring and {Expired} expired notice(s) raised.",
+                                run.ExpiringRaised, run.ExpiredRaised);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Evidence expiry pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 486-490: Third-Party Risk monitoring, at most every tprmInterval.
+            if (options.TprmMonitoringEnabled && (lastTprmRun is null || DateTime.UtcNow - lastTprmRun.Value >= tprmInterval))
+            {
+                lastTprmRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var tprm = scope.ServiceProvider.GetService<ITprmService>();
+                    if (tprm is not null)
+                    {
+                        var raised = await tprm.RunMonitoringSweepAsync(options.OrganizationId, stoppingToken);
+                        if (raised > 0)
+                            logger.LogInformation("TPRM monitoring pass: {Raised} review(s) raised.", raised);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "TPRM monitoring pass failed; will retry on the next interval.");
                 }
             }
         }

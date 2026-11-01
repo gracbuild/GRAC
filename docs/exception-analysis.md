@@ -403,3 +403,27 @@ instances), `exception-analysis.cshtml` (5), `risk-centre.cshtml` (37),
 alone here, out of scope for a request specifically about the Add Custom
 Exception form. Worth a follow-up change request if sir wants those
 cleaned up too.
+
+
+## Exception View -- "Justification (analyst)" heading shortened to "Justification" (2026-10-15)
+
+Note: this one is about `exception-view.js` / `exception-view.cshtml`
+(migration 326's read-only full page, documented in the Practice
+Management project memory as `task_view_and_exception_view`), not the
+Analysis workflow this file otherwise covers -- there is no standalone
+doc for that page yet, so the note lives here since it is the closest
+Exception Centre changelog.
+
+Change request: in the View page's **Reason / Justification** section,
+the label read "Justification (analyst)" -- sir asked for only the
+"(analyst)" part of the HEADING to go, not the field or its content.
+
+First pass got this wrong -- dropped the whole field, reading the request
+as "remove Justification". Corrected: `renderReason(d)` in
+`exception-view.js` still reads `d.justification` and still renders it
+exactly as before (same "nothing to show" guard, same position in the
+section); only the label text changed, from `Justification (analyst)` to
+`Justification`. Reason / Justification (requester) and Risk / Impact are
+unaffected either way.
+
+UI only, label text alone. No API or database change.

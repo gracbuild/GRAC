@@ -410,7 +410,7 @@
       const [sl, sc] = STATUS[s.status] || [s.status, ""];
       const kids = path.includes(s.serviceId) ? [] : (children.get(s.serviceId) || []).filter(l => byId.has(l.childServiceId));
       return `<li><button class="pm-link-button" type="button" data-bsv-open="${s.serviceId}">${esc(s.serviceName)}</button>
-          <span class="bsv-note">${esc(s.serviceCode)} - ${esc(TYPES[s.serviceType] || s.serviceType)} - ${esc(s.criticalityCode || "no criticality")} - RTO ${esc(s.rtoHours ?? "-")} h - ${esc(s.businessOwnerName || "no owner")}</span>
+          <span class="bsv-note">${esc(s.serviceCode)} - ${esc(TYPES[s.serviceType] || s.serviceType)} - ${esc(s.criticalityCode || "no criticality")} - RTO ${esc(s.rtoHours ?? "-")} h - ${esc(s.businessOwnerName || "Unassigned")}</span>
           <span class="bsv-chip ${sc}">${esc(sl)}</span>${link && link.status !== "ACTIVE" ? ` <span class="bsv-chip bsv-st-wait">${esc(label(link.status))} link</span>` : ""}${link && link.isCritical ? ' <span class="bsv-chip bsv-st-bad">Critical</span>' : ""}
           ${kids.length ? `<ul>${kids.map(l => node(byId.get(l.childServiceId), l, path.concat(s.serviceId))).join("")}</ul>` : ""}</li>`;
     };

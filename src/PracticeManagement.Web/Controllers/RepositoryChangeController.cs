@@ -62,6 +62,17 @@ public sealed class RepositoryChangeController(
         return await ForwardAsync(HttpMethod.Get, $"api/practice/repository-changes/counts{qs}", null, ct);
     }
 
+    /// <summary>Migration 500: the readable field list behind "Details".
+    /// Read-only; sp_repository_change_display is scoped by organization
+    /// as well as by change id, so a foreign change returns nothing.</summary>
+    [HttpGet("{id:long}/details")]
+    public async Task<IActionResult> Details(long id, CancellationToken ct)
+    {
+        if (!TryGuardOrganization(out var err, out _)) return err!;
+        var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        return await ForwardAsync(HttpMethod.Get, $"api/practice/repository-changes/{id}/details{qs}", null, ct);
+    }
+
     /// <summary>organizationId (query) scopes the org-isolation check; the
     /// change itself is looked up by id and re-checked by the procedure.</summary>
     [HttpPost("{id:long}/decision")]

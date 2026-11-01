@@ -121,7 +121,7 @@
     /* ---- Practice group rows ----
        One wide row per Practice, spanning every column, with the
        instances it owns nested directly beneath it -- same shape as the
-       control-group rows on the Practices grid (renderRequirementControlGroups
+       control-group rows on the Practices grid (renderRequirementStatementGroups
        in practice.js), reused here for the same reason: a group header is
        a band across the table, not another data row. */
     #rvRoot .rv-grid tr.rv-group-row td {
@@ -208,6 +208,12 @@
 <section class="pm-panel" id="rvRoot" hidden>
     <div class="pm-toolbar rv-toolbar">
         <select id="rvOrganization"><option value="">Loading...</option></select>
+        @* 465. Framework filter -- the shared subscribed-frameworks list the
+           other Governance pages use (repository releases + Custom releases).
+           Default "All subscribed frameworks". Loaded by loadFrameworks() on
+           its own call: the resolve/instances response carries Owner/Status
+           options but not frameworks. *@
+        <select id="rvFramework" title="Framework"><option value="">All subscribed frameworks</option></select>
         @* 315. Options are filled from the same response the grid already
            loads (owners/statuses in scope for the selected organization),
            not enumerated here -- see load()'s populateFilterOptions(). *@
@@ -342,7 +348,10 @@
             // follows.
             resetFilterSelect('rvOwner', 'All owners');
             resetFilterSelect('rvStatus', 'All statuses');
-            pager?.reset(true); load();
+            // 465. Framework options are organisation-specific too; reset to
+            // "All subscribed frameworks" and reload them for the new org.
+            resetFilterSelect('rvFramework', 'All subscribed frameworks');
+            pager?.reset(true); load(); loadFrameworks();
         });
         // Refresh is NOT a filter change: it re-reads the page the user
         // is on, so it must not reset.
@@ -363,6 +372,10 @@
             pager?.reset(true); load();
         });
         document.getElementById('rvStatus').addEventListener('change', function () {
+            pager?.reset(true); load();
+        });
+        // 465. Framework filter -- same reset-to-page-1 pattern as the others.
+        document.getElementById('rvFramework').addEventListener('change', function () {
             pager?.reset(true); load();
         });
 
@@ -393,6 +406,7 @@
             window.clearTimeout(timer);
             timer = window.setTimeout(function () { pager?.reset(true); load(); }, 250);
         });
+        await loadFrameworks();
         await load();
     }
 
@@ -405,6 +419,9 @@
         const search = document.getElementById('rvSearch').value || '';
         const ownerId = document.getElementById('rvOwner')?.value || (rvPendingOwner ? String(rvPendingOwner) : '');
         const status  = document.getElementById('rvStatus')?.value || (rvPendingStatus || '');
+        // 465. Framework filter. Signed value (negative = Custom release);
+        // sent only when set, like the other optional filters below.
+        const releaseId = document.getElementById('rvFramework')?.value || '';
         pager?.busy(true);
         try {
             const includeRetired = document.getElementById('rvIncludeRetired')?.value === 'true';
@@ -429,6 +446,7 @@
                         // when set" rule as the drill-down params above.
                         + (ownerId ? '&ownerEmployeeId=' + encodeURIComponent(ownerId) : '')
                         + (status  ? '&status=' + encodeURIComponent(status) : '')
+                        + (releaseId ? '&releaseId=' + encodeURIComponent(releaseId) : '')
                         + paging,
                         { credentials: 'same-origin' });
             if (!r.ok) {
@@ -472,6 +490,74 @@
     // user is looking at. Falls back to "All ..." only when the previous
     // selection is no longer offered (organisation just changed, or the
     // API predates migration 315 and never sent any options).
+    // 465. The practice-management gateway serialises with ReferenceHandler
+    // .Preserve and returns one or more result sets, so its rows arrive wrapped
+    // in { $values: [...] } (sometimes as a JSON string) and nested one level
+    // (an array of tables). The resolve/instances workflow endpoint returns
+    // plain JSON, which is why its reads never needed this. Mirror practice.js's
+    // unwrapApiValue + apiData so the Framework dropdown reads identically to
+    // the other Governance pages instead of mapping the envelope into junk
+    // ("Release null") options.
+    function rvUnwrap(value) {
+        if (typeof value === 'string') {
+            const t = value.trim();
+            if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+                try { return rvUnwrap(JSON.parse(t)); } catch (e) { return value; }
+            }
+        }
+        if (value && typeof value === 'object' && Array.isArray(value.$values)) return value.$values.map(rvUnwrap);
+        if (Array.isArray(value)) return value.map(rvUnwrap);
+        return value;
+    }
+    function rvApiData(result) {
+        const data = rvUnwrap(result && (result.data ?? result.Data) || []);
+        if (!Array.isArray(data)) return [];
+        const isDirectRowSet = data.length > 0 && !Array.isArray(data[0]) && typeof data[0] === 'object';
+        const first = rvUnwrap((isDirectRowSet ? [data] : data)[0] ?? []);
+        if (Array.isArray(first)) return first;
+        if (first && typeof first === 'object') return [first];
+        return [];
+    }
+
+    // 465. Framework filter options. The same subscribed-frameworks list the
+    // other Governance pages load (repository releases, plus Custom releases
+    // with a synthetic negative ReleaseId), via the practice-management
+    // gateway. Kept on its own call because resolve/instances returns
+    // Owner/Status options but no frameworks.
+    async function loadFrameworks() {
+        const sel = document.getElementById('rvFramework');
+        if (!sel) return;
+        const org = document.getElementById('rvOrganization').value || '';
+        const keep = sel.value;
+        sel.innerHTML = '<option value="">All subscribed frameworks</option>';
+        sel.disabled = !org;
+        if (!org) return;
+        try {
+            const r = await fetch(U('/practice-management-gateway/subscribed-frameworks/query'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ data: { organizationId: Number(org), pageNumber: 1, pageSize: 500 } })
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const body = await r.json();
+            const list = rvApiData(body);
+            sel.innerHTML = '<option value="">All subscribed frameworks</option>'
+                + list.map(function (it) {
+                    const value = F(it, 'releaseId');
+                    const label = F(it, 'frameworkRelease') || F(it, 'releaseVersion') || ('Release ' + value);
+                    return '<option value="' + esc(value) + '">' + esc(label) + '</option>';
+                }).join('');
+            // Keep the selection across a Refresh when still offered.
+            if (keep && [...sel.options].some(function (o) { return o.value === keep; })) sel.value = keep;
+            sel.disabled = false;
+        } catch (err) {
+            console.error('resolve: frameworks failed', err);
+            sel.innerHTML = '<option value="">All subscribed frameworks</option>';
+            sel.disabled = false;
+        }
+    }
+
     function resetFilterSelect(id, allLabel) {
         const sel = document.getElementById(id);
         if (sel) sel.innerHTML = '<option value="">' + esc(allLabel) + '</option>';
@@ -684,7 +770,7 @@
                 + '</td>'
             + (isAdmin
                 ? '<td class="rv-truncate" title="' + esc(owner) + '">'
-                  + (owner ? esc(owner) : '<span class="rv-progress none">no owner</span>') + '</td>'
+                  + (owner ? esc(owner) : '<span class="rv-progress none">Unassigned</span>') + '</td>'
                 : '')
             + '<td class="rv-num">' + progress(F(row, 'adoptedObligations'), F(row, 'totalObligations'), 'adopted') + '</td>'
             + '<td class="rv-num">' + progress(F(row, 'resolvedDependencies'), F(row, 'totalDependencies'), 'resolved') + '</td>'

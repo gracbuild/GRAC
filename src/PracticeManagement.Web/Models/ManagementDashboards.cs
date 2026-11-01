@@ -52,6 +52,16 @@ public static class ManagementDashboards
                 ("services",      "business-services"),
                 ("relationships", "asset-relationships"),
                 ("notifications", "asset-notifications")
+            ],
+            // 490: Third-Party Risk dashboard (sp_dashboard_tprm).
+            ["tprm-dashboard"] =
+            [
+                ("tprmthirdparties", "tprm-third-parties"),
+                ("tprmengagements",  "tprm-engagements"),
+                ("tprmdiligence",    "tprm-engagements"),
+                ("tprmfindings",     "tprm-engagements"),
+                ("tprmreviews",      "tprm-reviews"),
+                ("tprmacceptance",   "tprm-engagements")
             ]
         };
 

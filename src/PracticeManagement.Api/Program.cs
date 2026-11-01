@@ -94,9 +94,22 @@ builder.Services.AddPracticeManagementDashboardService();
 // Menu Permission section. Enforcement is the row-level security policy,
 // applied per connection by Infrastructure.ViewScopeSession.
 builder.Services.AddPracticeRoleViewDataScopeService();
+// Organization-wise single sign-on policy (migration 466): Organization
+// Administration -> Organization tab -> Single Sign-On. Enforced at sign-in by
+// PracticeAuthenticationService.
+builder.Services.AddPracticeOrganizationSsoSettingService();
 // Asset & Contract Management, Phase 2.1 (migration 420): field
 // dictionary + versioned asset form templates. Rules live in the procs.
 builder.Services.AddPracticeAssetConfigService();
+// Evidence Center (migration 476, Phase 1): an organisation-level store of
+// evidence files, uploaded once and linked wherever used. Visibility and
+// edit rights live in the procedures (fn_pm_evidence_item_visible).
+builder.Services.AddPracticeEvidenceCenterService();
+// Third-Party Risk Management (migrations 486-490): registration,
+// engagements, inherent / residual risk, due diligence, decisions,
+// onboarding and monitoring. Every rule lives in the sp_tprm_* procedures;
+// the monitoring sweep runs in TaskNotificationWorker (TprmMonitoring*).
+builder.Services.AddPracticeTprmService();
 // Task Centre SLA notifications (201-203) and, in the same existing
 // worker, the Asset & Contract scheduler pass (migration 437 -- reminders,
 // escalations, renewal occurrences, periodic attestation runs). The worker

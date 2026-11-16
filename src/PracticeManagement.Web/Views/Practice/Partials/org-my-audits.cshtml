@@ -1,0 +1,992 @@
+@*
+    My Audits (migration 555, 2026-11-14, sir) -- Phase 3 of the audit flow
+    redesign (docs/audit-flow-redesign.md).
+
+    Screen key : `org-my-audits`
+    Group      : Audit Assurance
+    Menu       : nav-assurance -> My Audits (555, display order 468)
+    Backend    :
+        POST /practice/api/org-assurance/my-audits/prepare
+        GET  /practice/api/org-assurance/my-audits
+        GET  /practice/api/org-assurance/executions/{id}/live-scope?organizationId=
+        GET  /practice/api/org-assurance/executions/{id}/scope-exclusions?organizationId=
+        GET  /practice/api/org-assurance/executions/{id}/continuous-assurance?organizationId=
+        (567: the 558 responses endpoints are no longer called here --
+        Working Papers opens the Workpapers page)
+        POST /practice/api/org-assurance/executions/{id}/freeze-scope
+        GET  /practice/api/org-assurance/executions/{id}/scope-review?organizationId=   (563)
+    The caller is the session employee (the Web tier stamps it); the list
+    shows only engagements where that employee is the Assigned Auditor.
+
+    FLOW (sir's decisions):
+      * Opening the page starts the engagements that are due (From <=
+        today): one execution per audit, scope LIVE.
+      * Review & Freeze Scope: the live scope (the audit's scope now,
+        narrowed to the engagement's Branch). Untick what does not apply --
+        each exclusion needs a reason. Freeze is FINAL and starts the audit
+        (Planned -> In Progress).
+      * View Scope: a frozen scope and its exclusions, read-only.
+      * 563 (2026-11-15, sir) -- Scope Builder Step 3, Review and Confirm
+        (Audit Change spec 4.2.1, phase C2), in the same frame under the
+        scope list: "Related GRAC Intelligence" -- Step 2's discovery over
+        THIS engagement's practice instances (the scope list's "Why in
+        scope" column comes from it too). Per category an Include tick
+        (Practice Instances are the scope list itself); open a category
+        (child row, as Step 2) to untick a record -- with a reason -- or
+        add a manual item; Search filters the records. Freeze sends the
+        review with the exclusions and keeps it as the approved scope
+        snapshot (version 1); View Scope shows that snapshot read-only.
+      * Continuous Assurance (556, Phase 4): over the scope (frozen, or live
+        now) -- each scope item -> its practice instances (direct, or
+        through the Operationalize resolution) -> their Execution /
+        Assurance obligations -> implementation status and last task.
+        Summary counts each obligation once. Read-only, same frame.
+      * Working Papers (567, replaces 558's Answer Questions): opens the
+        Workpapers page on the execution (the id in the navigation code,
+        gracSecureNav) -- working papers per question, review, conclusion,
+        findings raised by the auditor (nothing automatic).
+      * No popups (sir, 543 rule): each opens in a CHILD ROW under the
+        audit's row -- the Audit Plans child row (sir, 2026-11-14: "like the
+        child row"): .oa-pl-wrap list, tr.oa-pl-items-row > td > .oa-pl-items
+        (44px indent, accent down the left edge with the open row
+        .oa-pl-open, inner grids not height-capped). Inside it the frame
+        keeps the Audit Configuration caption / save bar (.oa-cfg-frame,
+        .oa-cfg-savebar -- the section carries .oa-cfg for those). One open
+        at a time.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel oa-cfg" id="oaMyRoot">
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaMyFilterState" aria-label="State">
+            <option value="">All audits</option>
+            <option value="ScopeLive">Scope to freeze</option>
+            <option value="InProgress">In progress</option>
+            <option value="Upcoming">Upcoming</option>
+            <option value="Ready">Not started</option>
+            <option value="Done">Done</option>
+            <option value="Cancelled">Cancelled</option>
+        </select>
+        <input id="oaMySearch" type="text" placeholder="Search engagement / audit / branch..." />
+        <button class="pm-button icon" id="oaMyRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+    </div>
+    <div class="pm-message" id="oaMyMessage" style="display:none; margin-top:10px;"></div>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Engagement</th>
+                    <th>Audit</th>
+                    <th>Branch</th>
+                    <th>Scheduled</th>
+                    <th>Status</th>
+                    <th>Scope</th>
+                    <th style="width:70px;"></th>
+                </tr>
+            </thead>
+            <tbody id="oaMyBody">
+                <tr><td colspan="7" class="pm-empty">Loading your audits...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* ---------- Review & Freeze Scope / View Scope ----------
+   The frame waits here and opens in a row under the audit's row
+   (Audit Configuration's step frame, 543). *@
+<div id="oaMyHolder" hidden>
+    <div class="oa-cfg-frame" id="oaMyFrame">
+        <p class="oa-ws-section-hint" id="oaMyFrameCaption"></p>
+        <div class="pm-message" id="oaMyScopeMessage" style="display:none; margin-bottom:10px;"></div>
+        <div id="oaMyScopePane">
+            <div class="oa-pl-scope-summary" id="oaMyScopeSummary"></div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:70px;" id="oaMyScopeKeepHead">Keep</th>
+                            <th>Type</th>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Why in scope</th>
+                            <th id="oaMyScopeReasonHead">Reason for excluding</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaMyScopeBody"></tbody>
+                </table>
+            </div>
+            @* 563: Step 3 Review and Confirm -- the related records, the
+               Step 2 category list (Include, child row per category). *@
+            <div id="oaMyReview" hidden style="margin-top:16px;">
+                <div class="oa-ws-section-head"><h2>Related GRAC Intelligence</h2></div>
+                <p class="oa-ws-section-hint" id="oaMyReviewHint"></p>
+                <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+                    <input id="oaMyReviewSearch" type="text" placeholder="Search related records..." />
+                </div>
+                <div class="pm-table-wrap oa-pl-wrap" style="margin-top:8px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:90px;">Include</th>
+                                <th>Category</th>
+                                <th style="text-align:right; width:110px;">Records</th>
+                                <th style="width:60px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="oaMyReviewBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        @* 556: Continuous Assurance -- same frame, read-only. *@
+        <div id="oaMyCaPane" hidden>
+            <div class="oa-pl-scope-summary" id="oaMyCaSummary"></div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Scope item</th>
+                            <th>Practice instance</th>
+                            <th>Obligation</th>
+                            <th>Status</th>
+                            <th>Last task</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oaMyCaBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="oa-flow-nav oa-cfg-savebar">
+            <span class="oa-ws-section-hint" id="oaMyFrameHint"></span>
+            <span style="display:flex; gap:8px;">
+                <button type="button" id="oaMyScopeCancel" class="pm-button">Close</button>
+                <button type="button" id="oaMyScopeFreeze" class="pm-button primary">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i> Freeze Scope
+                </button>
+            </span>
+        </div>
+    </div>
+</div>
+
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const STATE_LABEL = {
+        Upcoming  : 'Upcoming',
+        Ready     : 'Not started',
+        ScopeLive : 'Scope to freeze',
+        InProgress: 'In progress',
+        Done      : 'Done',
+        Cancelled : 'Cancelled'
+    };
+
+    const state = {
+        rows   : [],
+        byKey  : {},
+        filter : '',
+        search : '',
+        scope  : { row: null, key: null, items: [], frozen: false }
+    };
+    let openMenuEl = null, openMenuTrigger = null;
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+
+    async function boot() {
+        if (booted) return; booted = true;
+        document.getElementById('oaMyFilterState').addEventListener('change', function (e) { state.filter = e.target.value; render(); });
+        document.getElementById('oaMySearch').addEventListener('input', function (e) { state.search = e.target.value.trim().toLowerCase(); render(); });
+        document.getElementById('oaMyRefreshBtn').addEventListener('click', function () { load(true); });
+        document.getElementById('oaMyScopeCancel').addEventListener('click', closeScope);
+        document.getElementById('oaMyScopeFreeze').addEventListener('click', freeze);
+        document.getElementById('oaMyScopeBody').addEventListener('change', onKeepChange);
+        wireReview();   // 563
+        wireRowMenus();
+        await load(true);
+    }
+
+    // Opening (and Refresh) starts the engagements that are due, then lists.
+    async function load(prepare) {
+        wf.setMessage('oaMyMessage', '');
+        if (prepare) {
+            try {
+                const r = await fetch(U(API + '/my-audits/prepare'), {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' }, body: '{}'
+                });
+                const j = await safeJson(r);
+                if (!r.ok) { showList([], (j && (j.error || j.Error)) || ('HTTP ' + r.status)); return; }
+                const res = (j && (j.data || j.Data)) || [];
+                const started = res.filter(function (x) { return x.started ?? x.Started; });
+                const failed  = res.filter(function (x) { return !(x.started ?? x.Started); });
+                if (failed.length)
+                    wf.setMessage('oaMyMessage', 'Could not start: ' + failed.map(function (x) {
+                        return (x.engagementCode || x.EngagementCode || '') + ' -- ' + (x.message || x.Message || '');
+                    }).join('; '), 'error');
+                else if (started.length)
+                    wf.setMessage('oaMyMessage', started.length + ' engagement(s) are due and were started. Review and freeze their scope to begin.', 'ok');
+            } catch (err) { wf.setMessage('oaMyMessage', 'Could not start the due audits: ' + (err.message || err), 'error'); }
+        }
+        try {
+            const r = await fetch(U(API + '/my-audits'), { credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { showList([], (j && (j.error || j.Error)) || ('HTTP ' + r.status)); return; }
+            showList((j && (j.data || j.Data)) || [], null);
+        } catch (err) { showList([], err.message || String(err)); }
+    }
+
+    function showList(rows, error) {
+        state.rows = rows;
+        state.byKey = {};
+        rows.forEach(function (r, i) { state.byKey[String(i)] = r; });
+        if (error) {
+            document.getElementById('oaMyBody').innerHTML = '<tr><td colspan="7" class="pm-empty">' + wf.escape(error) + '</td></tr>';
+            return;
+        }
+        render();
+    }
+
+    function v(row, camel, pascal) { return row[camel] ?? row[pascal]; }
+
+    function render() {
+        const body = document.getElementById('oaMyBody');
+        const rows = state.rows.map(function (r, i) { return { i: i, r: r }; }).filter(function (x) {
+            const r = x.r;
+            if (state.filter && v(r, 'auditState', 'AuditState') !== state.filter) return false;
+            if (!state.search) return true;
+            const hay = [v(r, 'engagementCode', 'EngagementCode'), v(r, 'engagementName', 'EngagementName'),
+                         v(r, 'definitionCode', 'DefinitionCode'), v(r, 'definitionName', 'DefinitionName'),
+                         v(r, 'branchName', 'BranchName'), v(r, 'planName', 'PlanName')].join(' ').toLowerCase();
+            return hay.indexOf(state.search) >= 0;
+        });
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">'
+                + (state.rows.length ? 'No audits match the filter.' : 'No audits are assigned to you.') + '</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(function (x) {
+            const r = x.r;
+            const st    = v(r, 'auditState', 'AuditState') || '';
+            const from  = onlyDate(v(r, 'scheduledFrom', 'ScheduledFrom'));
+            const to    = onlyDate(v(r, 'scheduledTo', 'ScheduledTo'));
+            const exec  = v(r, 'executionCode', 'ExecutionCode') || '';
+            const total = v(r, 'totalEntityCount', 'TotalEntityCount');
+            const scope = st === 'ScopeLive' ? 'Live'
+                        : (v(r, 'scopeFrozenAt', 'ScopeFrozenAt') ? 'Frozen, ' + (total ?? 0) + ' item(s)' : '');
+            return '<tr data-key="' + x.i + '">'
+                 + '<td>' + wf.escape(v(r, 'engagementName', 'EngagementName') || '')
+                 + ' <span style="color:var(--fg-subtle);">(' + wf.escape(v(r, 'engagementCode', 'EngagementCode') || '') + ')</span>'
+                 + '<div style="color:var(--fg-subtle); font-size:12px;">' + wf.escape(v(r, 'planName', 'PlanName') || '') + '</div></td>'
+                 + '<td>' + wf.escape(v(r, 'definitionName', 'DefinitionName') || '')
+                 + ' <span style="color:var(--fg-subtle);">(' + wf.escape(v(r, 'definitionCode', 'DefinitionCode') || '') + ')</span></td>'
+                 + '<td>' + wf.escape(v(r, 'branchName', 'BranchName') || '') + '</td>'
+                 + '<td>' + wf.escape(from + (to ? ' - ' + to : '')) + '</td>'
+                 + '<td>' + wf.badge(STATE_LABEL[st] || st)
+                 + (exec ? ' <span style="color:var(--fg-subtle);">' + wf.escape(exec) + '</span>' : '') + '</td>'
+                 + '<td>' + wf.escape(scope) + '</td>'
+                 + '<td>' + trigger(x.i) + '</td>'
+                 + '</tr>';
+        }).join('');
+        mountFrame();   // an open scope stays open under its row
+    }
+
+    function keyOf(row) {
+        for (const k in state.byKey) if (state.byKey[k] === row) return k;
+        return null;
+    }
+
+    function buildMenu(row) {
+        const st = v(row, 'auditState', 'AuditState');
+        const items = [];
+        if (st === 'ScopeLive')
+            items.push({ icon: 'fa-lock', label: 'Review & Freeze Scope', action: function () { openScope(row, false); } });
+        // An id is tested against null, never for truthiness: 0 is an id
+        // (557 renumbers the rows that got it, but the page must not hide
+        // an audit's actions over it).
+        const hasExec = v(row, 'executionId', 'ExecutionId') != null;
+        if ((st === 'InProgress' || st === 'Done') && hasExec)
+            items.push({ icon: 'fa-eye', label: 'View Scope', action: function () { openScope(row, true); } });
+        // 567: the questions are tested in Workpapers (working papers
+        // replace the 558 answers) -- In Progress to work, Done to read.
+        if ((st === 'InProgress' || st === 'Done') && hasExec)
+            items.push({ icon: 'fa-file-pen', label: 'Working Papers', action: function () { openWorkpapers(row); } });
+        // 556: Continuous Assurance over the live or frozen scope.
+        if ((st === 'ScopeLive' || st === 'InProgress' || st === 'Done') && hasExec)
+            items.push({ icon: 'fa-shield-halved', label: 'Continuous Assurance', action: function () { openCa(row); } });
+        if (st === 'Ready')
+            items.push({ icon: 'fa-play', label: 'Start now', action: function () { load(true); } });
+        return items;
+    }
+
+    // -----------------------------------------------------------------
+    // Scope dialog
+    // -----------------------------------------------------------------
+    async function openScope(row, frozen) {
+        closeScope();
+        state.scope = { row: row, key: keyOf(row), items: [], frozen: frozen };
+        showPane('scope');
+        const branch = v(row, 'branchName', 'BranchName');
+        document.getElementById('oaMyFrameCaption').textContent = frozen
+            ? 'The frozen scope of this audit' + (branch ? ' at ' + branch : '') + ', with what was excluded and why.'
+            : 'The audit\'s scope as it is now' + (branch ? ', narrowed to ' + branch : '')
+              + '. Untick what does not apply and give the reason. Freezing is final and starts the audit.';
+        document.getElementById('oaMyFrameHint').textContent = '';
+        document.getElementById('oaMyScopeKeepHead').hidden   = frozen;
+        document.getElementById('oaMyScopeFreeze').hidden     = frozen;
+        document.getElementById('oaMyScopeReasonHead').textContent = frozen ? 'Excluded because' : 'Reason for excluding';
+        document.getElementById('oaMyScopeSummary').innerHTML = '';
+        document.getElementById('oaMyScopeBody').innerHTML = '<tr><td colspan="6" class="pm-empty">'
+            + (frozen ? 'Loading the scope...' : 'Resolving the scope...') + '</td></tr>';
+        document.getElementById('oaMyReview').hidden = true;   // 563: shown once loaded
+        wf.setMessage('oaMyScopeMessage', '');
+        mountFrame();
+
+        const org = v(row, 'organizationId', 'OrganizationId');
+        const id  = v(row, 'executionId', 'ExecutionId');
+        try {
+            // 563: the review (discovery / snapshot) loads beside the scope.
+            const reviewP = loadReview(org, id);
+            const r = await fetch(U(API + '/executions/' + encodeURIComponent(id) + '/live-scope?organizationId=' + encodeURIComponent(org)),
+                                  { credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            state.scope.items = (j && (j.data || j.Data)) || [];
+            state.scope.review = await reviewP;
+            if (state.scope.row !== row) return;   // closed or switched meanwhile
+            let excl = [];
+            if (frozen) {
+                const rx = await fetch(U(API + '/executions/' + encodeURIComponent(id) + '/scope-exclusions?organizationId=' + encodeURIComponent(org)),
+                                       { credentials: 'same-origin' });
+                const jx = await safeJson(rx);
+                excl = rx.ok ? ((jx && (jx.data || jx.Data)) || []) : [];
+            }
+            renderScope(excl);
+            renderReview();
+        } catch (err) {
+            document.getElementById('oaMyScopeBody').innerHTML = '';
+            wf.setMessage('oaMyScopeMessage', 'The scope could not be loaded: ' + (err.message || err), 'error');
+        }
+    }
+
+    function renderScope(exclusions) {
+        const frozen = state.scope.frozen;
+        const items  = state.scope.items;
+        const counts = {};
+        items.forEach(function (it) {
+            const n = v(it, 'dimensionName', 'DimensionName') || v(it, 'dimensionCode', 'DimensionCode') || '';
+            counts[n] = (counts[n] || 0) + 1;
+        });
+        document.getElementById('oaMyScopeSummary').innerHTML = Object.keys(counts).map(function (k) {
+            return '<span class="pm-badge">' + wf.escape(k) + ' ' + counts[k] + '</span>';
+        }).join(' ') + (exclusions.length ? ' <span class="pm-badge">Excluded ' + exclusions.length + '</span>' : '');
+
+        const keepCell = function (i) {
+            return frozen ? '' : '<td><input type="checkbox" data-keep="' + i + '" checked aria-label="Keep in scope"></td>';
+        };
+        const rows = items.map(function (it, i) {
+            return '<tr>' + keepCell(i)
+                 + '<td>' + wf.escape(v(it, 'dimensionName', 'DimensionName') || v(it, 'dimensionCode', 'DimensionCode') || '') + '</td>'
+                 + '<td>' + wf.escape(v(it, 'entityCode', 'EntityCode') || '') + '</td>'
+                 + '<td>' + wf.escape(v(it, 'entityName', 'EntityName') || '') + '</td>'
+                 + '<td class="qs-cell-text">' + wf.escape(whyInScope(it)) + '</td>'
+                 + '<td>' + (frozen ? '' : '<input class="pm-input" type="text" maxlength="1000" data-reason="' + i
+                      + '" placeholder="Why it does not apply" hidden style="min-width:0; width:100%;">') + '</td>'
+                 + '</tr>';
+        });
+        // A frozen scope also lists what was excluded, with the reason.
+        exclusions.forEach(function (x) {
+            rows.push('<tr style="color:var(--fg-subtle);">'
+                 + '<td>' + wf.escape((v(x, 'dimensionName', 'DimensionName') || v(x, 'dimensionCode', 'DimensionCode') || '') + ' (excluded)') + '</td>'
+                 + '<td>' + wf.escape(v(x, 'entityCode', 'EntityCode') || '') + '</td>'
+                 + '<td>' + wf.escape(v(x, 'entityName', 'EntityName') || '') + '</td>'
+                 + '<td></td>'
+                 + '<td>' + wf.escape(v(x, 'reason', 'Reason') || '') + '</td>'
+                 + '</tr>');
+        });
+        document.getElementById('oaMyScopeBody').innerHTML = rows.length ? rows.join('')
+            : '<tr><td colspan="6" class="pm-empty">' + (frozen ? 'Nothing in scope.'
+              : 'Nothing is in scope now. Check the audit\'s scope and the engagement\'s branch.') + '</td></tr>';
+        document.getElementById('oaMyScopeFreeze').disabled = !items.length;
+        updateHint();
+    }
+
+    function updateHint() {
+        if (state.scope.frozen) return;
+        const out = document.querySelectorAll('#oaMyScopeBody [data-keep]:not(:checked)').length;
+        const all = state.scope.items.length;
+        const rv = reviewLive() ? state.scope.review : null;   // 563
+        const rOut = rv ? Object.keys(rv.unkept).length : 0;
+        const rMan = rv ? rv.manual.length : 0;
+        document.getElementById('oaMyFrameHint').textContent =
+            (all - out) + ' of ' + all + ' item(s) kept' + (out ? ', ' + out + ' excluded' : '')
+            + (rOut ? '; ' + rOut + ' related record(s) unticked' : '')
+            + (rMan ? '; ' + rMan + ' manual item(s)' : '');
+    }
+
+    function onKeepChange(e) {
+        const cb = e.target.closest('[data-keep]');
+        if (!cb) return;
+        const reason = document.querySelector('[data-reason="' + cb.getAttribute('data-keep') + '"]');
+        if (reason) { reason.hidden = cb.checked; if (!cb.checked) reason.focus(); }
+        updateHint();
+    }
+
+    async function freeze() {
+        const row = state.scope.row;
+        if (!row) return;
+        const excl = [];
+        let missing = false;
+        document.querySelectorAll('#oaMyScopeBody [data-keep]').forEach(function (cb) {
+            if (cb.checked) return;
+            const i  = Number(cb.getAttribute('data-keep'));
+            const it = state.scope.items[i];
+            const reason = (document.querySelector('[data-reason="' + i + '"]').value || '').trim();
+            if (!reason) missing = true;
+            excl.push({ dimensionCode: v(it, 'dimensionCode', 'DimensionCode'), entityId: v(it, 'entityId', 'EntityId'), reason: reason });
+        });
+        if (missing) { wf.setMessage('oaMyScopeMessage', 'Give the reason for every item you exclude.', 'error'); return; }
+        const keep = state.scope.items.length - excl.length;
+        if (keep <= 0) { wf.setMessage('oaMyScopeMessage', 'Keep at least one item in scope.', 'error'); return; }
+        // 563: Step 3 -- the review goes with the exclusions.
+        const review = reviewPayload();
+        if (review && review.missing) {
+            wf.setMessage('oaMyScopeMessage', 'Give the reason for every related record you untick.', 'error'); return;
+        }
+        if (!await window.gracUi.confirm('Freeze the scope with ' + keep + ' item(s)' + (excl.length ? ', ' + excl.length + ' excluded' : '')
+                + '? This is final and starts the audit.', { type: 'confirm', title: 'Freeze Scope', confirmText: 'Freeze' })) return;
+
+        const btn = document.getElementById('oaMyScopeFreeze');
+        btn.disabled = true;
+        try {
+            const r = await fetch(U(API + '/executions/' + encodeURIComponent(v(row, 'executionId', 'ExecutionId')) + '/freeze-scope'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organizationId: Number(v(row, 'organizationId', 'OrganizationId')), exclusions: excl, actor: null,
+                                       review: review ? review.body : null })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { wf.setMessage('oaMyScopeMessage', (j && (j.error || j.Error)) || ('HTTP ' + r.status), 'error'); btn.disabled = false; return; }
+            closeScope();
+            const rvNo = j.reviewVersionNo ?? j.ReviewVersionNo;
+            wf.setMessage('oaMyMessage', 'Scope frozen: ' + (j.executionCode || j.ExecutionCode || '') + ', '
+                + (j.totalEntityCount ?? j.TotalEntityCount ?? keep) + ' item(s)'
+                + (rvNo != null ? '; approved scope version ' + rvNo : '') + '. The audit is in progress.', 'ok');
+            load(false);
+        } catch (err) {
+            wf.setMessage('oaMyScopeMessage', err.message || String(err), 'error');
+            btn.disabled = false;
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 563: Scope Builder Step 3 -- Review and Confirm. The related records
+    // of the engagement's scope (Step 2's discovery over its instances),
+    // in Step 2's category list. Live: Include per category, untick a
+    // record with a reason, add manual items; Freeze sends it. Frozen: the
+    // approved snapshot, read-only. Practice Instances are the scope list
+    // above, so they are not repeated here -- they give its "Why in scope".
+    // -----------------------------------------------------------------
+    const SCOPE_CATEGORY = 'PRACTICE_INSTANCE';
+    const MANUAL_CATEGORY = 'MANUAL';
+
+    async function loadReview(org, id) {
+        try {
+            const r = await fetch(U(API + '/executions/' + encodeURIComponent(id) + '/scope-review?organizationId=' + encodeURIComponent(org)),
+                                  { credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            const header = (j && (j.header || j.Header)) || {};
+            return {
+                header     : header,
+                categories : (j && (j.categories || j.Categories)) || [],
+                items      : (j && (j.items || j.Items)) || [],
+                open       : null,
+                search     : '',
+                unkept     : {},    // 'CAT|recordId' -> reason (live)
+                manual     : []     // [{ categoryCode, name, note }] (live)
+            };
+        } catch (err) {
+            // The review is an addition: without it (563 not deployed, or
+            // discovery failed) the scope list still freezes as before.
+            console.warn('[my-audits] scope review not available:', err);
+            return null;
+        }
+    }
+
+    function whyInScope(it) {
+        const rv = state.scope.review;
+        if (!rv || v(it, 'dimensionCode', 'DimensionCode') !== SCOPE_CATEGORY) return '';
+        const id = v(it, 'entityId', 'EntityId');
+        const hit = rv.items.find(function (x) {
+            return v(x, 'categoryCode', 'CategoryCode') === SCOPE_CATEGORY && String(v(x, 'recordId', 'RecordId')) === String(id);
+        });
+        return hit ? (v(hit, 'reason', 'Reason') || '') : '';
+    }
+
+    function reviewLive() {
+        const rv = state.scope.review;
+        return !!rv && !state.scope.frozen && !v(rv.header, 'isFrozen', 'IsFrozen');
+    }
+
+    function reviewCategories() {
+        const rv = state.scope.review;
+        return rv ? rv.categories.filter(function (c) { return v(c, 'categoryCode', 'CategoryCode') !== SCOPE_CATEGORY; }) : [];
+    }
+
+    function reviewRecords(code) {
+        const rv = state.scope.review;
+        const q  = rv.search;
+        const rows = rv.items.filter(function (x) { return v(x, 'categoryCode', 'CategoryCode') === code; })
+            .map(function (x) {
+                return { code: v(x, 'recordCode', 'RecordCode') || '', name: v(x, 'recordName', 'RecordName') || '',
+                         status: v(x, 'status', 'Status') || '', reason: v(x, 'reason', 'Reason') || '',
+                         id: v(x, 'recordId', 'RecordId'), kept: !!v(x, 'isKept', 'IsKept'),
+                         exclusion: v(x, 'exclusionReason', 'ExclusionReason') || '',
+                         manual: !!v(x, 'isManual', 'IsManual'), note: v(x, 'manualNote', 'ManualNote') || '' };
+            })
+            .concat(rv.manual.map(function (m, i) {
+                return m.categoryCode === code
+                    ? { code: '', name: m.name, status: '', reason: 'Added by the auditor', id: null, kept: true,
+                        exclusion: '', manual: true, note: m.note, newIndex: i }
+                    : null;
+            }).filter(Boolean));
+        if (!q) return rows;
+        return rows.filter(function (r) {
+            return [r.code, r.name, r.status, r.reason, r.note].join(' ').toLowerCase().indexOf(q) >= 0;
+        });
+    }
+
+    function renderReview() {
+        const rv   = state.scope.review;
+        const host = document.getElementById('oaMyReview');
+        if (!rv) { host.hidden = true; return; }
+        host.hidden = false;
+        const live = reviewLive();
+        const h    = rv.header || {};
+        const ver  = v(h, 'versionNo', 'VersionNo');
+        const by   = v(h, 'approvedBy', 'ApprovedBy');
+        const dt   = onlyDate(v(h, 'approvedDt', 'ApprovedDt'));
+        document.getElementById('oaMyReviewHint').textContent = live
+            ? 'What this engagement\'s scope leads to in GRAC, and why. Untick a category or a record that does not apply '
+              + '(a record needs the reason), add manual items, then freeze: the result is kept as the approved scope.'
+            : (ver != null
+                ? 'The approved scope, version ' + ver + (by ? ', approved by ' + by : '') + (dt ? ' on ' + dt : '') + '. Read-only.'
+                : 'No review was recorded for this scope: it was frozen before the review step.');
+        document.getElementById('oaMyReviewSearch').value = rv.search;
+        const cats = reviewCategories();
+        const body = document.getElementById('oaMyReviewBody');
+        if (!live && ver == null) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Nothing to show.</td></tr>';
+            return;
+        }
+        body.innerHTML = cats.map(function (c) {
+            const code  = v(c, 'categoryCode', 'CategoryCode');
+            const name  = v(c, 'categoryName', 'CategoryName') || code;
+            const inc   = !!v(c, 'isIncluded', 'IsIncluded');
+            const all   = rv.items.filter(function (x) { return v(x, 'categoryCode', 'CategoryCode') === code; }).length
+                        + rv.manual.filter(function (m) { return m.categoryCode === code; }).length;
+            const shown = rv.search ? reviewRecords(code).length : all;
+            const open  = rv.open === code;
+            return '<tr data-rcat="' + wf.escape(code) + '"' + (open ? ' class="oa-pl-open is-selected"' : '') + ' style="cursor:pointer;">'
+                 + '<td><input type="checkbox" data-rinclude="' + wf.escape(code) + '"' + (inc ? ' checked' : '')
+                 +      (live ? '' : ' disabled') + ' aria-label="Include ' + wf.escape(name) + '" /></td>'
+                 + '<td>' + wf.escape(name) + (inc ? '' : ' <span style="color:var(--fg-subtle);">(not included)</span>') + '</td>'
+                 + '<td style="text-align:right;">' + (rv.search ? shown + ' of ' + all : all) + '</td>'
+                 + '<td style="text-align:center;"><i class="fa-solid ' + (open ? 'fa-chevron-up' : 'fa-chevron-down') + '" aria-hidden="true"></i></td>'
+                 + '</tr>'
+                 + (open ? reviewChildRow(code, inc, live) : '');
+        }).join('') || '<tr><td colspan="4" class="pm-empty">Nothing related was found.</td></tr>';
+    }
+
+    // The Audit Plans child row, as Step 2: tr.oa-pl-items-row > td > .oa-pl-items.
+    function reviewChildRow(code, included, live) {
+        const rv   = state.scope.review;
+        const rows = reviewRecords(code);
+        const editable = live && included;
+        const head = '<tr>' + (live ? '<th style="width:60px;">Keep</th>' : '')
+                   + '<th>Code</th><th>Name</th><th>Status</th><th>Why it is related</th>'
+                   + '<th>' + (live ? 'Reason for excluding / note' : 'Excluded because / note') + '</th>'
+                   + (live ? '<th style="width:50px;"></th>' : '') + '</tr>';
+        const lines = rows.map(function (r) {
+            const key = code + '|' + r.id;
+            const unkept = !r.manual && Object.prototype.hasOwnProperty.call(rv.unkept, key);
+            const kept = live ? !unkept : r.kept;
+            const keepCell = live
+                ? '<td>' + (r.manual ? '' : '<input type="checkbox" data-rkeep="' + wf.escape(key) + '"' + (kept ? ' checked' : '')
+                       + (editable ? '' : ' disabled') + ' aria-label="Keep">') + '</td>'
+                : '';
+            const last = r.manual
+                ? '<td class="qs-cell-text">' + wf.escape(r.note) + '</td>'
+                : (live
+                    ? '<td>' + (unkept ? '<input class="pm-input" type="text" maxlength="1000" data-rreason="' + wf.escape(key)
+                        + '" value="' + wf.escape(rv.unkept[key]) + '" placeholder="Why it does not apply" style="min-width:0; width:100%;">' : '') + '</td>'
+                    : '<td class="qs-cell-text">' + wf.escape(kept ? '' : r.exclusion) + '</td>');
+            const del = live
+                ? '<td>' + (r.manual && r.newIndex != null
+                    ? '<button type="button" class="pm-button icon" data-rdel="' + r.newIndex + '" title="Remove"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>'
+                    : '') + '</td>'
+                : '';
+            return '<tr' + (kept ? '' : ' style="color:var(--fg-subtle);"') + '>' + keepCell
+                 + '<td>' + wf.escape(r.code) + '</td>'
+                 + '<td>' + wf.escape(r.name) + (r.manual ? ' ' + wf.badge('Manual') : '') + '</td>'
+                 + '<td>' + wf.escape(r.status) + '</td>'
+                 + '<td class="qs-cell-text">' + wf.escape(r.reason) + '</td>'
+                 + last + del + '</tr>';
+        }).join('');
+        const cols = live ? 7 : 5;
+        const add = editable
+            ? '<tr><td colspan="' + (cols - 4) + '"></td>'
+              + '<td colspan="2"><input class="pm-input" type="text" maxlength="400" data-rnew-name="' + wf.escape(code)
+              + '" placeholder="Manual item" style="min-width:0; width:100%;"></td>'
+              + '<td><input class="pm-input" type="text" maxlength="1000" data-rnew-note="' + wf.escape(code)
+              + '" placeholder="Note" style="min-width:0; width:100%;"></td>'
+              + '<td><button type="button" class="pm-button" data-radd="' + wf.escape(code) + '">Add</button></td></tr>'
+            : '';
+        const inner = (rows.length || add)
+            ? '<div class="pm-table-wrap"><table><thead>' + head + '</thead><tbody>'
+              + (lines || '<tr><td colspan="' + cols + '" class="pm-empty">' + (rv.search ? 'No records match the search.' : 'No related records.') + '</td></tr>')
+              + add + '</tbody></table></div>'
+            : '<div class="pm-empty" style="padding:8px 0;">' + (rv.search ? 'No records match the search.' : 'No related records.') + '</div>';
+        return '<tr class="oa-pl-items-row is-selected"><td colspan="4"><div class="oa-pl-items">' + inner + '</div></td></tr>';
+    }
+
+    function wireReview() {
+        const body = document.getElementById('oaMyReviewBody');
+        document.getElementById('oaMyReviewSearch').addEventListener('input', function (e) {
+            if (!state.scope.review) return;
+            state.scope.review.search = e.target.value.trim().toLowerCase();
+            renderReview();
+            const box = document.getElementById('oaMyReviewSearch');
+            box.focus();
+            box.setSelectionRange(box.value.length, box.value.length);
+        });
+        body.addEventListener('click', function (e) {
+            const rv = state.scope.review;
+            if (!rv) return;
+            const add = e.target.closest('[data-radd]');
+            if (add) {
+                const code = add.getAttribute('data-radd');
+                const nameEl = body.querySelector('[data-rnew-name="' + code + '"]');
+                const noteEl = body.querySelector('[data-rnew-note="' + code + '"]');
+                const name = (nameEl && nameEl.value || '').trim();
+                if (!name) { wf.setMessage('oaMyScopeMessage', 'Give the manual item a name.', 'error'); if (nameEl) nameEl.focus(); return; }
+                rv.manual.push({ categoryCode: code, name: name, note: (noteEl && noteEl.value || '').trim() });
+                wf.setMessage('oaMyScopeMessage', '');
+                renderReview();
+                updateHint();
+                return;
+            }
+            const del = e.target.closest('[data-rdel]');
+            if (del) {
+                rv.manual.splice(Number(del.getAttribute('data-rdel')), 1);
+                renderReview();
+                updateHint();
+                return;
+            }
+            if (e.target.closest('input, button')) return;
+            const tr = e.target.closest('tr[data-rcat]');
+            if (!tr) return;
+            const code = tr.getAttribute('data-rcat');
+            rv.open = rv.open === code ? null : code;
+            renderReview();
+        });
+        body.addEventListener('change', function (e) {
+            const rv = state.scope.review;
+            if (!rv || !reviewLive()) return;
+            const inc = e.target.closest('[data-rinclude]');
+            if (inc) {
+                const code = inc.getAttribute('data-rinclude');
+                rv.categories.forEach(function (c) {
+                    if (v(c, 'categoryCode', 'CategoryCode') === code) { c.isIncluded = inc.checked; c.IsIncluded = inc.checked; }
+                });
+                renderReview();
+                updateHint();
+                return;
+            }
+            const keep = e.target.closest('[data-rkeep]');
+            if (keep) {
+                const key = keep.getAttribute('data-rkeep');
+                if (keep.checked) delete rv.unkept[key]; else rv.unkept[key] = '';
+                renderReview();
+                if (!keep.checked) {
+                    const box = body.querySelector('[data-rreason="' + key + '"]');
+                    if (box) box.focus();
+                }
+                updateHint();
+            }
+        });
+        body.addEventListener('input', function (e) {
+            const rv = state.scope.review;
+            const box = e.target.closest('[data-rreason]');
+            if (rv && box) rv.unkept[box.getAttribute('data-rreason')] = box.value;
+        });
+    }
+
+    // { body: { categories, excluded, manual }, missing } -- null without a review.
+    function reviewPayload() {
+        const rv = state.scope.review;
+        if (!reviewLive()) return null;
+        let missing = false;
+        const excluded = Object.keys(rv.unkept).map(function (key) {
+            const at = key.indexOf('|');
+            const reason = (rv.unkept[key] || '').trim();
+            if (!reason) missing = true;
+            return { categoryCode: key.slice(0, at), recordId: Number(key.slice(at + 1)), reason: reason };
+        });
+        return {
+            missing: missing,
+            body: {
+                categories: rv.categories.map(function (c) {
+                    return { code: v(c, 'categoryCode', 'CategoryCode'), isIncluded: !!v(c, 'isIncluded', 'IsIncluded') };
+                }),
+                excluded: excluded,
+                manual: rv.manual.map(function (m) { return { categoryCode: m.categoryCode, name: m.name, note: m.note || null }; })
+            }
+        };
+    }
+
+    // The frame in a row under the audit's row (Audit Configuration's
+    // mountFrame / unmountStep, 543). Called again after the list is
+    // re-rendered, so an open scope stays open.
+    function mountFrame() {
+        const key = state.scope.key;
+        if (key == null) return;
+        const body = document.getElementById('oaMyBody');
+        const old = body.querySelector('tr.oa-pl-items-row');
+        if (old) old.remove();
+        const row  = body.querySelector('tr[data-key="' + key + '"]');
+        // the audit is filtered out of the list: the frame goes back to its
+        // holder and closes (it is held by reference, never looked up by id,
+        // because re-rendering the list takes it out of the page)
+        if (!row) { closeScope(); return; }
+        // The Audit Plans child row: tr.oa-pl-items-row > td > .oa-pl-items.
+        const tr = document.createElement('tr');
+        tr.className = 'oa-pl-items-row is-selected';
+        const td = document.createElement('td');
+        td.colSpan = 7;
+        const host = document.createElement('div');
+        host.className = 'oa-pl-items';
+        host.appendChild(myFrame());
+        td.appendChild(host);
+        tr.appendChild(td);
+        row.insertAdjacentElement('afterend', tr);
+        row.classList.add('oa-pl-open', 'is-selected');
+    }
+
+    // -----------------------------------------------------------------
+    // 556: Continuous Assurance -- the same frame, read-only.
+    // -----------------------------------------------------------------
+    function showPane(which) {
+        document.getElementById('oaMyScopePane').hidden = which !== 'scope';
+        document.getElementById('oaMyCaPane').hidden    = which !== 'ca';
+    }
+
+    // -----------------------------------------------------------------
+    // 567: Working Papers -- the Workpapers page on this execution; the
+    // execution travels in the navigation code (never in the address).
+    // -----------------------------------------------------------------
+    async function openWorkpapers(row) {
+        const err = await window.gracSecureNav.open('org-my-audits', 'org-workpapers', 'AssuranceExecution',
+            v(row, 'executionId', 'ExecutionId'), v(row, 'organizationId', 'OrganizationId'),
+            v(row, 'executionCode', 'ExecutionCode'));
+        if (err) wf.setMessage('oaMyMessage', err, 'error');
+    }
+
+    async function openCa(row) {
+        closeScope();
+        state.scope = { row: row, key: keyOf(row), items: [], frozen: true };
+        showPane('ca');
+        const live   = v(row, 'auditState', 'AuditState') === 'ScopeLive';
+        const branch = v(row, 'branchName', 'BranchName');
+        document.getElementById('oaMyFrameCaption').textContent =
+            'Continuous Assurance over the ' + (live ? 'live' : 'frozen') + ' scope' + (branch ? ' at ' + branch : '')
+            + ': each scope item, the practice instances it covers, their scheduled obligations, the obligation status and the last task.';
+        document.getElementById('oaMyFrameHint').textContent = 'Read-only. Each obligation is counted once in the summary.';
+        document.getElementById('oaMyScopeFreeze').hidden = true;
+        document.getElementById('oaMyCaSummary').innerHTML = '';
+        document.getElementById('oaMyCaBody').innerHTML = '<tr><td colspan="5" class="pm-empty">Loading...</td></tr>';
+        wf.setMessage('oaMyScopeMessage', '');
+        mountFrame();
+
+        try {
+            const r = await fetch(U(API + '/executions/' + encodeURIComponent(v(row, 'executionId', 'ExecutionId'))
+                    + '/continuous-assurance?organizationId=' + encodeURIComponent(v(row, 'organizationId', 'OrganizationId'))),
+                    { credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            renderCa((j && (j.summary || j.Summary)) || [], (j && (j.detail || j.Detail)) || []);
+        } catch (err) {
+            document.getElementById('oaMyCaBody').innerHTML = '';
+            wf.setMessage('oaMyScopeMessage', 'Continuous Assurance could not be loaded: ' + (err.message || err), 'error');
+        }
+    }
+
+    function renderCa(summary, detail) {
+        const group = function (kind, title) {
+            const rows = summary.filter(function (x) { return v(x, 'summaryKind', 'SummaryKind') === kind; });
+            if (!rows.length) return '';
+            return '<div style="margin-bottom:6px;"><span style="color:var(--fg-muted); font-size:12px; margin-right:6px;">' + wf.escape(title) + '</span>'
+                 + rows.map(function (x) {
+                       return '<span class="pm-badge">' + wf.escape(v(x, 'label', 'Label') || '') + ' ' + wf.escape(String(v(x, 'itemCount', 'ItemCount') ?? 0)) + '</span>';
+                   }).join(' ') + '</div>';
+        };
+        document.getElementById('oaMyCaSummary').innerHTML =
+            group('Totals', 'Totals') + group('ObligationStatus', 'Obligation status') + group('LastTaskStatus', 'Last task');
+
+        if (!detail.length) {
+            document.getElementById('oaMyCaBody').innerHTML = '<tr><td colspan="5" class="pm-empty">Nothing is in scope.</td></tr>';
+            return;
+        }
+        const muted = function (t) { return '<span style="color:var(--fg-subtle);">' + wf.escape(t) + '</span>'; };
+        let lastItem = null, lastInst = null;
+        document.getElementById('oaMyCaBody').innerHTML = detail.map(function (d) {
+            const itemKey = (v(d, 'dimensionCode', 'DimensionCode') || '') + ':' + (v(d, 'entityId', 'EntityId') ?? '');
+            const instId  = v(d, 'practiceInstanceId', 'PracticeInstanceId');
+            const firstOfItem = itemKey !== lastItem;
+            const firstOfInst = firstOfItem || String(instId) !== String(lastInst);
+            lastItem = itemKey; lastInst = instId;
+
+            const item = firstOfItem
+                ? wf.escape(v(d, 'entityName', 'EntityName') || v(d, 'entityCode', 'EntityCode') || '')
+                  + '<div style="color:var(--fg-subtle); font-size:12px;">' + wf.escape(v(d, 'dimensionName', 'DimensionName') || v(d, 'dimensionCode', 'DimensionCode') || '') + '</div>'
+                : '';
+            let inst = '';
+            if (instId == null) inst = firstOfItem ? muted('No practice instance covers this item') : '';
+            else if (firstOfInst)
+                inst = wf.escape(v(d, 'instanceName', 'InstanceName') || '')
+                     + ' ' + muted('(' + (v(d, 'instanceCode', 'InstanceCode') || '') + ')')
+                     + '<div style="color:var(--fg-subtle); font-size:12px;">' + wf.escape(v(d, 'via', 'Via') || '') + '</div>';
+
+            const obId = v(d, 'obligationId', 'ObligationId');
+            const ob = obId == null
+                ? (instId == null ? '' : muted('No scheduled obligation'))
+                : wf.escape(v(d, 'obligationName', 'ObligationName') || '')
+                  + '<div style="color:var(--fg-subtle); font-size:12px;">' + wf.escape([v(d, 'obligationType', 'ObligationType'), v(d, 'frequency', 'Frequency')].filter(Boolean).join(' - ')) + '</div>';
+            const st = obId == null ? '' : wf.badge(v(d, 'obligationStatusName', 'ObligationStatusName') || 'Not set');
+            const tn = v(d, 'lastTaskNumber', 'LastTaskNumber');
+            const task = obId == null ? '' : (tn
+                ? wf.escape(tn) + ' ' + wf.badge(v(d, 'lastTaskStatusName', 'LastTaskStatusName') || '')
+                  + '<div style="color:var(--fg-subtle); font-size:12px;">Due ' + wf.escape(onlyDate(v(d, 'lastTaskDueDate', 'LastTaskDueDate'))) + '</div>'
+                : muted('No task yet'));
+            return '<tr><td>' + item + '</td><td>' + inst + '</td><td>' + ob + '</td><td>' + st + '</td><td>' + task + '</td></tr>';
+        }).join('');
+    }
+
+    let myFrameEl = null;
+    function myFrame() { return myFrameEl || (myFrameEl = document.getElementById('oaMyFrame')); }
+    function closeScope() {
+        document.getElementById('oaMyHolder').appendChild(myFrame());
+        const body = document.getElementById('oaMyBody');
+        const tr = body.querySelector('tr.oa-pl-items-row');
+        if (tr) tr.remove();
+        body.querySelectorAll('tr.oa-pl-open').forEach(function (r) { r.classList.remove('oa-pl-open', 'is-selected'); });
+        state.scope = { row: null, key: null, items: [], frozen: false, review: null };
+        document.getElementById('oaMyScopeFreeze').disabled = false;
+        document.getElementById('oaMyReview').hidden = true;   // 563
+        showPane('scope');
+    }
+
+    // -----------------------------------------------------------------
+    // Row menu -- the Audit Plans page's pattern (portal to body).
+    // -----------------------------------------------------------------
+    function trigger(key) {
+        return '<button type="button" class="pm-action-trigger"'
+             + ' data-key="' + key + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+    function closeRowMenu() {
+        if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trg) {
+        if (!openMenuEl) return;
+        const r  = trg.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trg, items) {
+        closeRowMenu();
+        openMenuTrigger = trg;
+        trg.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        if (!items.length) {
+            const p = document.createElement('div');
+            p.style.cssText = 'padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;';
+            p.textContent = 'No actions available';
+            openMenuEl.appendChild(p);
+        }
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[my-audits] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trg);
+    }
+    function wireRowMenus() {
+        const body = document.getElementById('oaMyBody');
+        body.addEventListener('click', function (e) {
+            const trg = e.target.closest('.pm-action-trigger');
+            if (!trg || !body.contains(trg)) return;
+            e.preventDefault(); e.stopPropagation();
+            if (openMenuTrigger === trg) { closeRowMenu(); return; }
+            const row = state.byKey[trg.getAttribute('data-key')];
+            if (row) openRowMenu(trg, buildMenu(row));
+        });
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu'))    return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+
+    function onlyDate(val) {
+        if (!val) return '';
+        if (typeof window.gracFormatDisplayDate === "function") { var g = window.gracFormatDisplayDate(val); if (g !== val) return g; }
+        return String(val).slice(0, 10);
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

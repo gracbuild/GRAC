@@ -1,0 +1,16 @@
+21aeb0259ca8bfc17d79b374b049110a  database/487_tprm_baseline_seed.sql
+57c526f8cee42f701f832d3b3b6238f0  database/522_tpm_cr2_registration_exposure.sql
+e1d60e999280e87a5fecb08f8ac95235  database/522_tpm_cr2_registration_exposure_rollback.sql
+577ce5e1e96afda526144de2baea589f  database/523_tpm_cr2_screening_admission.sql
+79f3b4d41363c446dfca42eb06a9052a  database/523_tpm_cr2_screening_admission_rollback.sql
+37bdc9dfaf910960edc17262e530995b  docs/tpm-lifecycle-redesign.md
+6fc6a3bf6e77d1cd1bc1b02058edc6f2  docs/tprm.md
+7e0f56bba473f9b774ff74ff69b5796d  src/PracticeManagement.Api/Controllers/TprmController.cs
+ebfc92e66d0fdff726749c63e423aa8a  src/PracticeManagement.Api/Models/TprmModels.cs
+7cdff4a63e7545fcdc2eee33bcecca31  src/PracticeManagement.Api/Services/TprmService.cs
+8c1fd0b9a498518fec9b45c1e32cc940  src/PracticeManagement.Web/Controllers/TprmController.cs
+bd436c2ac78e886a32feade8c3f682e7  src/PracticeManagement.Web/Security/CallerIdentityHandler.cs
+a06749d0fe86133bbee68d0d0da2061a  src/PracticeManagement.Web/Views/Practice/Partials/tprm-engagements.cshtml
+fb0de32f9902959c00c7dc94c08da62a  src/PracticeManagement.Web/wwwroot/js/Tprm/tprm-engagements.js
+5cd137bbe2851e076ead881ef8aeee7d  tools/tprm/gen_487.py
+b0431ecee1befb9d210db24c3b834876  tools/tprm/gen_csharp.py

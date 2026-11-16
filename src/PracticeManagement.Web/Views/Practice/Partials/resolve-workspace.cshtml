@@ -1555,6 +1555,9 @@
         // Constraint: scope, exception_policy
         'triggercondition', 'responsibleparty', 'assuranceparty',
         'escalationpath', 'exceptionpolicy', 'scope',
+        // EventResponse: trigger_event -- the free text Control Management
+        // 086 replaced with the event (event_type_id, shown as "Event type").
+        'triggerevent',
 
         // Migration 473: the cadence CODE. Its label (EvidenceCadenceLabel,
         // "One-time" rather than "OneTime") is what an Evidence-type card
@@ -1576,6 +1579,8 @@
     // this map is presentation polish, never a gate on what is shown.
     const detailLabels = {
         slavalue: 'SLA', slaunit: 'SLA unit',
+        sladays: 'Due within (days)',   // CM 086 -- Event Response deadline
+        eventtypeid: 'Event',           // CM 086 -- resolved to the event name
         minretentionvalue: 'Minimum retention', minretentionunit: 'Minimum retention unit',
         maxretentionvalue: 'Maximum retention', maxretentionunit: 'Maximum retention unit',
         evidencetype: 'Evidence type', retentionrequirement: 'Retention',
@@ -1732,66 +1737,57 @@
                 parts.push(overrideRow(id, 'First occurrence', 'firstOccurrenceDate',
                     '<input type="date" value="' + esc(val(o, 'firstOccurrenceDate') || '') + '">'));
             } else if (mode === 'EventDriven') {
-                // The flat event vocabulary from migration 230, read from
-                // the shared obligation form -- it fetches that endpoint
-                // for its own Assurance panel, so this side reads the
-                // result instead of fetching it a second time.
-                // Only the leaves are picker options -- a parent domain
-                // is a grouping, never an event you can pick.
-                const allEvents = vocabulary().eventTypes;
-                const leaves = allEvents
-                    .filter(e => F(e, 'parentEventTypeId'))
-                    .map(e => ({ value: String(F(e, 'eventTypeId')),
-                                 label: String(F(e, 'eventName') || '') }));
-                const pubEventId = F(item, 'eventTypeId') ?? F(item, 'event_type_id');
-                const pubEventLabel = pubEventId != null
-                    ? String((allEvents.find(e => String(F(e, 'eventTypeId')) === String(pubEventId)) || {}).eventName || '')
-                    : '';
-
-                parts.push(overrideRow(id, 'Event', 'eventTypeId',
-                    '<select>' + options(leaves, val(o, 'eventTypeId'),
-                        pubEventLabel ? 'As published (' + pubEventLabel + ')' : 'As published') + '</select>'));
-
-                // SLA is two paired inputs. Number + unit -- same shape
-                // CM uses in its own admin panel, kept side by side so
-                // reading them as one phrase ("5 Days") still works.
-                const pubValue = F(item, 'slaValue') ?? F(item, 'sla_value');
-                const pubUnit  = String(F(item, 'slaUnit')  || F(item, 'sla_unit')  || '');
-                const curVal   = val(o, 'slaValue');
-                const curUnit  = val(o, 'slaUnit');
-
-                const pubSlaLabel = (pubValue != null && String(pubValue) !== '')
-                    ? String(pubValue) + (pubUnit ? ' ' + pubUnit : '')
-                    : '';
-
-                parts.push(overrideRow(id, 'SLA value', 'slaValue',
-                    '<input type="number" min="0" value="' + esc(curVal ?? '')
-                    + '" placeholder="' + esc(pubSlaLabel || 'As published') + '">'));
-
-                // Unit picker: just the units this obligation has ever
-                // referred to. An earlier draft tried to sweep every
-                // sibling item for units, which referenced a variable
-                // outside its scope and broke the whole card. The
-                // published value and the stored override are enough --
-                // nothing on screen refers to a value the user cannot
-                // re-pick, and CM has no separate unit vocabulary to
-                // borrow from.
-                const unitValues = new Set();
-                if (curUnit) unitValues.add(curUnit);
-                if (pubUnit) unitValues.add(pubUnit);
-                const unitOptions = Array.from(unitValues).map(u => ({ value: u, label: u }));
-
-                parts.push(overrideRow(id, 'SLA unit', 'slaUnit',
-                    '<select>' + options(unitOptions, curUnit,
-                        pubUnit ? 'As published (' + pubUnit + ')' : 'As published') + '</select>'));
+                // An organization that has not yet approved Control
+                // Management 086's repository update still holds the
+                // pre-086 copy (an Event Driven assurance). It gets the
+                // same inputs as the Event Response it is about to become.
+                parts.push(eventOverrides(id, o, item));
             }
+        } else if (type === 'EventResponse') {
+            // CM 086: the event-driven obligation.
+            parts.push(eventOverrides(id, o, item));
         }
         return parts.join('');
     }
 
+    // Event + "Due within (days)" overrides of an event-driven obligation
+    // (an Event Response; or a pre-086 Event Driven assurance copy).
+    function eventOverrides(id, o, item) {
+        // The flat event vocabulary from migration 230, read from the
+        // shared obligation form -- it fetches that endpoint for its own
+        // Event Response panel, so this side reads the result instead of
+        // fetching it a second time.
+        // Only the leaves are picker options -- People / Asset is a
+        // grouping, never an event you can pick.
+        const allEvents = vocabulary().eventTypes;
+        const leaves = allEvents
+            .filter(e => F(e, 'parentEventTypeId'))
+            .map(e => ({ value: String(F(e, 'eventTypeId')),
+                         label: String(F(e, 'eventName') || '') }));
+        const pubEventId = F(item, 'eventTypeId') ?? F(item, 'event_type_id');
+        const pubEventLabel = pubEventId != null
+            ? String((allEvents.find(e => String(F(e, 'eventTypeId')) === String(pubEventId)) || {}).eventName || '')
+            : '';
+
+        // The deadline is in DAYS (CM 086). The override is stored in the
+        // instance's sla_value with sla_unit 'Days' (see the save payload);
+        // the published value is the spec's sla_days.
+        const pubDays = F(item, 'slaDays') ?? F(item, 'sla_days');
+        const pubDaysLabel = (pubDays != null && String(pubDays) !== '')
+            ? String(pubDays) + ' days'
+            : '';
+
+        return overrideRow(id, 'Event', 'eventTypeId',
+                   '<select>' + options(leaves, val(o, 'eventTypeId'),
+                       pubEventLabel ? 'As published (' + pubEventLabel + ')' : 'As published') + '</select>')
+             + overrideRow(id, 'Due within (days)', 'slaValue',
+                   '<input type="number" min="0" max="3650" value="' + esc(val(o, 'slaValue') ?? '')
+                   + '" placeholder="' + esc(pubDaysLabel ? 'As published (' + pubDaysLabel + ')' : 'As published') + '">');
+    }
+
     // The override inputs for "Your answers": frequency + first occurrence
-    // (Execution, Scheduled Assurance) or event + SLA (EventDriven
-    // Assurance). The stored overrides are per obligation, so one set is
+    // (Execution, Scheduled Assurance) or event + days (Event Response).
+    // The stored overrides are per obligation, so one set is
     // rendered -- from the first published rule that has any. A local
     // obligation has nothing published to override; it is edited on its
     // own form.
@@ -3204,7 +3200,9 @@
             remarks:              val(o, 'remarks') || null,
             eventTypeId:          num(val(o, 'eventTypeId')),
             slaValue:             num(val(o, 'slaValue')),
-            slaUnit:              val(o, 'slaUnit') || null,
+            // CM 086: the "Due within" override is in days, so a value
+            // entered here is always stored as Days.
+            slaUnit:              num(val(o, 'slaValue')) != null ? 'Days' : (val(o, 'slaUnit') || null),
             implementationStatusId: num(val(o, 'implementationStatusId')),
             connectionTypeId:     num(val(o, 'connectionTypeId')),
             connectionUrl:        val(o, 'connectionUrl') || null,

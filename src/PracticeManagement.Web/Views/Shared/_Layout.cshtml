@@ -44,7 +44,19 @@
     var dependencyOpen = dependencyRoot?.Key == currentArea || dependencyScreens.Any(x => x.Key == currentArea);
     var workbenchOpen = (resolveScreen?.Key == currentArea) || workbenchScreens.Any(x => x.Key == currentArea);
     var practiceOpen = practiceScreens.Any(x => x.Key == currentArea) || workbenchOpen;
-    var currentGroup = isOrganizationManagementModule ? "Organization Management" : onboardingOpen ? PracticeScreen.OrganizationOnboardingGroup : organizationOpen ? PracticeScreen.OrganizationAdministrationGroup : dependencyOpen ? PracticeScreen.OrganizationDependenciesGroup : practiceOpen ? PracticeScreen.PracticeManagementGroup : "Practice Management";
+    // The breadcrumb's middle segment is the CURRENT SCREEN'S OWN group --
+    // the same value the page-heading eyebrow prints -- so the two can no
+    // longer disagree. Read from PracticeScreen.All rather than
+    // ViewBag.Screens, because that one is filtered to what the menu shows
+    // and would miss every sub-page (gap-detail, task-edit, gap-view, ...).
+    // Before this, the chain below hand-listed four groups and everything
+    // else fell through to the literal "Practice Management": Standards &
+    // Frameworks is in the Governance group, so the breadcrumb read
+    // "Home / Practice Management / Standards & Frameworks" while the card
+    // under it read "Governance / Standards & Frameworks". The chain is
+    // kept as the fallback for a key that is not in All at all.
+    var currentScreenGroup = PracticeScreen.All.FirstOrDefault(x => x.Key == currentArea)?.Group;
+    var currentGroup = isOrganizationManagementModule ? "Organization Management" : !string.IsNullOrWhiteSpace(currentScreenGroup) ? currentScreenGroup : onboardingOpen ? PracticeScreen.OrganizationOnboardingGroup : organizationOpen ? PracticeScreen.OrganizationAdministrationGroup : dependencyOpen ? PracticeScreen.OrganizationDependenciesGroup : practiceOpen ? PracticeScreen.PracticeManagementGroup : "Practice Management";
 
     // Signed-in identity for the navbar. The name was hardcoded to
     // "Practice Admin", which told every user they were somebody else.

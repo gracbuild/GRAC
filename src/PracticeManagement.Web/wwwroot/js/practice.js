@@ -72,8 +72,8 @@
   document.body.addEventListener("change", __pmCascadeChangeHandler);
   // pmCommitteeAndTeamClick top-level attach: same reason as pmCascade
   // just above -- the IIFE returns early on organization-workspace screens
-  // (see the "if (screen.Key === "organizations" || isOrganizationWorkspace)"
-  // guard, later in this file, right before it calls initOrganizationSetup),
+  // (see the "if (isOrganizationWorkspace)" guard, later in this file,
+  // right before it calls initOrganizationSetup),
   // and both the Team Members tree ("+"/"-" toggle, migration 362) and the
   // Committee Members section (migration 370, change request 2026-09-22)
   // are only ever shown on organization-workspace screens (Organization
@@ -328,11 +328,18 @@
   // page after the Asset taxonomy (migration 239-241) subsumed them. The
   // default tab is now Vendors, matching the new first setupChildTabs entry
   // in Manage.cshtml.
-  const setupState = { organizationId: "", activeTab: screen.Key === "organization-dependencies" ? "dependency-vendors" : "organization", childRows: {}, treeRows: [], collapsed: new Set(), selectedReleases: new Set(), attributes: {}, treeInitialized: false, recommendations: new Map(), recommendationAutoSelected: new Set() };
+  const setupState = { organizationId: "", activeTab: screen.Key === "organization-dependencies" ? "dependency-vendors" : "organization", childRows: {}, treeRows: [], collapsed: new Set(), selectedReleases: new Set(), attributes: {}, treeInitialized: false, recommendations: new Map(), recommendationAutoSelected: new Set(), admin: null };
   const isOrganizationOnboarding = screen.Key === "organization-setup";
   const isOrganizationAdministration = screen.Key === "organization-administration";
   const isOrganizationDependencies = screen.Key === "organization-dependencies";
   const isOrganizationWorkspace = isOrganizationOnboarding || isOrganizationAdministration || isOrganizationDependencies;
+  // Organization Setup reached from inside the Organization Management
+  // module (2026-11-02, set by Manage.cshtml). The organization comes from
+  // the row that was clicked on the landing list -- or from the view page's
+  // Actions > Edit -- so the Organization combo is hidden there and is not a
+  // selection the user makes. Read-only VIEWING of an organization is NOT
+  // this page's job: it has its own screen, organization-view.
+  const organizationSetupInModule = isOrganizationOnboarding && window.pmOrganizationSetupInModule === true;
   const isOperationalizationWorkbench = screen.Key === "resolve" || screen.Key === "practice-operationalization";
   const workbenchScreens = new Set(["workbench-applications", "workbench-tools", "workbench-vendors", "workbench-assets", "workbench-teams", "workbench-committees", "workbench-processes", "workbench-locations"]);
   const organizationScopedScreens = new Set(["organization-metadata", "repository-subscriptions", "locations", "departments", "business-functions", "teams", "committees", "roles", "role-menu-permissions", "users", "dependency-applications", "dependency-tools", "dependency-vendors", "dependency-assets", "dependency-processes", "user-assignments", "user-role-assignments", "owner-mappings", "organization-controls", "control-applicability", "organization-requirements", "practices", "practice-instances", "practice-operationalization", "resolve",
@@ -523,6 +530,23 @@
   };
   const cellClassFor = column =>
     wrappedColumnsByScreen[screen.Key]?.has(column) ? ' class="pm-cell-text"' : "";
+  // 2026-11-02. Per-screen column headings. columnLabel()'s map is global,
+  // so "Name" reads "Practice Instance Name" on every grid -- wrong on the
+  // Organization Management landing list, where the request was for
+  // "Organisation Short Name" / "Organisation Long Name". Keyed by screen for
+  // the same reason wrappedColumnsByScreen above is: renaming "Name" globally
+  // would silently retitle a column on every other grid in the module.
+  const columnLabelsByScreen = {
+    "organizations": {
+      Code: "Organisation Short Name",
+      Name: "Organisation Long Name",
+      SubscriptionStartDate: "Start Date",
+      SubscriptionEndDate: "End Date",
+      FrameworkSummary: "Selected Standards and Frameworks",
+      SpocName: "SPOC Name",
+      Status: "Organisation Status"
+    }
+  };
   const setupChildScreens = {
     "locations": { title: "Location", columns: ["Name", "LocationType", "LocationHead", "Region", "Status"] },
     "departments": { title: "Department", columns: ["Code", "Name", "HeadUser", "Status"] },
@@ -567,6 +591,8 @@
   }
 
   function columnLabel(column) {
+    const screenLabels = columnLabelsByScreen[screen.Key];
+    if (screenLabels?.[column]) return screenLabels[column];
     const labels = {
       Name: "Practice Instance Name",
       Chairperson: "Committee Head",
@@ -761,7 +787,10 @@
     // your team, delivered by someone else.
     "teams": [select("organizationId", "Organization", "organizations", true), text("name", "Team Name", true), select("teamType", "Team Type", "team-types", true), select("vendorId", "Vendor", "dependency-vendors"), select("teamManagerId", "Team Manager", "users-id"), select("parentDepartmentId", "Parent Department", "departments"), area("remarks", "Remarks"), { name: "memberIds", label: "Team Members", type: "deptEmployeeTree", lookup: "team-department-employees", full: true }, select("statusId", "Status", "record-status", true, { restrictTo: ACTIVE_INACTIVE_ONLY_STATUSES })],
     "committees": [select("organizationId", "Organization", "organizations", true), text("name", "Committee Name", true), select("chairpersonId", "Committee Head", "users-id"), hidden("secretaryId"), select("reviewFrequencyId", "Review Frequency", "frequency-master"), area("remarks", "Remarks"), select("statusId", "Status", "record-status", true)],
-    "roles": [select("organizationId", "Organization", "organizations", true), text("roleCode", "Role Code"), text("roleName", "Role Name", true), area("description", "Description")],
+    // 553 (2026-11-14): Responsibilities -- what the role does (Auditor,
+    // Audit Reviewer ...; role_responsibility_master). People whose role
+    // carries Auditor are the Audit Plan engagement's Assigned Auditors.
+    "roles": [select("organizationId", "Organization", "organizations", true), text("roleCode", "Role Code"), text("roleName", "Role Name", true), { name: "responsibilityIds", label: "Responsibilities", type: "comboChecks", lookup: "role-responsibilities" }, area("description", "Description")],
     "role-menu-permissions": [select("organizationId", "Organization", "organizations", true), select("roleId", "Role", "roles", true), select("menuId", "Menu", "menus", true), { name: "canView", label: "View", type: "checkbox" }, { name: "canAdd", label: "Add", type: "checkbox" }, { name: "canEdit", label: "Edit", type: "checkbox" }, { name: "canDelete", label: "Delete", type: "checkbox" }, { name: "canApprove", label: "Approve", type: "checkbox" }, select("statusId", "Status", "record-status", true)],
     // Personnel Type comes second because it changes what the rest of the
     // form means: a third-party person must name the Provider that supplies
@@ -1320,6 +1349,10 @@
     // merges its rows.
     await ensureTimeZoneLookup();
 
+    // 553: Role Master's Responsibilities multi-select -- its own entity,
+    // not in the generic /lookups UNION, merged the same way as time-zones.
+    await ensureRoleResponsibilityLookup();
+
     // Team Members tree (migration 362, change request 2026-09-20):
     // Department -> active Employee rows for the Add/Edit Team form.
     // "team-department-employees" is not part of the generic /lookups
@@ -1465,6 +1498,36 @@
       timeZoneLookupPromise = null;
     });
     return timeZoneLookupPromise;
+  }
+
+  // 553: Role Responsibilities (Auditor, Audit Reviewer ...) for Role
+  // Master's Responsibilities multi-select. Same fetch/merge/degrade rules
+  // as ensureTimeZoneLookup above (promise cleared in finally for the same
+  // reason: loadLookups() rebuilds state.lookups every call).
+  let roleResponsibilityLookupPromise = null;
+  function ensureRoleResponsibilityLookup() {
+    if (roleResponsibilityLookupPromise) return roleResponsibilityLookupPromise;
+    roleResponsibilityLookupPromise = fetchJson(`${api}/role-responsibilities/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+      body: JSON.stringify({ data: { pageNumber: 1, pageSize: 500 } })
+    }).then(result => {
+      const rows = apiData(result);
+      state.lookups["role-responsibilities"] = dedupeLookupItems(rows.map(row => ({
+        value: row.Value ?? row.value,
+        label: row.Label ?? row.label,
+        organizationId: "",
+        departmentId: "",
+        departmentName: ""
+      })));
+    }).catch(() => {
+      // 553 not deployed yet: the multi-select renders empty; the rest of
+      // the Role form still works.
+      state.lookups["role-responsibilities"] = state.lookups["role-responsibilities"] || [];
+    }).finally(() => {
+      roleResponsibilityLookupPromise = null;
+    });
+    return roleResponsibilityLookupPromise;
   }
 
   // Team Members tree (migration 362): one row per (active Department,
@@ -1876,8 +1939,25 @@
   function populateSetupOrganizationSelector() {
     setupOrganization.innerHTML = `<option value="">${isOrganizationOnboarding ? "New Organization" : "Select Organization"}</option>${(state.lookups.organizations || []).map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("")}`;
     const organizations = state.lookups.organizations || [];
+    // 2026-11-02: the Organization Management landing list reaches this page
+    // through an encrypted navigation code (?code=), resolved into
+    // state.navigationContext by loadSetupNavigationContext() before this
+    // runs -- never a readable id in the URL. It wins over the remembered
+    // organization and over the first-in-list fallback. An organization that
+    // is not in this caller's list falls through to exactly the previous
+    // behaviour rather than selecting nothing.
+    const requested = String(state.navigationContext?.organizationId
+      || state.navigationContext?.filterId || "");
     const saved = getSavedOrganizationId();
-    const selected = organizations.find(item => String(item.value) === saved) || (isOrganizationOnboarding ? null : organizations[0]);
+    const selected = organizations.find(item => String(item.value) === requested)
+      // In the Organization Management module this page is reached in exactly
+      // two ways: from a row on the landing list, which supplies the context
+      // above, or from "Add Organization", which must open a BLANK New
+      // Organization form. So the remembered organization is deliberately
+      // not a fallback there -- it would make Add Organization open whichever
+      // organization was last looked at, read-only.
+      || (organizationSetupInModule ? null : organizations.find(item => String(item.value) === saved))
+      || (isOrganizationOnboarding ? null : organizations[0]);
     if (!setupOrganization.value && selected) setupOrganization.value = String(selected.value);
     setupOrganization.disabled = !isOrganizationOnboarding && organizations.length === 1;
   }
@@ -1914,6 +1994,7 @@
     setupState.treeRows.filter(row => row.IsSubscribed || row.isSubscribed).forEach(row => setupState.selectedReleases.add(String(row.ReleaseId || row.releaseId)));
     collapseSubscriptionTree();
     setupState.treeInitialized = true;
+    await loadSetupOrganizationAdmin(orgId);
     renderSetupBasic(org);
     renderSetupAttributes();
     await loadSetupSso(orgId);
@@ -1992,7 +2073,11 @@
       stateProvince: org.StateProvince || "",
       postalCode: org.PostalCode || "",
       subscriptionStartDate: String(org.SubscriptionStartDate || "").slice(0, 10),
-      subscriptionEndDate: String(org.SubscriptionEndDate || "").slice(0, 10)
+      subscriptionEndDate: String(org.SubscriptionEndDate || "").slice(0, 10),
+      // 518: the organization's current Organisation GRAC Admin. These are
+      // not organization columns -- see loadSetupOrganizationAdmin().
+      adminEmail: setupState.admin?.email || "",
+      adminName: setupState.admin?.name || ""
     };
     // Organization Administration's Organization tab is read-only by design
     // (change request 2026-09-20) -- render plain label/value pairs there
@@ -2000,7 +2085,56 @@
     // this same field schema (Organization Setup's onboarding flow).
     setupBasicFields.innerHTML = isOrganizationAdministration
       ? setupBasicSchema.map(field => setupViewFieldMarkup(field, values[field.name])).join("")
-      : setupBasicSchema.map(field => setupFieldMarkup(field, values[field.name], false)).join("");
+      : setupBasicSchema.map(field => setupFieldMarkup(setupAdminField(field), values[field.name], false)).join("");
+  }
+
+  // 518 -- Admin Email / Admin Full Name are not stored on the organization.
+  // They are handed to provision-and-notify, which creates the organization's
+  // Admin employee (pm_create_organization_admin, 217). On an EXISTING
+  // organization the form shows that employee instead:
+  //   * an admin exists (or could not be read) -> read-only, not required;
+  //     changing the admin is not this form's job (the employee code is
+  //     ORGADMIN-<id>, one per organization).
+  //   * no admin yet (an organization created while the id bug below hid
+  //     provisioning) -> editable, optional; Save provisions one.
+  // A NEW organization keeps the schema as is (Admin Email required).
+  function setupAdminLocked() {
+    const admin = setupState.admin;
+    return !admin || admin.unknown === true || Boolean(admin.email || admin.name);
+  }
+
+  function setupAdminField(field) {
+    if (field.name !== "adminEmail" && field.name !== "adminName") return field;
+    if (!setupState.organizationId) return field;
+    return setupAdminLocked()
+      ? { ...field, required: false, readonly: true }
+      : { ...field, required: false };
+  }
+
+  // Reads the admin from the 'organizations' read (510's
+  // sp_org_organization_list: SpocName, and SpocEmail since 518) -- the
+  // same call the landing list and organization-view already make, and
+  // governed by the same organization-setup permission. Allowed to fail:
+  // the fields then render read-only and blank, and Save provisions nothing.
+  async function loadSetupOrganizationAdmin(orgId) {
+    setupState.admin = null;
+    if (!orgId) return;
+    try {
+      const result = await fetchJson(`${api}/organizations/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({ id: Number(orgId), data: { pageNumber: 1, pageSize: 1 } })
+      });
+      const tables = result.data || result.Data || [];
+      const row = (Array.isArray(tables[0]) ? tables[0][0] : tables[0]) || {};
+      setupState.admin = {
+        email: String(valueOf(row, "SpocEmail") || "").trim(),
+        name: String(valueOf(row, "SpocName") || "").trim()
+      };
+    } catch (error) {
+      console.warn("Organization admin could not be read.", error);
+      setupState.admin = { email: "", name: "", unknown: true };
+    }
   }
 
   function renderSetupAttributes() {
@@ -2239,6 +2373,8 @@
       const organization = collectSetupFields(setupBasicFields);
       organization.id = setupState.organizationId ? Number(setupState.organizationId) : 0;
       const isNewOrganization = !organization.id || organization.id <= 0;
+      // 518: an existing organization with no admin yet may be given one here.
+      const provisionAdmin = isNewOrganization || !setupAdminLocked();
       const attributes = collectSetupFields(setupAttributeFields);
       const recommendations = [...setupState.recommendations.entries()].map(([releaseId, item]) => ({
         releaseId: Number(releaseId),
@@ -2254,8 +2390,10 @@
       // Rule 6 — best-effort admin provisioning for newly-created orgs.
       // Never let this step block the "org saved" confirmation.
       let provisioningNote = "";
-      if (isNewOrganization) {
-        const newOrgId = extractNewOrganizationId(saveResult) || setupState.organizationId;
+      if (provisionAdmin) {
+        const newOrgId = isNewOrganization
+          ? (extractNewOrganizationId(saveResult) || setupState.organizationId)
+          : organization.id;
         const adminEmail = String(organization.adminEmail || "").trim();
         if (newOrgId && adminEmail) {
           try {
@@ -2277,7 +2415,10 @@
             provisioningNote = ` Admin provisioning failed: ${provisionError.message}`;
           }
         } else if (!adminEmail) {
-          provisioningNote = " (No admin email supplied — admin not provisioned.)";
+          if (isNewOrganization) provisioningNote = " (No admin email supplied — admin not provisioned.)";
+        } else {
+          // 518: never skip silently again -- this branch is how the id bug hid.
+          provisioningNote = " Admin not provisioned: the saved organization's id was not returned.";
         }
       }
 
@@ -2318,7 +2459,12 @@
     if (!data) return 0;
     const first = Array.isArray(data) ? (Array.isArray(data[0]) ? data[0][0] : data[0]) : data;
     if (!first) return 0;
-    return Number(first.OrganizationId || first.organizationId || first.NewOrganizationId || first.newOrganizationId || 0) || 0;
+    // 518: pm_manage_practice_repository (404) ends with
+    // SELECT ... @new_id Id -- the organization-setup save returns the new
+    // organization's id as `Id`. Reading only OrganizationId made this 0 for
+    // every new organization, so the admin was never provisioned.
+    return Number(first.OrganizationId || first.organizationId || first.NewOrganizationId || first.newOrganizationId
+      || first.Id || first.id || 0) || 0;
   }
 
   function currentSetupPayload() {
@@ -2368,8 +2514,27 @@
     renderSubscriptionTree();
   }
 
+  // Organization Setup is reached from the Organization Management landing
+  // list through an encrypted ?code=, so the organization to open has to be
+  // decrypted before the selector is built. loadNavigationContext() is the
+  // same resolver every grid screen uses; it is safe here because the two
+  // elements it touches that this page does not have (#organizationFilter,
+  // the context summary) are already guarded inside it.
+  //
+  // A stale or expired code is NOT fatal: the code's envelope is good for 30
+  // minutes, and after that the page falls back to the remembered
+  // organization exactly as it did before, rather than failing to load.
+  async function loadSetupNavigationContext() {
+    if (!state.navigationCode) return;
+    try { await loadNavigationContext(); }
+    catch (error) {
+      console.warn("Organization context could not be resolved; opening the remembered organization.", error);
+    }
+  }
+
   function initOrganizationSetup() {
     populateSetupOrganizationSelector();
+
     loadOrganizationSetup().catch(error => {
       setupMessage.textContent = error.message;
       setupMessage.hidden = false;
@@ -3752,8 +3917,9 @@
   // Lists the central Repository releases (the same eligibility rule
   // Organization Setup's subscription tree uses) with THIS organization's
   // state for each: Subscribed / Request Pending / Rejected / Request for
-  // Subscription. "Request" files a Pending request that Control Management
-  // approves or rejects (Subscription Requests); approval is what
+  // Subscription. "Request" files a Pending request that Organization
+  // Management or Control Management approves or rejects (Subscription
+  // Requests in either, one shared queue -- 511); approval is what
   // subscribes the organization, never this button. The organization is
   // the one the dialog was opened for (toolbar filter), read again on every
   // open, so switching organization always shows that organization's state.
@@ -3874,7 +4040,7 @@
     const row = addReleaseRepositoryState.rows.find(item => String(valueOf(item, "ReleaseId")) === String(releaseId));
     if (!row) return;
     const label = [valueOf(row, "ArtifactCode") || valueOf(row, "ArtifactName"), valueOf(row, "ReleaseVersion")].filter(Boolean).join(" ");
-    if (!await window.gracUi.confirm(`Request a subscription to ${label}? Control Management will review the request; the release is added to this organization once it is approved.`,
+    if (!await window.gracUi.confirm(`Request a subscription to ${label}? The request is reviewed by the platform administrator; the release is added to this organization once it is approved.`,
           { title: "Request for Subscription", confirmText: "Request" })) return;
     try {
       await fetchJson(`${api}/repository-subscription-requests`, {
@@ -3883,7 +4049,7 @@
         body: JSON.stringify({ id: 0, data: { organizationId: Number(addReleaseRepositoryState.organizationId), releaseId: Number(releaseId) } })
       });
       await loadAddReleaseRepository();
-      window.alert("Subscription request submitted. It is now pending Control Management approval.");
+      window.alert("Subscription request submitted. It is now pending approval.");
     } catch (error) {
       // A stale row (already subscribed / already pending) is refused by
       // the server; reload so the row shows the state that refused it.
@@ -5041,7 +5207,7 @@
         || valueOf(row, "PracticeId")
         || valueOf(row, "OrganizationControlId")
         || "";
-      return `<tr data-record-id="${escapeHtml(rowId)}">${currentColumns().map(column => {
+      return `<tr data-record-id="${escapeHtml(rowId)}"${organizationRowAttrs(index)}>${currentColumns().map(column => {
         const value = column === "Register" ? (valueOf(row, "Register") || valueOf(row, "DependencyCategory")) : valueOf(row, column);
         const title = column === "SourceFrameworkRelease" ? ` title="${escapeHtml(value)}"` : "";
         return `<td${cellClassFor(column)}${title}>${formatCell(value)}</td>`;
@@ -5081,6 +5247,52 @@
     return permissions.has("VIEW")
       ? ` class="pm-row-clickable" data-practice-view-index="${escapeHtml(index)}"`
       : "";
+  }
+
+  // Row click-to-open on the Organization Management landing list
+  // (2026-11-02). The same .pm-row-clickable affordance the Gap / Task /
+  // Exception / Risk / Organization Practices grids carry, gated on VIEW the
+  // way practiceRowViewAttrs above is. Only this screen, so no other grid
+  // rendered by renderRows() changes behaviour.
+  function organizationRowAttrs(index) {
+    return screen.Key === "organizations" && permissions.has("VIEW")
+      ? ` class="pm-row-clickable" data-organization-index="${escapeHtml(index)}" title="Open this organization"`
+      : "";
+  }
+
+  // The organization's own page: organization-view, the read-only page
+  // (Partials/organization-view.cshtml). NOT the Organization Setup edit
+  // form -- that is where the view page's own Actions > Edit goes.
+  //
+  // THE ID IS NEVER IN THE URL. The organization id travels inside the
+  // encrypted navigation code (?code=), the same NavigationContextProtector
+  // envelope every other cross-screen drill in this app uses -- minted
+  // server-side by the gateway's navigation-code endpoint, which re-checks
+  // VIEW on both the source and the target area, and which expires after 30
+  // minutes. A readable ?organizationId= would have put a row key in the
+  // address bar and made the page reachable by editing it.
+  //
+  // THE PATH is the area key. /OrganizationManagement is a PathBase in a
+  // hosted deployment but a conventional ROUTE on a plain host
+  // ("OrganizationManagement/{areaKey?}", Program.cs), and the area key is
+  // the one spelling correct under both.
+  async function openOrganizationViewPage(index) {
+    const record = state.records[Number(index)] || {};
+    const organizationId = Number(valueOf(record, "Id") || 0);
+    if (!organizationId) return;
+    const code = await createNavigationCode({
+      sourceArea: "organizations",
+      targetArea: "organization-view",
+      filterType: "Organization",
+      filterId: organizationId,
+      organizationId,
+      displayCode: valueOf(record, "Code") || "",
+      displayName: valueOf(record, "Name") || ""
+    });
+    // The shared org preference as well, so every other org-scoped page
+    // follows the organization that was opened.
+    rememberOrganizationId(String(organizationId));
+    window.location.assign(`${buildAppUrl("organization-view")}?code=${encodeURIComponent(code)}`);
   }
 
   // Implementation Status for a Practice row. Derived server-side from the
@@ -8695,13 +8907,22 @@
       const filterType = practiceId ? "Practice" : "OrganizationRequirement";
       const filterId   = practiceId || id;
 
+      // 519: the framework the grid is showing travels with the practice, so
+      // Practice View lists only that framework's obligations. The toolbar's
+      // selection first; on a statement drill the filter is locked to "All"
+      // and the release comes from the drill's own context instead. A custom
+      // release's synthetic negative id is passed as-is and ignored by the
+      // Api (it has no repository mappings to narrow by).
+      const viewReleaseId = Number(subscribedFrameworkFilter?.value || state.navigationContext?.releaseId || 0) || null;
+
       if (filterId) {
         return navigateWithContext("practice-view", filterType, filterId,
           valueOf(record, "Code"), valueOf(record, "Name"),
           valueOf(record, "OrganizationId"),
           state.navigationContext?.organizationControlId || null,
           valueOf(record, "ApplicabilityStatus"),
-          screen.Key === "organization-requirements" ? id : valueOf(record, "OrganizationRequirementId"))
+          screen.Key === "organization-requirements" ? id : valueOf(record, "OrganizationRequirementId"),
+          viewReleaseId)
           .catch(error => alert(error.message));
       }
 
@@ -8744,8 +8965,18 @@
     else placeholderAction(action);
   }
 
-  if (screen.Key === "organizations" || isOrganizationWorkspace) {
-    loadLookups().then(initOrganizationSetup).then(() => { orgAutoSelectArmed = true; }).catch(error => {
+  // "organizations" was in this condition until 2026-11-02, from when that
+  // screen key WAS the Organization Onboarding page. It is now the
+  // Organization Management landing LIST, and Manage.cshtml renders the
+  // generic grid for it -- not the #organizationSetup panel, so there is no
+  // #setupOrganization element and initOrganizationSetup() threw
+  // "Cannot set properties of null" on populateSetupOrganizationSelector().
+  // The early return also skipped the grid bootstrap below, which is why the
+  // page sat on "Loading...". The three real workspace screens
+  // (organization-setup / -administration / -dependencies) are unchanged;
+  // see isOrganizationWorkspace.
+  if (isOrganizationWorkspace) {
+    loadLookups().then(loadSetupNavigationContext).then(initOrganizationSetup).then(() => { orgAutoSelectArmed = true; }).catch(error => {
       if (setupMessage) {
         setupMessage.textContent = error.message || "Unable to load Organization Setup.";
         setupMessage.hidden = false;
@@ -8836,6 +9067,19 @@
     // row's own "View" action. The 3-dot trigger, the bulk-select cell and
     // any inner control keep their own behaviour -- same exclusions as the
     // statement row-click above.
+    // Organization Management landing list row -> that organization's page.
+    // Same exclusions as the row-clicks above: the 3-dot trigger, the
+    // bulk-select cell and any inner control keep their own behaviour.
+    const organizationRow = screen.Key === "organizations"
+      ? event.target.closest("[data-organization-index]") : null;
+    if (organizationRow
+        && !event.target.closest(".pm-action-trigger")
+        && !event.target.closest(".pm-select-cell")
+        && !event.target.closest("a, button, input, label, select")) {
+      openOrganizationViewPage(organizationRow.dataset.organizationIndex)
+        .catch(error => alert(error.message || "Unable to open this organization."));
+      return;
+    }
     const practiceRow = screen.Key === "organization-requirements"
       ? event.target.closest("[data-practice-view-index]") : null;
     if (practiceRow
@@ -8879,8 +9123,8 @@
   // level delegated listener finds whichever one is actually visible.
   //
   // NOTE: this listener sits AFTER the organization-workspace early return
-  // ("if (screen.Key === \"organizations\" || isOrganizationWorkspace) { ...
-  // return; }", earlier in this file), so it never binds at all on
+  // ("if (isOrganizationWorkspace) { ... return; }", earlier in this
+  // file), so it never binds at all on
   // Organization Administration / Onboarding / Dependencies screens. That
   // is fine for everything still handled here (checkCombo trigger for
   // non-org screens, dependency/evidence rows, obligation viewer,
@@ -9150,7 +9394,7 @@
   bulkApplicabilityButton?.addEventListener("click", () => openBulkApplicabilityForm());
 
   if (isOrganizationWorkspace) {
-    loadLookups().then(initOrganizationSetup).then(() => { orgAutoSelectArmed = true; }).catch(error => {
+    loadLookups().then(loadSetupNavigationContext).then(initOrganizationSetup).then(() => { orgAutoSelectArmed = true; }).catch(error => {
       if (setupMessage) {
         setupMessage.textContent = error.message || "Unable to load Organization Setup.";
         setupMessage.hidden = false;

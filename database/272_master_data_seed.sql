@@ -804,6 +804,7 @@ ELSE
     USING (VALUES
         (N'PRACTICE_CATEGORY', N'Practice Categories', N'Practice',     0,  1),
         (N'PRACTICE_INSTANCE', N'Practice Instances',  N'Practice',     1,  2),
+        (N'SOURCE_STATEMENT',  N'Control Statements',  N'Compliance',   1,  2),   -- 534: replaces Practice Instances in the Scope Builder's Simple mode
         (N'FRAMEWORK',         N'Frameworks',          N'Compliance',   0,  3),
         (N'REQUIREMENT',       N'Requirements',        N'Compliance',   0,  4),
         (N'OBLIGATION',        N'Obligations',         N'Compliance',   0,  5),

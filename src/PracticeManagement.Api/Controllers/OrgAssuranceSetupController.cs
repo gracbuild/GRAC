@@ -8,6 +8,7 @@
 //   GET  /definitions/{definitionId}/question-sets?organizationId=&versionId=
 //   POST /definitions/{definitionId}/question-sets
 //   GET  /definitions/{definitionId}/setup-status?organizationId=&versionId=
+//   GET  /configuration-audits?organizationId=&search=&page=&pageSize=   (537; 543: Draft + Under Review; 545: five steps)
 //
 // Shares the base route with OrgAssuranceDefinitionController and
 // OrgAssuranceQuestionController -- ASP.NET Core routes by the specific
@@ -106,6 +107,41 @@ public sealed class OrgAssuranceSetupController(
         catch (Exception ex)
         {
             logger.LogError(ex, "OrgAssuranceSetupController.GetSetupStatus failed for {DefinitionId}", definitionId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // ================================================================
+    // Audit Configuration list (537) -- 543: every Draft and Under Review
+    // audit, with the configuration step statuses (545: Scope, Question
+    // Sets, Workflow, Scoring, Trigger).
+    // ================================================================
+    [HttpGet("configuration-audits")]
+    public async Task<IActionResult> ListConfigurationAudits(
+        [FromQuery] long? organizationId,
+        [FromQuery] string? search,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+
+        try
+        {
+            var result = await service.ListConfigurationAuditsAsync(
+                organizationId.Value, search, page ?? 1, pageSize ?? 25, cancellationToken);
+            return Ok(new
+            {
+                totalCount = result.TotalCount,
+                pageNumber = result.PageNumber,
+                pageSize   = result.PageSize,
+                rows       = result.Rows
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceSetupController.ListConfigurationAudits failed for organization {OrganizationId}", organizationId);
             return StatusCode(500, new { error = ex.Message });
         }
     }

@@ -31,6 +31,16 @@ w("""-- =====================================================================
 --   baseline) for every configuration type 486 created:
 --     5.1-1  third-party classification   SERVICE_CATEGORY, PROVIDER_TYPE,
 --                                          CRITICALITY, TP_STATUS
+--            (CHANGED BY 521, Third-Party Management Phase 1: TP_STATUS
+--            holds the Vendor Registry states; new lists
+--            VENDOR_MATCH_ATTRIBUTE, SUBSTITUTABILITY, CUSTOMER_IMPACT.
+--            Re-run this file BEFORE 521: 521 moves organization values
+--            and vendors off the old TP_STATUS meanings and then deletes
+--            the old baseline values. CHANGED BY 522, CR 2: DRAFT retired
+--            -- TP_STATUS is ACTIVE / INACTIVE / SUSPENDED / ARCHIVED;
+--            522 moves draft vendors to ACTIVE and removes the value.
+--            CHANGED BY 523, CR 2 Round B: new list SCREENING_INDICATOR.
+--            CHANGED BY 524, CR 2 Round C: new list VENDOR_PROFILE_AREA.)
 --     5.1-2  engagement classification    SERVICE_MODEL, ENGAGEMENT_TYPE,
 --                                          DATA_EXPOSURE, ACCESS_CATEGORY
 --     5.1-3  risk assessment              risk model GRAC_TPRM_STANDARD v1:
@@ -131,9 +141,9 @@ GO
 # ---------------------------------------------------------------- lists
 lists = [
  ("SERVICE_CATEGORY","Service categories","What the third party provides. Selects service-specific questionnaires.","EXTENSIBLE",None,10),
- ("PROVIDER_TYPE","Provider types","Legal / organizational form of the third party.","EXTENSIBLE",None,20),
+ ("PROVIDER_TYPE","Vendor types","Legal / organizational form of the vendor.","EXTENSIBLE",None,20),
  ("CRITICALITY","Service criticality","Criticality of the service to the organization; the rank drives approval and review rules.","EXTENSIBLE",None,30),
- ("TP_STATUS","Third-party lifecycle statuses","Lifecycle status of a third party. Each value maps to a lifecycle meaning the workflow uses.","MEANING","PROSPECTIVE,UNDER_ASSESSMENT,APPROVED,ACTIVE,SUSPENDED,EXITED",40),
+ ("TP_STATUS","Vendor lifecycle statuses","Lifecycle status of a vendor in the Vendor Registry. Registration activates the vendor (522); activation is not a TPRM assessment or admission. Each value maps to a lifecycle meaning; the transitions between meanings are fixed (fn_tprm_vendor_transitions).","MEANING","ACTIVE,INACTIVE,SUSPENDED,ARCHIVED",40),
  ("SERVICE_MODEL","Service / delivery models","How the service is delivered.","EXTENSIBLE",None,50),
  ("ENGAGEMENT_TYPE","Engagement types","Nature of the engagement.","EXTENSIBLE",None,60),
  ("DATA_EXPOSURE","Data exposure categories","Most sensitive data the third party stores, processes or accesses; the rank drives questionnaire applicability.","EXTENSIBLE",None,70),
@@ -149,6 +159,14 @@ lists = [
  ("ONBOARDING_CHECK","Onboarding prerequisites","Checks completed (or formally waived) before an engagement is activated. Mandatory checks block activation.","EXTENSIBLE",None,170),
  ("EXIT_CHECK","Exit checks","Checks completed before an exit is closed. Mandatory checks block closure.","EXTENSIBLE",None,180),
  ("REPORTING_CATEGORY","Reporting categories","Organization reporting buckets for third parties.","EXTENSIBLE",None,190),
+ # 521 (Third-Party Management Phase 1)
+ ("VENDOR_MATCH_ATTRIBUTE","Vendor duplicate-detection attributes","Identity attributes compared when a vendor is registered or edited. Hide a value to stop matching on it. The rank is the strength: 2 = the same identifier, 1 = a possible match.","MEANING","REGISTRATION_NUMBER,TAX_ID,LEI,LEGAL_NAME,TRADING_NAME,SIMILAR_NAME,WEBSITE_DOMAIN,EMAIL_DOMAIN",200),
+ ("SUBSTITUTABILITY","Substitutability","How easily the engagement's service could be moved to another provider or brought in-house. The rank feeds qualification and exposure comparison.","EXTENSIBLE",None,210),
+ ("CUSTOMER_IMPACT","Customer impact","Effect on the organization's customers if the engagement's service fails. The rank feeds qualification and exposure comparison.","EXTENSIBLE",None,220),
+ # 523 (CR 2 Round B): Initial Exposure Screening indicators
+ ("SCREENING_INDICATOR","Screening indicators","Exposure indicators of the Initial Exposure Screening. Each value is an indicator (its meaning); the rank is its threshold where it has one. Hide a value to switch the indicator off -- the observation is still reported, without making the engagement a potential TPRM case.","MEANING","CRITICALITY,DATA,ACCESS,CUSTOMER_IMPACT,SUBSTITUTABILITY,IMPORTANT_PROCESS,FOURTH_PARTY_DATA,DISCOVERED_CRITICAL_INSTANCE,DISCOVERED_OPEN_FINDING",230),
+ # 524 (CR 2 Round C): TP Risk Register vendor-level profile areas
+ ("VENDOR_PROFILE_AREA","Vendor profile areas","The vendor-level areas of the TP Risk Register profile (CR 2 8.2). Each area is rated on the bands of the risk model in force, with the rationale and evidence. Add areas, relabel or hide them per organization.","EXTENSIBLE",None,240),
 ]
 w("-- =====================================================================\n-- 1. Reference lists\n-- =====================================================================")
 w("MERGE grac_practice.tprm_reference_list AS t\nUSING (VALUES\n" + rows(lists) + "\n) AS s(list_code, list_name, description, scope_rule, allowed_meanings, display_order)\nON t.list_code = s.list_code\nWHEN MATCHED THEN UPDATE SET list_name = s.list_name, description = s.description, scope_rule = s.scope_rule,\n    allowed_meanings = s.allowed_meanings, display_order = s.display_order, updated_by = N'seed-487', updated_dt = SYSUTCDATETIME()\nWHEN NOT MATCHED THEN INSERT (list_code, list_name, description, scope_rule, allowed_meanings, display_order, entered_by)\n    VALUES (s.list_code, s.list_name, s.description, s.scope_rule, s.allowed_meanings, s.display_order, N'seed-487');\nPRINT CONCAT('487: reference lists merged: ', @@ROWCOUNT);\nGO\n")
@@ -173,10 +191,13 @@ for c,l in [("COMPANY","Company"),("PARTNERSHIP","Partnership / LLP"),("INDIVIDU
     val("PROVIDER_TYPE", c, l)
 for c,l,r,col in [("LOW","Low",1,"#16a34a"),("MEDIUM","Medium",2,"#ca8a04"),("HIGH","High",3,"#ea580c"),("CRITICAL","Critical",4,"#dc2626")]:
     val("CRITICALITY", c, l, rank=r, color=col)
-for c,l,m in [("PROSPECTIVE","Prospective","PROSPECTIVE"),("UNDER_ASSESSMENT","Under assessment","UNDER_ASSESSMENT"),
-              ("APPROVED","Approved","APPROVED"),("ACTIVE","Active","ACTIVE"),("SUSPENDED","Suspended","SUSPENDED"),
-              ("EXITED","Exited","EXITED")]:
-    val("TP_STATUS", c, l, meaning=m)
+# 521: Vendor Registry lifecycle (replaces PROSPECTIVE / UNDER_ASSESSMENT /
+# APPROVED / EXITED, which followed the engagements). 522 (CR 2 4.2):
+# DRAFT retired -- registration activates the vendor.
+for c,l,m,col in [("ACTIVE","Active","ACTIVE","#16a34a"),
+                  ("INACTIVE","Inactive","INACTIVE","#ca8a04"),("SUSPENDED","Suspended","SUSPENDED","#dc2626"),
+                  ("ARCHIVED","Archived","ARCHIVED","#475569")]:
+    val("TP_STATUS", c, l, meaning=m, color=col)
 for c,l in [("ON_PREMISE","On-premise (at the organization)"),("SAAS","Software as a service"),("PAAS","Platform as a service"),
             ("IAAS","Infrastructure as a service"),("MANAGED_SERVICE","Managed service"),("ONSITE_STAFF","Onsite staff augmentation"),
             ("OFFSHORE","Offshore / remote delivery centre"),("HYBRID","Hybrid")]:
@@ -245,6 +266,43 @@ for c,l,m in [("EXIT_NOTICE","Exit / termination notice served and acknowledged"
 for c,l in [("STRATEGIC","Strategic partner"),("MATERIAL_OUTSOURCING","Material outsourcing"),
             ("INTRA_GROUP","Intra-group"),("OPERATIONAL","Operational supplier")]:
     val("REPORTING_CATEGORY", c, l)
+# 521: duplicate-detection attributes (rank 2 = same identifier, 1 = possible match)
+for c,l,r,d in [("REGISTRATION_NUMBER","Registration number",2,"Same company / registration number."),
+                ("TAX_ID","Tax identifier",2,"Same tax identifier."),
+                ("LEI","Legal Entity Identifier",2,"Same LEI."),
+                ("LEGAL_NAME","Legal name",1,"Same legal or trading name after normalisation (case, punctuation and legal-form words ignored)."),
+                ("TRADING_NAME","Trading name",1,"The trading name equals another vendor's legal or trading name after normalisation."),
+                ("SIMILAR_NAME","Similar name",1,"One normalised name contains the other (five characters or more)."),
+                ("WEBSITE_DOMAIN","Website domain",1,"Same website domain."),
+                ("EMAIL_DOMAIN","Contact e-mail domain",1,"A contact e-mail domain equals another vendor's website or contact e-mail domain (public mail domains excluded).")]:
+    val("VENDOR_MATCH_ATTRIBUTE", c, l, desc=d, meaning=c, rank=r)
+for c,l,r in [("EASY","Easily substitutable",1),("MODERATE","Substitutable with moderate effort",2),
+              ("DIFFICULT","Difficult to substitute",3),("NOT_SUBSTITUTABLE","Not substitutable in a reasonable time",4)]:
+    val("SUBSTITUTABILITY", c, l, rank=r)
+for c,l,r in [("NONE","No customer impact",0),("INDIRECT","Indirect impact",1),
+              ("DIRECT","Direct impact on customers",2),("DIRECT_CRITICAL","Direct impact on critical customer services",3)]:
+    val("CUSTOMER_IMPACT", c, l, rank=r)
+# 523: screening indicators (meaning = indicator; rank = threshold where it has one)
+for c,l,r,d in [("CRITICALITY","Business criticality",3,"Service criticality at or above the rank (CRITICALITY list)."),
+                ("DATA","Sensitive data",3,"A data category at or above the rank (DATA_EXPOSURE list)."),
+                ("ACCESS","System or privileged access",3,"An access category at or above the rank (ACCESS_CATEGORY list)."),
+                ("CUSTOMER_IMPACT","Customer impact",3,"Customer impact at or above the rank (CUSTOMER_IMPACT list)."),
+                ("SUBSTITUTABILITY","Hard to substitute",3,"Substitutability at or above the rank (SUBSTITUTABILITY list)."),
+                ("IMPORTANT_PROCESS","Important process with disruption impact",None,"The service supports an important business process and its disruption affects operations."),
+                ("FOURTH_PARTY_DATA","Subcontracting with data",None,"Subcontractors are used and organization or customer data is in scope."),
+                ("DISCOVERED_CRITICAL_INSTANCE","Critical practice instance discovered",None,"GRAC finds a practice instance of high or critical criticality behind the engagement's applications, processes or business functions."),
+                ("DISCOVERED_OPEN_FINDING","Open high assurance finding discovered",None,"GRAC finds an open assurance finding of high or critical severity on a related practice instance.")]:
+    val("SCREENING_INDICATOR", c, l, desc=d, meaning=c, rank=r)
+# 524: vendor-level profile areas (TP Risk Register, CR 2 8.2)
+for c,l,d in [("CORPORATE_PROFILE","Vendor identity and corporate profile","Legal identity, registration, size, years in business, locations."),
+              ("OWNERSHIP_GROUP","Ownership and group relationships","Ultimate ownership, parent and group companies, related parties."),
+              ("FINANCIAL_STABILITY","Financial stability","Financial statements, ratings, solvency and concentration."),
+              ("GOVERNANCE","Governance and management","Board and management structure, policies, oversight of risk."),
+              ("LEGAL_REGULATORY","Legal and regulatory standing","Licences, regulatory actions, litigation, sanctions screening."),
+              ("INFORMATION_SECURITY","Enterprise cybersecurity and information security","Security programme, incidents, vulnerability management, privacy."),
+              ("BUSINESS_CONTINUITY","Business continuity capability","Continuity and recovery plans, tests, resilience of critical services."),
+              ("CERTIFICATIONS","Certifications and independent assurance","Certifications (ISO 27001, SOC 2 ...), audit reports and their validity.")]:
+    val("VENDOR_PROFILE_AREA", c, l, desc=d)
 
 w("-- =====================================================================\n-- 2. Reference values (baseline rows only; organization rows untouched)\n-- =====================================================================")
 w("MERGE grac_practice.tprm_reference_value AS t\nUSING (VALUES\n" + rows(V) + "\n) AS s(list_code, value_code, label, description, meaning_code, rank_no, color_hex, is_mandatory, display_order)\nON t.organization_id IS NULL AND t.list_code = s.list_code AND t.value_code = s.value_code\nWHEN MATCHED THEN UPDATE SET label = s.label, description = s.description, meaning_code = s.meaning_code,\n    rank_no = s.rank_no, color_hex = s.color_hex, is_mandatory = s.is_mandatory, display_order = s.display_order,\n    status = N'Active', updated_by = N'seed-487', updated_dt = SYSUTCDATETIME()\nWHEN NOT MATCHED BY TARGET THEN INSERT\n    (list_code, organization_id, value_code, label, description, meaning_code, rank_no, color_hex, is_mandatory, display_order, status, entered_by)\n    VALUES (s.list_code, NULL, s.value_code, s.label, s.description, s.meaning_code, s.rank_no, s.color_hex, s.is_mandatory, s.display_order, N'Active', N'seed-487');\nPRINT CONCAT('487: reference values merged: ', @@ROWCOUNT);\nGO\n")

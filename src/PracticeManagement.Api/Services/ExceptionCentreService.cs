@@ -102,7 +102,9 @@ public sealed class ExceptionCentreService(IConfiguration configuration, ILogger
                 ReadIntSafe(r,    "SlaDaysRequested"),
                 ReadStringSafe(r, "ExceptionNumber"),   // 470/472
                 ReadLongSafe(r,   "DesignatedApproverEmployeeId"),   // 498
-                ReadStringSafe(r, "DesignatedApproverName")));
+                ReadStringSafe(r, "DesignatedApproverName"),
+                ReadLongSafe(r,   "OwnerEmployeeId"),                // 527
+                ReadStringSafe(r, "OwnerName")));
             total = Convert.ToInt64(r["TotalRows"]);
         }
         return new ExceptionRequestListResult(total, page, pageSize, rows);

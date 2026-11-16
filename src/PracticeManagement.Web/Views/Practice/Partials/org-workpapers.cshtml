@@ -1,0 +1,760 @@
+@*
+    Workpapers (567, Audit Change spec 4.6 / 4.7)
+
+    Test Working Papers -- they replace the 558 answer grid. Sir's answers
+    (2026-11-16): a Workpapers page; Satisfactory / Partially Satisfactory /
+    Unsatisfactory / Not Applicable, the question concluded from its
+    approved papers (worst result) unless the auditor gives a reason; the
+    engagement's Reviewer (or the Lead) reviews, never their own paper; the
+    execution's score = question weight x conclusion in the audit's bands.
+
+    UX (the Audit Plans list and child rows, no popups):
+      * One list of the executions the user works on (lead / team /
+        reviewer), or all ("Show" filter); filters are selects.
+      * A row's chevron -- or a click on the row -- opens the execution in a
+        child row: its score and people, the audit conclusion (the lead),
+        and its questions. A question row opens its working papers under
+        it, with the inline forms (working paper, assign, conclude, raise
+        finding) and the activity.
+      * My Audits' "Working Papers" opens this page on one execution
+        (gracSecureNav, filter AssuranceExecution).
+    Only what the server allows is offered; it checks every action again.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaWpUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-file-pen pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaWpUnavailableTitle">Workpapers are not available.</h2>
+        <p id="oaWpUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaWpRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaWpFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaWpFilterMine">
+            <option value="1">My engagements</option>
+            <option value="0">All executions</option>
+        </select>
+        <select id="oaWpFilterStatus">
+            <option value="">All statuses</option>
+            <option value="InProgress">In Progress</option>
+            <option value="Submitted">Submitted</option>
+            <option value="Reviewed">Reviewed</option>
+            <option value="Approved">Approved</option>
+            <option value="Closed">Closed</option>
+        </select>
+        <input id="oaWpSearch" type="text" placeholder="Search execution / audit / engagement..." />
+        <button class="pm-button icon" id="oaWpRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+    </div>
+    <div class="pm-message" id="oaWpMessage" style="display:none;"></div>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Execution</th>
+                    <th>Audit</th>
+                    <th>Engagement</th>
+                    <th>Status</th>
+                    <th>Lead / Reviewer</th>
+                    <th>My Role</th>
+                    <th>Concluded</th>
+                    <th>Awaiting Review</th>
+                    <th>Score</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="oaWpBody">
+                <tr><td colspan="10" class="pm-empty">Select an organization to load executions.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const AREA    = 'org-workpapers';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const RESULT  = { SATISFACTORY: 'Satisfactory', PARTIAL: 'Partially Satisfactory', UNSATISFACTORY: 'Unsatisfactory', NA: 'Not Applicable' };
+    const STATUS  = { Draft: 'Draft', Pending: 'Pending Review', Reviewed: 'Reviewed', Returned: 'Returned', Approved: 'Approved' };
+    const ACTION_LABEL = { Created: 'Created', Updated: 'Updated', SUBMIT: 'Submitted', REVIEW: 'Reviewed', RETURN: 'Returned',
+                           APPROVE: 'Approved', REOPEN: 'Reopened', DELETE: 'Deleted', Assigned: 'Assigned',
+                           Concluded: 'Concluded', AuditConclusion: 'Audit conclusion', FindingRaised: 'Finding raised' };
+
+    const state = {
+        orgId     : '',
+        mine      : '1',
+        status    : '',
+        search    : '',
+        rows      : {},          // executionId -> list row
+        open      : new Set(),   // executions open
+        data      : {},          // executionId -> { execution, questions, papers, team }
+        openQ     : new Set(),   // 'execId:questionId' open
+        form      : null,        // { execId, qid, kind: paper|assign|conclude|finding, paperId, readOnly }
+        activity  : new Set(),   // 'execId' or 'execId:questionId' showing activity
+        acts      : {},
+        methods   : [],
+        severities: [],
+        employees : [],
+        empOrg    : null,
+        focusId   : null         // the execution My Audits opened this page on
+    };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : o[k.charAt(0).toLowerCase() + k.slice(1)];
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data || b.rows || b.Rows)) || []); }
+    function onlyDate(x) { return x ? String(x).substring(0, 10) : ''; }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function trigger(attrs) {
+        return '<button type="button" class="pm-action-trigger" ' + attrs
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span></button>';
+    }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaWpUnavailable', 'oaWpUnavailableTitle', 'oaWpUnavailableBody',
+                'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaWpFilterOrg', orgs);
+        // My Audits -> Working Papers: the execution travels in the code.
+        const ctx = window.gracSecureNav ? window.gracSecureNav.context(AREA) : null;
+        if (ctx && ctx.error) wf.setMessage('oaWpMessage', ctx.error, 'error');
+        if (ctx && !ctx.error && ctx.filterType === 'AssuranceExecution') {
+            const sel = document.getElementById('oaWpFilterOrg');
+            if (Array.prototype.some.call(sel.options, function (o) { return o.value === String(ctx.organizationId); }))
+                sel.value = String(ctx.organizationId);
+            state.focusId = String(ctx.filterId);
+        }
+        state.orgId = document.getElementById('oaWpFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaWpUnavailable', 'oaWpUnavailableTitle', 'oaWpUnavailableBody',
+                'Workpapers are not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaWpRoot').hidden = false;
+        wire();
+        try {
+            const [m, s] = await Promise.all([getJson(API + '/testing-methods'), getJson(API + '/observation-severities')]);
+            state.methods = rowsOf(m);
+            state.severities = rowsOf(s);
+        } catch (_) { /* the forms show what loaded */ }
+        await reload();
+        if (state.focusId != null) {
+            if (!state.rows[state.focusId] && state.mine === '1') {
+                state.mine = '0';
+                document.getElementById('oaWpFilterMine').value = '0';
+                await reload();
+            }
+            if (state.rows[state.focusId] && !state.open.has(state.focusId)) toggle(state.focusId);
+        }
+    }
+
+    function wire() {
+        document.getElementById('oaWpFilterOrg').addEventListener('change', function (e) {
+            state.orgId = e.target.value || ''; state.open.clear(); state.data = {}; state.openQ.clear(); state.form = null;
+            reload();
+        });
+        document.getElementById('oaWpFilterMine').addEventListener('change', function (e) { state.mine = e.target.value; reload(); });
+        document.getElementById('oaWpFilterStatus').addEventListener('change', function (e) { state.status = e.target.value || ''; reload(); });
+        document.getElementById('oaWpSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            clearTimeout(window.__oaWpSearchTimer);
+            window.__oaWpSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaWpRefreshBtn').addEventListener('click', function () { state.data = {}; reload(); });
+
+        const body = document.getElementById('oaWpBody');
+        body.addEventListener('click', onBodyClick);
+        body.addEventListener('submit', function (e) { e.preventDefault(); });
+    }
+
+    // -----------------------------------------------------------------
+    // The executions
+    // -----------------------------------------------------------------
+    async function reload() {
+        const body = document.getElementById('oaWpBody');
+        if (!state.orgId) { body.innerHTML = '<tr><td colspan="10" class="pm-empty">Select an organization.</td></tr>'; return; }
+        body.innerHTML = '<tr><td colspan="10" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('mine', state.mine === '1' ? 'true' : 'false');
+            if (state.status) qs.set('status', state.status);
+            if (state.search) qs.set('search', state.search);
+            render(rowsOf(await getJson(API + '/workpapers/executions?' + qs.toString())));
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="10" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function roleText(x) {
+        const r = [];
+        if (g(x, 'isLead')) r.push('Lead');
+        else if (g(x, 'isTeam')) r.push('Team');
+        if (g(x, 'isReviewer') && !g(x, 'isLead')) r.push('Reviewer');
+        return r.join(', ') || 'View';
+    }
+    function scoreText(x) {
+        const s = g(x, 'scorePct');
+        return s == null ? '--' : Number(s).toFixed(2) + '%' + (g(x, 'scoreBandName') ? ' (' + g(x, 'scoreBandName') + ')' : '');
+    }
+
+    function render(rows) {
+        const body = document.getElementById('oaWpBody');
+        state.rows = {};
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="10" class="pm-empty">'
+                + (state.mine === '1' ? 'No executions of your engagements are in progress. Executions start from My Audits once the scope is frozen.'
+                                      : 'No executions past Planned.') + '</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(function (x) {
+            const id = String(g(x, 'executionId'));
+            state.rows[id] = x;
+            const open = state.open.has(id);
+            return '<tr class="pm-row-clickable oa-wp-exec' + (open ? ' oa-pl-open is-selected' : '') + '" data-exec="' + esc(id) + '">'
+                 + '<td><span class="task-tree-cell">'
+                 + '<button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '" data-exec-toggle="' + esc(id) + '"'
+                 + ' aria-expanded="' + (open ? 'true' : 'false') + '" title="Show the working papers">'
+                 + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>'
+                 + '<span class="visually-hidden">Show the working papers</span></button>'
+                 + '<span>' + esc(g(x, 'executionCode')) + '</span></span></td>'
+                 + '<td>' + esc(g(x, 'definitionName')) + '</td>'
+                 + '<td>' + esc(g(x, 'engagementCode') || '--') + '</td>'
+                 + '<td>' + wf.badge(g(x, 'executionStatusName') || g(x, 'executionStatusCode') || '') + '</td>'
+                 + '<td>' + esc(g(x, 'leadAuditorName') || '') + (g(x, 'reviewerName') && g(x, 'reviewerName') !== g(x, 'leadAuditorName')
+                        ? ' <span style="color:var(--fg-subtle);">/ ' + esc(g(x, 'reviewerName')) + '</span>' : '') + '</td>'
+                 + '<td>' + esc(roleText(x)) + '</td>'
+                 + '<td>' + esc(String(g(x, 'concludedCount') || 0) + ' / ' + String(g(x, 'questionCount') || 0)) + '</td>'
+                 + '<td>' + esc(String(g(x, 'awaitingReviewCount') || 0)) + '</td>'
+                 + '<td>' + esc(scoreText(x)) + '</td>'
+                 + '<td>' + trigger('data-exec-menu="' + esc(id) + '"') + '</td>'
+                 + '</tr>';
+        }).join('');
+        body.querySelectorAll('[data-exec-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-exec-menu');
+            window.gracPageActions.attach(btn, function () {
+                return [
+                    { icon: 'fa-eye', label: state.open.has(id) ? 'Hide Working Papers' : 'Working Papers', run: function () { toggle(id); } },
+                    { icon: 'fa-clock-rotate-left', label: 'Activity', run: function () { showActivity(id, null); } }
+                ];
+            });
+        });
+        Array.from(state.open).forEach(function (id) {
+            if (state.rows[id]) loadExec(id, true); else state.open.delete(id);
+        });
+    }
+
+    function execRow(id) { return document.querySelector('#oaWpBody tr.oa-wp-exec[data-exec="' + id + '"]'); }
+    function setToggle(id, open) {
+        const tr = execRow(id);
+        if (tr) { tr.classList.toggle('oa-pl-open', open); tr.classList.toggle('is-selected', open); }
+        const b = document.querySelector('#oaWpBody [data-exec-toggle="' + id + '"]');
+        if (b) { b.classList.toggle('is-open', open); b.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+    }
+    function toggle(id) {
+        id = String(id);
+        if (state.open.has(id)) {
+            state.open.delete(id);
+            const child = document.querySelector('#oaWpBody tr.oa-pl-items-row[data-exec-child="' + id + '"]');
+            if (child) child.remove();
+            setToggle(id, false);
+            return;
+        }
+        state.open.add(id);
+        setToggle(id, true);
+        loadExec(id, false);
+    }
+    function host(id) {
+        let child = document.querySelector('#oaWpBody tr.oa-pl-items-row[data-exec-child="' + id + '"]');
+        if (!child) {
+            const parent = execRow(id);
+            if (!parent) return null;
+            child = document.createElement('tr');
+            child.className = 'oa-pl-items-row is-selected';
+            child.setAttribute('data-exec-child', id);
+            child.innerHTML = '<td colspan="10"><div class="oa-pl-items"></div></td>';
+            parent.insertAdjacentElement('afterend', child);
+        }
+        return child.querySelector('.oa-pl-items');
+    }
+    async function loadExec(id, fresh) {
+        const h = host(id);
+        if (!h) return;
+        if (fresh || !state.data[id]) {
+            h.innerHTML = '<p class="oa-pl-plan-facts">Loading the working papers...</p>';
+            try {
+                const d = await getJson(API + '/executions/' + encodeURIComponent(id) + '/workpapers?organizationId=' + encodeURIComponent(state.orgId));
+                state.data[id] = { execution: g(d, 'execution') || {}, questions: g(d, 'questions') || [],
+                                   papers: g(d, 'papers') || [], team: g(d, 'team') || [] };
+            } catch (err) {
+                h.innerHTML = '<p class="oa-pl-plan-facts">Failed to load: ' + esc(err.message || err) + '</p>';
+                return;
+            }
+        }
+        draw(id);
+    }
+
+    // -----------------------------------------------------------------
+    // One execution: facts, the audit conclusion, the questions
+    // -----------------------------------------------------------------
+    function can(id) {
+        const e = state.data[id].execution;
+        const open = !!g(e, 'isOpen');
+        return { open: open, lead: open && !!g(e, 'isLead'), team: open && !!g(e, 'isTeam'), reviewer: open && !!g(e, 'isReviewer') };
+    }
+    function draw(id) {
+        const h = host(id);
+        if (!h) return;
+        const d = state.data[id], e = d.execution, c = can(id);
+        let html = '<p class="oa-pl-plan-facts">'
+            + esc('Score ' + scoreText(e) + '  |  Lead ' + (g(e, 'leadAuditorName') || '--') + '  |  Reviewer ' + (g(e, 'reviewerName') || '--')
+                  + '  |  You: ' + roleText(e) + (c.open ? '' : '  |  ' + (g(e, 'executionStatusName') || '') + ' -- read only'))
+            + '</p>';
+        // The audit conclusion (spec 4.6): the lead writes it; Submit needs it.
+        const concl = g(e, 'auditConclusion') || '';
+        html += '<div class="oa-pl-plan-grid" style="margin-bottom:10px;">'
+            + '<label class="pm-field oa-pl-span-all"><span>Audit Conclusion'
+            + (g(e, 'conclusionBy') ? ' <span style="color:var(--fg-subtle); font-weight:400;">(' + esc(g(e, 'conclusionBy')) + ', ' + esc(onlyDate(g(e, 'conclusionDt'))) + ')</span>' : '')
+            + '</span>'
+            + (c.lead ? '<textarea class="pm-input" rows="3" data-concl="' + esc(id) + '">' + esc(concl) + '</textarea>'
+                      : '<span class="pm-view-value' + (concl ? '' : ' pm-field-empty') + '" style="white-space:pre-wrap;">' + esc(concl || '--') + '</span>')
+            + '</label></div>';
+        if (c.lead)
+            html += '<div class="oa-pl-items-foot" style="margin:-4px 0 10px;"><a href="#" class="oa-pl-add" data-save-concl="' + esc(id) + '">Save Audit Conclusion</a></div>';
+
+        html += '<div class="pm-table-wrap"><table><thead><tr>'
+              + '<th>Code</th><th>Question</th><th>Assigned To</th><th>Papers</th><th>From Papers</th><th>Conclusion</th><th></th>'
+              + '</tr></thead><tbody>'
+              + (d.questions.length ? d.questions.map(function (q) { return questionRows(id, q); }).join('')
+                                    : '<tr><td colspan="7" class="pm-empty">This execution has no questions.</td></tr>')
+              + '</tbody></table></div>';
+        if (state.activity.has(id)) html += activityHtml(id, null);
+        h.innerHTML = html;
+
+        h.querySelectorAll('[data-q-menu]').forEach(function (btn) {
+            const qid = btn.getAttribute('data-q-menu');
+            window.gracPageActions.attach(btn, function () { return questionMenu(id, qid); });
+        });
+        h.querySelectorAll('[data-p-menu]').forEach(function (btn) {
+            const pid = btn.getAttribute('data-p-menu');
+            window.gracPageActions.attach(btn, function () { return paperMenu(id, pid); });
+        });
+    }
+
+    function qById(id, qid) { return state.data[id].questions.find(function (q) { return String(g(q, 'executionQuestionId')) === String(qid); }) || {}; }
+    function pById(id, pid) { return state.data[id].papers.find(function (p) { return String(g(p, 'workingPaperId')) === String(pid); }) || {}; }
+    function papersOf(id, qid) { return state.data[id].papers.filter(function (p) { return String(g(p, 'executionQuestionId')) === String(qid); }); }
+
+    function questionRows(id, q) {
+        const qid = String(g(q, 'executionQuestionId'));
+        const key = id + ':' + qid;
+        const open = state.openQ.has(key);
+        const n = Number(g(q, 'paperCount') || 0);
+        const papers = n ? n + ' (' + (g(q, 'approvedCount') || 0) + ' approved' + (g(q, 'inReviewCount') ? ', ' + g(q, 'inReviewCount') + ' in review' : '')
+                         + (g(q, 'openCount') ? ', ' + g(q, 'openCount') + ' open' : '') + ')' : '--';
+        const concl = g(q, 'conclusionCode');
+        let html = '<tr class="pm-row-clickable oa-wp-q' + (open ? ' oa-pl-prog-open' : '') + '" data-q="' + esc(qid) + '" data-exec-of="' + esc(id) + '">'
+            + '<td>' + esc(g(q, 'questionCode')) + '</td>'
+            + '<td style="white-space:normal;">' + esc(g(q, 'questionText')) + '</td>'
+            + '<td>' + esc(g(q, 'assignedName') || 'Team') + '</td>'
+            + '<td>' + esc(papers) + '</td>'
+            + '<td>' + esc(RESULT[g(q, 'suggestedConclusion')] || '--') + '</td>'
+            + '<td>' + (concl ? wf.badge(RESULT[concl] || concl) + (g(q, 'conclusionReason') ? ' <span title="' + esc(g(q, 'conclusionReason')) + '" style="color:var(--fg-subtle);">(overridden)</span>' : '') : '--') + '</td>'
+            + '<td>' + trigger('data-q-menu="' + esc(qid) + '"') + '</td>'
+            + '</tr>';
+        if (open)
+            html += '<tr class="oa-pl-prog-items"><td colspan="7">' + questionDetail(id, q) + '</td></tr>';
+        return html;
+    }
+
+    function questionDetail(id, q) {
+        const qid = String(g(q, 'executionQuestionId'));
+        const c = can(id);
+        const papers = papersOf(id, qid);
+        let html = '<p class="oa-pl-plan-facts" style="white-space:pre-wrap;"><strong>Testing Guidance:</strong> '
+                 + esc(g(q, 'testingGuidance') || '--')
+                 + (g(q, 'expectedEvidence') ? '\n<strong>Expected Evidence:</strong> ' + esc(g(q, 'expectedEvidence')) : '')
+                 + (g(q, 'weight') != null ? '  |  Weight ' + esc(g(q, 'weight')) : '') + '</p>';
+        html += '<div class="pm-table-wrap"><table><thead><tr>'
+              + '<th>Paper</th><th>Method</th><th>Result</th><th>Review Status</th><th>Prepared By</th><th>Reviewed / Approved</th><th>Finding</th><th></th>'
+              + '</tr></thead><tbody>'
+              + (papers.length ? papers.map(function (p) {
+                    const pid = String(g(p, 'workingPaperId'));
+                    return '<tr><td>' + esc(g(p, 'paperCode')) + '</td>'
+                         + '<td>' + esc(g(p, 'testingMethodName') || '--') + '</td>'
+                         + '<td>' + esc(RESULT[g(p, 'testResult')] || '--') + '</td>'
+                         + '<td>' + wf.badge(STATUS[g(p, 'reviewStatus')] || g(p, 'reviewStatus')) + (Number(g(p, 'reopenCount') || 0) ? ' <span style="color:var(--fg-subtle);">reopened ' + esc(g(p, 'reopenCount')) + 'x</span>' : '') + '</td>'
+                         + '<td>' + esc(g(p, 'preparedByName') || '--') + '</td>'
+                         + '<td>' + esc(g(p, 'approvedByName') ? g(p, 'approvedByName') + ', ' + onlyDate(g(p, 'approvedDt'))
+                                         : g(p, 'reviewedByName') ? g(p, 'reviewedByName') + ', ' + onlyDate(g(p, 'reviewedDt')) : '--') + '</td>'
+                         + '<td>' + esc(g(p, 'findingCode') || '--') + '</td>'
+                         + '<td>' + trigger('data-p-menu="' + esc(pid) + '"') + '</td></tr>';
+                }).join('') : '<tr><td colspan="8" class="pm-empty">No working papers yet.</td></tr>')
+              + '</tbody></table></div>';
+        const f = state.form;
+        if (f && f.execId === id && String(f.qid) === qid) html += formHtml(id, q, f);
+        const links = [];
+        if (c.team && canPrepare(id, q)) links.push('<a href="#" class="oa-pl-add" data-add-paper="' + esc(qid) + '">+ Add Working Paper</a>');
+        links.push('<a href="#" class="oa-pl-more" data-q-activity="' + esc(qid) + '">' + (state.activity.has(id + ':' + qid) ? 'Hide activity' : 'Show activity') + '</a>');
+        html += '<div class="oa-pl-items-foot">' + links.join('') + '</div>';
+        if (state.activity.has(id + ':' + qid)) html += activityHtml(id, qid);
+        return html;
+    }
+
+    // Hints only -- the server checks each action again.
+    function isMe(id, employeeId) {
+        const me = g(state.data[id].execution, 'callerEmployeeId');
+        return me != null && employeeId != null && String(me) === String(employeeId);
+    }
+    // A question is prepared by its auditor, or by anyone on the team when
+    // it is given to nobody; the lead always.
+    function canPrepare(id, q) {
+        const c = can(id);
+        if (!c.team) return false;
+        if (c.lead) return true;
+        const a = g(q, 'assignedEmployeeId');
+        return a == null || isMe(id, a);
+    }
+    // A paper is changed / submitted / deleted by its preparer or the lead.
+    function canEditPaper(id, p) {
+        const c = can(id);
+        if (c.lead) return true;
+        const by = g(p, 'preparedByEmployeeId');
+        return c.team && (by == null || isMe(id, by));
+    }
+
+    // -----------------------------------------------------------------
+    // Menus
+    // -----------------------------------------------------------------
+    function questionMenu(id, qid) {
+        const q = qById(id, qid), c = can(id);
+        const items = [{ icon: 'fa-eye', label: state.openQ.has(id + ':' + qid) ? 'Hide Working Papers' : 'Working Papers', run: function () { toggleQ(id, qid); } }];
+        if (c.team && canPrepare(id, q)) items.push({ icon: 'fa-plus', label: 'Add Working Paper', run: function () { openForm(id, qid, 'paper', null, false); } });
+        if (c.lead) items.push({ icon: 'fa-user-tag', label: 'Assign', run: function () { openForm(id, qid, 'assign', null, false); } });
+        const n = Number(g(q, 'paperCount') || 0), a = Number(g(q, 'approvedCount') || 0);
+        if ((c.lead || (c.team && isMe(id, g(q, 'assignedEmployeeId')))) && n > 0 && a === n) items.push({ icon: 'fa-flag-checkered', label: 'Conclude', run: function () { openForm(id, qid, 'conclude', null, false); } });
+        items.push({ icon: 'fa-clock-rotate-left', label: 'Activity', run: function () { showActivity(id, qid); } });
+        return items;
+    }
+
+    function paperMenu(id, pid) {
+        const p = pById(id, pid), c = can(id);
+        const qid = String(g(p, 'executionQuestionId'));
+        const st = g(p, 'reviewStatus');
+        const items = [{ icon: 'fa-eye', label: 'View', run: function () { openForm(id, qid, 'paper', pid, true); } }];
+        if (!c.open) return items;
+        const editable = st === 'Draft' || st === 'Returned';
+        if (editable && canEditPaper(id, p)) {
+            items.push({ icon: 'fa-pen', label: 'Edit', run: function () { openForm(id, qid, 'paper', pid, false); } });
+            items.push({ icon: 'fa-paper-plane', label: 'Submit for Review', run: function () { act(id, pid, 'SUBMIT', null); } });
+        }
+        if (c.reviewer && st === 'Pending')
+            items.push({ icon: 'fa-check', label: 'Mark Reviewed', run: function () { askAct(id, pid, 'REVIEW', false, 'Reviewer comments (optional):', 'Mark Reviewed'); } });
+        if (c.reviewer && (st === 'Pending' || st === 'Reviewed')) {
+            items.push({ icon: 'fa-check-double', label: 'Approve', run: function () { askAct(id, pid, 'APPROVE', false, 'Reviewer comments (optional):', 'Approve'); } });
+            items.push({ icon: 'fa-rotate-left', label: 'Return', run: function () { askAct(id, pid, 'RETURN', true, 'Why is the working paper returned?', 'Return'); } });
+        }
+        if ((c.lead || c.reviewer) && st === 'Approved')
+            items.push({ icon: 'fa-lock-open', label: 'Reopen', run: function () { askAct(id, pid, 'REOPEN', true, 'Why is the working paper reopened? Its question\'s conclusion is cleared.', 'Reopen'); } });
+        const res = g(p, 'testResult');
+        if ((c.team || c.reviewer) && (res === 'PARTIAL' || res === 'UNSATISFACTORY'))
+            items.push({ icon: 'fa-triangle-exclamation', label: 'Raise Finding', run: function () { openForm(id, qid, 'finding', pid, false); } });
+        if (st === 'Draft' && canEditPaper(id, p))
+            items.push({ icon: 'fa-trash', label: 'Delete', run: async function () {
+                if (await window.gracUi.confirm('Delete this draft working paper?', { type: 'warning', title: 'Delete working paper', confirmText: 'Delete' }))
+                    act(id, pid, 'DELETE', null);
+            } });
+        return items;
+    }
+
+    // -----------------------------------------------------------------
+    // Clicks
+    // -----------------------------------------------------------------
+    function onBodyClick(e) {
+        const t = e.target;
+        if (t.closest('.pm-action-trigger, .pm-action-menu')) return;
+        const a = t.closest('a[data-save-concl], a[data-add-paper], a[data-q-activity], [data-form-cancel], [data-form-save]');
+        if (a) {
+            e.preventDefault();
+            const ex = a.closest('tr.oa-pl-items-row') ? a.closest('tr.oa-pl-items-row').getAttribute('data-exec-child') : null;
+            if (a.hasAttribute('data-save-concl')) saveConclusion(a.getAttribute('data-save-concl'));
+            else if (a.hasAttribute('data-add-paper')) openForm(ex, a.getAttribute('data-add-paper'), 'paper', null, false);
+            else if (a.hasAttribute('data-q-activity')) showActivity(ex, a.getAttribute('data-q-activity'));
+            else if (a.hasAttribute('data-form-cancel')) { state.form = null; draw(ex); }
+            else if (a.hasAttribute('data-form-save')) saveForm(ex);
+            return;
+        }
+        if (t.closest('.oa-pl-prog-items, input, select, textarea, a, button, .oa-wp-form')) return;
+        const q = t.closest('tr.oa-wp-q[data-q]');
+        if (q) { toggleQ(q.getAttribute('data-exec-of'), q.getAttribute('data-q')); return; }
+        const tr = t.closest('tr.oa-wp-exec[data-exec]');
+        if (tr) toggle(tr.getAttribute('data-exec'));
+    }
+    function toggleQ(id, qid) {
+        const key = id + ':' + qid;
+        if (state.openQ.has(key)) {
+            state.openQ.delete(key);
+            if (state.form && state.form.execId === id && String(state.form.qid) === String(qid)) state.form = null;
+        } else state.openQ.add(key);
+        draw(id);
+    }
+
+    // -----------------------------------------------------------------
+    // Inline forms: working paper, assign, conclude, raise finding
+    // -----------------------------------------------------------------
+    async function openForm(id, qid, kind, paperId, readOnly) {
+        if (kind === 'finding') await loadEmployees();
+        state.form = { execId: String(id), qid: String(qid), kind: kind, paperId: paperId != null ? String(paperId) : null, readOnly: !!readOnly };
+        state.openQ.add(id + ':' + qid);
+        draw(id);
+        const f = document.querySelector('#oaWpBody .oa-wp-form');
+        if (f) { f.scrollIntoView({ block: 'nearest' }); const first = f.querySelector('select:not([disabled]), textarea:not([disabled]), input:not([disabled])'); if (first) first.focus(); }
+    }
+    async function loadEmployees() {
+        if (state.empOrg === state.orgId) return;
+        try { state.employees = rowsOf(await getJson('/practice/api/document-uploads/lookups/employees?organizationId=' + encodeURIComponent(state.orgId))); }
+        catch (_) { state.employees = []; }
+        state.empOrg = state.orgId;
+    }
+    function opts(list, valueKey, labelKey, selected, blank) {
+        return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '')
+            + list.map(function (x) {
+                const v = String(g(x, valueKey));
+                return '<option value="' + esc(v) + '"' + (String(selected) === v ? ' selected' : '') + '>' + esc(g(x, labelKey)) + '</option>';
+            }).join('');
+    }
+    function resultOpts(selected, blank) {
+        return '<option value="">' + esc(blank) + '</option>' + Object.keys(RESULT).map(function (k) {
+            return '<option value="' + k + '"' + (selected === k ? ' selected' : '') + '>' + esc(RESULT[k]) + '</option>';
+        }).join('');
+    }
+    function fld(label, inner, cls) { return '<label class="pm-field ' + (cls || '') + '"><span>' + label + '</span>' + inner + '</label>'; }
+    function ta(name, value, ro, rows, ph) {
+        return '<textarea class="pm-input" rows="' + (rows || 2) + '" data-f="' + name + '"' + (ro ? ' disabled' : '') + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>' + esc(value || '') + '</textarea>';
+    }
+    function inp(name, value, ro, type, extra) {
+        return '<input class="pm-input" type="' + (type || 'text') + '" data-f="' + name + '" value="' + esc(value == null ? '' : value) + '"' + (ro ? ' disabled' : '') + (extra || '') + ' />';
+    }
+    function sel(name, inner, ro) { return '<select class="pm-input" data-f="' + name + '"' + (ro ? ' disabled' : '') + '>' + inner + '</select>'; }
+
+    function formHtml(id, q, f) {
+        const req = ' <span class="required">*</span>';
+        let title, body;
+        if (f.kind === 'paper') {
+            const p = f.paperId ? pById(id, f.paperId) : {};
+            const ro = f.readOnly;
+            title = f.paperId ? (ro ? 'Working Paper ' : 'Edit Working Paper ') + esc(g(p, 'paperCode')) : 'New Working Paper';
+            body = fld('Testing Method', sel('testingMethodCode', opts(state.methods, 'code', 'name', g(p, 'testingMethodCode') || '', '-- select --'), ro))
+                 + fld('Sampling Method', inp('samplingMethod', g(p, 'samplingMethod'), ro, 'text', ' maxlength="400"'))
+                 + fld('Sample Size', inp('sampleSize', g(p, 'sampleSize'), ro, 'number', ' min="0" step="1"'))
+                 + fld('Test Result' + req, sel('testResult', resultOpts(g(p, 'testResult') || '', '-- select --'), ro))
+                 + fld('Testing Guidance', ta('testingGuidance', f.paperId ? g(p, 'testingGuidance') : g(q, 'testingGuidance'), ro, 3), 'oa-pl-span-all')
+                 + fld('Actual Procedure Performed' + req, ta('procedurePerformed', g(p, 'procedurePerformed'), ro, 3, 'What you actually did'), 'oa-pl-span-all')
+                 + fld('Population', ta('population', g(p, 'population'), ro, 2, 'The population examined'), 'oa-pl-span-2')
+                 + fld('Sample Details', ta('sampleDetails', g(p, 'sampleDetails'), ro, 2, 'The records examined'), 'oa-pl-span-2')
+                 + fld('Evidence References', ta('evidenceReferences', g(p, 'evidenceReferences'), ro, 2, 'Documents, Evidence Center references, screenshots'), 'oa-pl-span-2')
+                 + fld('Deviations', ta('deviations', g(p, 'deviations'), ro, 2, 'Exceptions found'), 'oa-pl-span-2')
+                 + fld('Auditor Comments', ta('auditorComments', g(p, 'auditorComments'), ro, 2), 'oa-pl-span-all')
+                 + fld('Conclusion' + req, ta('conclusion', g(p, 'conclusion'), ro, 2, "The auditor's assessment"), 'oa-pl-span-all')
+                 + (f.paperId ? fld('Reviewer Comments', '<span class="pm-view-value' + (g(p, 'reviewerComments') ? '' : ' pm-field-empty') + '" style="white-space:pre-wrap;">'
+                                    + esc(g(p, 'reviewerComments') || '--') + '</span>', 'oa-pl-span-all') : '');
+        } else if (f.kind === 'assign') {
+            title = 'Assign ' + esc(g(q, 'questionCode'));
+            body = fld('Auditor', sel('assignee', opts(state.data[id].team, 'employeeId', 'employeeName', g(q, 'assignedEmployeeId') ?? '', 'Anyone on the team')), 'oa-pl-span-2');
+        } else if (f.kind === 'conclude') {
+            const sug = g(q, 'suggestedConclusion');
+            title = 'Conclude ' + esc(g(q, 'questionCode'));
+            body = fld('Conclusion' + req, sel('conclusionCode', resultOpts(g(q, 'conclusionCode') || sug || '', '-- select --')))
+                 + '<p class="oa-pl-plan-facts oa-pl-span-all">From the approved working papers: <strong>' + esc(RESULT[sug] || '--')
+                 + '</strong>. A different conclusion needs the reason.</p>'
+                 + fld('Reason (when different)', ta('reason', g(q, 'conclusionReason'), false, 2), 'oa-pl-span-all');
+        } else {
+            const p = pById(id, f.paperId);
+            title = 'Raise Finding from ' + esc(g(p, 'paperCode'));
+            body = fld('Title' + req, inp('title', (g(q, 'questionCode') || '') + ' - ' + String(g(q, 'questionText') || '').substring(0, 200), false, 'text', ' maxlength="300"'), 'oa-pl-span-2')
+                 + fld('Severity', sel('severityCode', opts(state.severities, 'severityCode', 'severityName', 'Medium', null)))
+                 + fld('Target Closure Date', inp('dueDate', '', false, 'date'))
+                 + fld('Responsible Owner', sel('ownerEmployeeId', opts(state.employees, 'employeeId', 'employeeName', '', '-- select --')), 'oa-pl-span-2')
+                 + fld('Description', ta('description', g(p, 'deviations') || g(p, 'conclusion'), false, 2), 'oa-pl-span-all')
+                 + fld('Audit Criteria', ta('auditCriteria', '', false, 2, 'What should be'), 'oa-pl-span-2')
+                 + fld('Condition / Finding', ta('conditionText', g(p, 'deviations'), false, 2, 'What is'), 'oa-pl-span-2')
+                 + fld('Root Cause', ta('rootCause', '', false, 2), 'oa-pl-span-2')
+                 + fld('Risk and Impact', ta('riskImpact', '', false, 2), 'oa-pl-span-2')
+                 + fld('Auditor Recommendation', ta('recommendation', '', false, 2), 'oa-pl-span-all')
+                 + fld('Supporting Evidence', ta('supportingEvidence', g(p, 'evidenceReferences'), false, 2), 'oa-pl-span-all');
+        }
+        return '<div class="oa-wp-form" style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">'
+             + '<p class="oa-pl-plan-facts"><strong>' + title + '</strong></p>'
+             + '<div class="pm-message" data-form-msg style="display:none;"></div>'
+             + '<div class="oa-pl-plan-grid">' + body + '</div>'
+             + '<div class="oa-pl-items-foot">'
+             + (f.readOnly ? '' : '<a href="#" class="oa-pl-add" data-form-save="1">Save</a>')
+             + '<a href="#" class="oa-pl-more" data-form-cancel="1">' + (f.readOnly ? 'Close' : 'Cancel') + '</a></div></div>';
+    }
+
+    function formValues() {
+        const out = {};
+        document.querySelectorAll('#oaWpBody .oa-wp-form [data-f]').forEach(function (el) {
+            const v = el.value != null ? String(el.value).trim() : '';
+            out[el.getAttribute('data-f')] = v === '' ? null : v;
+        });
+        return out;
+    }
+    function formMsg(text) {
+        const m = document.querySelector('#oaWpBody .oa-wp-form [data-form-msg]');
+        if (!m) { window.gracUi.alert(text, { type: 'error' }); return; }
+        m.style.display = 'block';
+        m.style.background = 'var(--danger-100)';
+        m.style.color = 'var(--danger-700)';
+        m.textContent = text;
+    }
+
+    async function saveForm(id) {
+        const f = state.form;
+        if (!f || f.readOnly) return;
+        const v = formValues();
+        const org = Number(state.orgId);
+        try {
+            if (f.kind === 'paper') {
+                await post('/execution-questions/' + encodeURIComponent(f.qid) + '/working-papers', {
+                    organizationId: org, workingPaperId: f.paperId ? Number(f.paperId) : null,
+                    testingMethodCode: v.testingMethodCode, testingGuidance: v.testingGuidance, procedurePerformed: v.procedurePerformed,
+                    population: v.population, samplingMethod: v.samplingMethod,
+                    sampleSize: v.sampleSize != null ? Number(v.sampleSize) : null, sampleDetails: v.sampleDetails,
+                    evidenceReferences: v.evidenceReferences, testResult: v.testResult, deviations: v.deviations,
+                    auditorComments: v.auditorComments, conclusion: v.conclusion, actor: null });
+            } else if (f.kind === 'assign') {
+                await post('/execution-questions/' + encodeURIComponent(f.qid) + '/assign',
+                    { organizationId: org, assigneeEmployeeId: v.assignee != null ? Number(v.assignee) : null, actor: null });
+            } else if (f.kind === 'conclude') {
+                if (!v.conclusionCode) { formMsg('Pick the conclusion.'); return; }
+                await post('/execution-questions/' + encodeURIComponent(f.qid) + '/conclude',
+                    { organizationId: org, conclusionCode: v.conclusionCode, reason: v.reason, actor: null });
+            } else {
+                if (!v.title) { formMsg('Give the finding a title.'); return; }
+                const j = await post('/working-papers/' + encodeURIComponent(f.paperId) + '/finding', {
+                    organizationId: org, title: v.title, description: v.description, severityCode: v.severityCode,
+                    ownerEmployeeId: v.ownerEmployeeId != null ? Number(v.ownerEmployeeId) : null, dueDate: v.dueDate,
+                    auditCriteria: v.auditCriteria, conditionText: v.conditionText, rootCause: v.rootCause,
+                    riskImpact: v.riskImpact, recommendation: v.recommendation, supportingEvidence: v.supportingEvidence, actor: null });
+                wf.setMessage('oaWpMessage', 'Finding raised (Observations) -- id ' + String(j && (j.observationId ?? j.ObservationId)) + '.', 'ok');
+            }
+            state.form = null;
+            await refresh();
+        } catch (err) { formMsg(err.message || String(err)); }
+    }
+
+    // The list again (its counts and score); the open executions are read
+    // again by render().
+    async function refresh() { await reload(); }
+
+    async function act(id, pid, action, comment) {
+        try {
+            await post('/working-papers/' + encodeURIComponent(pid) + '/action',
+                       { organizationId: Number(state.orgId), action: action, comment: comment, actor: null });
+            if (state.form && state.form.paperId === String(pid)) state.form = null;
+            await refresh();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    async function askAct(id, pid, action, required, message, confirmText) {
+        const opts2 = { title: confirmText, confirmText: confirmText, multiline: true };
+        const c = required ? await window.gracUi.promptRequired(message, opts2) : await window.gracUi.prompt(message, opts2);
+        if (c == null) return;
+        act(id, pid, action, c);
+    }
+
+    async function saveConclusion(id) {
+        const el = document.querySelector('#oaWpBody [data-concl="' + id + '"]');
+        if (!el) return;
+        try {
+            await post('/executions/' + encodeURIComponent(id) + '/audit-conclusion',
+                       { organizationId: Number(state.orgId), conclusion: el.value, actor: null });
+            wf.setMessage('oaWpMessage', 'Audit conclusion saved.', 'ok');
+            await refresh();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // -----------------------------------------------------------------
+    // Activity (spec 4.6: complete activity history)
+    // -----------------------------------------------------------------
+    async function showActivity(id, qid) {
+        const key = qid ? id + ':' + qid : id;
+        if (state.activity.has(key)) { state.activity.delete(key); draw(id); return; }
+        if (!state.open.has(id)) { state.open.add(id); setToggle(id, true); await loadExec(id, false); }
+        if (qid) state.openQ.add(key);
+        try {
+            const qs = '?organizationId=' + encodeURIComponent(state.orgId) + (qid ? '&questionId=' + encodeURIComponent(qid) : '');
+            state.acts[key] = rowsOf(await getJson(API + '/executions/' + encodeURIComponent(id) + '/workpaper-activity' + qs));
+        } catch (err) { state.acts[key] = []; }
+        state.activity.add(key);
+        draw(id);
+    }
+    function activityHtml(id, qid) {
+        const rows = state.acts[qid ? id + ':' + qid : id] || [];
+        return '<p class="oa-pl-plan-facts" style="margin-top:10px;"><strong>Activity</strong></p>'
+             + '<div class="pm-table-wrap"><table><thead><tr><th>When</th><th>By</th><th>Action</th><th>Item</th><th>From -&gt; To</th><th>Comment</th></tr></thead><tbody>'
+             + (rows.length ? rows.map(function (a) {
+                    const from = g(a, 'fromStatus'), to = g(a, 'toStatus');
+                    return '<tr><td>' + esc(String(g(a, 'enteredDt') || '').replace('T', ' ').substring(0, 16)) + '</td>'
+                         + '<td>' + esc(g(a, 'actorName')) + '</td>'
+                         + '<td>' + esc(ACTION_LABEL[g(a, 'actionCode')] || g(a, 'actionCode')) + '</td>'
+                         + '<td>' + esc(g(a, 'paperCode') || g(a, 'questionCode') || '') + '</td>'
+                         + '<td>' + esc((RESULT[from] || STATUS[from] || from || '') + (from || to ? ' -> ' : '') + (RESULT[to] || STATUS[to] || to || '')) + '</td>'
+                         + '<td style="white-space:normal;">' + esc(g(a, 'comment') || '') + '</td></tr>';
+                }).join('') : '<tr><td colspan="6" class="pm-empty">No activity yet.</td></tr>')
+             + '</tbody></table></div>';
+    }
+})();
+</script>

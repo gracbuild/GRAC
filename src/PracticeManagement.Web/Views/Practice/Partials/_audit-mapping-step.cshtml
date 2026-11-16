@@ -1,0 +1,363 @@
+@*
+    Audit Configuration -- Control and Practice Mapping (564, 2026-11-15,
+    sir -- Audit Change spec 4.2.2, P0 phase D).
+
+    Associates the audit (its current version) with the GRAC records it is
+    about, as contextual intelligence -- nothing here changes who owns or
+    operates a control:
+      * Controls -- the source statements (Framework -> Release -> Source
+        Structure -> Source Statement; there is no Control record in
+        Practice Management), picked in the Scope Builder's two-list tree
+        (js/Shared/statement-tree-picker.js, 534).
+      * Practices and Practice Instances -- the organization's active ones,
+        multi-select combos (js/Shared/checkcombo.js, 560). Picking
+        practices narrows the instance list to theirs (selective inclusion
+        of individual instances); with none picked every instance is listed.
+      * Manual mappings -- where the GRAC record is not available: kind
+        (Control / Practice / Practice Instance / Other), reference, name,
+        note. The Question Sets grid's look (.qs-grid).
+    Many-to-many: the audit maps many records; a record can be mapped by
+    many audits. A mapped record that is no longer active stays mapped and
+    is shown as such.
+
+    OPTIONAL step: Optional until something is mapped, then Completed; it
+    never blocks Submit for Review. Draft only, as every step.
+
+    Backend:
+      GET  /practice/api/org-assurance/mapping-options?organizationId=
+      GET  /practice/api/org-assurance/scope-statement-tree?organizationId=   (the tree picker)
+      GET  /practice/api/org-assurance/definitions/{id}/mapping?organizationId=
+      POST /practice/api/org-assurance/definitions/{id}/mapping
+
+    Context: the flow shell's `audit-context-change` event (as the Question
+    Sets step). The step frame's Save runs window.__oaMapping.save() ->
+    Promise<bool>; every open runs window.__oaMapping.reload().
+    Id prefix `oaMap`.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<section class="pm-panel oa-map-panel" id="oaMapRoot">
+    <p class="pm-hint" id="oaMapSubtitle" hidden style="margin:0 0 8px;"></p>
+    <div id="oaMapMessage" class="pm-message" style="display:none;"></div>
+
+    <div id="oaMapBody" hidden>
+        <div class="oa-ws-section-head"><h2>Controls</h2></div>
+        <p class="oa-ws-section-hint">The control statements this audit is about, from the organization's subscribed frameworks.</p>
+        <div id="oaMapControls"></div>
+
+        <div class="oa-ws-section-head" style="margin-top:16px;"><h2>Practices and Practice Instances</h2></div>
+        <p class="oa-ws-section-hint">Pick practices, then the individual instances to include. Picking practices narrows the instance list to theirs.</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" id="oaMapPicks">
+            <div class="pm-field">
+                <span>Practices <span class="pm-badge" id="oaMapPracticeCount">0</span></span>
+                <div id="oaMapPractices"></div>
+            </div>
+            <div class="pm-field">
+                <span>Practice Instances <span class="pm-badge" id="oaMapInstanceCount">0</span></span>
+                <div id="oaMapInstances"></div>
+            </div>
+        </div>
+        <p class="oa-ws-section-hint" id="oaMapUnavailable" hidden style="margin-top:6px;"></p>
+
+        <div class="oa-ws-section-head" style="margin-top:16px;"><h2>Manual Mappings</h2></div>
+        <p class="oa-ws-section-hint">Where the record is not in GRAC: what it is, its reference, a name and a note.</p>
+        <div class="pm-table-wrap">
+            <table class="qs-grid">
+                <thead>
+                    <tr>
+                        <th style="width:190px;">Type</th>
+                        <th style="width:200px;">Reference</th>
+                        <th>Name</th>
+                        <th>Note</th>
+                        <th style="width:58px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="oaMapManualBody"></tbody>
+            </table>
+        </div>
+        <div style="margin-top:8px;">
+            <button type="button" class="pm-button" id="oaMapAddManual">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add manual mapping
+            </button>
+        </div>
+    </div>
+</section>
+
+<script src="~/js/Shared/checkcombo.js" asp-append-version="true"></script>
+<script src="~/js/Shared/statement-tree-picker.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const pick = function (o, a, b) { return o == null ? undefined : (o[a] !== undefined ? o[a] : o[b]); };
+
+    const MANUAL_KINDS = [
+        ['CONTROL', 'Control'], ['PRACTICE', 'Practice'],
+        ['PRACTICE_INSTANCE', 'Practice Instance'], ['OTHER', 'Other']
+    ];
+
+    const state = {
+        orgId        : '',
+        definitionId : '',
+        editable     : false,
+        options      : { practices: [], instances: [] },
+        optionsOrg   : null,
+        mapped       : [],     // the saved rows
+        picker       : null    // the statement tree picker
+    };
+
+    const el = {
+        root      : document.getElementById('oaMapRoot'),
+        subtitle  : document.getElementById('oaMapSubtitle'),
+        message   : document.getElementById('oaMapMessage'),
+        body      : document.getElementById('oaMapBody'),
+        controls  : document.getElementById('oaMapControls'),
+        practices : document.getElementById('oaMapPractices'),
+        instances : document.getElementById('oaMapInstances'),
+        manual    : document.getElementById('oaMapManualBody'),
+        addManual : document.getElementById('oaMapAddManual'),
+        unavail   : document.getElementById('oaMapUnavailable')
+    };
+
+    window.gracCheckCombo.wire(document.getElementById('oaMapPicks'));
+
+    document.addEventListener('audit-context-change', function (e) {
+        const d = (e && e.detail) || {};
+        state.orgId        = d.orgId || '';
+        state.definitionId = d.definitionId || '';
+        reload();
+    });
+
+    // Picking practices narrows the instances (their picks are kept).
+    el.practices.addEventListener('change', function () { renderInstances(selectedInstanceIds()); updateCounts(); });
+    el.instances.addEventListener('change', updateCounts);
+    el.addManual.addEventListener('click', function () {
+        el.manual.insertAdjacentHTML('beforeend', manualRow({}));
+        const last = el.manual.querySelector('tr:last-child [data-m="name"]');
+        if (last) last.focus();
+    });
+    el.manual.addEventListener('click', function (e) {
+        const del = e.target.closest('[data-m-remove]');
+        if (!del || !state.editable) return;
+        del.closest('tr').remove();
+        if (!el.manual.querySelector('tr')) el.manual.innerHTML = emptyManual();
+    });
+
+    async function reload() {
+        clearMessage();
+        if (!state.orgId || !state.definitionId) {
+            el.body.hidden = true;
+            el.subtitle.textContent = 'Pick an audit to map its controls and practices.';
+            el.subtitle.hidden = false;
+            return;
+        }
+        try {
+            const both = await Promise.all([
+                getJson(API + '/definitions/' + encodeURIComponent(state.definitionId)
+                        + '/mapping?organizationId=' + encodeURIComponent(state.orgId)),
+                loadOptions()
+            ]);
+            const j = both[0];
+            const header = pick(j, 'header', 'Header') || {};
+            state.editable = !!pick(header, 'isEditable', 'IsEditable');
+            state.mapped   = pick(j, 'items', 'Items') || [];
+            el.body.hidden = false;
+            el.subtitle.textContent = state.editable ? '' : 'Read-only: the mapping can only be changed while the current version is Draft.';
+            el.subtitle.hidden = state.editable;
+            render();
+        } catch (err) {
+            el.body.hidden = true;
+            showMessage('error', 'Could not load the mapping: ' + (err.message || err));
+        }
+    }
+
+    async function loadOptions() {
+        if (state.optionsOrg === state.orgId) return;
+        const j = await getJson(API + '/mapping-options?organizationId=' + encodeURIComponent(state.orgId));
+        state.options = {
+            practices: pick(j, 'practices', 'Practices') || [],
+            instances: pick(j, 'instances', 'Instances') || []
+        };
+        state.optionsOrg = state.orgId;
+    }
+
+    function mappedOf(type) {
+        return state.mapped.filter(function (m) { return pick(m, 'mappingType', 'MappingType') === type; });
+    }
+
+    function render() {
+        // Controls: the 534 tree picker; a statement no longer available
+        // stays selected under "No longer available" (the picker's rule).
+        if (state.picker) state.picker.destroy();
+        state.picker = window.gracStatementTreePicker.attach({
+            host           : el.controls,
+            organizationId : state.orgId,
+            readOnly       : !state.editable,
+            selected       : mappedOf('CONTROL_STATEMENT').map(function (m) {
+                return { entityId: pick(m, 'recordId', 'RecordId'), entityCode: pick(m, 'recordCode', 'RecordCode'),
+                         entityName: pick(m, 'recordName', 'RecordName') };
+            }),
+            selectedInfo   : 'This audit is mapped to these control statements (context only; ownership stays with the practice).'
+        });
+
+        renderPractices(mappedOf('PRACTICE').map(function (m) { return String(pick(m, 'recordId', 'RecordId')); }));
+        renderInstances(mappedOf('PRACTICE_INSTANCE').map(function (m) { return String(pick(m, 'recordId', 'RecordId')); }));
+
+        const manual = mappedOf('MANUAL');
+        el.manual.innerHTML = manual.length ? manual.map(function (m) {
+            return manualRow({ kind: pick(m, 'manualKind', 'ManualKind'), reference: pick(m, 'manualReference', 'ManualReference'),
+                               name: pick(m, 'recordName', 'RecordName'), note: pick(m, 'note', 'Note') });
+        }).join('') : emptyManual();
+        el.addManual.hidden = !state.editable;
+
+        const gone = state.mapped.filter(function (m) {
+            return pick(m, 'mappingType', 'MappingType') !== 'MANUAL' && !pick(m, 'isAvailable', 'IsAvailable');
+        });
+        el.unavail.hidden = !gone.length;
+        el.unavail.textContent = gone.length
+            ? 'No longer active in GRAC, kept mapped: ' + gone.map(function (m) {
+                  return (pick(m, 'recordCode', 'RecordCode') || '') + ' ' + (pick(m, 'recordName', 'RecordName') || '');
+              }).join('; ') + '. Remove them from the lists above to unmap them.'
+            : '';
+        updateCounts();
+    }
+
+    // A mapped record that is no longer in the options is kept as an
+    // option, marked, so a save never drops it silently.
+    function withMissing(options, type, label) {
+        const have = new Set(options.map(function (o) { return o.value; }));
+        mappedOf(type).forEach(function (m) {
+            const v = String(pick(m, 'recordId', 'RecordId'));
+            if (!have.has(v)) options.push({ value: v, label: label(m) + ' (no longer active)' });
+        });
+        return options;
+    }
+
+    function renderPractices(selected) {
+        const opts = withMissing(state.options.practices.map(function (p) {
+            return { value: String(pick(p, 'id', 'Id')),
+                     label: (pick(p, 'code', 'Code') || '') + ' - ' + (pick(p, 'name', 'Name') || '') };
+        }), 'PRACTICE', function (m) { return (pick(m, 'recordCode', 'RecordCode') || '') + ' - ' + (pick(m, 'recordName', 'RecordName') || ''); });
+        el.practices.innerHTML = window.gracCheckCombo.html(opts, selected, { ariaLabel: 'Practices', disabled: !state.editable });
+    }
+
+    function selectedPracticeIds() {
+        return window.gracCheckCombo.values(el.practices.querySelector('[data-checkcombo]'));
+    }
+    function selectedInstanceIds() {
+        return window.gracCheckCombo.values(el.instances.querySelector('[data-checkcombo]'));
+    }
+
+    function renderInstances(selected) {
+        const practices = new Set(selectedPracticeIds());
+        const keep = new Set((selected || []).map(String));
+        const opts = withMissing(state.options.instances
+            .filter(function (i) {
+                return !practices.size || practices.has(String(pick(i, 'practiceId', 'PracticeId')))
+                    || keep.has(String(pick(i, 'id', 'Id')));
+            })
+            .map(function (i) {
+                const pc = pick(i, 'practiceCode', 'PracticeCode');
+                return { value: String(pick(i, 'id', 'Id')),
+                         label: (pick(i, 'code', 'Code') || '') + ' - ' + (pick(i, 'name', 'Name') || '') + (pc ? ' (' + pc + ')' : '') };
+            }), 'PRACTICE_INSTANCE', function (m) { return (pick(m, 'recordCode', 'RecordCode') || '') + ' - ' + (pick(m, 'recordName', 'RecordName') || ''); });
+        el.instances.innerHTML = window.gracCheckCombo.html(opts, selected, { ariaLabel: 'Practice Instances', disabled: !state.editable });
+    }
+
+    function updateCounts() {
+        document.getElementById('oaMapPracticeCount').textContent = String(selectedPracticeIds().length);
+        document.getElementById('oaMapInstanceCount').textContent = String(selectedInstanceIds().length);
+    }
+
+    function manualRow(m) {
+        const dis = state.editable ? '' : ' disabled';
+        const kind = m.kind || 'OTHER';
+        return '<tr>'
+             + '<td><select class="pm-input" data-m="kind" aria-label="Type"' + dis + '>'
+             + MANUAL_KINDS.map(function (k) {
+                   return '<option value="' + k[0] + '"' + (k[0] === kind ? ' selected' : '') + '>' + k[1] + '</option>';
+               }).join('') + '</select></td>'
+             + '<td><input class="pm-input" type="text" maxlength="120" data-m="reference" value="' + wf.escape(m.reference || '')
+             +      '" placeholder="e.g. ISO 27001 A.5.1" aria-label="Reference"' + dis + '></td>'
+             + '<td><input class="pm-input" type="text" maxlength="400" data-m="name" value="' + wf.escape(m.name || '')
+             +      '" placeholder="Name" aria-label="Name"' + dis + '></td>'
+             + '<td><input class="pm-input" type="text" maxlength="1000" data-m="note" value="' + wf.escape(m.note || '')
+             +      '" placeholder="Note" aria-label="Note"' + dis + '></td>'
+             + '<td>' + (state.editable
+                    ? '<button type="button" class="pm-button icon" data-m-remove title="Remove" aria-label="Remove"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>'
+                    : '') + '</td>'
+             + '</tr>';
+    }
+    function emptyManual() {
+        return '<tr data-m-empty><td colspan="5" class="pm-empty">No manual mappings.</td></tr>';
+    }
+
+    // Resolves true when there was nothing to save or the save worked,
+    // false when it failed (the message is shown in this panel).
+    async function save() {
+        if (!state.editable) return true;
+        if (!state.orgId || !state.definitionId) { showMessage('error', 'Pick an audit first.'); return false; }
+        clearMessage();
+
+        const items = [];
+        (state.picker ? state.picker.getSelected() : []).forEach(function (s) {
+            items.push({ mappingType: 'CONTROL_STATEMENT', recordId: Number(s.entityId) });
+        });
+        selectedPracticeIds().forEach(function (id) { items.push({ mappingType: 'PRACTICE', recordId: Number(id) }); });
+        selectedInstanceIds().forEach(function (id) { items.push({ mappingType: 'PRACTICE_INSTANCE', recordId: Number(id) }); });
+        let missing = false;
+        el.manual.querySelectorAll('tr:not([data-m-empty])').forEach(function (tr) {
+            const val = function (k) { const x = tr.querySelector('[data-m="' + k + '"]'); return x ? x.value.trim() : ''; };
+            const row = { mappingType: 'MANUAL', manualKind: val('kind') || 'OTHER', reference: val('reference') || null,
+                          name: val('name'), note: val('note') || null };
+            if (!row.name && !row.reference && !row.note) return;   // an empty row is ignored
+            if (!row.name) missing = true;
+            items.push(row);
+        });
+        if (missing) { showMessage('error', 'Every manual mapping needs a name.'); return false; }
+
+        try {
+            const r = await fetch(U(API + '/definitions/' + encodeURIComponent(state.definitionId) + '/mapping'), {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify({ organizationId: Number(state.orgId), definitionId: Number(state.definitionId),
+                                               items: items, actor: null })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            const n = pick(j, 'mappingCount', 'MappingCount');
+            showMessage('ok', 'Saved. ' + (n != null ? n : items.length) + ' mapping(s).');
+            document.dispatchEvent(new CustomEvent('audit-setup-changed'));
+            return true;
+        } catch (err) {
+            showMessage('error', 'Save failed: ' + (err.message || err));
+            return false;
+        }
+    }
+
+    window.__oaMapping = { save: save, reload: reload };
+
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        const j = await safeJson(r);
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function showMessage(kind, text) {
+        el.message.style.display    = 'block';
+        el.message.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.message.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
+        el.message.textContent      = text;
+    }
+    function clearMessage() {
+        el.message.style.display = 'none';
+        el.message.textContent   = '';
+    }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

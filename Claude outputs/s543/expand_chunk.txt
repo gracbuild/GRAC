@@ -1,0 +1,193 @@
+    // Step row expand (543, sir): the Configure button opens the step's
+    // screen in a row under it, the Question Sets grid's expand pattern.
+    // -----------------------------------------------------------------
+    // Steps with a Save of their own. msg: the screen's inline message,
+    // hidden by [hidden] (byHidden) or by style.display.
+    const SAVE = {
+        'scope'     : { api: '__oaScopeBuilder',   msg: 'oaScopeMessage', byHidden: true  },
+        'questions' : { api: '__oaAdoption',       msg: 'oaAdoptMessage', byHidden: false },
+        'workflow'  : { api: '__oaWorkflowConfig', msg: 'oaWfMessage',    byHidden: true  },
+        'scoring'   : { api: '__oaScoringConfig',  msg: 'oaScMessage',    byHidden: true  }
+    };
+    // Steps that save as they go, inside their own screens.
+    const ACT_NOW = {
+        'trigger'          : 'Triggers are saved as you add, edit or remove them.',
+        'scope-resolution' : 'Preview Resolve Now saves a resolution of the current scope.'
+    };
+    // The frame around an open step (caption, the step's panel, Cancel /
+    // Save). It and every step panel wait in the hidden holder; the open
+    // step's panel goes into the frame and the frame into the expand row.
+    const frame = {
+        root    : document.getElementById('oaCfgFrame'),
+        caption : document.getElementById('oaCfgFrameCaption'),
+        body    : document.getElementById('oaCfgFrameBody'),
+        hint    : document.getElementById('oaCfgFrameHint'),
+        cancel  : document.getElementById('oaCfgFrameCancel'),
+        save    : document.getElementById('oaCfgFrameSave')
+    };
+    const home = {};   // stepKey -> the panel's place in the flow shell
+    const pop  = { key: '', panel: null, dirty: false, saving: false };
+
+    function clearStepMessage(key) {
+        const cfg  = SAVE[key];
+        const node = cfg && document.getElementById(cfg.msg);
+        if (!node) return;
+        if (cfg.byHidden) node.hidden = true; else node.style.display = 'none';
+        node.textContent = '';
+    }
+    function shownStepMessage(key) {
+        const cfg  = SAVE[key];
+        const node = cfg && document.getElementById(cfg.msg);
+        if (!node) return null;
+        const shown = cfg.byHidden ? !node.hidden : node.style.display !== 'none';
+        return shown && String(node.textContent || '').trim() ? node : null;
+    }
+
+    // Puts the frame in an expand row under the open step's row. Also run
+    // after the step list is re-rendered (its rows are rebuilt), so an open
+    // step stays open; the frame and panel are kept by reference meanwhile.
+    function mountFrame() {
+        if (!pop.key) return;
+        const body = document.getElementById('oaCfgSteps');
+        const row  = body.querySelector('tr[data-step="' + pop.key + '"]');
+        if (!row) return;
+        const tr = document.createElement('tr');
+        tr.className = 'oa-cfg-expand is-selected';
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.appendChild(frame.root);
+        tr.appendChild(td);
+        row.insertAdjacentElement('afterend', tr);
+        const btn = row.querySelector('[data-configure]');
+        if (btn) {
+            btn.setAttribute('aria-expanded', 'true');
+            btn.innerHTML = '<i class="fa-solid fa-chevron-up" aria-hidden="true"></i>';
+        }
+    }
+
+    // Closes the open step: its panel goes back to the flow shell, the
+    // frame back to the holder, the expand row away.
+    function unmountStep() {
+        if (pop.panel && home[pop.key]) home[pop.key].appendChild(pop.panel);
+        document.getElementById('oaCfgHolder').appendChild(frame.root);
+        const tr = document.querySelector('#oaCfgSteps tr.oa-cfg-expand');
+        if (tr) tr.remove();
+        const btn = document.querySelector('#oaCfgSteps [data-configure][aria-expanded="true"]');
+        if (btn) {
+            btn.setAttribute('aria-expanded', 'false');
+            btn.innerHTML = '<i class="fa-solid fa-sliders" aria-hidden="true"></i>';
+        }
+        pop.key = '';
+        pop.panel = null;
+        pop.dirty = false;
+    }
+
+    async function openStep(key) {
+        if (!state.definitionId || !key) return;
+        const blocked = blockedReason(key);
+        if (blocked) { await box(blocked, 'warning'); return; }
+        const panel = document.querySelector('#oaCfgHolder [data-flow-panel="' + key + '"]');
+        if (!panel) return;
+
+        const editable = state.statusCode === 'Draft';
+        const caption  = panel.querySelector(':scope > .oa-ws-section-hint');
+        frame.caption.textContent = caption ? caption.textContent : '';
+        frame.save.hidden   = !(SAVE[key] && editable);
+        frame.save.disabled = false;
+        frame.cancel.textContent = SAVE[key] && editable ? 'Cancel' : 'Close';
+        frame.hint.textContent = editable ? (ACT_NOW[key] || '') : 'Read-only: the audit is not a Draft.';
+
+        home[key] = home[key] || panel.parentNode;
+        frame.body.appendChild(panel);
+        pop.key = key;
+        pop.panel = panel;
+        pop.dirty = false;
+        clearStepMessage(key);
+        // Re-apply the audit (a no-op once the screen is bound; binds it if
+        // its own pickers were still loading when the view opened), then
+        // re-read what is saved, so edits thrown away last time are gone.
+        if (window.__oaFlowShell) window.__oaFlowShell.setContext(state.orgId, state.definitionId);
+        const api = SAVE[key] && window[SAVE[key].api];
+        if (api && typeof api.reload === 'function') {
+            try { api.reload(); } catch (_) { /* the screen shows its own error */ }
+        }
+        mountFrame();
+        const row = document.querySelector('#oaCfgSteps tr[data-step="' + key + '"]');
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // Configure button: open the step, or close it when it is the open one.
+    // Another step open first asks to close it (when it has changes).
+    async function toggleStep(key) {
+        if (pop.saving) return;
+        const same = pop.key === key;
+        if (pop.key && !(await requestClose())) return;
+        if (!same) openStep(key);
+    }
+
+    // A change the user makes inside the open step -- typing, picking, or a
+    // button of the step screen -- makes it "dirty", and closing then asks
+    // first. Not counted: Cancel / Save, a message box over it, and change
+    // events raised by code (not isTrusted).
+    function markDirty(e) {
+        if (!e.isTrusted || !pop.key) return;
+        const t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('.grac-dialog-overlay, #oaCfgFrameSave, #oaCfgFrameCancel')) return;
+        if (e.type === 'click' && !t.closest('button')) return;
+        pop.dirty = true;
+    }
+    frame.root.addEventListener('input',  markDirty, true);
+    frame.root.addEventListener('change', markDirty, true);
+    frame.root.addEventListener('click',  markDirty, true);
+
+    // Resolves true when the step was closed (or none was open).
+    async function requestClose() {
+        if (pop.saving) return false;
+        if (!pop.key) return true;
+        if (pop.dirty && SAVE[pop.key] && state.statusCode === 'Draft') {
+            const ok = await window.gracUi.confirm('Close without saving? The changes made here will be lost.',
+                { type: 'warning', title: 'Unsaved changes', confirmText: 'Close without saving' });
+            if (!ok) return false;
+        }
+        unmountStep();
+        // Trigger and Scope Resolution save while open: show what is saved.
+        loadView();
+        return true;
+    }
+    frame.cancel.addEventListener('click', requestClose);
+
+    async function saveStep() {
+        const key = pop.key;
+        const cfg = SAVE[key];
+        const api = cfg && window[cfg.api];
+        if (!api || pop.saving) return;
+        pop.saving = true;
+        frame.save.disabled = true;
+        clearStepMessage(key);
+        let ok = false;
+        try {
+            ok = await api.save();
+        } catch (_) {
+            ok = false;
+        } finally {
+            pop.saving = false;
+            frame.save.disabled = false;
+        }
+        if (!ok) {
+            // The step screen's own message says why; the step stays open on it.
+            const m = shownStepMessage(key);
+            if (m) m.scrollIntoView({ block: 'nearest' });
+            else await box('Not saved.', 'error');
+            return;
+        }
+        const s = findStep(key);
+        const title = (s && pick(s, 'stepName', 'StepName')) || key;
+        clearStepMessage(key);
+        unmountStep();
+        await loadView();
+        await box(title + ' saved.', 'success');
+    }
+    frame.save.addEventListener('click', saveStep);
+
+    // -----------------------------------------------------------------

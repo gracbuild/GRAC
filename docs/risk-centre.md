@@ -630,7 +630,7 @@ Do not re-add these routes without reading it.
 | GET | `/notifications?organizationId=&statusCode=&notifyEventCode=&subjectTypeCode=&subjectRecordId=&recipientEmployeeId=` | §21 |
 | GET | `/notifications/counts?organizationId=` | §21 |
 | POST | `/notifications/{notificationId}/mark` | §21 |
-| GET | `/dashboard?organizationId=&trendMonths=` | §23; since 413 also matrix axes, both heatmaps, heatmap coverage, review ageing and Top 5 (sets 11-16) |
+| GET | `/dashboard?organizationId=&trendMonths=` | §23; since 413 also matrix axes, both heatmaps, heatmap coverage, review ageing and Top risks (sets 11-16); since 505 `stageCounts`, `treatmentOptions`, `residualRatings` (sets 17-19) and Top risks = 10 with `workflowStageCode`, `nextReviewDate` |
 | GET | `/ageing?organizationId=&minAgeDays=&page=&pageSize=` | §23 |
 | POST | `/register/{riskId}/treatment-task` | §22 |
 | GET | `/register/{riskId}/treatment-tasks` | §22 |
@@ -647,7 +647,7 @@ Two procs return multiple result sets read **by position**, not by name:
 | Proc | Sets | Reader |
 | --- | --- | --- |
 | `sp_risk_scoring_options_get` | 5 — Likelihood, Impact, Categories, Sources, Matrix | `GetScoringOptionsAsync` |
-| `sp_risk_dashboard_counts` | 17 — 214's 11, plus 413's 11-16 (axes, inherent heatmap, residual heatmap, coverage, review ageing, top 5) | `GetDashboardAsync` |
+| `sp_risk_dashboard_counts` | 20 — 214's 11, 413's 11-16 (axes, inherent heatmap, residual heatmap, coverage, review ageing, top risks), 505's 17-19 (workflow stage, treatment option, residual rating) | `GetDashboardAsync` |
 
 Changing the order in either proc breaks the service **silently**. Add at
 the end instead.
@@ -4248,3 +4248,57 @@ frequency, and the next review date recalculated from the frequency.
   Existing Controls were already loaded from the risk's current mapping.
 
 Deploy: 485, then API + Web.
+
+## 505 -- Dashboard v2 layout (2026-11-02)
+
+The Dashboard tab follows the Dashboard UI specification v2 (section 8). Detail, KPI
+rules and the out-of-scope register: `docs/risk-dashboard-v2.md`.
+
+# Risk Management -> Settings: Workflow Settings + Risk Methodology (2026-11-13, migration 533)
+
+**Request (sir):** move the risk configuration out of the organisation Settings menu into Risk Management, as a Settings group with two menus -- Workflow Settings and Risk Methodology -- and fold Risk Acceptance Approval Authority into Workflow Settings instead of keeping a separate page.
+
+**Why two menus and not one page.** Risk Methodology is versioned (draft -> publish, every assessment stamped with its version). The workflow settings and the acceptance authority take effect on save. Mixing them on one form would either version a notification toggle or give one form two save models. Their access also differs: methodology is ORG_ADMIN / GRAC_ADMIN only.
+
+## Menu (533)
+
+```
+Risk Management (risk-centre)
+  ...
+  Settings (risk-centre-settings, NEW, url '#', 289)
+    Workflow     (risk-settings, renamed from "Risk Settings", 291)
+    Methodology  (risk-methodology, renamed from "Risk Methodology", 292)
+```
+
+- The menu names are short because the group already says Settings and the root Risk Management (sir, 2026-11-13). The page titles stay **Workflow Settings** and **Risk Methodology**.
+
+- `risk-settings` keeps its key and url (`Practice/Index/risk-settings`), so existing role permissions carry over. `module_type` becomes Risk Management for both pages.
+- `risk-acceptance-authority` is set **Inactive** (row and permission rows kept; the rollback re-activates it).
+- The group is granted VIEW to every role that can view either child, so nobody gets an empty group.
+- Re-running 458 or 532 re-parents their rows to the organisation Settings menu; run 533 again after them.
+- `274_menu_master_seed.sql` carries the new row, the renamed / moved rows and the links.
+- Rollback: `533_risk_settings_menu_group_rollback.sql` (revert the Web files with it).
+
+## Workflow Settings page
+
+- `Partials/risk-settings.cshtml` + `js/RiskCentre/risk-settings.js`. The screen's title is **Workflow Settings** and its group is **Risk Management**, so the breadcrumb reads Home / Risk Management / Workflow Settings. Risk Methodology's group moved the same way.
+- One organization picker and one icon Reload for the whole page.
+- Below the existing form: a **Risk acceptance approval authority** section -- the 271 grid, unchanged in behaviour, included as `Partials/risk-acceptance-authority.cshtml` (now a section, not a page; its heading and picker were removed).
+- The section keeps its **own Save / Discard changes**: it posts to a different endpoint (`acceptance-authority`), and saving one must not save or discard the other's unsaved edits.
+- `risk-acceptance-authority.js` no longer loads organizations. It exposes `window.gracRiskAcceptanceAuthority.load(orgId)` and `.isDirty()`. `risk-settings.js` calls `load` on org change, on Reload, and after Save settings (the section's fallback note reads approval on/off and the approver role) -- skipped while the grid has unsaved edits.
+- The "approval is switched off" note now points at the checkbox above instead of another page.
+- `risk-acceptance-authority` is removed from `PracticeScreen.All` and from `Manage.cshtml`'s partial list.
+
+## Shared CSS
+
+`practice-management.css` gains an opt-in `.pm-toolbar.pm-toolbar-fields`: it drops AdminLTE's `label { margin-bottom: .5rem }` under the toolbar's `.pm-field` blocks and sizes a `.pm-button.icon` to the 34px control height, so the Reload icon sits on the controls' middle line. Used by Workflow Settings and Risk Methodology (which drops its page-local copy of the same rules).
+
+## Unchanged
+
+No database object other than menu rows; no API; `org_risk_config`, `org_risk_acceptance_authority` and the methodology tables and procedures are untouched. The acceptance-authority API checks session and organisation, not the menu, so inactivating its menu row does not affect it.
+
+## Deploy
+
+1. Run `533_risk_settings_menu_group.sql`; expect 3 PASS rows.
+2. Publish Web; hard refresh.
+3. Users sign out and back in (menu permissions are read at sign-in).

@@ -297,3 +297,14 @@ links and the items the 477 migration created, drops
 
 - Exception, Risk and Asset contract attachments; referencing Document Upload
   policies; moving file storage out of the database.
+
+## Update 530 -- Evidence Automation feeds the Evidence Center
+
+Migration 530 (`evidence-automation.md`) lets an organization's own systems send
+evidence for an obligation (webhook or file drop). Each file received is stored
+through the unchanged `sp_evidence_item_store` as an ordinary item (tag
+`automated`, owner = the source owner, validity = the evidence period) and waits
+for review on Policies & Documents -> Evidence Automation. Accepting it links it
+through the unchanged `sp_evidence_link_add` / `sp_task_evidence_link_add`, so
+Used in, version pinning, the completion gate and the expiry sweep treat it like
+any other item. No Evidence Center table, procedure or screen was changed.

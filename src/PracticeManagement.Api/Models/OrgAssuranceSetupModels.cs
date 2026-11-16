@@ -27,14 +27,19 @@ public sealed record OrgAssuranceDefinitionQuestionSetRow(
     string? SetName,
     int?    DisplayOrder,
     bool    IsMandatory,
-    int?    QuestionCount);
+    int?    QuestionCount,
+    // 551 -- the adopted question set version and its status
+    // (Active / Superseded ...). Null before 551 is run.
+    int?    SetVersionNumber = null,
+    string? SetVersionStatus = null);
 
 /// <summary>A question set in the organization that could be adopted.</summary>
 public sealed record OrgAssuranceAvailableQuestionSetRow(
     long?   QuestionSetId,
     string? SetCode,
     string? SetName,
-    int?    QuestionCount);
+    int?    QuestionCount,
+    int?    SetVersionNumber = null);   // 551: only Active versions are offered
 
 /// <summary>Everything the Question Sets step needs in one round trip.</summary>
 public sealed record OrgAssuranceDefinitionQuestionSetResult(
@@ -74,3 +79,43 @@ public sealed record OrgAssuranceSetupStatusRow(
 public sealed record OrgAssuranceSetupStatusResult(
     OrgAssuranceSetupHeader                   Header,
     IReadOnlyList<OrgAssuranceSetupStatusRow>  Steps);
+
+/// <summary>
+/// 537: one audit on the Audit Configuration list -- a Draft audit set up
+/// up to its question sets (sp_org_assurance_configuration_list). The four
+/// configuration statuses are Completed / InProgress / NotConfigured, the
+/// same vocabulary as <see cref="OrgAssuranceSetupStatusRow"/>.
+/// 543: every Draft or Under Review audit; Scope and Question Sets are
+/// configuration steps too (ScopeStatus, QuestionsStatus).
+/// 545: Scope Resolution is no longer a step (the scope is resolved when an
+/// execution is created), so ScopeResolutionStatus is gone and
+/// ConfigurationSteps is 5.
+/// </summary>
+public sealed record OrgAssuranceConfigurationListRow(
+    long      DefinitionId,
+    long      OrganizationId,
+    string?   DefinitionCode,
+    string?   DefinitionName,
+    string?   OwnerRoleName,
+    string?   OwnerDisplayName,
+    long?     CurrentVersionId,
+    string?   CurrentStatusCode,
+    string?   CurrentStatusName,
+    int?      CurrentVersionNumber,
+    string?   CurrentVersionLabel,
+    DateTime? CurrentEffectiveDate,
+    string?   CurrentCategoryName,
+    string?   ScopeStatus,
+    string?   QuestionsStatus,
+    string?   WorkflowStatus,
+    string?   ScoringStatus,
+    // 548: TriggerStatus removed -- Trigger is no longer a configuration step.
+    int       ConfiguredSteps,
+    int       ConfigurationSteps,
+    bool      IsConfigured);
+
+public sealed record OrgAssuranceConfigurationListResult(
+    long TotalCount,
+    int  PageNumber,
+    int  PageSize,
+    IReadOnlyList<OrgAssuranceConfigurationListRow> Rows);

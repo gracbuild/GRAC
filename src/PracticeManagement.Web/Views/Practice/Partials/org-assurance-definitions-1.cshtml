@@ -1,0 +1,940 @@
+@*
+    Assurance Definitions (BRD Part 2 Sec 1) -- Phase 2 Assurance
+    Management, Stage 1. NEW, INDEPENDENT module.
+
+    Screen key : `org-assurance-definitions`
+    Group      : Organization Assurance
+    Menu       : nav-assurance -> Assurance Definitions (migration 071)
+    Feature    : screen.org-assurance-definitions
+    Backend    : /practice/api/org-assurance/*
+                 -> /api/practice/org-assurance/*
+
+    Follows the same partial + inline-JS pattern used by
+    workflows.cshtml. Uses the shared __wfCommon helpers loaded via
+    _workflow-common.cshtml (org list, badge, escape, pager).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaDefUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-file-shield pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaDefUnavailableTitle">Audit Assurance is not yet enabled for this organization.</h2>
+        <p id="oaDefUnavailableBody">Ask a GRAC Admin to turn on <code>screen.org-assurance-definitions</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaDefRoot" hidden>
+    <div class="pm-toolbar">
+        <select id="oaDefFilterOrganization"><option value="">All organizations</option></select>
+        <select id="oaDefFilterStatus">
+            <option value="">All statuses</option>
+        </select>
+        <input id="oaDefSearch" type="text" placeholder="Search name / code..." />
+        <button class="pm-button icon" id="oaDefRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaDefAddBtn" type="button" title="Add Audit Definition">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Definition
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th><th>Name</th><th>Category</th>
+                    <th>Owner</th><th>Version</th>
+                    <th>Status</th><th>Effective</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="oaDefBody">
+                <tr><td colspan="8" class="pm-empty">Select an organization to load audits.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="oa-def">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+@* ---------- Add / Edit dialog ---------- *@
+<dialog id="oaDefDialog" style="max-width:720px; width:94%;">
+    <form id="oaDefForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaDefDialogTitle">Add Audit Definition</h2>
+            <button class="pm-icon-button" type="button" id="oaDefClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="pm-message" id="oaDefMessage" style="display:none;"></div>
+        <input type="hidden" id="oaDefEditId" />
+        @* Identity row: Code 25% | Name 50% | Effective Date 25%.
+           Name used to sit on its own full-width row below; folding it in
+           here removes one row of vertical height from a form that is
+           already long. The 1fr/2fr/1fr tracks give the 25/50/25 split.
+
+           `align-items:start` keeps the three top-aligned even if one
+           label wraps -- otherwise a wrapped label pushes its own input
+           below the others. `min-width:0` lets a long value shrink inside
+           its track instead of widening it and breaking the ratio.
+
+           Each label keeps its title + required-asterisk inside a single
+           <span> so the asterisk cannot fall onto its own line under
+           flex-direction:column. Ids, required flags, maxlengths and the
+           input styling are unchanged -- only the grid around them moved.
+
+           Stacks to one column under 900px (practice-management.css). *@
+        <div style="display:grid; grid-template-columns:1fr 2fr 1fr; gap:10px; align-items:start;">
+            <label class="pm-field" style="min-width:0;">
+                <span>Code <span class="required">*</span></span>
+                <input class="pm-input" id="oaDefCode" type="text" maxlength="80" required />
+            </label>
+            <label class="pm-field" style="min-width:0;">
+                <span>Name <span class="required">*</span></span>
+                <input class="pm-input" id="oaDefName" type="text" maxlength="240" required />
+            </label>
+            <label class="pm-field" style="min-width:0;">
+                <span>Effective Date</span>
+                <input class="pm-input" id="oaDefEffectiveDate" type="date" />
+            </label>
+        </div>
+        @* SAME 1fr/2fr/1fr tracks as the identity row above, so the two
+           rows share vertical guides: Audit Category lines up under Code,
+           and the Owner pair spans exactly the width of Name. The third
+           track is intentionally left empty -- an aligned gap under
+           Effective Date reads better than a second row on its own,
+           unrelated rhythm.
+
+           The inner Owner grid keeps minmax(0,1fr) so long <option> text
+           cannot push a select wider than its slot and force a
+           horizontal scrollbar. *@
+        <div style="display:grid; grid-template-columns:1fr 2fr 1fr; gap:10px; margin-top:10px; align-items:start;">
+            @* Assurance Category is fed from the GRAC Admin (Phase 1) master
+               grac_new.assurance_category via /practice/api/org-assurance/categories.
+               Selected option carries category id / code / name via data-* attrs. *@
+            <label class="pm-field" style="min-width:0;">
+                <span>Audit Category</span>
+                <select class="pm-input" id="oaDefCategory">
+                    <option value="">Loading categories...</option>
+                </select>
+            </label>
+            @* 119 hybrid role+employee Owner picker.
+               Role dropdown = organization_role (assurance-capable roles).
+               Employee dropdown = current active holders of the picked role.
+               The SP auto-resolves whichever side is left blank (Q1-A). *@
+            <div class="pm-field" style="min-width:0;">
+                <span>Owner</span>
+                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
+                    <select class="pm-input" id="oaDefOwnerRole" style="min-width:0;" aria-label="Owner Role">
+                        <option value="">Loading roles...</option>
+                    </select>
+                    <select class="pm-input" id="oaDefOwnerEmployee" style="min-width:0;" aria-label="Owner Employee (current holder)">
+                        <option value="">-- pick a role first --</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <label class="pm-field" style="margin-top:10px;">Objective
+            <textarea class="pm-input" id="oaDefObjective" rows="2" maxlength="4000"></textarea>
+        </label>
+        <label class="pm-field" style="margin-top:10px;">Description
+            <textarea class="pm-input" id="oaDefDescription" rows="6" maxlength="4000"></textarea>
+        </label>
+        <div class="pm-dialog-actions">
+            <button type="button" id="oaDefCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaDefSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- History / Version dialog ---------- *@
+<dialog id="oaDefHistoryDialog" style="max-width:820px; width:94%;">
+    <div style="margin:0; padding:20px 24px;">
+        <div class="pm-dialog-heading">
+            <h2 id="oaDefHistoryTitle">Version History</h2>
+            <button class="pm-icon-button" type="button" id="oaDefHistoryClose" aria-label="Close">&times;</button>
+        </div>
+        <div style="max-height:60vh; overflow:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">When</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Action</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">From</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">To</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Actor</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);">Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="oaDefHistoryBody">
+                    <tr><td colspan="6" class="pm-empty" style="padding:12px;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</dialog>
+
+@* 537: Audit Configuration is opened on an audit through the encrypted navigation code. *@
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing - _workflow-common partial not rendered'); return; }
+
+    const API      = '/practice/api/org-assurance';
+    const FEATURE  = 'screen.org-assurance-definitions';
+    const U        = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+
+    const state = {
+        orgId      : '',
+        status     : '',
+        search     : '',
+        page       : 1,
+        pageSize   : 25,
+        total      : 0,
+        statuses   : [],
+        categories : []    // Admin-published assurance categories
+        // 119: employees[] removed -- picker maintains its own per-role holder cache.
+    };
+
+    // 3-dot action menu shared state (matches the pattern in
+    // Partials/tasks.cshtml and gaps.cshtml -- uses the shared
+    // .pm-action-trigger / .pm-action-menu CSS classes).
+    let openMenuEl      = null;
+    let openMenuTrigger = null;
+
+    // -----------------------------------------------------------------
+    // Boot
+    // -----------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    async function boot() {
+        wf.wirePager('oa-def', delta => {
+            const next = state.page + delta;
+            if (next < 1) return;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next > maxPage) return;
+            state.page = next;
+            reload();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaDefUnavailable', 'oaDefUnavailableTitle', 'oaDefUnavailableBody',
+                'No accessible organizations',
+                'Your account does not have any organizations linked. Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaDefFilterOrganization', orgs);
+        state.orgId = document.getElementById('oaDefFilterOrganization').value || '';
+
+        const enabled = await wf.checkFeature(FEATURE, state.orgId);
+        if (!enabled) {
+            wf.unavailable('oaDefUnavailable', 'oaDefUnavailableTitle', 'oaDefUnavailableBody',
+                'Audit Assurance is not yet enabled for this organization.',
+                'Ask a GRAC Admin to turn on ' + FEATURE + ' for this organization.');
+            return;
+        }
+
+        document.getElementById('oaDefRoot').hidden = false;
+        await loadStatuses();
+        await loadCategories();
+        // 119 hybrid Owner picker fetches roles + holders lazily on dialog open
+        // via window.__roleHolderPicker.attach() -- no eager employee fetch here.
+        wireControls();
+        reload();
+    }
+
+    async function loadStatuses() {
+        try {
+            const r = await fetch(U(API + '/statuses'), { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            state.statuses = rows;
+            const sel = document.getElementById('oaDefFilterStatus');
+            for (const s of rows) {
+                const opt = document.createElement('option');
+                opt.value = s.statusCode || s.StatusCode;
+                opt.textContent = s.statusName || s.StatusName;
+                sel.appendChild(opt);
+            }
+        } catch (_) { /* non-fatal */ }
+    }
+
+    // Loads Admin (grac_new) published assurance categories once per page.
+    async function loadCategories() {
+        const sel = document.getElementById('oaDefCategory');
+        try {
+            const r = await fetch(U(API + '/categories'), { credentials: 'same-origin' });
+            if (!r.ok) {
+                sel.innerHTML = '<option value="">(no categories available)</option>';
+                return;
+            }
+            const b = await r.json();
+            const rows = (b && (b.data || b.Data)) || [];
+            state.categories = rows;
+            renderCategoryOptions();
+        } catch (_) {
+            sel.innerHTML = '<option value="">(failed to load categories)</option>';
+        }
+    }
+
+    function renderCategoryOptions(selectedId) {
+        const sel = document.getElementById('oaDefCategory');
+        sel.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = state.categories.length
+            ? '-- select a category --'
+            : '(no categories published by Admin)';
+        sel.appendChild(placeholder);
+        for (const c of state.categories) {
+            const id   = c.id   || c.Id;
+            const code = c.code || c.Code || '';
+            const name = c.name || c.Name || '';
+            const opt  = document.createElement('option');
+            opt.value = String(id != null ? id : '');
+            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            opt.setAttribute('data-code', code);
+            opt.setAttribute('data-name', name);
+            sel.appendChild(opt);
+        }
+        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
+    }
+
+    // 119 -- loadEmployees / renderEmployeeOptions retired.
+    // Owner picker now uses window.__roleHolderPicker from _workflow-common.cshtml
+    // which fetches roles from /practice/api/org-roles and holders per-role
+    // on demand. See openDialog() for the attach() call.
+
+    function wireControls() {
+        document.getElementById('oaDefFilterOrganization').addEventListener('change', function (e) {
+            state.orgId = e.target.value || '';
+            state.page = 1;
+            // 119 hybrid Owner picker -- drop cached roles/holders so the next
+            // dialog open re-fetches for the newly-selected org.
+            if (window.__roleHolderPicker && typeof window.__roleHolderPicker.invalidateCaches === 'function') {
+                window.__roleHolderPicker.invalidateCaches();
+            }
+            reload();
+        });
+        document.getElementById('oaDefFilterStatus').addEventListener('change', function (e) {
+            state.status = e.target.value || '';
+            state.page = 1;
+            reload();
+        });
+        document.getElementById('oaDefSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.page = 1;
+            clearTimeout(window.__oaDefSearchTimer);
+            window.__oaDefSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaDefRefreshBtn').addEventListener('click', reload);
+        document.getElementById('oaDefAddBtn').addEventListener('click', function () { openDialog(null); });
+
+        // Phase 3: expose the two entry points this screen already has so
+        // the Audit Definition workspace can drive the SAME form rather
+        // than growing a second one. Nothing new is implemented here --
+        // these are the existing functions, published.
+        window.__oaDefinitions = {
+            open   : openDialog,   // (id) edit, (null) create
+            reload : reload,
+            orgId  : function () { return state.orgId; },
+            // 2026-11-13: the Audit Definition page has one Save for the
+            // whole audit. This runs the form's own validation and save
+            // and resolves to the saved definition id, or null when the
+            // form is invalid or the save failed (message in the form).
+            save   : function () {
+                const form = document.getElementById('oaDefForm');
+                if (form && !form.reportValidity()) return Promise.resolve(null);
+                return saveDefinition();
+            },
+            // 2026-11-04: the row menu for one audit, for the audit page's
+            // Actions button. Same items, same handlers. Without arguments it
+            // is the record open in the form.
+            actionItems : function (id, statusCode) {
+                if (id) return buildActionsMenu(String(id), statusCode || '');
+                const formId = document.getElementById('oaDefEditId').value;
+                return formId ? buildActionsMenu(formId, state.loadedStatusCode || '') : [];
+            }
+        };
+        try {
+            document.dispatchEvent(new CustomEvent('audit-definitions-ready'));
+        } catch (_) { /* nothing depends on this when unhosted */ }
+
+        document.getElementById('oaDefClose').addEventListener('click', closeDialog);
+        document.getElementById('oaDefCancel').addEventListener('click', closeDialog);
+        document.getElementById('oaDefForm').addEventListener('submit', function (e) {
+            e.preventDefault(); saveDefinition();
+        });
+
+        document.getElementById('oaDefHistoryClose').addEventListener('click', function () {
+            document.getElementById('oaDefHistoryDialog').close();
+        });
+
+        // 3-dot row menu delegation -- attach once, event-delegated on
+        // the tbody so we don't need to re-wire after each reload.
+        wireRowMenu();
+    }
+
+    // -----------------------------------------------------------------
+    // Load list
+    // -----------------------------------------------------------------
+    async function reload() {
+        const body = document.getElementById('oaDefBody');
+        if (!state.orgId) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Select an organization to load audits.</td></tr>';
+            wf.updatePager('oa-def', { pageNumber: 1, totalCount: 0, pageSize: 1 });
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="8" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.status) qs.set('statusCode', state.status);
+            if (state.search) qs.set('search', state.search);
+            qs.set('page',     String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/definitions?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { renderError(r); return; }
+            const payload = await r.json();
+            state.total = Number(payload.totalCount || payload.TotalCount || 0);
+            const rows  = payload.rows || payload.Rows || [];
+            renderRows(rows);
+            wf.updatePager('oa-def', {
+                pageNumber : state.page,
+                totalCount : state.total,
+                pageSize   : state.pageSize
+            });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    async function renderError(r) {
+        const body = document.getElementById('oaDefBody');
+        let msg = 'HTTP ' + r.status;
+        try {
+            const j = await r.json();
+            if (j && (j.error || j.Error)) msg += ' -- ' + (j.error || j.Error);
+        } catch (_) { /* ignore */ }
+        body.innerHTML = '<tr><td colspan="8" class="pm-empty">Failed to load: ' + wf.escape(msg) + '</td></tr>';
+    }
+
+    function renderRows(rows) {
+        const body = document.getElementById('oaDefBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="8" class="pm-empty">No definitions yet. Click "Add Definition" to create one.</td></tr>';
+            return;
+        }
+        const html = rows.map(function (row) {
+            const id           = row.definitionId       || row.DefinitionId;
+            const code         = row.definitionCode     || row.DefinitionCode || '';
+            const name         = row.definitionName     || row.DefinitionName || '';
+            const category     = row.currentCategoryName|| row.CurrentCategoryName || '';
+            // 119 hybrid role+employee -- compose "Role (Employee)" label; fall back gracefully.
+            const ownerRole    = row.ownerRoleName      || row.OwnerRoleName      || '';
+            const ownerEmp     = row.ownerDisplayName   || row.OwnerDisplayName   || '';
+            const owner        = (ownerRole && ownerEmp) ? (ownerRole + ' (' + ownerEmp + ')')
+                                : (ownerRole || ownerEmp);
+            const versionNo    = row.currentVersionNumber || row.CurrentVersionNumber || '';
+            const versionLabel = row.currentVersionLabel  || row.CurrentVersionLabel  || '';
+            const statusCode   = row.currentStatusCode  || row.CurrentStatusCode || '';
+            const statusName   = row.currentStatusName  || row.CurrentStatusName || '';
+            const effective    = formatDate(row.currentEffectiveDate || row.CurrentEffectiveDate);
+            const versionText  = versionLabel ? versionLabel : (versionNo ? String(versionNo) : '');
+
+            // 2026-11-04: a row click opens the audit (same as the row's View).
+            return '<tr class="pm-row-clickable" data-id="' + id + '" data-status="' + wf.escape(statusCode) + '">'
+                + '<td>' + wf.escape(code) + '</td>'
+                + '<td>' + wf.escape(name) + '</td>'
+                + '<td>' + wf.escape(category) + '</td>'
+                + '<td>' + wf.escape(owner) + '</td>'
+                + '<td>' + wf.escape(versionText) + '</td>'
+                + '<td>' + wf.badge(statusName) + '</td>'
+                + '<td>' + wf.escape(effective) + '</td>'
+                + '<td>' + actionsTrigger(id, statusCode) + '</td>'
+                + '</tr>';
+        }).join('');
+        body.innerHTML = html;
+
+        // Row menu delegation is wired once (see wireRowMenu()); no
+        // per-row listener attach needed here.
+    }
+
+    // Render a single 3-dot trigger button per row. Menu items are
+    // built lazily on click via buildActionsMenu(id, statusCode).
+    function actionsTrigger(id, statusCode) {
+        return '<button type="button" class="pm-action-trigger"'
+             + ' data-id="'    + id + '"'
+             + ' data-status="' + wf.escape(statusCode) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span>'
+             + '</button>';
+    }
+
+    // Menu items per row -- driven by lifecycle status. Static entries
+    // (Edit / Scope / History) are always present; transition entries
+    // appear only when the current status allows them.
+    function buildActionsMenu(id, statusCode) {
+        const items = [
+            // Phase 3: View opens the audit's own 3-tab workspace
+            // (Definition Details / Scope Details / Question Set). It is
+            // first because it is now the normal way into an audit -- the
+            // per-section entries below stay for direct deep links.
+            // 2026-11-04: each item carries its action as `key`, so the
+            // audit page's Actions menu can reuse this list (minus View /
+            // Edit, which that page already is).
+            { key: 'view', icon: 'fa-up-right-from-square', label: 'View',
+                action: function () { handleRowAction(id, 'view'); } },
+            { key: 'edit', icon: 'fa-pen',              label: 'Edit',
+                action: function () { handleRowAction(id, 'edit'); } },
+            // 2026-11-13: Scope and Question Set removed -- the audit page is
+            // one page now (details, scope and question sets together), so
+            // Edit opens all three. Evidence removed too (536): evidence is
+            // set per question in the question sets.
+            // 537 (sir): Workflow / Scoring / Triggers / Resolve Scope became
+            // ONE item, Audit Configuration -- the one page that holds all
+            // four, opened on this audit.
+            { key: 'configuration', icon: 'fa-sliders',     label: 'Audit Configuration',
+                action: function () { handleRowAction(id, 'configuration'); } },
+            { key: 'executions', icon: 'fa-play-circle',      label: 'Executions',
+                action: function () { handleRowAction(id, 'executions'); } },
+            { key: 'history', icon: 'fa-clock-rotate-left',label: 'History',
+                action: function () { handleRowAction(id, 'history'); } }
+        ];
+        // 542 (sir): Submit for Review and Approve moved to Audit
+        // Configuration -- review comes after the configuration (537), so
+        // it is done there (Submit next to Save; Approve on its list).
+        if (statusCode === 'Approved')
+            items.push({ key: 'activate', icon: 'fa-play', label: 'Activate',
+                action: function () { handleRowAction(id, 'activate'); } });
+        if (statusCode === 'Active')
+            items.push({ key: 'retire', icon: 'fa-box-archive', label: 'Retire',
+                action: function () { handleRowAction(id, 'retire'); } });
+        return items;
+    }
+
+    // ---------- shared row-menu open/close/position (mirrors tasks.cshtml) ----------
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function positionRowMenu(trigger) {
+        if (!openMenuEl) return;
+        const r  = trigger.getBoundingClientRect();
+        const mr = openMenuEl.getBoundingClientRect();
+        const gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top  = top  + 'px';
+        openMenuEl.style.left = left + 'px';
+    }
+    function openRowMenu(trigger, items) {
+        closeRowMenu();
+        openMenuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        for (const it of items) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            if (it.disabled) { b.disabled = true; b.title = it.disabledReason || ''; }
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[org-assurance-definitions] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        }
+        document.body.appendChild(openMenuEl);
+        positionRowMenu(trigger);
+    }
+    function wireRowMenu() {
+        const body = document.getElementById('oaDefBody');
+        if (body) {
+            body.addEventListener('click', function (e) {
+                const trigger = e.target.closest('.pm-action-trigger');
+                if (!trigger || !body.contains(trigger)) return;
+                e.preventDefault(); e.stopPropagation();
+                if (openMenuTrigger === trigger) { closeRowMenu(); return; }
+                const id         = trigger.getAttribute('data-id');
+                const statusCode = trigger.getAttribute('data-status') || '';
+                openRowMenu(trigger, buildActionsMenu(id, statusCode));
+            });
+            // 2026-11-04: row click = the row's View (Gap / Task / Practice
+            // pattern). The 3-dot trigger and any control keep their own click.
+            body.addEventListener('click', function (e) {
+                if (e.target.closest('.pm-action-trigger, a, button, input, label, select')) return;
+                const tr = e.target.closest('tr.pm-row-clickable[data-id]');
+                if (!tr || !body.contains(tr)) return;
+                handleRowAction(tr.getAttribute('data-id'), 'view');
+            });
+        }
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu')) return;
+            if (e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll',  closeRowMenu, true);
+    }
+
+    // 2026-11-04: open the audit's edit page ('details' | 'scope' |
+    // 'questions' scrolls to that section since 2026-11-13). Hosted in the
+    // Audit Definition workspace, the host switches in place; anywhere else
+    // this navigates to that page. Only Edit calls it now.
+    function openEditTab(id, step) {
+        const handled = !document.dispatchEvent(new CustomEvent('audit-definition-open', {
+            detail: { definitionId: id, mode: 'edit', step: step }, cancelable: true
+        }));
+        if (handled) return;
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        window.location.href = base + '/Practice/org-audit-definition?definitionId=' + encodeURIComponent(id)
+                             + '&step=' + encodeURIComponent(step);
+    }
+
+    function handleRowAction(id, action) {
+        // Inside the workspace Edit opens the edit page on Definition Details;
+        // the standalone list keeps its Edit modal.
+        if (action === 'edit' && window.__oaDefInlineForm) return openEditTab(id, 'details');
+        if (action === 'view') {
+            // The audit's view page. When this screen is already
+            // hosted inside that workspace the host intercepts the event
+            // below and switches in place instead of navigating.
+            const handled = !document.dispatchEvent(new CustomEvent('audit-definition-open', {
+                detail: { definitionId: id, mode: 'view' }, cancelable: true
+            }));
+            if (handled) return;
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-audit-definition?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        if (action === 'edit')     return openDialog(id);
+        if (action === 'history')  return openHistory(id);
+        if (action === 'configuration') {
+            // 537: the Audit Configuration page, opened on this audit. The
+            // audit travels in the encrypted navigation code (?code=,
+            // Shared/secure-nav.js), never as a readable ?definitionId=.
+            if (!window.gracSecureNav) { alert('Audit Configuration could not be opened.'); return; }
+            const row = document.querySelector('#oaDefBody tr[data-id="' + String(id).replace(/"/g, '') + '"]');
+            const code = row && row.children[0] ? row.children[0].textContent : '';
+            window.gracSecureNav.open('org-audit-definition', 'org-audit-configuration', 'AuditDefinition', id, state.orgId, code)
+                .then(function (err) { if (err) alert(err); });
+            return;
+        }
+        if (action === 'executions') {
+            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+            window.location.href = base + '/Practice/org-assurance-executions?definitionId=' + encodeURIComponent(id);
+            return;
+        }
+        return doTransition(id, action);
+    }
+
+    async function doTransition(id, action) {
+        const reason = await window.gracUi.prompt('Reason (optional):',
+              { title: 'Reason', inputLabel: 'Reason', confirmText: 'Continue' });
+        const url    = U(API + '/definitions/' + id + '/' + action);
+        try {
+            const r = await fetch(url, {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify({
+                    organizationId : Number(state.orgId),
+                    definitionId   : Number(id),
+                    reasonText     : reason || null,
+                    actor          : null
+                })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { alert('Failed: ' + ((j && (j.error || j.Error)) || ('HTTP ' + r.status))); return; }
+            reload();
+            // 2026-11-04: run from the audit page's Actions menu, the open
+            // record changed status too -- reload it so the form and the
+            // Actions menu follow the new status, and tell the host page
+            // (its read-only view reloads on audit-setup-changed).
+            if (window.__oaDefInlineForm && document.getElementById('oaDefEditId').value === String(id)) openDialog(id);
+            try { document.dispatchEvent(new CustomEvent('audit-setup-changed')); } catch (_) { /* notification only */ }
+        } catch (err) {
+            alert('Failed: ' + (err.message || err));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Add / Edit dialog
+    // -----------------------------------------------------------------
+    async function openDialog(id) {
+        const dlg = document.getElementById('oaDefDialog');
+        clearMessage();
+
+        if (id) {
+            document.getElementById('oaDefDialogTitle').textContent = 'Edit Audit Definition';
+            try {
+                const r = await fetch(U(API + '/definitions/' + id + '?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+                if (!r.ok) { alert('Failed to load definition.'); return; }
+                const b = await r.json();
+                const d = (b && (b.data || b.Data)) || null;
+                if (!d) { alert('Definition not found.'); return; }
+                document.getElementById('oaDefEditId').value        = String(d.definitionId || d.DefinitionId || '');
+                state.loadedStatusCode = d.currentStatusCode || d.CurrentStatusCode || '';
+                document.getElementById('oaDefCode').value          = d.definitionCode || d.DefinitionCode || '';
+                document.getElementById('oaDefCode').disabled       = true; // code is immutable after create
+                document.getElementById('oaDefName').value          = d.definitionName || d.DefinitionName || '';
+                document.getElementById('oaDefEffectiveDate').value = onlyDate(d.effectiveDate || d.EffectiveDate);
+                document.getElementById('oaDefObjective').value     = d.objective || d.Objective || '';
+                document.getElementById('oaDefDescription').value   = d.description || d.Description || '';
+
+                // Prefer the Admin category id; fall back to code match if id
+                // is missing (definition might have been created before the
+                // dropdown existed). Refresh options with the selected value.
+                const catId = d.assuranceCategoryId || d.AssuranceCategoryId || '';
+                let selectedCatId = catId ? String(catId) : '';
+                if (!selectedCatId) {
+                    const code = d.assuranceCategoryCode || d.AssuranceCategoryCode || '';
+                    const match = state.categories.find(function (c) {
+                        return String(c.code || c.Code || '') === code;
+                    });
+                    if (match) selectedCatId = String(match.id || match.Id || '');
+                }
+                renderCategoryOptions(selectedCatId);
+
+                // 119 hybrid Owner picker -- seed with the definition's snapshot.
+                if (state.orgId && window.__roleHolderPicker) {
+                    try {
+                        await window.__roleHolderPicker.attach({
+                            organizationId    : Number(state.orgId),
+                            roleSelectId      : 'oaDefOwnerRole',
+                            employeeSelectId  : 'oaDefOwnerEmployee',
+                            initialRoleId     : d.ownerRoleId       || d.OwnerRoleId,
+                            initialRoleName   : d.ownerRoleName     || d.OwnerRoleName,
+                            initialEmployeeId : d.ownerEmployeeId   || d.OwnerEmployeeId,
+                            initialEmployeeName: d.ownerDisplayName || d.OwnerDisplayName,
+                            allowEmpty        : true
+                        });
+                    } catch (_) { /* soft-fail -- dropdowns stay empty */ }
+                }
+            } catch (err) {
+                alert('Failed: ' + (err.message || err));
+                return;
+            }
+        } else {
+            document.getElementById('oaDefDialogTitle').textContent  = 'Add Audit Definition';
+            document.getElementById('oaDefEditId').value             = '';
+            state.loadedStatusCode = '';
+            document.getElementById('oaDefCode').disabled            = false;
+            document.getElementById('oaDefForm').reset();
+            // reset() clears the selects too; repopulate placeholders.
+            renderCategoryOptions('');
+            // 119 hybrid Owner picker -- fresh dialog, no initial snapshot.
+            if (state.orgId && window.__roleHolderPicker) {
+                try {
+                    await window.__roleHolderPicker.attach({
+                        organizationId  : Number(state.orgId),
+                        roleSelectId    : 'oaDefOwnerRole',
+                        employeeSelectId: 'oaDefOwnerEmployee',
+                        allowEmpty      : true
+                    });
+                } catch (_) { /* soft-fail */ }
+            }
+        }
+        // Audit Definition workspace (Phase 3): when this screen is hosted
+        // as the "Definition Details" tab the form is rendered inline, not
+        // as a modal over a list the user cannot see. Same form, same
+        // fields, same submit handler -- only the presentation differs.
+        if (window.__oaDefInlineForm) dlg.show(); else dlg.showModal();
+    }
+
+    function closeDialog() {
+        // Inline mode has nothing to close back to: the form IS the tab.
+        if (window.__oaDefInlineForm) return;
+        document.getElementById('oaDefDialog').close();
+    }
+
+    // 2026-11-04: one save at a time. A second click while the first POST
+    // is still running used to send a second CREATE: the first one made
+    // the record, the second hit the per-organization code check (53605)
+    // and showed "already exists" for a record that had just been saved.
+    let saving = false;
+
+    // Resolves to the saved definition id, or null when nothing was saved.
+    async function saveDefinition() {
+        if (saving) return null;
+        saving = true;
+        const submitBtn = document.getElementById('oaDefSubmit');
+        if (submitBtn) submitBtn.disabled = true;
+        try { return await saveDefinitionOnce(); }
+        finally {
+            saving = false;
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    }
+
+    async function saveDefinitionOnce() {
+        const idStr    = document.getElementById('oaDefEditId').value;
+
+        // Assurance Category -- pull id + code + name from the selected option.
+        const catSel   = document.getElementById('oaDefCategory');
+        const catOpt   = catSel.options[catSel.selectedIndex] || null;
+        const catId    = catSel.value ? Number(catSel.value) : null;
+        const catCode  = catOpt && catId != null ? (catOpt.getAttribute('data-code') || null) : null;
+        const catName  = catOpt && catId != null ? (catOpt.getAttribute('data-name') || null) : null;
+
+        // 119 hybrid Owner -- read picker state; SP auto-resolves the missing side.
+        const ownerState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaDefOwnerRole', 'oaDefOwnerEmployee')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+
+        const body  = {
+            organizationId          : Number(state.orgId),
+            definitionId            : idStr ? Number(idStr) : null,
+            definitionCode          : document.getElementById('oaDefCode').value.trim(),
+            definitionName          : document.getElementById('oaDefName').value.trim(),
+            ownerRoleId             : ownerState.roleId       || null,
+            ownerRoleName           : ownerState.roleName     || null,
+            ownerEmployeeId         : ownerState.employeeId   || null,
+            ownerDisplayName        : ownerState.employeeName || null,
+            description             : document.getElementById('oaDefDescription').value || null,
+            objective               : document.getElementById('oaDefObjective').value || null,
+            effectiveDate           : document.getElementById('oaDefEffectiveDate').value || null,
+            assuranceCategoryId     : catId,
+            assuranceCategoryCode   : catCode,
+            assuranceCategoryName   : catName,
+            actor                   : null
+        };
+        try {
+            const r = await fetch(U(API + '/definitions'), {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                showMessage('error', (j && (j.error || j.Error)) || ('HTTP ' + r.status));
+                return null;
+            }
+            // Announce what was saved so a host page can react. The POST
+            // returns { definitionId, definitionVersionId }, and the id is
+            // the ONLY reliable way for the Audit Definition workspace to
+            // know which audit a brand-new record became -- guessing it
+            // from the reloaded list would be a race.
+            const savedId = (j && (j.definitionId || j.DefinitionId)) || (idStr ? Number(idStr) : null);
+
+            // 2026-11-04: after a CREATE the form now holds the saved record,
+            // exactly as openDialog(id) leaves it. In the inline workspace the
+            // form stays on screen, and without this the next Save created
+            // the definition a second time (53605 "already exists").
+            if (!idStr && savedId) {
+                document.getElementById('oaDefEditId').value          = String(savedId);
+                document.getElementById('oaDefCode').disabled         = true; // code is immutable after create
+                document.getElementById('oaDefDialogTitle').textContent = 'Edit Audit Definition';
+            }
+
+            try {
+                document.dispatchEvent(new CustomEvent('audit-definition-saved', {
+                    detail: {
+                        definitionId   : savedId,
+                        organizationId : Number(state.orgId) || null,
+                        isNew          : !idStr
+                    }
+                }));
+            } catch (_) { /* the save already succeeded; never fail on the notification */ }
+
+            closeDialog();
+            reload();
+            return savedId;
+        } catch (err) {
+            showMessage('error', err.message || String(err));
+            return null;
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // History dialog
+    // -----------------------------------------------------------------
+    async function openHistory(id) {
+        const dlg  = document.getElementById('oaDefHistoryDialog');
+        const body = document.getElementById('oaDefHistoryBody');
+        body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">Loading...</td></tr>';
+        dlg.showModal();
+        try {
+            const r = await fetch(U(API + '/definitions/' + id + '/history?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">Failed to load history.</td></tr>'; return; }
+            const j = await r.json();
+            const rows = (j && (j.data || j.Data)) || [];
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">No history yet.</td></tr>';
+                return;
+            }
+            body.innerHTML = rows.map(function (h) {
+                return '<tr>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(formatDate(h.enteredDt || h.EnteredDt)) + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.actionCode || h.ActionCode || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.fromStatusName || h.FromStatusName || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.toStatusName   || h.ToStatusName   || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.actorDisplayName || h.ActorDisplayName || h.enteredBy || h.EnteredBy || '') + '</td>'
+                    + '<td style="padding:6px 8px; border-bottom:1px solid var(--neutral-100);">' + wf.escape(h.reasonText || h.ReasonText || '') + '</td>'
+                    + '</tr>';
+            }).join('');
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty" style="padding:12px;">Failed: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function showMessage(kind, text) {
+        const el = document.getElementById('oaDefMessage');
+        el.style.display    = 'block';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
+        el.textContent      = text;
+    }
+    function clearMessage() {
+        const el = document.getElementById('oaDefMessage');
+        el.style.display = 'none';
+        el.textContent   = '';
+    }
+    function formatDate(v) {
+        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
+        if (!v) return '';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0,10);
+    }
+    // The VALUE for <input type="date">, which accepts only yyyy-MM-dd.
+    // 2026-11-13: it used to run gracFormatDisplayDate first, which turns
+    // 2026-11-13 into 13-Nov-2026 -- a value the date input rejects, so
+    // Effective Date came up blank when an audit was opened for editing.
+    // Display formatting is for text, not for an input's value.
+    function onlyDate(v) {
+        if (!v) return '';
+        return String(v).slice(0, 10);
+    }
+    async function safeJson(r) {
+        try { return await r.json(); } catch (_) { return null; }
+    }
+})();
+</script>

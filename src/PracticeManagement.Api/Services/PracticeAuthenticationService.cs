@@ -1,4 +1,6 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.SqlClient;
 using PracticeManagement.Api.Infrastructure;
 using PracticeManagement.Api.Models;
@@ -49,6 +51,22 @@ public interface IPracticeAuthenticationService
     /// </para>
     /// </summary>
     Task<ResolvedIdentity?> ResolveIdentityAsync(string loginId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Forgot password (migration 529). Issues a one-time, expiring reset
+    /// token for the active employee behind <paramref name="loginId"/>
+    /// (employee code or email, the sign-in predicate). Issued = false for
+    /// every refusal (unknown, no email, SSO Only, hourly limit) so the
+    /// caller cannot tell them apart; Available = false only when 529 is
+    /// not applied or the database cannot be reached.
+    /// </summary>
+    Task<PasswordResetRequestOutcome> RequestPasswordResetAsync(string loginId, string? requestedIp, CancellationToken cancellationToken);
+
+    /// <summary>The account a reset token belongs to, or null when the token is not usable.</summary>
+    Task<PasswordResetTarget?> ValidatePasswordResetAsync(string token, CancellationToken cancellationToken);
+
+    /// <summary>Use the token once and set the new password (529 + 208).</summary>
+    Task<PasswordResetCompletion> CompletePasswordResetAsync(string token, string newPassword, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -64,6 +82,20 @@ public sealed record ResolvedIdentity(
     string EmployeeName,
     string Email,
     long   OrganizationId);
+
+// Forgot password (migration 529). Token is the RAW token, returned once to
+// the Web tier so it can email the link; only its SHA-256 is stored.
+public sealed record PasswordResetIssue(string Token, string Email, string EmployeeName, int ExpiresInMinutes);
+
+public sealed record PasswordResetRequestOutcome(bool Available, PasswordResetIssue? Issue)
+{
+    public static readonly PasswordResetRequestOutcome NotIssued   = new(true, null);
+    public static readonly PasswordResetRequestOutcome Unavailable = new(false, null);
+}
+
+public sealed record PasswordResetTarget(string Email, string EmployeeName);
+
+public enum PasswordResetCompletion { Completed, Invalid, Failed }
 
 // =====================================================================
 // PracticeAuthenticationService
@@ -506,6 +538,158 @@ public sealed class PracticeAuthenticationService(
         }
     }
 
+    // =================================================================
+    // Forgot password -- reset by email link (migration 529, 2026-11-10).
+    //
+    // The token is 32 random bytes (base64url) generated HERE; only its
+    // SHA-256 is stored. The raw token goes back to the Web tier once, over
+    // the encrypted bootstrap channel, so the Web tier can email the link
+    // (PracticeEmailService lives there). Every "no" -- unknown account,
+    // inactive, SSO Only, hourly limit -- returns Issued = false, and the
+    // page shows one message for all of them, so this is not an
+    // account-enumeration oracle. The reason goes to the log only.
+    // =================================================================
+    public async Task<PasswordResetRequestOutcome> RequestPasswordResetAsync(string loginId, string? requestedIp, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(loginId)) return PasswordResetRequestOutcome.NotIssued;
+        var connectionString = SqlConnectionStringResolver.Resolve(configuration);
+        if (string.IsNullOrWhiteSpace(connectionString)) return PasswordResetRequestOutcome.Unavailable;
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        if (await ProcedureMissingAsync(connection, "grac_practice.sp_password_reset_request", cancellationToken))
+        {
+            logger.LogError("grac_practice.sp_password_reset_request is missing. Run database/529_password_reset_by_email.sql.");
+            return PasswordResetRequestOutcome.Unavailable;
+        }
+
+        // Same row a sign-in would find (ResolveIdentityAsync shares the
+        // sign-in predicate: active employee, active record status, employee
+        // code OR email).
+        var identity = await ResolveIdentityAsync(loginId, cancellationToken);
+        if (identity is null)
+        {
+            logger.LogInformation("Password reset requested for {LoginId}: no active employee matched. Nothing sent.", loginId);
+            return PasswordResetRequestOutcome.NotIssued;
+        }
+        if (string.IsNullOrWhiteSpace(identity.Email))
+        {
+            logger.LogWarning("Password reset requested for {LoginId}: employee {EmployeeId} has no email. Nothing sent.", loginId, identity.EmployeeId);
+            return PasswordResetRequestOutcome.NotIssued;
+        }
+        // An SSO Only organization has no password sign-in (466), so a
+        // reset link would set a password nobody can use.
+        var policy = await LoadSsoPolicyAsync(connection, identity.OrganizationId, cancellationToken);
+        if (policy is { SsoEnabled: true } && string.Equals(policy.LoginMode, SsoLoginModes.SsoOnly, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogInformation("Password reset requested for {LoginId}: organization {OrganizationId} is SSO Only. Nothing sent.", loginId, identity.OrganizationId);
+            return PasswordResetRequestOutcome.NotIssued;
+        }
+
+        var token = Base64Url(RandomNumberGenerator.GetBytes(32));
+        var minutes = Math.Clamp(configuration.GetValue("PasswordReset:TokenMinutes", 30), 5, 1440);
+
+        await using var command = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_password_reset_request";
+        command.Parameters.Add(new SqlParameter("@employee_id", SqlDbType.BigInt) { Value = identity.EmployeeId });
+        command.Parameters.Add(new SqlParameter("@token_hash", SqlDbType.NVarChar, 128) { Value = HashResetToken(token) });
+        command.Parameters.Add(new SqlParameter("@expiry_minutes", SqlDbType.Int) { Value = minutes });
+        command.Parameters.Add(new SqlParameter("@requested_ip", SqlDbType.NVarChar, 64)
+            { Value = string.IsNullOrWhiteSpace(requestedIp) ? DBNull.Value : (requestedIp.Length > 64 ? requestedIp[..64] : requestedIp) });
+        command.Parameters.Add(new SqlParameter("@max_per_hour", SqlDbType.Int) { Value = configuration.GetValue("PasswordReset:MaxPerHour", 5) });
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                logger.LogWarning("Password reset for employee {EmployeeId} not issued: the procedure returned no row.", identity.EmployeeId);
+                return PasswordResetRequestOutcome.NotIssued;
+            }
+            if (!Convert.ToBoolean(reader["Issued"]))
+            {
+                // 'limit' (hourly cap) or 'inactive'.
+                logger.LogWarning("Password reset for employee {EmployeeId} not issued: {Reason}.", identity.EmployeeId, reader["Reason"]);
+                return PasswordResetRequestOutcome.NotIssued;
+            }
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Password reset request failed for employee {EmployeeId}. SqlNumber={SqlNumber}", identity.EmployeeId, ex.Number);
+            return PasswordResetRequestOutcome.Unavailable;
+        }
+
+        logger.LogInformation("Password reset link issued for employee {EmployeeId} (valid {Minutes} min).", identity.EmployeeId, minutes);
+        return new PasswordResetRequestOutcome(true, new PasswordResetIssue(token, identity.Email, identity.EmployeeName, minutes));
+    }
+
+    public async Task<PasswordResetTarget?> ValidatePasswordResetAsync(string token, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var connectionString = SqlConnectionStringResolver.Resolve(configuration);
+        if (string.IsNullOrWhiteSpace(connectionString)) return null;
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        if (await ProcedureMissingAsync(connection, "grac_practice.sp_password_reset_validate", cancellationToken)) return null;
+
+        await using var command = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_password_reset_validate";
+        command.Parameters.Add(new SqlParameter("@token_hash", SqlDbType.NVarChar, 128) { Value = HashResetToken(token.Trim()) });
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        return new PasswordResetTarget(
+            Convert.ToString(reader["Email"]) ?? "",
+            Convert.ToString(reader["EmployeeName"]) ?? "");
+    }
+
+    public async Task<PasswordResetCompletion> CompletePasswordResetAsync(string token, string newPassword, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(newPassword)) return PasswordResetCompletion.Invalid;
+        var connectionString = SqlConnectionStringResolver.Resolve(configuration);
+        if (string.IsNullOrWhiteSpace(connectionString)) return PasswordResetCompletion.Failed;
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        if (await ProcedureMissingAsync(connection, "grac_practice.sp_password_reset_complete", cancellationToken))
+        {
+            logger.LogError("grac_practice.sp_password_reset_complete is missing. Run database/529_password_reset_by_email.sql.");
+            return PasswordResetCompletion.Failed;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_password_reset_complete";
+        command.Parameters.Add(new SqlParameter("@token_hash", SqlDbType.NVarChar, 128) { Value = HashResetToken(token.Trim()) });
+        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.NVarChar, 500) { Value = passwordHasher.Hash(newPassword) });
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            logger.LogInformation("Password reset completed through an emailed link.");
+            return PasswordResetCompletion.Completed;
+        }
+        catch (SqlException ex) when (ex.Number is 55983 or 52322)
+        {
+            // 55983: link invalid / expired / used; 52322 (208): account no longer active.
+            logger.LogWarning("Password reset refused: {Message} (SqlNumber={SqlNumber})", ex.Message, ex.Number);
+            return PasswordResetCompletion.Invalid;
+        }
+        catch (SqlException ex)
+        {
+            logger.LogError(ex, "Password reset failed. SqlNumber={SqlNumber}", ex.Number);
+            return PasswordResetCompletion.Failed;
+        }
+    }
+
+    // URL-safe, no padding: the token travels in a query string.
+    private static string Base64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    // Only this hash is stored; a database read cannot produce a working link.
+    private static string HashResetToken(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
     private static async Task<List<long>> LoadAllowedOrganizationsAsync(SqlConnection connection, string email, string employeeCode, long primaryOrganizationId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -683,6 +867,15 @@ public sealed class PracticeAuthenticationService(
         command.Parameters.Add(new SqlParameter("@column_name", SqlDbType.NVarChar, 128) { Value = columnName });
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null && result != DBNull.Value;
+    }
+
+    private static async Task<bool> ProcedureMissingAsync(SqlConnection connection, string procedureName, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT OBJECT_ID(@procedure_name,'P');";
+        command.Parameters.Add(new SqlParameter("@procedure_name", SqlDbType.NVarChar, 300) { Value = procedureName });
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is null || result == DBNull.Value;
     }
 
     private static async Task<bool> TableMissingAsync(SqlConnection connection, string tableName, CancellationToken cancellationToken)

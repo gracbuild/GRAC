@@ -398,7 +398,9 @@
 
     async function selectDefinition(definitionId) {
         state.definitionId = definitionId;
-        try {
+        // 537: hosted on the Audit Configuration page, the host owns the
+        // address bar -- no record id is written there.
+        if (!window.__oaHostNoUrl) try {
             const u = new URL(window.location.href);
             u.searchParams.set('definitionId', String(definitionId));
             window.history.replaceState(null, '', u.toString());
@@ -802,23 +804,15 @@
             e.preventDefault(); saveBandFromDialog();
         });
 
-        document.getElementById('oaScReloadBtn').addEventListener('click', async function () {
-            if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick an organization and definition first.'); return; }
-            try {
-                await loadScoring();
-                renderBanner(); renderReadonlyBannerIfNeeded();
-                renderHeaderForm(); renderBands(); applyTypeVisibility();
-                document.getElementById('oaScSaveBtn').disabled    = !state.header.isEditable;
-                document.getElementById('oaScAddBandBtn').disabled = !state.header.isEditable;
-                setMessage('ok', 'Reloaded.');
-            } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); }
-        });
+        document.getElementById('oaScReloadBtn').addEventListener('click', function () { reloadScoring(false); });
 
         document.getElementById('oaScSaveBtn').addEventListener('click', saveScoring);
     }
 
+    // 537: resolves true when saved, false otherwise, so the Audit
+    // Configuration page's one Save can run it (window.__oaScoringConfig).
     async function saveScoring() {
-        if (!state.header || !state.header.isEditable) return;
+        if (!state.header || !state.header.isEditable) return false;
         const body = {
             organizationId : Number(state.orgId),
             definitionId   : Number(state.definitionId),
@@ -847,11 +841,30 @@
             if (!r.ok) {
                 setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
                     (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
-                return;
+                return false;
             }
             setMessage('ok', 'Scoring config saved.');
-        } catch (err) { setMessage('error', 'Save failed: ' + (err.message || err)); }
+            return true;
+        } catch (err) { setMessage('error', 'Save failed: ' + (err.message || err)); return false; }
     }
+    // 543: Reload, also run quietly by the Audit Configuration page each
+    // time it opens this step's popup (discarded edits are not shown again).
+    async function reloadScoring(quiet) {
+        if (!state.definitionId || !state.orgId) {
+            if (!quiet) setMessage('error', 'Pick an organization and definition first.');
+            return false;
+        }
+        try {
+            await loadScoring();
+            renderBanner(); renderReadonlyBannerIfNeeded();
+            renderHeaderForm(); renderBands(); applyTypeVisibility();
+            document.getElementById('oaScSaveBtn').disabled    = !state.header.isEditable;
+            document.getElementById('oaScAddBandBtn').disabled = !state.header.isEditable;
+            if (!quiet) setMessage('ok', 'Reloaded.');
+            return true;
+        } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); return false; }
+    }
+    window.__oaScoringConfig = { save: saveScoring, reload: function () { return reloadScoring(true); } };
 
     // -----------------------------------------------------------------
     // Helpers

@@ -1,0 +1,359 @@
+
+    // -----------------------------------------------------------------
+    // View: facts and the six steps; a step row opens its popup.
+    // -----------------------------------------------------------------
+    function fmtDate(v) {
+        if (!v) return '';
+        if (typeof window.gracFormatDisplayDate === 'function') {
+            const g = window.gracFormatDisplayDate(v); if (g !== v) return g;
+        }
+        return String(v).slice(0, 10);
+    }
+    function facts(rows) {
+        return rows.map(function (r) {
+            return '<div><dt>' + esc(r[0]) + '</dt>'
+                 + (r[1] ? '<dd>' + esc(r[1]) + '</dd>' : '<dd class="oa-wv-empty">Not set</dd>') + '</div>';
+        }).join('');
+    }
+    function setMessage(text) {
+        const m = document.getElementById('oaCfgMessage');
+        m.style.display = text ? 'block' : 'none';
+        m.style.background = 'var(--danger-100)'; m.style.color = 'var(--danger-700)';
+        m.textContent = text || '';
+    }
+
+    function openView(id) {
+        const changed = String(id || '') !== state.definitionId;
+        // A different audit never shows the previous one's name or steps.
+        if (changed) { state.name = ''; state.statusCode = ''; state.steps = []; }
+        state.definitionId = String(id || '');
+        setMode('view');
+        el.heading.textContent  = state.name || 'Audit Configuration';
+        el.subtitle.textContent = 'Click a step to configure it. Each step opens on its own and is saved there.';
+        // Bind the hosted step screens to this audit now, so a popup opens
+        // on loaded data.
+        if (window.__oaFlowShell) window.__oaFlowShell.setContext(state.orgId, state.definitionId);
+        loadView();
+    }
+
+    async function loadView() {
+        if (!state.definitionId || !state.orgId) return;
+        const id  = encodeURIComponent(state.definitionId);
+        const org = encodeURIComponent(state.orgId);
+        const get = function (path) {
+            return fetch(U(API + path), { credentials: 'same-origin' })
+                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+        };
+        setMessage('');
+        try {
+            const res = await Promise.all([
+                get('/definitions/' + id + '?organizationId=' + org),
+                get('/definitions/' + id + '/setup-status?organizationId=' + org)
+            ]);
+            const d = res[0] && (res[0].data || res[0].Data);
+            if (!d) throw new Error('Audit not found.');
+            renderFacts(d);
+            renderSteps((res[1] && (res[1].steps || res[1].Steps)) || []);
+        } catch (err) {
+            setMessage('Could not load this audit: ' + (err.message || err));
+        }
+    }
+
+    function renderFacts(d) {
+        const p = function (a, b) { return pick(d, a, b); };
+        state.name = p('definitionName', 'DefinitionName') || '';
+        state.statusCode = p('currentStatusCode', 'CurrentStatusCode') || '';
+        el.heading.textContent = state.name || 'Audit Configuration';
+        el.subtitle.textContent = state.statusCode === 'Draft'
+            ? 'Click a step to configure it. Each step opens on its own and is saved there.'
+            : 'Read-only: the audit is ' + (p('currentStatusName', 'CurrentStatusName') || state.statusCode) + '. Click a step to see it.';
+        document.getElementById('oaCfgStatus').textContent = p('currentStatusName', 'CurrentStatusName') || '-';
+        const ver = p('currentVersionLabel', 'CurrentVersionLabel') || (p('currentVersionNumber', 'CurrentVersionNumber') ? 'v' + p('currentVersionNumber', 'CurrentVersionNumber') : '');
+        const verEl = document.getElementById('oaCfgVersion');
+        verEl.textContent = ver; verEl.hidden = !ver;
+        document.getElementById('oaCfgFacts').innerHTML = facts([
+            ['Code',               p('definitionCode', 'DefinitionCode')],
+            ['Name',               p('definitionName', 'DefinitionName')],
+            ['Assurance Category', p('assuranceCategoryName', 'AssuranceCategoryName')],
+            ['Owner',              wf.personWithRole(p('ownerDisplayName', 'OwnerDisplayName'), p('ownerRoleName', 'OwnerRoleName'))],
+            ['Effective Date',     fmtDate(p('effectiveDate', 'EffectiveDate'))],
+            ['Status',             p('currentStatusName', 'CurrentStatusName')],
+            ['Version',            ver]
+        ]);
+    }
+
+    function findStep(key) {
+        return state.steps.find(function (x) { return pick(x, 'stepKey', 'StepKey') === key; }) || null;
+    }
+    function stepStatus(key) {
+        const s = findStep(key);
+        return s ? pick(s, 'status', 'Status') : '';
+    }
+    function openStepNames() {
+        return state.steps.filter(function (s) { return pick(s, 'status', 'Status') !== 'Completed'; })
+                          .map(function (s) { return pick(s, 'stepName', 'StepName'); });
+    }
+
+    // Why a step cannot be opened yet, or '' when it can. Scope Resolution
+    // resolves the saved scope, so it needs one.
+    function blockedReason(key) {
+        if (key === 'scope-resolution' && stepStatus('scope') !== 'Completed')
+            return 'Save the scope first (Scope Builder). Scope Resolution resolves it.';
+        return '';
+    }
+    // A short line under a step's name when its status needs explaining.
+    function stepNote(key, status, items) {
+        if (blockedReason(key)) return 'Needs the scope first.';
+        if (key === 'scope-resolution' && status === 'InProgress' && Number(items) > 0)
+            return 'The scope changed after the last resolve. Resolve it again.';
+        return '';
+    }
+
+    function renderSteps(steps) {
+        state.steps = steps.filter(function (s) { return pick(s, 'stepKey', 'StepKey') !== 'details'; });
+        document.getElementById('oaCfgSteps').innerHTML = state.steps.map(function (s) {
+            const key    = pick(s, 'stepKey', 'StepKey');
+            const status = pick(s, 'status', 'Status');
+            const items  = pick(s, 'itemCount', 'ItemCount');
+            const note   = stepNote(key, status, items);
+            return '<tr class="pm-row-clickable" data-step="' + esc(key) + '" title="' + esc(blockedReason(key) || 'Open this step') + '">'
+                 + '<td>' + esc(pick(s, 'stepName', 'StepName'))
+                 + (note ? '<div class="oa-cfg-step-note">' + esc(note) + '</div>' : '') + '</td>'
+                 + '<td>' + chip(status) + '</td>'
+                 + '<td>' + esc(items) + '</td></tr>';
+        }).join('') || '<tr><td colspan="3" class="pm-empty">No status available.</td></tr>';
+
+        // 542: Submit for Review shows on a Draft, enabled once every step
+        // is Completed; Approve shows Under Review.
+        const open  = openStepNames();
+        const draft = state.statusCode === 'Draft';
+        el.submit.hidden   = !draft;
+        el.submit.disabled = open.length > 0;
+        el.submit.title    = open.length ? 'Not complete: ' + open.join(', ') : '';
+        el.approve.hidden  = state.statusCode !== 'UnderReview';
+        document.getElementById('oaCfgReady').textContent = !draft
+            ? (state.statusCode === 'UnderReview' ? 'Under review. The configuration is read-only.' : '')
+            : (open.length
+                ? 'Not complete: ' + open.join(', ') + '. The audit can be submitted for review once every step is complete.'
+                : 'Configuration complete. Submit the audit for review.');
+    }
+    document.getElementById('oaCfgViewRefreshBtn').addEventListener('click', loadView);
+
+    document.getElementById('oaCfgSteps').addEventListener('click', function (e) {
+        const tr = e.target.closest('tr[data-step]');
+        if (tr) openStep(tr.getAttribute('data-step'));
+    });
+
+    // -----------------------------------------------------------------
+    // Step popup (543)
+    // -----------------------------------------------------------------
+    // Steps with a Save of their own. msg: the screen's inline message,
+    // hidden by [hidden] (byHidden) or by style.display.
+    const SAVE = {
+        'scope'     : { api: '__oaScopeBuilder',   msg: 'oaScopeMessage', byHidden: true  },
+        'questions' : { api: '__oaAdoption',       msg: 'oaAdoptMessage', byHidden: false },
+        'workflow'  : { api: '__oaWorkflowConfig', msg: 'oaWfMessage',    byHidden: true  },
+        'scoring'   : { api: '__oaScoringConfig',  msg: 'oaScMessage',    byHidden: true  }
+    };
+    // Steps that save as they go, inside their own screens.
+    const ACT_NOW = {
+        'trigger'          : 'Triggers are saved as you add, edit or remove them.',
+        'scope-resolution' : 'Preview Resolve Now saves a resolution of the current scope.'
+    };
+    const pop = { key: '', dirty: false, saving: false };
+
+    function clearStepMessage(key) {
+        const cfg  = SAVE[key];
+        const node = cfg && document.getElementById(cfg.msg);
+        if (!node) return;
+        if (cfg.byHidden) node.hidden = true; else node.style.display = 'none';
+        node.textContent = '';
+    }
+    function shownStepMessage(key) {
+        const cfg  = SAVE[key];
+        const node = cfg && document.getElementById(cfg.msg);
+        if (!node) return null;
+        const shown = cfg.byHidden ? !node.hidden : node.style.display !== 'none';
+        return shown && String(node.textContent || '').trim() ? node : null;
+    }
+
+    async function openStep(key) {
+        if (!state.definitionId || !key) return;
+        const blocked = blockedReason(key);
+        if (blocked) { await box(blocked, 'warning'); return; }
+
+        // One panel at a time.
+        let panel = null;
+        el.dlg.querySelectorAll('[data-flow-panel]').forEach(function (p) {
+            const on = p.getAttribute('data-flow-panel') === key;
+            p.hidden = !on;
+            if (on) panel = p;
+        });
+        if (!panel) return;
+
+        const s        = findStep(key);
+        const editable = state.statusCode === 'Draft';
+        const head     = panel.querySelector('.oa-ws-section-head h2');
+        const caption  = panel.querySelector(':scope > .oa-ws-section-hint');
+        document.getElementById('oaCfgStepTitle').textContent   = (s && pick(s, 'stepName', 'StepName')) || (head ? head.textContent : key);
+        document.getElementById('oaCfgStepCaption').textContent = caption ? caption.textContent : '';
+        document.getElementById('oaCfgStepChip').innerHTML      = s ? chip(pick(s, 'status', 'Status')) : '';
+        const save = document.getElementById('oaCfgStepSave');
+        save.hidden   = !(SAVE[key] && editable);
+        save.disabled = false;
+        document.getElementById('oaCfgStepHint').textContent = editable
+            ? (ACT_NOW[key] || '')
+            : 'Read-only: the audit is not a Draft.';
+
+        pop.key = key;
+        pop.dirty = false;
+        clearStepMessage(key);
+        // Re-apply the audit (a no-op once the screen is bound; binds it if
+        // its own pickers were still loading when the view opened), then
+        // re-read what is saved, so edits thrown away last time are gone.
+        if (window.__oaFlowShell) window.__oaFlowShell.setContext(state.orgId, state.definitionId);
+        const api = SAVE[key] && window[SAVE[key].api];
+        if (api && typeof api.reload === 'function') {
+            try { api.reload(); } catch (_) { /* the screen shows its own error */ }
+        }
+        el.dlg.showModal();
+        el.dlg.scrollTop = 0;
+    }
+
+    // A change the user makes inside the popup -- typing, picking, or a
+    // button of the step screen -- makes it "dirty", and closing then asks
+    // first. Not counted: the popup's own buttons, a message box over it,
+    // and change events raised by code (not isTrusted).
+    function markDirty(e) {
+        if (!e.isTrusted || !pop.key) return;
+        const t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('.grac-dialog-overlay, #oaCfgStepSave, #oaCfgStepCancel, #oaCfgStepClose')) return;
+        if (e.type === 'click' && !t.closest('button')) return;
+        pop.dirty = true;
+    }
+    el.dlg.addEventListener('input',  markDirty, true);
+    el.dlg.addEventListener('change', markDirty, true);
+    el.dlg.addEventListener('click',  markDirty, true);
+
+    async function requestClose() {
+        if (pop.saving) return;
+        if (pop.dirty && SAVE[pop.key] && state.statusCode === 'Draft') {
+            const ok = await window.gracUi.confirm('Close without saving? The changes made here will be lost.',
+                { type: 'warning', title: 'Unsaved changes', confirmText: 'Close without saving' });
+            if (!ok) return;
+        }
+        el.dlg.close();
+    }
+    document.getElementById('oaCfgStepClose').addEventListener('click', requestClose);
+    document.getElementById('oaCfgStepCancel').addEventListener('click', requestClose);
+    // Escape = Close, unless a message box is open inside the popup.
+    el.dlg.addEventListener('cancel', function (e) {
+        e.preventDefault();
+        if (el.dlg.querySelector('.grac-dialog-overlay')) return;
+        requestClose();
+    });
+    // However it closes, the step list re-reads what is saved (Trigger and
+    // Scope Resolution save while the popup is open).
+    el.dlg.addEventListener('close', function () {
+        pop.key = '';
+        pop.dirty = false;
+        loadView();
+    });
+
+    async function saveStep() {
+        const key = pop.key;
+        const cfg = SAVE[key];
+        const api = cfg && window[cfg.api];
+        if (!api || pop.saving) return;
+        const btn = document.getElementById('oaCfgStepSave');
+        pop.saving = true;
+        btn.disabled = true;
+        clearStepMessage(key);
+        let ok = false;
+        try {
+            ok = await api.save();
+        } catch (_) {
+            ok = false;
+        } finally {
+            pop.saving = false;
+            btn.disabled = false;
+        }
+        if (!ok) {
+            // The step screen's own message says why; keep the popup open on it.
+            const m = shownStepMessage(key);
+            if (m) m.scrollIntoView({ block: 'nearest' });
+            else await box('Not saved.', 'error');
+            return;
+        }
+        const title = document.getElementById('oaCfgStepTitle').textContent;
+        clearStepMessage(key);
+        pop.dirty = false;
+        el.dlg.close();   // the close handler reloads the step list
+        await box(title + ' saved.', 'success');
+    }
+    document.getElementById('oaCfgStepSave').addEventListener('click', saveStep);
+
+    // -----------------------------------------------------------------
+    // Boot
+    // -----------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        setMode('list');
+
+        wf.wirePager('oa-cfg', function (delta) {
+            const next = state.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.page = next;
+            reload();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            el.org.innerHTML = '<option value="">No accessible organizations</option>';
+            reload();
+            return;
+        }
+        wf.populateOrgSelect('oaCfgFilterOrganization', orgs);
+        state.orgId = el.org.value || '';
+
+        el.org.addEventListener('change', function () {
+            state.orgId = el.org.value || '';
+            state.page = 1;
+            reload();
+        });
+        document.getElementById('oaCfgSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.page = 1;
+            clearTimeout(state.searchTimer);
+            state.searchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaCfgRefreshBtn').addEventListener('click', reload);
+
+        // Opened from Audit Definition on one audit (537): the audit and
+        // its organization are in the navigation code. 543: straight to its
+        // view, the step list; Back goes to the list.
+        const ctx = window.gracSecureNav ? await window.gracSecureNav.context('org-audit-configuration') : null;
+        if (ctx && ctx.error) {
+            reload();
+            await box(ctx.error, 'error');
+            return;
+        }
+        if (ctx && ctx.filterType === 'AuditDefinition' && ctx.filterId) {
+            const org = ctx.organizationId ? String(ctx.organizationId) : '';
+            if (org && Array.prototype.some.call(el.org.options, function (o) { return o.value === org; })) el.org.value = org;
+            state.orgId = el.org.value || state.orgId;
+            reload();
+            openView(String(ctx.filterId));
+            return;
+        }
+        reload();
+    }
+})();
+</script>

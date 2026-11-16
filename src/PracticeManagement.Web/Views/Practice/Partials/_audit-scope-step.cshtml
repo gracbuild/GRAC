@@ -1,0 +1,173 @@
+@*
+    Audit Configuration -- the Scope Builder step.
+
+    562 (2026-11-15, sir -- Audit Change spec 4.2.1, the three-step Scope
+    Builder; phase C1):
+      Step 1  Select Audit Subjects -- the Scope Builder screen: the
+              Operationalize Dependencies table (Asset, Vendor, Department /
+              Person, Team, Committee, Location, Business Function; same
+              pickers, js/Shared/dependency-picker.js). Control Statements
+              is not a subject (sir, 2026-11-15).
+      Step 2  Discover Related GRAC Intelligence -- this panel: what the
+              SAVED subjects lead to today (Practice Instances, Practices,
+              Control Statements, Risks, Gaps, Exceptions, Assets, Vendors),
+              each record with why it is related; the categories the audit
+              brings in are ticked here (Draft only, saved at once).
+              GET  /practice/api/org-assurance/definitions/{id}/scope-discovery
+              POST /practice/api/org-assurance/definitions/{id}/scope-categories
+      Step 3  Review and Confirm -- on the engagement's live scope (My
+              Audits -> Review & Freeze Scope, 563): the same categories over
+              the engagement's instances; Include, untick records with a
+              reason, manual items; kept as the approved scope snapshot.
+    The scope is still resolved when an execution is created (545).
+
+    It replaces the 545 Preview (the Scope Resolution screen hosted here);
+    that screen keeps its own route. The panel takes its organization and
+    audit from the Scope Builder's `audit-scope-loaded` event.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/org-assurance-scope-builder" model="Model" />
+
+<div class="oa-scope-preview" id="oaDiscRoot">
+    <div class="oa-ws-section-head"><h2>Step 2 &mdash; Discover Related GRAC Intelligence</h2></div>
+    <p class="oa-ws-section-hint">What the saved subjects lead to in GRAC today, and why each record is related. Tick the categories this audit brings in; the auditor reviews and confirms the actual records on the engagement. Save the subjects first.</p>
+    <div class="pm-message" id="oaDiscMessage" style="display:none;"></div>
+    <div class="pm-table-wrap oa-pl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:90px;">Include</th>
+                    <th>Category</th>
+                    <th style="text-align:right; width:110px;">Records</th>
+                    <th style="width:60px;"></th>
+                </tr>
+            </thead>
+            <tbody id="oaDiscBody">
+                <tr><td colspan="4" class="pm-empty">Pick an audit to discover related records.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) return;
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const pick = function (o, a, b) { return o == null ? undefined : (o[a] !== undefined ? o[a] : o[b]); };
+
+    const st = { orgId: null, definitionId: null, editable: false, categories: [], rows: [], open: null };
+
+    document.addEventListener('audit-scope-loaded', function (e) {
+        const d = (e && e.detail) || {};
+        st.orgId        = d.organizationId != null ? d.organizationId : null;
+        st.definitionId = d.definitionId   != null ? d.definitionId   : null;
+        st.editable     = !!d.editable;
+        load();
+    });
+
+    async function load() {
+        const body = document.getElementById('oaDiscBody');
+        wf.setMessage('oaDiscMessage', '');
+        if (st.orgId == null || st.definitionId == null) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Pick an audit to discover related records.</td></tr>';
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="4" class="pm-empty">Discovering...</td></tr>';
+        try {
+            const r = await fetch(U(API + '/definitions/' + encodeURIComponent(st.definitionId)
+                                    + '/scope-discovery?organizationId=' + encodeURIComponent(st.orgId)),
+                                  { credentials: 'same-origin' });
+            const j = await r.json().catch(function () { return null; });
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            st.categories = pick(j, 'categories', 'Categories') || [];
+            st.rows       = pick(j, 'rows', 'Rows') || [];
+            render();
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Could not discover related records.</td></tr>';
+            wf.setMessage('oaDiscMessage', err.message || String(err), 'error');
+        }
+    }
+
+    function render() {
+        const body = document.getElementById('oaDiscBody');
+        if (!st.rows.length && !st.categories.some(function (c) { return Number(pick(c, 'itemCount', 'ItemCount')) > 0; })) {
+            body.innerHTML = '<tr><td colspan="4" class="pm-empty">Nothing found yet. Pick and save audit subjects in Step 1; '
+                           + 'subjects with no Operationalize links still define the audit.</td></tr>';
+            return;
+        }
+        body.innerHTML = st.categories.map(function (c) {
+            const code = pick(c, 'categoryCode', 'CategoryCode');
+            const n    = Number(pick(c, 'itemCount', 'ItemCount')) || 0;
+            const inc  = !!pick(c, 'isIncluded', 'IsIncluded');
+            const open = st.open === code;
+            return '<tr data-cat="' + wf.escape(code) + '"' + (open ? ' class="oa-pl-open is-selected"' : '') + ' style="cursor:pointer;">'
+                 + '<td><input type="checkbox" data-include="' + wf.escape(code) + '"' + (inc ? ' checked' : '')
+                 +      (st.editable ? '' : ' disabled') + ' aria-label="Include ' + wf.escape(pick(c, 'categoryName', 'CategoryName')) + '" /></td>'
+                 + '<td>' + wf.escape(pick(c, 'categoryName', 'CategoryName')) + '</td>'
+                 + '<td style="text-align:right;">' + n + '</td>'
+                 + '<td style="text-align:center;"><i class="fa-solid ' + (open ? 'fa-chevron-up' : 'fa-chevron-down') + '" aria-hidden="true"></i></td>'
+                 + '</tr>'
+                 + (open ? childRow(code) : '');
+        }).join('');
+    }
+
+    // The Audit Plans child row: tr.oa-pl-items-row > td > .oa-pl-items.
+    function childRow(code) {
+        const rows = st.rows.filter(function (r) { return pick(r, 'categoryCode', 'CategoryCode') === code; });
+        const inner = rows.length
+            ? '<div class="pm-table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Status</th><th>Why it is related</th></tr></thead><tbody>'
+              + rows.map(function (r) {
+                    return '<tr><td>' + wf.escape(pick(r, 'recordCode', 'RecordCode') || '') + '</td>'
+                         + '<td>' + wf.escape(pick(r, 'recordName', 'RecordName') || '') + '</td>'
+                         + '<td>' + wf.escape(pick(r, 'status', 'Status') || '') + '</td>'
+                         + '<td class="qs-cell-text">' + wf.escape(pick(r, 'reason', 'Reason') || '') + '</td></tr>';
+                }).join('')
+              + '</tbody></table></div>'
+            : '<div class="pm-empty" style="padding:8px 0;">No related records.</div>';
+        return '<tr class="oa-pl-items-row is-selected"><td colspan="4"><div class="oa-pl-items">' + inner + '</div></td></tr>';
+    }
+
+    document.getElementById('oaDiscBody').addEventListener('click', function (e) {
+        if (e.target.closest('input[data-include]')) return;
+        const tr = e.target.closest('tr[data-cat]');
+        if (!tr) return;
+        const code = tr.getAttribute('data-cat');
+        st.open = st.open === code ? null : code;
+        render();
+    });
+
+    document.getElementById('oaDiscBody').addEventListener('change', async function (e) {
+        const cb = e.target.closest('input[data-include]');
+        if (!cb || !st.editable) return;
+        const code = cb.getAttribute('data-include');
+        st.categories.forEach(function (c) {
+            if (pick(c, 'categoryCode', 'CategoryCode') === code) { c.isIncluded = cb.checked; c.IsIncluded = cb.checked; }
+        });
+        try {
+            const r = await fetch(U(API + '/definitions/' + encodeURIComponent(st.definitionId) + '/scope-categories'), {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify({
+                    organizationId : Number(st.orgId),
+                    definitionId   : Number(st.definitionId),
+                    categories     : st.categories.map(function (c) {
+                        return { code: pick(c, 'categoryCode', 'CategoryCode'), isIncluded: !!pick(c, 'isIncluded', 'IsIncluded') };
+                    }),
+                    actor          : null
+                })
+            });
+            const j = await r.json().catch(function () { return null; });
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            wf.setMessage('oaDiscMessage', 'Categories saved.', 'ok');
+        } catch (err) {
+            cb.checked = !cb.checked;
+            wf.setMessage('oaDiscMessage', err.message || String(err), 'error');
+        }
+    });
+})();
+</script>

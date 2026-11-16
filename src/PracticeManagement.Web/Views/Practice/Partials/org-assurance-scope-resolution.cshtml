@@ -295,7 +295,9 @@
 
     async function selectDefinition(definitionId) {
         state.definitionId = definitionId;
-        try {
+        // 537: hosted on the Audit Configuration page, the host owns the
+        // address bar -- no record id is written there.
+        if (!window.__oaHostNoUrl) try {
             const u = new URL(window.location.href);
             u.searchParams.set('definitionId', String(definitionId));
             window.history.replaceState(null, '', u.toString());

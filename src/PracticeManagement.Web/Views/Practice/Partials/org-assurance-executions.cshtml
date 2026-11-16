@@ -12,13 +12,15 @@
         POST /practice/api/org-assurance/executions/{id}/start|submit|review|approve|close|cancel
         DELETE /practice/api/org-assurance/executions/{id}
         GET  /practice/api/org-assurance/executions/{id}/entities?organizationId=&dimensionCode=&statusCode=&search=&page=&pageSize=
-        + supporting reads for materialize form:
+        + supporting read for materialize form:
         GET  /practice/api/org-assurance/definitions?organizationId=
-        GET  /practice/api/org-assurance/definitions/{id}/scope-resolutions?organizationId=
 
     UX:
       * Org + optional Definition picker at top.
-      * Materialize dialog (definition + version + resolution).
+      * Materialize dialog (definition + version). 545 (sir): no scope
+        snapshot to pick -- the API resolves the audit's scope at that
+        moment (purpose EXECUTION) and the execution covers what it
+        matches then, not a resolution made during configuration.
       * List with 3-dots menu -- Details / lifecycle transitions
         contextual by status / Delete (Planned or Cancelled only).
       * Details panel: header + config-snapshot tabs (Definition /
@@ -123,6 +125,12 @@
                     <h2 style="font-size:15px; margin:0; color:var(--fg-strong);" id="oaExDetailTitle">Execution Details</h2>
                     <p style="font-size:12px; color:var(--fg-muted); margin:4px 0 0;" id="oaExDetailSubtitle">Select a row to view execution details, immutable config snapshots and entity progress.</p>
                 </div>
+                @* 2026-11-04: Actions -- the row's 3-dot items for the execution
+                   shown here, minus View Details (shared page-actions-menu.js). *@
+                <button type="button" class="pm-button" id="oaExActionsBtn" aria-haspopup="true" aria-expanded="false" hidden>
+                    <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+                    <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+                </button>
             </div>
 
             @* Detail header tiles *@
@@ -234,7 +242,7 @@
             <h2 style="margin:0; font-size:16px;">Materialize Execution</h2>
             <button class="pm-button icon" id="oaExMatClose" type="button"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 12px;">Creates an immutable execution record from a definition + resolved scope. The active version's Definition, Questions, Evidence, Workflow and Scoring configuration is snapshotted onto the execution.</p>
+        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 12px;">Creates an immutable execution record from a definition. Its scope is resolved now, so the execution covers what the scope matches today. The active version's Definition, Workflow and Scoring configuration is snapshotted onto the execution, with the questions of its question sets (Questions) and the evidence those questions ask for (Evidence).</p>
 
         <div style="display:grid; gap:8px;">
             <label class="pm-field">
@@ -244,13 +252,6 @@
                 </select>
                 <span id="oaExMatHint" hidden
                       style="font-size:11px; color:var(--warning-700); background:var(--warning-100); border:1px solid var(--warning-200); border-radius:var(--radius-sm); padding:6px 8px; margin-top:6px;"></span>
-            </label>
-            <label class="pm-field">
-                <span>Scope Resolution Snapshot <span style="color:var(--danger-700);">*</span></span>
-                <select class="pm-input" id="oaExMatScope">
-                    <option value="">Pick a definition first</option>
-                </select>
-                <span style="font-size:11px; color:var(--fg-subtle); margin-top:2px;">Only snapshots that belong to an Approved/Active version can be materialized.</span>
             </label>
             <label class="pm-field">
                 <span>Execution Name</span>
@@ -313,6 +314,7 @@
 
 @* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
 <script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -345,9 +347,7 @@
         entities           : { page: 1, pageSize: 100, total: 0, rows: [], dim: '', status: '', search: '' },
 
         matDefId           : null,
-        matScopeId         : null,
-        matDefinitions     : [],
-        matScopes          : []
+        matDefinitions     : []
     };
 
     document.addEventListener('DOMContentLoaded', boot);
@@ -592,7 +592,8 @@
             const done     = Number(row.completedEntityCount || row.CompletedEntityCount || 0);
             const total    = Number(row.totalEntityCount     || row.TotalEntityCount     || 0);
             const isSel    = state.selectedExecId && String(state.selectedExecId) === String(id);
-            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:var(--primary-50);"' : '') + '>'
+            // pm-row-clickable: a row click already shows this execution (View Details).
+            return '<tr class="pm-row-clickable" data-id="' + id + '"' + (isSel ? ' style="background:var(--primary-50);"' : '') + '>'
                  + '<td><div>' + wf.escape(name) + '</div>'
                  + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(code) + '</div></td>'
                  + '<td>' + wf.escape(defName) + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(defCode) + (ver ? ' &middot; v' + ver : '') + '</div></td>'
@@ -637,11 +638,11 @@
         if (openMenuEl && !openMenuEl.contains(ev.target) && ev.target !== openMenuTrigger) closeRowMenu();
     });
 
-    function openRowMenu(trigger, id, row) {
-        closeRowMenu();
-        const status = row && (row.statusCode || row.StatusCode) || '';
+    // Items of the row menu. 2026-11-04: also the detail panel's Actions
+    // menu (without View Details), so both always offer the same actions.
+    function rowMenuItems(id, status) {
         const items = [
-            { icon: 'fa-eye',        label: 'View Details',
+            { key: 'view', icon: 'fa-eye',        label: 'View Details',
                 action: function () { selectExecution(id); } },
             { icon: 'fa-triangle-exclamation', label: 'Observations',
                 action: function () {
@@ -668,6 +669,13 @@
         } else if (status === 'Cancelled') {
             items.push({ icon: 'fa-trash', label: 'Delete', action: function () { doDelete(id); } });
         }
+        return items;
+    }
+
+    function openRowMenu(trigger, id, row) {
+        closeRowMenu();
+        const status = row && (row.statusCode || row.StatusCode) || '';
+        const items = rowMenuItems(id, status);
 
         const menu = document.createElement('div');
         menu.className = 'pm-action-menu';
@@ -739,6 +747,17 @@
     // -----------------------------------------------------------------
     // Detail
     // -----------------------------------------------------------------
+    // Detail panel Actions (2026-11-04).
+    if (window.gracPageActions) {
+        window.gracPageActions.attach('oaExActionsBtn', function () {
+            const d = state.detail;
+            if (!d || !state.selectedExecId) return [];
+            return rowMenuItems(state.selectedExecId, d.statusCode || d.StatusCode || '')
+                .filter(function (it) { return it.key !== 'view'; })
+                .map(function (it) { return { icon: it.icon, label: it.label, run: it.action }; });
+        });
+    }
+
     async function selectExecution(id) {
         state.selectedExecId = id;
         document.querySelectorAll('#oaExListBody tr').forEach(function (tr) {
@@ -755,6 +774,7 @@
     function resetDetail() {
         state.selectedExecId = null;
         state.detail = null;
+        document.getElementById('oaExActionsBtn').hidden = true;
         document.getElementById('oaExDetailTitle').textContent = 'Execution Details';
         document.getElementById('oaExDetailSubtitle').textContent =
             'Select a row to view execution details, immutable config snapshots and entity progress.';
@@ -783,6 +803,7 @@
     function renderDetail() {
         const d = state.detail;
         if (!d) { resetDetail(); return; }
+        document.getElementById('oaExActionsBtn').hidden = false;
         document.getElementById('oaExDetailTitle').textContent =
             (d.executionName || d.ExecutionName || '') + '  (' + (d.executionCode || d.ExecutionCode || '') + ')';
         document.getElementById('oaExDetailSubtitle').textContent =
@@ -792,7 +813,13 @@
 
         const tiles = document.getElementById('oaExDetailTiles');
         tiles.hidden = false;
+        // 555: an engagement's execution has a live scope until its auditor
+        // freezes it in My Audits (null ScopeFrozenAt); exclusions counted.
+        const frozenAt = d.scopeFrozenAt || d.ScopeFrozenAt;
+        const exclN    = Number(d.scopeExclusionCount ?? d.ScopeExclusionCount ?? 0);
         tiles.innerHTML = tile('Status', d.statusName || d.StatusName || '')
+                        + tile('Scope', frozenAt ? ('Frozen ' + formatDate(frozenAt) + (exclN ? ', ' + exclN + ' excluded' : ''))
+                                                 : 'Live -- the auditor freezes it in My Audits')
                         + tile('Total Entities', String(d.totalEntityCount || d.TotalEntityCount || 0))
                         + tile('Completed',       String(d.completedEntityCount || d.CompletedEntityCount || 0))
                         + tile('Owner', (function () {
@@ -1026,18 +1053,12 @@
         document.getElementById('oaExMatSave').addEventListener('click', submitMaterialize);
         document.getElementById('oaExMatDef').addEventListener('change', function (e) {
             state.matDefId = e.target.value ? Number(e.target.value) : null;
-            state.matScopeId = null;
-            populateMatScopes();
-        });
-        document.getElementById('oaExMatScope').addEventListener('change', function (e) {
-            state.matScopeId = e.target.value ? Number(e.target.value) : null;
         });
     }
 
     async function openMaterialize() {
         if (!state.orgId) { setMessage('error', 'Pick an organization first.'); return; }
         state.matDefId = state.filterDefinitionId;
-        state.matScopeId = null;
         document.getElementById('oaExMatMsg').hidden = true;
         document.getElementById('oaExMatName').value  = '';
         document.getElementById('oaExMatCode').value  = '';
@@ -1063,7 +1084,6 @@
             const sel = document.getElementById('oaExMatDef');
             if (sel && [...sel.options].some(function (o) { return o.value === String(state.matDefId); })) {
                 sel.value = String(state.matDefId);
-                await populateMatScopes();
             } else {
                 // Preselected definition isn't Approved / Active -- keep the
                 // dialog usable but call it out so the user isn't guessing.
@@ -1139,47 +1159,10 @@
         }
     }
 
-    async function populateMatScopes() {
-        const sel = document.getElementById('oaExMatScope');
-        if (!state.matDefId) {
-            sel.innerHTML = '<option value="">Pick a definition first</option>';
-            return;
-        }
-        sel.innerHTML = '<option value="">Loading...</option>';
-        try {
-            const qs = new URLSearchParams();
-            qs.set('organizationId', state.orgId);
-            qs.set('page', '1'); qs.set('pageSize', '50');
-            const r = await fetch(U(API + '/definitions/' + state.matDefId + '/scope-resolutions?' + qs.toString()),
-                                 { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            const payload = await r.json();
-            const rows = payload.rows || payload.Rows || [];
-            state.matScopes = rows;
-            sel.innerHTML = '';
-            const ph = document.createElement('option');
-            ph.value = ''; ph.textContent = rows.length ? '-- pick a snapshot --' : 'No snapshots. Run Scope Resolution first.';
-            sel.appendChild(ph);
-            rows.forEach(function (row) {
-                const id     = row.resolutionId       || row.ResolutionId;
-                const when   = formatDateTime(row.resolvedAt || row.ResolvedAt);
-                const purpose= row.resolutionPurpose  || row.ResolutionPurpose || '';
-                const total  = row.totalEntityCount   || row.TotalEntityCount || 0;
-                const opt = document.createElement('option');
-                opt.value = String(id);
-                opt.textContent = '#' + id + '  --  ' + when + '  (' + purpose + ')  --  ' + total + ' entities';
-                sel.appendChild(opt);
-            });
-        } catch (err) {
-            sel.innerHTML = '<option value="">Failed to load: ' + wf.escape(err.message || err) + '</option>';
-        }
-    }
-
     async function submitMaterialize() {
         const msg = document.getElementById('oaExMatMsg');
         msg.hidden = true;
         if (!state.matDefId)   { showMatMsg('error', 'Pick a definition.'); return; }
-        if (!state.matScopeId) { showMatMsg('error', 'Pick a scope resolution snapshot.'); return; }
         // 120 hybrid Owner -- read picker state; SP auto-resolves the missing side.
         const ownerState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
             ? window.__roleHolderPicker.readState('oaExMatOwnerRole', 'oaExMatOwnerEmp')
@@ -1189,7 +1172,7 @@
             organizationId    : Number(state.orgId),
             definitionId      : state.matDefId,
             versionId         : null,
-            scopeResolutionId : state.matScopeId,
+            scopeResolutionId : null,   // 545: resolved now, by the API
             executionCode     : val('oaExMatCode') || null,
             executionName     : val('oaExMatName') || null,
             originType        : 'MANUAL',
@@ -1249,13 +1232,6 @@
         const d = new Date(v);
         if (isNaN(d.getTime())) return String(v);
         return d.toISOString().slice(0, 10);
-    }
-    function formatDateTime(v) {
-        if (typeof window.gracFormatDisplayDate === "function" && v != null && v !== "") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
-        if (!v) return '';
-        const d = new Date(v);
-        if (isNaN(d.getTime())) return String(v);
-        return d.toISOString().replace('T', ' ').slice(0, 19);
     }
     async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
 })();

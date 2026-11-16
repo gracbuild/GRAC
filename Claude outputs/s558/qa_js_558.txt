@@ -1,0 +1,210 @@
+    function showPane(which) {
+        document.getElementById('oaMyScopePane').hidden = which !== 'scope';
+        document.getElementById('oaMyCaPane').hidden    = which !== 'ca';
+        document.getElementById('oaMyQaPane').hidden    = which !== 'qa';
+        document.getElementById('oaMyQaSave').hidden    = true;   // openAnswers shows it
+    }
+
+    // -----------------------------------------------------------------
+    // 558: Answer Questions -- the same frame. One answer per question;
+    // Not compliant needs a description and an owner and raises the
+    // finding (server side). Save writes the changed answers one by one.
+    // Owners: the `owners` feed (342), the Operationalize owner pickers'.
+    // -----------------------------------------------------------------
+    let ownersPromise = null;
+    function loadOwners() {
+        if (ownersPromise) return ownersPromise;
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        const csrf = csrfMeta ? csrfMeta.content : '';
+        ownersPromise = fetch(U('/practice-management-gateway/owners/query'), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+            body: JSON.stringify({ data: { pageNumber: 1, pageSize: 5000 } })
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+              const d = j && (j.data || j.Data);
+              const rows = Array.isArray(d) ? d : ((d && (d.rows || d.Rows || d.items || d.Items)) || []);
+              return rows.map(function (x) {
+                  return { value: String(x.Value ?? x.value), label: String(x.Label ?? x.label ?? ''),
+                           organizationId: String(x.OrganizationId ?? x.organizationId ?? '') };
+              });
+          })
+          .catch(function () { ownersPromise = null; return []; });
+        return ownersPromise;
+    }
+
+    async function openAnswers(row, readOnly) {
+        closeScope();
+        state.scope = { row: row, key: keyOf(row), items: [], frozen: true, qa: { readOnly: readOnly, rows: [], owners: [] } };
+        showPane('qa');
+        document.getElementById('oaMyFrameCaption').textContent = readOnly
+            ? 'The answers given in this audit, with the findings they raised.'
+            : 'Answer each question once. Not compliant needs a description and an owner, and raises an Audit Finding; changing it back withdraws an Open finding.';
+        document.getElementById('oaMyFrameHint').textContent = '';
+        document.getElementById('oaMyScopeFreeze').hidden = true;
+        document.getElementById('oaMyQaSave').hidden = readOnly;
+        document.getElementById('oaMyQaSave').disabled = true;
+        document.getElementById('oaMyQaSummary').innerHTML = '';
+        document.getElementById('oaMyQaBody').innerHTML = '<tr><td colspan="4" class="pm-empty">Loading the questions...</td></tr>';
+        wf.setMessage('oaMyScopeMessage', '');
+        mountFrame();
+
+        const org = v(row, 'organizationId', 'OrganizationId');
+        try {
+            const both = await Promise.all([
+                fetch(U(API + '/executions/' + encodeURIComponent(v(row, 'executionId', 'ExecutionId'))
+                        + '/responses?organizationId=' + encodeURIComponent(org)), { credentials: 'same-origin' }),
+                readOnly ? Promise.resolve([]) : loadOwners()
+            ]);
+            const r = both[0], owners = both[1];
+            const j = await safeJson(r);
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            state.scope.qa.rows   = (j && (j.questions || j.Questions)) || [];
+            state.scope.qa.owners = owners.filter(function (o) { return !o.organizationId || o.organizationId === String(org); });
+            renderAnswers((j && (j.counts || j.Counts)) || []);
+        } catch (err) {
+            document.getElementById('oaMyQaBody').innerHTML = '';
+            wf.setMessage('oaMyScopeMessage', 'The questions could not be loaded: ' + (err.message || err), 'error');
+        }
+    }
+
+    const RESULT_LABEL = { Compliant: 'Compliant', NotCompliant: 'Not compliant', NotApplicable: 'Not applicable', NotAnswered: 'Not answered' };
+
+    function renderAnswers(counts) {
+        const qa = state.scope.qa;
+        document.getElementById('oaMyQaSummary').innerHTML = ['NotAnswered', 'Compliant', 'NotCompliant', 'NotApplicable'].map(function (k) {
+            const c = counts.find(function (x) { return v(x, 'resultCode', 'ResultCode') === k; });
+            return '<span class="pm-badge">' + RESULT_LABEL[k] + ' ' + (c ? (v(c, 'questionCount', 'QuestionCount') ?? 0) : 0) + '</span>';
+        }).join(' ');
+        if (!qa.rows.length) {
+            document.getElementById('oaMyQaBody').innerHTML = '<tr><td colspan="4" class="pm-empty">This audit has no questions.</td></tr>';
+            return;
+        }
+        let lastSet = null;
+        document.getElementById('oaMyQaBody').innerHTML = qa.rows.map(function (q, i) {
+            const set = v(q, 'questionSetName', 'QuestionSetName') || v(q, 'questionSetCode', 'QuestionSetCode') || '';
+            let head = '';
+            if (set !== lastSet) {
+                lastSet = set;
+                head = '<tr><td colspan="4"><strong>' + wf.escape(set) + '</strong></td></tr>';
+            }
+            const res   = v(q, 'resultCode', 'ResultCode') || '';
+            const help  = v(q, 'helpText', 'HelpText');
+            const evid  = [v(q, 'evidenceTypeName', 'EvidenceTypeName'), v(q, 'expectedEvidence', 'ExpectedEvidence')].filter(Boolean).join(': ');
+            const owner = v(q, 'ownerEmployeeId', 'OwnerEmployeeId');
+            const opts  = ['', 'Compliant', 'NotCompliant', 'NotApplicable'].map(function (k) {
+                return '<option value="' + k + '"' + (k === res ? ' selected' : '') + '>' + (k ? RESULT_LABEL[k] : '-- not answered --') + '</option>';
+            }).join('');
+            const known = qa.owners.some(function (o) { return o.value === String(owner); });
+            const ownerOpts = '<option value="">-- owner --</option>' + qa.owners.map(function (o) {
+                return '<option value="' + wf.escape(o.value) + '"' + (String(owner) === o.value ? ' selected' : '') + '>' + wf.escape(o.label) + '</option>';
+            }).join('') + (owner != null && !known
+                ? '<option value="' + wf.escape(String(owner)) + '" selected>' + wf.escape(v(q, 'ownerDisplayName', 'OwnerDisplayName') || ('#' + owner)) + '</option>' : '');
+            const nc   = res === 'NotCompliant';
+            const desc = v(q, 'description', 'Description') || '';
+            const detail = qa.readOnly
+                ? (nc ? wf.escape(desc) + '<div style="color:var(--fg-subtle); font-size:12px;">Owner: ' + wf.escape(v(q, 'ownerDisplayName', 'OwnerDisplayName') || '') + '</div>' : '')
+                : '<div data-qa-nc="' + i + '"' + (nc ? '' : ' hidden') + '>'
+                  + '<textarea class="pm-input" rows="2" maxlength="4000" data-qa-desc="' + i + '" placeholder="What is not compliant" style="width:100%; min-width:0;">' + wf.escape(desc) + '</textarea>'
+                  + '<select class="pm-input" data-qa-owner="' + i + '" style="width:100%; min-width:0; margin-top:6px;">' + ownerOpts + '</select>'
+                  + '</div>';
+            const obsCode = v(q, 'observationCode', 'ObservationCode');
+            const finding = obsCode
+                ? wf.escape(obsCode) + ' ' + wf.badge(v(q, 'observationStatusName', 'ObservationStatusName') || '')
+                : '';
+            return head + '<tr>'
+                 + '<td>' + wf.escape(v(q, 'questionText', 'QuestionText') || '')
+                 + ' <span style="color:var(--fg-subtle);">(' + wf.escape(v(q, 'questionCode', 'QuestionCode') || '') + ')</span>'
+                 + (v(q, 'isMandatory', 'IsMandatory') ? ' <span class="required">*</span>' : '')
+                 + (help ? '<div style="color:var(--fg-subtle); font-size:12px;">' + wf.escape(help) + '</div>' : '')
+                 + (evid ? '<div style="color:var(--fg-subtle); font-size:12px;">Evidence: ' + wf.escape(evid) + '</div>' : '')
+                 + '</td>'
+                 + '<td>' + (qa.readOnly ? wf.badge(res ? RESULT_LABEL[res] : 'Not answered')
+                           : '<select class="pm-input" data-qa-result="' + i + '" style="width:100%; min-width:0;">' + opts + '</select>') + '</td>'
+                 + '<td>' + detail + '</td>'
+                 + '<td>' + finding + '</td>'
+                 + '</tr>';
+        }).join('');
+        updateQaHint();
+    }
+
+    function qaValue(i) {
+        const res = document.querySelector('[data-qa-result="' + i + '"]');
+        const dsc = document.querySelector('[data-qa-desc="' + i + '"]');
+        const own = document.querySelector('[data-qa-owner="' + i + '"]');
+        return { result: res ? res.value : '', description: dsc ? dsc.value.trim() : '', owner: own ? own.value : '' };
+    }
+    function qaChanged(i) {
+        const q = state.scope.qa.rows[i];
+        const now = qaValue(i);
+        const res = v(q, 'resultCode', 'ResultCode') || '';
+        if (now.result !== res) return true;
+        if (now.result !== 'NotCompliant') return false;
+        return now.description !== (v(q, 'description', 'Description') || '')
+            || now.owner !== String(v(q, 'ownerEmployeeId', 'OwnerEmployeeId') ?? '');
+    }
+    function changedIndexes() {
+        const out = [];
+        state.scope.qa.rows.forEach(function (_, i) { if (qaChanged(i)) out.push(i); });
+        return out;
+    }
+    function updateQaHint() {
+        if (!state.scope.qa || state.scope.qa.readOnly) return;
+        const n = changedIndexes().length;
+        document.getElementById('oaMyFrameHint').textContent = n ? n + ' answer(s) changed, not saved yet' : '';
+        document.getElementById('oaMyQaSave').disabled = !n;
+    }
+    function onAnswerChange(e) {
+        const sel = e.target.closest('[data-qa-result]');
+        if (sel) {
+            const i = sel.getAttribute('data-qa-result');
+            const box = document.querySelector('[data-qa-nc="' + i + '"]');
+            if (box) box.hidden = sel.value !== 'NotCompliant';
+        }
+        updateQaHint();
+    }
+
+    async function saveAnswers() {
+        const row = state.scope.row;
+        const qa  = state.scope.qa;
+        if (!row || !qa) return;
+        const idx = changedIndexes();
+        // An answer cannot be cleared once given (decision 3: one answer per
+        // question); Not compliant needs both a description and an owner.
+        for (const i of idx) {
+            const now = qaValue(i);
+            if (!now.result) { wf.setMessage('oaMyScopeMessage', 'Pick an answer for every question you changed.', 'error'); return; }
+            if (now.result === 'NotCompliant' && (!now.description || !now.owner)) {
+                wf.setMessage('oaMyScopeMessage', 'A Not compliant answer needs a description and an owner.', 'error'); return;
+            }
+        }
+        const btn = document.getElementById('oaMyQaSave');
+        btn.disabled = true;
+        wf.setMessage('oaMyScopeMessage', '');
+        const errors = [];
+        let raised = 0;
+        for (const i of idx) {
+            const q = qa.rows[i], now = qaValue(i);
+            try {
+                const r = await fetch(U(API + '/executions/' + encodeURIComponent(v(row, 'executionId', 'ExecutionId')) + '/responses'), {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        organizationId : Number(v(row, 'organizationId', 'OrganizationId')),
+                        questionId     : Number(v(q, 'questionId', 'QuestionId')),
+                        resultCode     : now.result,
+                        description    : now.result === 'NotCompliant' ? now.description : null,
+                        ownerEmployeeId: now.result === 'NotCompliant' ? Number(now.owner) : null,
+                        actor          : null
+                    })
+                });
+                const j = await safeJson(r);
+                if (!r.ok) errors.push((v(q, 'questionCode', 'QuestionCode') || '') + ': ' + ((j && (j.error || j.Error)) || ('HTTP ' + r.status)));
+                else if (now.result === 'NotCompliant' && (j.observationCode || j.ObservationCode) && !v(q, 'observationCode', 'ObservationCode')) raised += 1;
+            } catch (err) { errors.push((v(q, 'questionCode', 'QuestionCode') || '') + ': ' + (err.message || err)); }
+        }
+        // The answers as saved (findings, statuses), in the same frame.
+        await openAnswers(row, false);
+        if (errors.length) wf.setMessage('oaMyScopeMessage', 'Not saved -- ' + errors.join('; '), 'error');
+        else wf.setMessage('oaMyScopeMessage', idx.length + ' answer(s) saved' + (raised ? ', ' + raised + ' finding(s) raised' : '') + '.', 'ok');
+    }

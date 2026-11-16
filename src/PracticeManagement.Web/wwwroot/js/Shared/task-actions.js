@@ -137,13 +137,23 @@
       items.push({ icon: 'fa-pen', label: 'Edit',
         applicable: !fields.isTerminal, action: handlers.onEdit });
     }
+    // 526: a task waiting for its reviewer / approver is not completed
+    // again; the reviewer / approver acts on it instead (server-enforced:
+    // sp_task_complete 55961, sp_task_review_decide).
+    var awaitingReview = !!fields.awaitingReview
+      || fields.rawStatusCode === 'PendingReview' || fields.rawStatusCode === 'PendingApproval';
     if (handlers.onComplete) {
       items.push({ icon: 'fa-circle-check', label: 'Complete Task',
-        applicable: !fields.isTerminal,
+        applicable: !fields.isTerminal && !awaitingReview,
         disabled: !fields.isEligible,
         disabledReason: 'Mandatory sub tasks are still open. BRD §12: the parent '
                       + 'cannot be completed until they are done.',
         action: handlers.onComplete });
+    }
+    if (handlers.onReviewDecision) {
+      items.push({ icon: 'fa-clipboard-check', label: 'Review / Approve',
+        applicable: !fields.isTerminal && awaitingReview,
+        action: handlers.onReviewDecision });
     }
     if (handlers.onAddChild) {
       items.push({ icon: 'fa-diagram-project', label: 'Add Child Task',
@@ -948,6 +958,8 @@
       : 'Task #' + taskId;
     $('taskCompleteRemark').value = '';
     $('taskCompleteMsg').textContent = '';
+    var reviewNote = $('taskCompleteReviewNote');
+    if (reviewNote) reviewNote.style.display = 'none';
     // 499: the general evidence picker became a dialog button; nothing to reset.
     dlg.setAttribute('data-task-id', taskId);
 
@@ -992,6 +1004,7 @@
       var hh = d && (d.header || d.Header);
       if (hh && hh.taskNumber && $('taskCompleteSubject').textContent === 'Task #' + taskId)
         $('taskCompleteSubject').textContent = hh.taskNumber + (hh.subjectTitle ? ' — ' + hh.subjectTitle : '');
+      renderCompleteReviewNote(d && (d.review || d.Review));
       var files = (d && d.attachments) || [];
       // 482: a file that answers a recurring evidence row is listed under
       // that row; this list keeps the general task evidence.
@@ -1277,6 +1290,72 @@
     else    msg.textContent = 'The task was not completed — see the message above.';
   }
 
+  // ==== 526: review / approval cycle =====================================
+  // Complete Task says where the task goes next when it has a reviewer /
+  // approver; the detail it already fetched carries the cycle (review).
+  function renderCompleteReviewNote(rv) {
+    var el = $('taskCompleteReviewNote');
+    if (!el) return;
+    if (!rv || (!rv.reviewerEmployeeId && !rv.approverEmployeeId)) { el.style.display = 'none'; return; }
+    var steps = [];
+    if (rv.reviewerEmployeeId) steps.push('review by ' + (rv.reviewerName || 'the reviewer'));
+    if (rv.approverEmployeeId) steps.push('approval by ' + (rv.approverName || 'the approver'));
+    el.textContent = 'This task does not close on Complete: it goes for ' + steps.join(', then ')
+                   + '. It closes when the last of them approves; either of them can return it to you.';
+    el.style.display = 'block';
+  }
+
+  function reviewFact(label, value) {
+    var empty = value === null || value === undefined || value === '';
+    return '<div style="display:flex; gap:10px; padding:2px 0;"><dt style="min-width:120px; color:var(--fg-secondary);">'
+         + escape(label) + '</dt><dd style="margin:0;">' + (empty ? '&mdash;' : escape(value)) + '</dd></div>';
+  }
+
+  async function openReviewDecision(taskId, taskNumber, taskTitle) {
+    var dlg = $('taskReviewDialog');
+    if (!dlg) return;
+    dlg.setAttribute('data-task-id', taskId);
+    $('taskReviewSubject').textContent = (taskNumber || ('#' + taskId)) + (taskTitle ? ' \u2014 ' + taskTitle : '');
+    $('taskReviewRemark').value = '';
+    $('taskReviewMsg').textContent = '';
+    $('taskReviewFacts').innerHTML = '<p style="color:var(--fg-subtle); font-size:12px; margin:0;">Loading\u2026</p>';
+    showDialog(dlg);
+    try {
+      var r = await fetch(U('/practice/api/tasks/') + encodeURIComponent(taskId), { credentials: 'same-origin' });
+      var d = r.ok ? await r.json() : null;
+      var rv = d && (d.review || d.Review);
+      if (!rv || !rv.reviewStage) {
+        $('taskReviewFacts').innerHTML = '';
+        $('taskReviewMsg').textContent = 'This task is not waiting for review or approval.';
+        return;
+      }
+      var isApproval = rv.reviewStage === 'Approval';
+      $('taskReviewTitle').textContent = isApproval ? 'Approve task' : 'Review task';
+      $('taskReviewFacts').innerHTML =
+          reviewFact('Completed by', rv.submittedByName)
+        + reviewFact('Completed on', fmtDate(rv.submittedDt))
+        + reviewFact('Completion remark', rv.submittedRemark)
+        + reviewFact('Reviewer', rv.reviewerName)
+        + reviewFact('Approver', rv.approverName)
+        + reviewFact('Waiting for', rv.awaitingName);
+    } catch (_e) {
+      $('taskReviewFacts').innerHTML = '';
+    }
+  }
+
+  async function submitReviewDecision(decision) {
+    var dlg    = $('taskReviewDialog');
+    var taskId = dlg.getAttribute('data-task-id');
+    var msg    = $('taskReviewMsg');
+    var remark = $('taskReviewRemark').value.trim();
+    msg.textContent = '';
+    if (decision === 'Return' && !remark) { msg.textContent = 'Say why the task is being returned.'; return; }
+    var ok = await postTaskAction(taskId, '/review-decision',
+        { decision: decision, remark: remark || null }, null);
+    if (ok) hideDialog(dlg);
+    else    msg.textContent = 'Nothing was changed \u2014 see the message above.';
+  }
+
   async function openClose(taskId, taskNumber, taskTitle) {
     var dlg = $('taskCloseDialog');
     if (!dlg) return;
@@ -1399,6 +1478,16 @@
       b.addEventListener('click', function () { hideDialog(xDlg); });
     });
 
+    // 526
+    var vDlg = $('taskReviewDialog');
+    var vFrm = $('taskReviewForm');
+    if (vFrm) vFrm.addEventListener('submit', function (ev) { ev.preventDefault(); submitReviewDecision('Approve'); });
+    var vRet = $('taskReviewReturn');
+    if (vRet) vRet.addEventListener('click', function () { submitReviewDecision('Return'); });
+    document.querySelectorAll('[data-close-task-review]').forEach(function (b) {
+      b.addEventListener('click', function () { hideDialog(vDlg); });
+    });
+
     var rDlg = $('taskReopenDialog');
     var rFrm = $('taskReopenForm');
     if (rFrm) rFrm.addEventListener('submit', submitReopen);
@@ -1458,6 +1547,7 @@
     openComplete: openComplete,
     openClose: openClose,
     openReopen: openReopen,
+    openReviewDecision: openReviewDecision,   // 526
     openEvidenceUpload: openEvidenceUpload,
     openAddUpdate: openAddUpdate,
     postTaskAction: postTaskAction

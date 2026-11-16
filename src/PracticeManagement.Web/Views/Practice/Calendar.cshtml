@@ -214,6 +214,34 @@
     </form>
 </dialog>
 
+@* Review / Approval of a schedule (migration 526). Who reviews and who
+   approves the tasks this schedule raises; read and saved through
+   /practice/api/tasks/schedule-rules/{ruleId}/review. Offered with the same
+   gate as Edit Schedule (EDIT/ADD grant and Practice Instance Owner or
+   system admin), which the procedure enforces again on save. *@
+<dialog id="calReviewDialog">
+    <form id="calReviewForm">
+        <div class="pm-dialog-heading">
+            <div><h2>Review / Approval</h2><p>Who reviews and approves the tasks this schedule raises.</p></div>
+            <button type="button" id="calReviewClose" class="pm-icon-button" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div id="calReviewMessage" class="pm-message" hidden></div>
+        <div class="pm-form-grid">
+            <label class="pm-field full"><span>Practice Instance</span><input id="reviewPracticeInstance" type="text" readonly /></label>
+            <label class="pm-field"><span>Reviewer</span><select id="reviewReviewer"><option value="">&mdash; no review &mdash;</option></select></label>
+            <label class="pm-field"><span>Approver</span><select id="reviewApprover"><option value="">&mdash; no approval &mdash;</option></select></label>
+            <p class="pm-field full" style="margin:0; font-size:12px; color:var(--fg-muted);">
+                Applies to tasks this schedule raises from now on; tasks already raised keep their own.
+                With a reviewer and/or approver, a completed task goes to them before it closes. Leave both empty for no review.
+            </p>
+        </div>
+        <div class="pm-dialog-actions">
+            <button type="button" class="pm-button" id="calReviewCancel">Cancel</button>
+            <button type="button" class="pm-button primary" id="calReviewSubmit">Save</button>
+        </div>
+    </form>
+</dialog>
+
 @section Scripts {
     <script>
         window.pmScreen=@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model));

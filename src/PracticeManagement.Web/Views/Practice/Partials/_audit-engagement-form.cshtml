@@ -1,0 +1,209 @@
+@*
+    566 (Audit Change spec 4.5): the Audit Engagement form -- shared by
+    Audit Plans (a planned engagement) and Audit Engagements (planned and
+    independent). Behaviour: wwwroot/js/Shared/audit-engagement-form.js
+    (window.gracEngagementForm). Moved here from org-assurance-plans.cshtml
+    (the 552 Engagement dialog and View Scope), now in full view like the
+    plan form (pm-dialog-fullpage, the 4-column .oa-pl-plan-grid, each text
+    on its own row). The including page also renders _workflow-common.
+
+    Fields marked oa-eng-field are read-only in "Audit Team" mode (only
+    the team changes once an engagement is approved / running).
+    oa-eng-indep: an independent engagement only.
+*@
+<dialog id="oaEngDialog" class="pm-dialog-fullpage">
+    <form id="oaEngForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="oaEngTitle">Add Engagement</h2>
+            <button class="pm-icon-button" type="button" id="oaEngClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="pm-message" id="oaEngMessage" style="display:none;"></div>
+        <div class="oa-pl-plan-fields">
+        <div class="oa-pl-plan-grid">
+            @* The engagement: origin, plan, programme (mandatory for a planned one), order. *@
+            <label class="pm-field">
+                <span>Engagement Type</span>
+                <input class="pm-input" id="oaEngOrigin" type="text" readonly tabindex="-1" />
+            </label>
+            <label class="pm-field oa-eng-field">
+                <span>Audit Plan</span>
+                <select class="pm-input" id="oaEngPlan"></select>
+            </label>
+            <label class="pm-field oa-eng-field">
+                <span>Programme <span class="required" id="oaEngProgReq">*</span></span>
+                <select class="pm-input" id="oaEngProgramme"></select>
+            </label>
+            <label class="pm-field oa-eng-field">
+                <span>Order</span>
+                <input class="pm-input" id="oaEngOrder" type="number" min="1" step="1" />
+            </label>
+
+            <label class="pm-field oa-pl-span-2 oa-eng-field">
+                <span>Engagement Name</span>
+                <input class="pm-input" id="oaEngName" type="text" maxlength="240" placeholder="The first audit's name, if left empty" />
+            </label>
+            <label class="pm-field oa-pl-span-2 oa-eng-field">
+                <span>Audit Subject <span class="required">*</span></span>
+                <input class="pm-input" id="oaEngSubject" type="text" maxlength="400" placeholder="The unit, process or area audited" />
+            </label>
+
+            @* Independent: why it is done and on whose authority. *@
+            <label class="pm-field oa-eng-field oa-eng-indep">
+                <span>Initiation Source <span class="required">*</span></span>
+                <select class="pm-input" id="oaEngSource"></select>
+            </label>
+            <label class="pm-field oa-eng-field oa-eng-indep">
+                <span>Approval Reference</span>
+                <input class="pm-input" id="oaEngApprovalRef" type="text" maxlength="200" placeholder="e.g. AC resolution no., RBI letter ref." />
+            </label>
+            <label class="pm-field oa-pl-span-2 oa-eng-field oa-eng-indep">
+                <span>Reason for Initiation <span class="required">*</span></span>
+                <textarea class="pm-input" id="oaEngReason" rows="2" maxlength="2000"></textarea>
+            </label>
+
+            @* The audits of the engagement (552): the dual list -- > < icon-only,
+               up / down for the order. *@
+            <div class="oa-adopt-grid oa-pl-span-all oa-eng-field">
+                <label class="oa-adopt-label oa-adopt-a-label" for="oaEngAvail">
+                    Audits that can be planned <span class="pm-badge" id="oaEngAvailCount">0</span>
+                </label>
+                <label class="oa-adopt-label oa-adopt-s-label" for="oaEngSel">
+                    Audits in this engagement <span class="required">*</span> <span class="pm-badge" id="oaEngSelCount">0</span>
+                </label>
+                <select id="oaEngAvail" class="oa-adopt-box oa-adopt-a-box" multiple size="6"></select>
+                <div class="oa-adopt-actions oa-adopt-move">
+                    <button type="button" class="pm-button" id="oaEngAdd" title="Add the selected audits" aria-label="Add the selected audits">
+                        <i class="fa-solid fa-angle-right" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="pm-button" id="oaEngRemove" title="Remove the selected audits" aria-label="Remove the selected audits">
+                        <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <select id="oaEngSel" class="oa-adopt-box oa-adopt-s-box" multiple size="6"></select>
+                <div class="oa-adopt-actions oa-adopt-order">
+                    <button type="button" class="pm-button" id="oaEngUp" title="Move up" aria-label="Move up">
+                        <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="pm-button" id="oaEngDown" title="Move down" aria-label="Move down">
+                        <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="oa-adopt-a-hint">
+                    <p class="oa-adopt-hint">Audits with an Active version. Select one or more, then &gt;.</p>
+                </div>
+                <div class="oa-adopt-s-hint">
+                    <p class="oa-adopt-hint oa-adopt-links">
+                        <a href="#" id="oaEngScopeLink"><i class="fa-solid fa-eye" aria-hidden="true"></i> View Scope</a>
+                        <span>the selected audits' scope as it is now -- nothing is frozen.</span>
+                    </p>
+                </div>
+            </div>
+
+            @* When and where. 554: Branch = a Location; it narrows the scope. *@
+            <label class="pm-field oa-eng-field">
+                <span>Planned Start</span>
+                <input class="pm-input" id="oaEngFrom" type="date" />
+            </label>
+            <label class="pm-field oa-eng-field">
+                <span>Planned End</span>
+                <input class="pm-input" id="oaEngTo" type="date" />
+            </label>
+            <label class="pm-field oa-pl-span-2 oa-eng-field">
+                <span>Branch</span>
+                <select class="pm-input" id="oaEngBranch"></select>
+                <span class="oa-adopt-hint" style="display:block;">Audits only what is at this branch. Blank = the whole scope.</span>
+            </label>
+
+            @* The auditee (role -> person, as the plan owner) and department. *@
+            <label class="pm-field oa-eng-field">
+                <span>Auditee Role</span>
+                <select class="pm-input" id="oaEngAuditeeRole"><option value="">Loading roles...</option></select>
+            </label>
+            <label class="pm-field oa-eng-field">
+                <span>Auditee</span>
+                <select class="pm-input" id="oaEngAuditee"><option value="">-- pick a role first --</option></select>
+            </label>
+            <label class="pm-field oa-pl-span-2 oa-eng-field">
+                <span>Department</span>
+                <input class="pm-input" id="oaEngDept" type="text" maxlength="200" />
+            </label>
+
+            @* The audit team (566): the lead (an auditor, 553), members
+               (auditors), the reviewer (an auditor), subject matter experts
+               (any active employee) and external auditors. *@
+            <label class="pm-field oa-eng-field">
+                <span>Lead Auditor <span class="required">*</span></span>
+                <select class="pm-input" id="oaEngLead"></select>
+            </label>
+            <div class="pm-field oa-pl-span-2">
+                <span>Audit Team Members</span>
+                <div id="oaEngMembers"></div>
+            </div>
+            <label class="pm-field">
+                <span>Engagement Reviewer</span>
+                <select class="pm-input" id="oaEngReviewer"></select>
+            </label>
+            <div class="pm-field oa-pl-span-2">
+                <span>Subject Matter Experts</span>
+                <div id="oaEngSmes"></div>
+            </div>
+            <label class="pm-field oa-pl-span-2">
+                <span>External Auditors</span>
+                <textarea class="pm-input" id="oaEngExternals" rows="2" maxlength="4000" placeholder="One per line: Name - Organisation"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all">
+                <span>Team Remarks</span>
+                <textarea class="pm-input" id="oaEngTeamRemarks" rows="2" maxlength="2000"></textarea>
+            </label>
+
+            @* What the engagement is to do. *@
+            <label class="pm-field oa-pl-span-all oa-eng-field">
+                <span>Engagement Objective</span>
+                <textarea class="pm-input" id="oaEngObjective" rows="3" maxlength="8000"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all oa-eng-field">
+                <span>Scope <span class="required">*</span></span>
+                <textarea class="pm-input" id="oaEngScope" rows="3" maxlength="8000" placeholder="What the engagement covers -- and what it does not"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all oa-eng-field">
+                <span>Engagement Instructions</span>
+                <textarea class="pm-input" id="oaEngInstructions" rows="3" maxlength="8000" placeholder="For the audit team"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all oa-eng-field">
+                <span>Notes</span>
+                <textarea class="pm-input" id="oaEngNotes" rows="2" maxlength="4000"></textarea>
+            </label>
+        </div>
+        </div>
+        <div class="pm-dialog-actions">
+            <button type="button" id="oaEngCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaEngSubmit" class="pm-button primary">Save Engagement</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- View Scope (552): live, nothing saved ---------- *@
+<dialog id="oaEngScopeDialog" style="max-width:900px; width:96%;">
+    <div class="pm-dialog-heading">
+        <div>
+            <h2>Engagement Scope</h2>
+            <p id="oaEngScopeSub"></p>
+        </div>
+        <button class="pm-icon-button" type="button" id="oaEngScopeClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="pm-message" id="oaEngScopeMessage" style="display:none;"></div>
+    <div class="oa-pl-scope-summary" id="oaEngScopeSummary"></div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Type</th><th>Code</th><th>Name</th><th>Audits</th></tr></thead>
+            <tbody id="oaEngScopeBody"></tbody>
+        </table>
+    </div>
+    <p class="pm-hint" style="margin:8px 0 0;">Resolved now from each audit's scope. It is not saved or frozen -- the auditor freezes the scope in the execution.</p>
+    <div class="pm-dialog-actions">
+        <button type="button" id="oaEngScopeOk" class="pm-button">Close</button>
+    </div>
+</dialog>
+
+<script src="~/js/Shared/checkcombo.js" asp-append-version="true"></script>
+<script src="~/js/Shared/audit-engagement-form.js" asp-append-version="true"></script>

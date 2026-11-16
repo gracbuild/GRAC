@@ -26,6 +26,10 @@ public interface IOrgAssuranceDefinitionService
 
     Task<IReadOnlyList<OrgAssuranceAdminCategoryRow>> ListAdminCategoriesAsync(CancellationToken cancellationToken);
 
+    // 560
+    Task<IReadOnlyList<OrgAssuranceMasterRow>> ListApproachesAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<OrgAssuranceMasterRow>> ListMandatesAsync(CancellationToken cancellationToken);
+
     Task<OrgAssuranceDefinitionListResult> ListAsync(
         OrgAssuranceDefinitionListQuery query, CancellationToken cancellationToken);
 
@@ -59,25 +63,37 @@ public interface IOrgAssuranceDefinitionService
     Task<IReadOnlyList<OrgAssuranceScopeDimensionValueRow>> ListScopeDimensionValuesAsync(
         long organizationId, string dimensionCode, string? search, int pageSize, CancellationToken cancellationToken);
 
+    // 534 -- the Source Statements tree for the Scope Builder.
+    Task<IReadOnlyList<OrgAssuranceScopeStatementTreeRow>> ListScopeStatementTreeAsync(
+        long organizationId, CancellationToken cancellationToken);
+
     Task<OrgAssuranceScopeTree?> GetScopeAsync(
         long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken);
+
+    // 562: Scope Builder Step 2 -- discovery and the category flags.
+    Task<OrgAssuranceScopeDiscovery?> GetScopeDiscoveryAsync(
+        long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken);
+
+    Task<OrgAssuranceScopeSaveResult> SaveScopeCategoriesAsync(
+        OrgAssuranceScopeCategorySaveRequest request, CancellationToken cancellationToken);
+
+    // 564 -- Control and Practice Mapping
+    Task<OrgAssuranceMappingOptions> GetMappingOptionsAsync(long organizationId, CancellationToken cancellationToken);
+    Task<OrgAssuranceMappingResult?> GetMappingAsync(
+        long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken);
+    Task<OrgAssuranceMappingSaveResult> SaveMappingAsync(
+        OrgAssuranceMappingSaveRequest request, CancellationToken cancellationToken);
 
     Task<OrgAssuranceScopeSaveResult> SaveScopeAsync(
         OrgAssuranceScopeSaveRequest request, CancellationToken cancellationToken);
 
-    // ---------- Evidence Configuration (Stage 2) ----------
+    // ---------- Evidence Types (question Evidence Type lookup) ----------
+    // Evidence Configuration (collection methods, frequencies, per-version
+    // evidence config) removed by 536 -- evidence is set per question.
     Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListEvidenceTypesAsync(CancellationToken cancellationToken);
-    Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListCollectionMethodsAsync(CancellationToken cancellationToken);
-    Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListFrequenciesAsync(CancellationToken cancellationToken);
-
-    Task<OrgAssuranceEvidenceConfigResult?> GetEvidenceConfigAsync(
-        long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken);
-
-    Task<OrgAssuranceEvidenceConfigSaveResult> SaveEvidenceConfigAsync(
-        OrgAssuranceEvidenceConfigSaveRequest request, CancellationToken cancellationToken);
-
     // ---------- Workflow Configuration (Stage 2 -- BRD Sec 6) ----------
     Task<IReadOnlyList<OrgAssuranceAdminWorkflowTemplateRow>> ListAdminWorkflowTemplatesAsync(CancellationToken cancellationToken);
+    Task<OrgAssuranceAdminWorkflowTemplateDetail?>             GetAdminWorkflowTemplateAsync(long templateId, CancellationToken cancellationToken);   // 538
     Task<IReadOnlyList<OrgAssuranceWorkflowStageTypeRow>>     ListWorkflowStageTypesAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<OrgAssuranceOrganizationRoleRow>>      ListOrganizationRolesAsync(long organizationId, CancellationToken cancellationToken);
 
@@ -178,6 +194,37 @@ public sealed class OrgAssuranceDefinitionService(
     }
 
     // -----------------------------------------------------------------
+    // 560: Assurance Approaches (grac_practice.org_assurance_approach_master)
+    // -----------------------------------------------------------------
+    public Task<IReadOnlyList<OrgAssuranceMasterRow>> ListApproachesAsync(CancellationToken cancellationToken) =>
+        ListMasterAsync("grac_practice.sp_org_assurance_approach_list", cancellationToken);
+
+    // 560: Audit Mandates (grac_practice.org_assurance_mandate_master)
+    public Task<IReadOnlyList<OrgAssuranceMasterRow>> ListMandatesAsync(CancellationToken cancellationToken) =>
+        ListMasterAsync("grac_practice.sp_org_assurance_mandate_list", cancellationToken);
+
+    // One reader for the Definition masters -- each list proc returns Id, Code, Name, Description.
+    private async Task<IReadOnlyList<OrgAssuranceMasterRow>> ListMasterAsync(string procName, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = procName;
+
+        var rows = new List<OrgAssuranceMasterRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new OrgAssuranceMasterRow(
+                ReadLongOrNull(reader, "Id"),
+                ReadStringOrNull(reader, "Code"),
+                ReadStringOrNull(reader, "Name"),
+                ReadStringOrNull(reader, "Description")));
+        }
+        return rows;
+    }
+
+    // -----------------------------------------------------------------
     // List definitions (paginated)
     // -----------------------------------------------------------------
     public async Task<OrgAssuranceDefinitionListResult> ListAsync(
@@ -233,7 +280,33 @@ public sealed class OrgAssuranceDefinitionService(
         AddParam(command, "@definition_id",   DbType.Int64, definitionId);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken) ? MapDetailRow(reader) : null;
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        var detail = MapDetailRow(reader);
+
+        // 560: second result set -- the current version's Applicable Frameworks;
+        // third -- its Audit Mandates (both absent before 560 is run: empty lists).
+        var frameworks = new List<OrgAssuranceDefinitionFrameworkRow>();
+        var mandates   = new List<OrgAssuranceDefinitionMandateRow>();
+        if (await reader.NextResultAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                frameworks.Add(new OrgAssuranceDefinitionFrameworkRow(
+                    ReadLongOrNull(reader, "DefinitionFrameworkId"),
+                    ReadLongOrNull(reader, "ReleaseId"),
+                    reader["FrameworkName"]?.ToString() ?? "",
+                    ReadIntOrNull(reader, "DisplayOrder") ?? 0));
+            if (await reader.NextResultAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                    mandates.Add(new OrgAssuranceDefinitionMandateRow(
+                        ReadLongOrNull(reader, "DefinitionMandateId"),
+                        Convert.ToInt64(reader["AuditMandateId"]),
+                        reader["MandateCode"]?.ToString() ?? "",
+                        reader["MandateName"]?.ToString() ?? "",
+                        ReadIntOrNull(reader, "DisplayOrder") ?? 0));
+            }
+        }
+        return detail with { ApplicableFrameworks = frameworks, AuditMandates = mandates };
     }
 
     // -----------------------------------------------------------------
@@ -270,6 +343,18 @@ public sealed class OrgAssuranceDefinitionService(
             AddParam(command, "@assurance_category_id",   DbType.Int64,  (object?)request.AssuranceCategoryId ?? DBNull.Value);
             AddParam(command, "@assurance_category_code", DbType.String, (object?)request.AssuranceCategoryCode ?? DBNull.Value, 120);
             AddParam(command, "@assurance_category_name", DbType.String, (object?)request.AssuranceCategoryName ?? DBNull.Value, 200);
+            // 560: Assurance Approach, Audit Mandate, Applicable Frameworks (JSON; null = unchanged).
+            AddParam(command, "@assurance_approach_id",   DbType.Int64,  (object?)request.AssuranceApproachId ?? DBNull.Value);
+            AddParam(command, "@audit_mandate_ids_json",  DbType.String,
+                request.AuditMandateIds is null
+                    ? (object)DBNull.Value
+                    : System.Text.Json.JsonSerializer.Serialize(request.AuditMandateIds), -1);
+            AddParam(command, "@applicable_frameworks_json", DbType.String,
+                request.ApplicableFrameworks is null
+                    ? (object)DBNull.Value
+                    : System.Text.Json.JsonSerializer.Serialize(request.ApplicableFrameworks
+                        .Where(f => !string.IsNullOrWhiteSpace(f.Name))
+                        .Select(f => new { releaseId = f.ReleaseId, name = f.Name!.Trim() })), -1);
             AddParam(command, "@actor",                   DbType.String, (object?)request.Actor ?? (object)"system", 100);
 
             var defIdOut = command.CreateParameter();
@@ -405,7 +490,8 @@ public sealed class OrgAssuranceDefinitionService(
                 reader["DimensionName"]?.ToString() ?? "",
                 reader["Category"]?.ToString() ?? "",
                 Convert.ToBoolean(reader["IsPickable"]),
-                Convert.ToInt32(reader["DisplayOrder"])));
+                Convert.ToInt32(reader["DisplayOrder"]),
+                HasColumn(reader, "DependencyTypeId") ? ReadLongOrNull(reader, "DependencyTypeId") : null));   // 562
         }
         return rows;
     }
@@ -434,6 +520,38 @@ public sealed class OrgAssuranceDefinitionService(
                 ReadLongOrNull(reader,  "Id"),
                 ReadStringOrNull(reader, "Code"),
                 ReadStringOrNull(reader, "Name")));
+        }
+        return rows;
+    }
+
+    // 534 -- sp_org_assurance_scope_statement_tree: every selectable source
+    // statement with its framework / release / structure and the number of
+    // practice instances it resolves to.
+    public async Task<IReadOnlyList<OrgAssuranceScopeStatementTreeRow>> ListScopeStatementTreeAsync(
+        long organizationId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_scope_statement_tree";
+
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+
+        var rows = new List<OrgAssuranceScopeStatementTreeRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new OrgAssuranceScopeStatementTreeRow(
+                reader["FrameworkKey"]?.ToString()  ?? "",
+                reader["FrameworkName"]?.ToString() ?? "",
+                reader["ReleaseKey"]?.ToString()    ?? "",
+                reader["ReleaseName"]?.ToString()   ?? "",
+                reader["StructureKey"]?.ToString()  ?? "",
+                reader["StructureName"]?.ToString() ?? "",
+                Convert.ToInt64(reader["StatementId"]),
+                ReadStringOrNull(reader, "StatementCode"),
+                ReadStringOrNull(reader, "StatementName"),
+                ReadIntOrNull(reader, "InstanceCount") ?? 0));
         }
         return rows;
     }
@@ -581,16 +699,212 @@ public sealed class OrgAssuranceDefinitionService(
     }
 
     // -----------------------------------------------------------------
-    // Evidence Configuration (Stage 2 -- BRD Part 2 Sec 5)
+    // 562: Scope Builder Step 2 -- Discover related GRAC intelligence
+    // -----------------------------------------------------------------
+    public async Task<OrgAssuranceScopeDiscovery?> GetScopeDiscoveryAsync(
+        long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_scope_discover";
+            AddParam(command, "@organization_id", DbType.Int64, organizationId);
+            AddParam(command, "@definition_id",   DbType.Int64, definitionId);
+            AddParam(command, "@version_id",      DbType.Int64, (object?)versionId ?? DBNull.Value);
+
+            var categories = new List<OrgAssuranceScopeDiscoveryCategory>();
+            var rows       = new List<OrgAssuranceScopeDiscoveryRow>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                categories.Add(new OrgAssuranceScopeDiscoveryCategory(
+                    reader["CategoryCode"]?.ToString() ?? "",
+                    reader["CategoryName"]?.ToString() ?? "",
+                    ReadIntOrNull(reader, "DisplayOrder") ?? 0,
+                    ReadLongOrNull(reader, "ItemCount") ?? 0,
+                    reader["IsIncluded"] != DBNull.Value && Convert.ToBoolean(reader["IsIncluded"])));
+            if (await reader.NextResultAsync(cancellationToken))
+                while (await reader.ReadAsync(cancellationToken))
+                    rows.Add(new OrgAssuranceScopeDiscoveryRow(
+                        reader["CategoryCode"]?.ToString() ?? "",
+                        Convert.ToInt64(reader["RecordId"]),
+                        ReadStringOrNull(reader, "RecordCode"),
+                        ReadStringOrNull(reader, "RecordName"),
+                        ReadStringOrNull(reader, "Status"),
+                        ReadStringOrNull(reader, "Reason")));
+            return new OrgAssuranceScopeDiscovery(categories, rows);
+        }
+        catch (SqlException ex) when (ex.Number is 53606 or 53607)
+        {
+            return null;
+        }
+    }
+
+    public async Task<OrgAssuranceScopeSaveResult> SaveScopeCategoriesAsync(
+        OrgAssuranceScopeCategorySaveRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.OrganizationId <= 0)
+            return new OrgAssuranceScopeSaveResult(false, Error: "OrganizationId is required.");
+        if (request.DefinitionId <= 0)
+            return new OrgAssuranceScopeSaveResult(false, Error: "DefinitionId is required.");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            (request.Categories ?? Array.Empty<OrgAssuranceScopeCategoryInput>())
+                .Where(c => !string.IsNullOrWhiteSpace(c.Code))
+                .Select(c => new { code = c.Code.Trim().ToUpperInvariant(), isIncluded = c.IsIncluded }));
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_scope_category_save";
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@definition_id",   DbType.Int64,  request.DefinitionId);
+            AddParam(command, "@categories_json", DbType.String, json, -1);
+            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return new OrgAssuranceScopeSaveResult(true, request.DefinitionId);
+        }
+        catch (SqlException ex)
+        {
+            var reason = MapScopeReason(ex.Number);
+            logger.LogWarning(ex,
+                "OrgAssuranceDefinitionService.SaveScopeCategoriesAsync failed with SQL error {Number}: {Message}",
+                ex.Number, ex.Message);
+            return new OrgAssuranceScopeSaveResult(false, Error: ex.Message, ReasonCode: reason);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 564: Control and Practice Mapping (Audit Configuration step).
+    // -----------------------------------------------------------------
+    public async Task<OrgAssuranceMappingOptions> GetMappingOptionsAsync(
+        long organizationId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_mapping_options";
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+
+        var practices = new List<OrgAssuranceMappingOptionRow>();
+        var instances = new List<OrgAssuranceMappingOptionRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            practices.Add(new OrgAssuranceMappingOptionRow(
+                Convert.ToInt64(reader["Id"]),
+                ReadStringOrNull(reader, "Code"),
+                ReadStringOrNull(reader, "Name"),
+                null, null,
+                ReadIntOrNull(reader, "InstanceCount")));
+        if (await reader.NextResultAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+                instances.Add(new OrgAssuranceMappingOptionRow(
+                    Convert.ToInt64(reader["Id"]),
+                    ReadStringOrNull(reader, "Code"),
+                    ReadStringOrNull(reader, "Name"),
+                    ReadLongOrNull(reader,   "PracticeId"),
+                    ReadStringOrNull(reader, "PracticeCode"),
+                    null));
+        return new OrgAssuranceMappingOptions(practices, instances);
+    }
+
+    public async Task<OrgAssuranceMappingResult?> GetMappingAsync(
+        long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_definition_mapping_get";
+            AddParam(command, "@organization_id", DbType.Int64, organizationId);
+            AddParam(command, "@definition_id",   DbType.Int64, definitionId);
+            AddParam(command, "@version_id",      DbType.Int64, (object?)versionId ?? DBNull.Value);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+            var header = new OrgAssuranceMappingHeader(
+                definitionId,
+                ReadLongOrNull(reader,   "VersionId"),
+                ReadStringOrNull(reader, "StatusCode"),
+                reader["IsEditable"] != DBNull.Value && Convert.ToBoolean(reader["IsEditable"]));
+            var items = new List<OrgAssuranceMappingRow>();
+            if (await reader.NextResultAsync(cancellationToken))
+                while (await reader.ReadAsync(cancellationToken))
+                    items.Add(new OrgAssuranceMappingRow(
+                        Convert.ToInt64(reader["MappingId"]),
+                        reader["MappingType"]?.ToString() ?? "",
+                        ReadLongOrNull(reader,   "RecordId"),
+                        ReadStringOrNull(reader, "RecordCode"),
+                        ReadStringOrNull(reader, "RecordName"),
+                        ReadStringOrNull(reader, "ManualKind"),
+                        ReadStringOrNull(reader, "ManualReference"),
+                        ReadStringOrNull(reader, "Note"),
+                        ReadIntOrNull(reader,    "DisplayOrder") ?? 0,
+                        ReadLongOrNull(reader,   "PracticeId"),
+                        reader["IsAvailable"] != DBNull.Value && Convert.ToBoolean(reader["IsAvailable"])));
+            return new OrgAssuranceMappingResult(header, items);
+        }
+        catch (SqlException ex) when (ex.Number is 53606 or 53607)
+        {
+            return null;
+        }
+    }
+
+    public async Task<OrgAssuranceMappingSaveResult> SaveMappingAsync(
+        OrgAssuranceMappingSaveRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.OrganizationId <= 0)
+            return new OrgAssuranceMappingSaveResult(false, Error: "OrganizationId is required.");
+        if (request.DefinitionId <= 0)
+            return new OrgAssuranceMappingSaveResult(false, Error: "DefinitionId is required.");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            (request.Items ?? Array.Empty<OrgAssuranceMappingInput>())
+                .Where(i => !string.IsNullOrWhiteSpace(i.MappingType))
+                .Select(i => new
+                {
+                    mappingType = i.MappingType.Trim().ToUpperInvariant(),
+                    recordId    = i.RecordId,
+                    manualKind  = i.ManualKind,
+                    reference   = i.Reference,
+                    name        = i.Name,
+                    note        = i.Note
+                }));
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_definition_mapping_save";
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@definition_id",   DbType.Int64,  request.DefinitionId);
+            AddParam(command, "@items_json",      DbType.String, json, -1);
+            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
+            var count = await command.ExecuteScalarAsync(cancellationToken);
+            return new OrgAssuranceMappingSaveResult(true,
+                count is null || count == DBNull.Value ? null : Convert.ToInt32(count));
+        }
+        catch (SqlException ex)
+        {
+            var reason = MapScopeReason(ex.Number);
+            logger.LogWarning(ex,
+                "OrgAssuranceDefinitionService.SaveMappingAsync failed with SQL error {Number}: {Message}",
+                ex.Number, ex.Message);
+            return new OrgAssuranceMappingSaveResult(false, Error: ex.Message, ReasonCode: reason);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Evidence Types (question Evidence Type lookup). Evidence
+    // Configuration removed by 536.
     // -----------------------------------------------------------------
     public async Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListEvidenceTypesAsync(CancellationToken cancellationToken)
         => await ListLookupAsync("grac_practice.sp_org_assurance_evidence_type_list", cancellationToken);
-
-    public async Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListCollectionMethodsAsync(CancellationToken cancellationToken)
-        => await ListLookupAsync("grac_practice.sp_org_assurance_collection_method_list", cancellationToken);
-
-    public async Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListFrequenciesAsync(CancellationToken cancellationToken)
-        => await ListLookupAsync("grac_practice.sp_org_assurance_frequency_list", cancellationToken);
 
     private async Task<IReadOnlyList<OrgAssuranceEvidenceLookupRow>> ListLookupAsync(string procName, CancellationToken cancellationToken)
     {
@@ -609,139 +923,6 @@ public sealed class OrgAssuranceDefinitionService(
                 ReadStringOrNull(reader, "Name")));
         }
         return rows;
-    }
-
-    public async Task<OrgAssuranceEvidenceConfigResult?> GetEvidenceConfigAsync(
-        long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command    = connection.CreateCommand();
-        command.CommandType = CommandType.StoredProcedure;
-        command.CommandText = "grac_practice.sp_org_assurance_evidence_config_get";
-
-        AddParam(command, "@organization_id", DbType.Int64, organizationId);
-        AddParam(command, "@definition_id",   DbType.Int64, definitionId);
-        AddParam(command, "@version_id",      DbType.Int64, (object?)versionId ?? DBNull.Value);
-
-        try
-        {
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken)) return null;
-            var header = new OrgAssuranceEvidenceConfigHeader(
-                Convert.ToInt64(reader["DefinitionId"]),
-                Convert.ToInt64(reader["VersionId"]),
-                ReadLongOrNull(reader, "CurrentVersionId"),
-                reader["CurrentStatusCode"]?.ToString() ?? "",
-                Convert.ToBoolean(reader["IsEditable"]));
-
-            var items = new List<OrgAssuranceEvidenceConfigRow>();
-            if (await reader.NextResultAsync(cancellationToken))
-            {
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    items.Add(new OrgAssuranceEvidenceConfigRow(
-                        Convert.ToInt64(reader["EvidenceConfigId"]),
-                        ReadIntOrNull(reader,    "EvidenceTypeId"),
-                        ReadStringOrNull(reader, "EvidenceTypeCode"),
-                        ReadStringOrNull(reader, "EvidenceTypeName"),
-                        ReadIntOrNull(reader,    "CollectionMethodId"),
-                        ReadStringOrNull(reader, "CollectionMethodCode"),
-                        ReadStringOrNull(reader, "CollectionMethodName"),
-                        ReadIntOrNull(reader,    "CollectionFrequencyId"),
-                        ReadStringOrNull(reader, "CollectionFrequencyCode"),
-                        ReadStringOrNull(reader, "CollectionFrequencyName"),
-                        ReadStringOrNull(reader, "EvidenceOwner"),
-                        ReadStringOrNull(reader, "RetentionPeriod"),
-                        ReadStringOrNull(reader, "EvidenceLocation"),
-                        ReadStringOrNull(reader, "EvidenceLocator"),
-                        reader["EvidenceLabel"]?.ToString() ?? "",
-                        ReadStringOrNull(reader, "Description"),
-                        Convert.ToBoolean(reader["IsMandatory"]),
-                        ReadIntOrNull(reader,    "ValidityDays"),
-                        ReadIntOrNull(reader,    "ExpiryWarningDays"),
-                        Convert.ToInt32(reader["DisplayOrder"]),
-                        // 118 hybrid role+employee Owner
-                        ReadLongOrNull(reader,   "OwnerRoleId"),
-                        ReadStringOrNull(reader, "OwnerRoleName"),
-                        ReadLongOrNull(reader,   "OwnerEmployeeId"),
-                        ReadStringOrNull(reader, "OwnerDisplayName")));
-                }
-            }
-            return new OrgAssuranceEvidenceConfigResult(header, items);
-        }
-        catch (SqlException ex)
-        {
-            logger.LogWarning(ex,
-                "OrgAssuranceDefinitionService.GetEvidenceConfigAsync SQL error {Number}: {Message}",
-                ex.Number, ex.Message);
-            throw;
-        }
-    }
-
-    public async Task<OrgAssuranceEvidenceConfigSaveResult> SaveEvidenceConfigAsync(
-        OrgAssuranceEvidenceConfigSaveRequest request, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (request.OrganizationId <= 0)
-            return new OrgAssuranceEvidenceConfigSaveResult(false, Error: "OrganizationId is required.");
-        if (request.DefinitionId <= 0)
-            return new OrgAssuranceEvidenceConfigSaveResult(false, Error: "DefinitionId is required.");
-
-        var payload = (request.Items ?? Array.Empty<OrgAssuranceEvidenceConfigSaveItem>())
-            .Where(i => !string.IsNullOrWhiteSpace(i.EvidenceLabel))
-            .Select(i => new
-            {
-                evidenceTypeId          = i.EvidenceTypeId,
-                evidenceTypeCode        = i.EvidenceTypeCode,
-                evidenceTypeName        = i.EvidenceTypeName,
-                collectionMethodId      = i.CollectionMethodId,
-                collectionMethodCode    = i.CollectionMethodCode,
-                collectionMethodName    = i.CollectionMethodName,
-                collectionFrequencyId   = i.CollectionFrequencyId,
-                collectionFrequencyCode = i.CollectionFrequencyCode,
-                collectionFrequencyName = i.CollectionFrequencyName,
-                evidenceOwner           = i.EvidenceOwner,
-                retentionPeriod         = i.RetentionPeriod,
-                evidenceLocation        = i.EvidenceLocation,
-                evidenceLocator         = i.EvidenceLocator,
-                evidenceLabel           = i.EvidenceLabel.Trim(),
-                description             = i.Description,
-                isMandatory             = i.IsMandatory ?? false,
-                validityDays            = i.ValidityDays,
-                expiryWarningDays       = i.ExpiryWarningDays,
-                displayOrder            = i.DisplayOrder ?? 0,
-                // 118 hybrid role+employee Owner
-                ownerRoleId             = i.OwnerRoleId,
-                ownerRoleName           = i.OwnerRoleName,
-                ownerEmployeeId         = i.OwnerEmployeeId,
-                ownerDisplayName        = i.OwnerDisplayName
-            });
-        var itemsJson = System.Text.Json.JsonSerializer.Serialize(payload);
-
-        try
-        {
-            await using var connection = await OpenAsync(cancellationToken);
-            await using var command    = connection.CreateCommand();
-            command.CommandType = CommandType.StoredProcedure;
-            command.CommandText = "grac_practice.sp_org_assurance_evidence_config_save";
-
-            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
-            AddParam(command, "@definition_id",   DbType.Int64,  request.DefinitionId);
-            AddParam(command, "@items_json",      DbType.String, itemsJson, -1);
-            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
-
-            await command.ExecuteNonQueryAsync(cancellationToken);
-            return new OrgAssuranceEvidenceConfigSaveResult(true, request.DefinitionId);
-        }
-        catch (SqlException ex)
-        {
-            var reason = MapScopeReason(ex.Number);   // shares the same THROW space as scope
-            logger.LogWarning(ex,
-                "OrgAssuranceDefinitionService.SaveEvidenceConfigAsync SQL error {Number}: {Message}",
-                ex.Number, ex.Message);
-            return new OrgAssuranceEvidenceConfigSaveResult(false, Error: ex.Message, ReasonCode: reason);
-        }
     }
 
     // -----------------------------------------------------------------
@@ -765,6 +946,42 @@ public sealed class OrgAssuranceDefinitionService(
                 ReadStringOrNull(reader, "Description")));
         }
         return rows;
+    }
+
+    // 538: one Admin template and its stages, shaped as organization stages.
+    public async Task<OrgAssuranceAdminWorkflowTemplateDetail?> GetAdminWorkflowTemplateAsync(long templateId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_admin_workflow_template_stage_list";
+        AddParam(command, "@template_id", DbType.Int64, templateId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        var id          = ReadLongOrNull(reader,   "Id");
+        var code        = ReadStringOrNull(reader, "Code");
+        var name        = ReadStringOrNull(reader, "Name");
+        var description = ReadStringOrNull(reader, "Description");
+        var totalSla    = ReadIntOrNull(reader,    "TotalSlaDays");
+
+        var stages = new List<OrgAssuranceAdminWorkflowTemplateStageRow>();
+        if (await reader.NextResultAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                stages.Add(new OrgAssuranceAdminWorkflowTemplateStageRow(
+                    ReadIntOrNull(reader,    "StageOrder"),
+                    ReadStringOrNull(reader, "StageCode"),
+                    ReadStringOrNull(reader, "StageName"),
+                    ReadStringOrNull(reader, "StageType"),
+                    ReadIntOrNull(reader,    "SlaDays"),
+                    ReadStringOrNull(reader, "Instructions"),
+                    ReadStringOrNull(reader, "AdminStageType"),
+                    ReadIntOrNull(reader,    "SlaHours")));
+            }
+        }
+        return new OrgAssuranceAdminWorkflowTemplateDetail(id, code, name, description, totalSla, stages);
     }
 
     public async Task<IReadOnlyList<OrgAssuranceWorkflowStageTypeRow>> ListWorkflowStageTypesAsync(CancellationToken cancellationToken)
@@ -1545,6 +1762,11 @@ public sealed class OrgAssuranceDefinitionService(
         53702 => "DIMENSION_CODE_REQUIRED",
         53703 => "INVALID_JSON",
         53704 => "UNKNOWN_DIMENSION",
+        53705 => "INVALID_CATEGORIES",   // 562
+        53706 => "UNKNOWN_CATEGORY",     // 562
+        53707 => "INVALID_MAPPING",      // 564
+        53708 => "MAPPED_RECORD_NOT_FOUND",   // 564
+        53709 => "MANUAL_MAPPING_NAME_REQUIRED",  // 564
         _     => "SQL_ERROR"
     };
 
@@ -1637,12 +1859,24 @@ public sealed class OrgAssuranceDefinitionService(
         ReadLongOrNull(r, "AssuranceCategoryId"),
         ReadStringOrNull(r, "AssuranceCategoryCode"),
         ReadStringOrNull(r, "AssuranceCategoryName"),
+        // 560 -- tolerant: the columns exist only once 560 is run.
+        HasColumn(r, "AssuranceApproachId")   ? ReadLongOrNull(r, "AssuranceApproachId")     : null,
+        HasColumn(r, "AssuranceApproachCode") ? ReadStringOrNull(r, "AssuranceApproachCode") : null,
+        HasColumn(r, "AssuranceApproachName") ? ReadStringOrNull(r, "AssuranceApproachName") : null,
         ReadStringOrNull(r, "SubmittedBy"), ReadDateTimeOrNull(r, "SubmittedDt"),
         ReadStringOrNull(r, "ApprovedBy"),  ReadDateTimeOrNull(r, "ApprovedDt"),
         ReadStringOrNull(r, "ActivatedBy"), ReadDateTimeOrNull(r, "ActivatedDt"),
         ReadStringOrNull(r, "RetiredBy"),   ReadDateTimeOrNull(r, "RetiredDt"),
         ReadStringOrNull(r, "EnteredBy"),   ReadDateTimeOrNull(r, "EnteredDt"),
         ReadStringOrNull(r, "UpdatedBy"),   ReadDateTimeOrNull(r, "UpdatedDt"));
+
+    // 560: tolerant read of columns a later migration adds.
+    private static bool HasColumn(DbDataReader r, string col)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+            if (string.Equals(r.GetName(i), col, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 
     private static OrgAssuranceDefinitionHistoryRow MapHistoryRow(DbDataReader r) => new(
         Convert.ToInt64(r["HistoryId"]),
@@ -1682,7 +1916,13 @@ public sealed class OrgAssuranceDefinitionService(
         logger.LogWarning(ex,
             "OrgAssuranceDefinitionService.{Op} failed with SQL error {Number}: {Message}",
             op, ex.Number, ex.Message);
-        return new OrgAssuranceDefinitionSaveResult(false, Error: ex.Message, ReasonCode: reason);
+        // 2026-11-04: two creates racing past the 53605 check meet the
+        // UNIQUE(organization_id, definition_code) constraint instead; show
+        // the same message rather than the raw constraint text.
+        var error = ex.Number is 2627 or 2601
+            ? "A definition with this code already exists in the organization."
+            : ex.Message;
+        return new OrgAssuranceDefinitionSaveResult(false, Error: error, ReasonCode: reason);
     }
 
     private OrgAssuranceDefinitionTransitionResult HandleSqlErrorAsTransition(SqlException ex, string op)
@@ -1702,12 +1942,17 @@ public sealed class OrgAssuranceDefinitionService(
         53603 => "CODE_REQUIRED",
         53604 => "NAME_REQUIRED",
         53605 => "DUPLICATE_CODE",
+        2627 or 2601 => "DUPLICATE_CODE",   // unique key (organization_id, definition_code)
         53606 => "NOT_FOUND",
         53607 => "WRONG_ORGANIZATION",
         53608 => "NOT_EDITABLE_IN_REVIEW",
         53609 => "STATUS_LOOKUP_FAILED",
         53610 => "ILLEGAL_TRANSITION",
         53611 => "NO_CURRENT_VERSION",
+        53612 => "CONFIGURATION_INCOMPLETE",   // 537: submit before the configuration is complete
+        53613 => "APPROACH_NOT_FOUND",         // 560: Assurance Approach missing or inactive
+        53614 => "FRAMEWORKS_INVALID",         // 560: Applicable Frameworks list not valid JSON
+        53615 => "MANDATE_INVALID",            // 560: an Audit Mandate missing / inactive, or the list not valid JSON
         _     => "SQL_ERROR"
     };
 }

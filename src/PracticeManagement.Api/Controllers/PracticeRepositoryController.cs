@@ -63,6 +63,10 @@ public sealed class PracticeRepositoryController(
         // from GRAC_New.time_zone_master (managed in ControlManagement, not
         // here). Same shim pattern as asset-taxonomy / connection-types.
         "time-zones",
+        // 553: Role Master's Responsibilities multi-select (Auditor, Audit
+        // Reviewer ...). Read-only lookup over role_responsibility_master,
+        // same shim pattern as time-zones.
+        "role-responsibilities",
         // Team Members tree on the Add/Edit Team form (change request
         // 2026-09-20, migration 362). "team-department-employees" is the
         // read-only Department->Employee tree feed; "team-members" is the
@@ -95,7 +99,9 @@ public sealed class PracticeRepositoryController(
         // above (Manage/Query enforce IsAllowed, which is false for PM_LOGIN).
         "authenticate", "set-password", "resolve-identity",
         // Single sign-on (2026-10-12): same bootstrap transport as authenticate.
-        "authenticate-external"
+        "authenticate-external",
+        // Forgot password (529, 2026-11-10): same bootstrap transport.
+        "password-reset-request", "password-reset-validate", "password-reset-complete"
     };
 
     [HttpGet]
@@ -264,6 +270,63 @@ public sealed class PracticeRepositoryController(
             return changed
                 ? new PracticeRepositoryResult(true, "Password changed.")
                 : new PracticeRepositoryResult(false, "The password could not be changed.");
+        });
+
+    // =================================================================
+    // Forgot password -- reset by email link (migration 529, 2026-11-10).
+    // Same bootstrap-token transport and trust model as set-password: the
+    // Web tier's Login/ForgotPassword and Login/ResetPassword actions call
+    // these before any session exists. docs/forgot-password.md.
+    //
+    // request : { loginId, requestedIp } -> Data { token, email, employeeName,
+    //           expiresInMinutes } when a link was issued; Success true with
+    //           no Data when nothing was issued (one answer for every
+    //           refusal); Success false only when the feature is unavailable.
+    // validate: { token } -> Data { email, employeeName } or Success false.
+    // complete: { token, newPassword } -> Success true / false ("invalid").
+    // =================================================================
+    [HttpPost("secure/password-reset-request")]
+    public Task<IActionResult> PasswordResetRequest([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var loginId = JsonString(request.Data, "loginId");
+            if (string.IsNullOrWhiteSpace(loginId))
+                return new PracticeRepositoryResult(false, "A user ID or email is required.");
+
+            var outcome = await authenticationService.RequestPasswordResetAsync(loginId, JsonString(request.Data, "requestedIp"), cancellationToken);
+            if (!outcome.Available)
+                return new PracticeRepositoryResult(false, "Password reset is not available.", null, "unavailable");
+            return outcome.Issue is null
+                ? new PracticeRepositoryResult(true, "Not issued.")
+                : new PracticeRepositoryResult(true, "Issued.", outcome.Issue);
+        });
+
+    [HttpPost("secure/password-reset-validate")]
+    public Task<IActionResult> PasswordResetValidate([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var token = JsonString(request.Data, "token");
+            var target = string.IsNullOrWhiteSpace(token) ? null : await authenticationService.ValidatePasswordResetAsync(token, cancellationToken);
+            return target is null
+                ? new PracticeRepositoryResult(false, "This password reset link is invalid or has expired.")
+                : new PracticeRepositoryResult(true, "Valid.", target);
+        });
+
+    [HttpPost("secure/password-reset-complete")]
+    public Task<IActionResult> PasswordResetComplete([FromBody] EncryptedRequest envelope, CancellationToken cancellationToken) =>
+        ExecuteAsync(envelope, null, async (request, _) =>
+        {
+            var token = JsonString(request.Data, "token");
+            var newPassword = JsonString(request.Data, "newPassword");
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(newPassword))
+                return new PracticeRepositoryResult(false, "A reset link and a new password are required.");
+
+            return await authenticationService.CompletePasswordResetAsync(token, newPassword, cancellationToken) switch
+            {
+                PasswordResetCompletion.Completed => new PracticeRepositoryResult(true, "Password changed."),
+                PasswordResetCompletion.Invalid   => new PracticeRepositoryResult(false, "This password reset link is invalid or has expired.", null, "invalid"),
+                _                                 => new PracticeRepositoryResult(false, "The password could not be changed.")
+            };
         });
 
     private static string? JsonString(JsonElement data, string property) =>

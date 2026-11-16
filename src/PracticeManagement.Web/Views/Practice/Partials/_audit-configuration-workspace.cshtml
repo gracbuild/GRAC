@@ -1,0 +1,887 @@
+@*
+    Audit Configuration workspace (537, 2026-11-13; 543 the same day).
+
+    Screen key : `org-audit-configuration`
+    Group      : Audit Management
+
+    REQUEST (sir, 537): the page showed two Organization pickers -- the flow
+    shell's context bar and each hosted screen's own. Make it a list of
+    the audits to configure; a row click opens the audit's view.
+
+    REQUEST (sir, 543): Scope Builder and Question Sets move here from Audit
+    Definition (which keeps only the audit details). Each step opens on its
+    own (follow-up: in a row under the step) and is saved there; once
+    saved, the step shows Completed. Submit for Review and Approve live here (542, folded in).
+
+    MODES, ONE PAGE (the Audit Definition workspace pattern)
+      list  -- every Draft and Under Review audit of the organization
+               (sp_org_assurance_configuration_list,
+               GET /org-assurance/configuration-audits; Under Review first).
+               One Organization picker. Columns: Code, Name, Owner, Version,
+               Status (Draft / Under Review) and Configured (n/4; 548) -- no
+               per-step columns (sir).
+               3-dot: View, and Submit for Review (Draft) / Approve
+               (Under Review).
+      view  -- row click / View: the audit's facts and its six steps
+               (GET definitions/{id} + setup-status). A step's Configure
+               button opens its screen under the row. Submit for Review
+               (Draft, enabled once every step is Completed) and Approve (Under Review) sit under
+               the steps and on Actions.
+      Opened from Audit Definition's "Audit Configuration" item, the page
+      reads the audit from the encrypted navigation code (?code=,
+      Shared/secure-nav.js) and opens its view.
+      No record id is written to the address bar; the mode lives in the
+      page (standing rule: no plain ids in a URL).
+
+    STEP ROWS EXPAND (543; sir, same day: instead of popups and the Scope
+    Builder full page -- the Question Sets grid's expand pattern)
+      The step list has a Configure column: one button (pen) per step. It opens
+      that step's screen in a row right under the step (one step open at
+      a time); pressing it again, or Cancel, closes it. A row click does
+      nothing. The flow shell (Partials/_audit-flow-shell, hosted mode)
+      waits in a hidden holder with every step's panel; opening a step
+      moves its panel into a frame (caption, panel, Cancel / Save) and the
+      frame into the expand row; closing moves both back. The open step's
+      row stays highlighted, and the page does not scroll -- the step opens
+      downward from where it was clicked. The hosted
+      screens are unchanged apart from the reload hooks below.
+        Scope Builder  save window.__oaScopeBuilder.save()    -> bool
+        Question Sets  save window.__oaAdoption.save()        -> bool
+        Workflow       save window.__oaWorkflowConfig.save()  -> bool
+        Scoring        save window.__oaScoringConfig.save()   -> bool
+        548: Trigger is no longer a step. 545: Scope Resolution is no longer a step (the scope is
+        resolved when an execution is created); its screen is the Preview
+        under the Scope Builder (Partials/_audit-scope-step).
+      Save closes the step and re-reads the step list (its chip turns
+      Completed). Every open re-reads the step (its reload(), quiet), so
+      edits thrown away by closing unsaved are not shown next time; closing
+      after a change (Cancel, the button again, another step, Back) asks
+      first. A failed Save keeps the step open with the screen's own
+      message in it. The step list re-renders on refresh; an open step is
+      put back under its row (mountFrame).
+
+    WHY DRAFT ONLY
+      Every step saves only while the version is Draft (074, 084, 087, 093,
+      277). Under Review (and any other status) a step opens read-only (its
+      button reads View): the hosted screens show their own read-only line
+      and there is no Save. Submit for Review requires every step (537 gate, THROW 53612).
+
+    REUSE
+      The six step screens are hosted unchanged through the flow shell;
+      chips come from the shell (window.__oaFlowShell.chipHtml); the row
+      and page Actions menus are js/Shared/page-actions-menu.js; the facts
+      layout is the Audit Definition view's (.oa-ws-view); message boxes
+      are gracUi.
+*@
+@model PracticeManagement.Web.Models.AuditFlowShell
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Screen.Group / @Model.Screen.Title</p>
+        <h1 id="oaCfgHeading">@Model.Screen.Title</h1>
+        <p id="oaCfgSubtitle">@Model.Screen.Description</p>
+    </div>
+    <div class="pm-actions">
+        <button type="button" class="pm-button" id="oaCfgActionsBtn" aria-haspopup="true" aria-expanded="false" hidden>
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
+        <button type="button" class="pm-button" id="oaCfgBack" hidden>
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> <span id="oaCfgBackLabel">Back to audit list</span>
+        </button>
+    </div>
+</div>
+
+<section class="oa-cfg" id="oaCfgRoot" data-mode="list">
+
+    @* ---------------- List ---------------- *@
+    <section class="pm-panel oa-cfg-list">
+        <div class="pm-toolbar">
+            <select id="oaCfgFilterOrganization" aria-label="Organization"><option value="">Loading organizations...</option></select>
+            <input id="oaCfgSearch" type="text" placeholder="Search name / code..." />
+            <button class="pm-button icon" id="oaCfgRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+            </button>
+        </div>
+        <p class="oa-ws-section-hint">Draft audits are configured here, one step at a time; once every step is complete, submit the audit for review. Audits under review are approved here.</p>
+        <div class="pm-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        @* 543 follow-up (sir): no per-step columns -- Configured
+                           (n/6) and the audit's Status say enough here; the
+                           steps are on the audit's view. *@
+                        <th>Code</th><th>Name</th><th>Owner</th><th>Version</th><th>Status</th>
+                        <th>Configured</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="oaCfgBody">
+                    <tr><td colspan="7" class="pm-empty">Select an organization to load audits.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pm-pager" data-pager="oa-cfg">
+            <button class="pm-button" data-pg="prev" type="button">Previous</button>
+            <span data-pg="label">Page 1</span>
+            <button class="pm-button" data-pg="next" type="button">Next</button>
+            <span data-pg="total" class="pm-pager-total">0 total</span>
+        </div>
+    </section>
+
+    @* ---------------- View: facts, and the steps (Configure opens a step under its row) ---------------- *@
+    <section class="pm-panel oa-ws-view">
+        <div class="pm-toolbar" style="justify-content:space-between">
+            <div style="display:flex; gap:6px; align-items:center;">
+                <span class="pm-badge" id="oaCfgStatus">-</span>
+                <span class="pm-badge" id="oaCfgVersion" hidden></span>
+            </div>
+            <button class="pm-button icon" id="oaCfgViewRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <div class="pm-message" id="oaCfgMessage" style="display:none;"></div>
+
+        <h3 class="oa-wv-section">Audit</h3>
+        <dl class="oa-wv-facts" id="oaCfgFacts"></dl>
+
+        <h3 class="oa-wv-section">Configuration</h3>
+        <div class="pm-table-wrap oa-cfg-steps-wrap">
+            <table>
+                <thead><tr><th>Step</th><th>Status</th><th>Items</th><th>Configure</th></tr></thead>
+                <tbody id="oaCfgSteps"></tbody>
+            </table>
+        </div>
+        @* 542 / 543: review from here. Submit is enabled once every step
+           is Completed; Approve shows while the audit is Under Review. *@
+        <div class="oa-flow-nav oa-cfg-savebar">
+            <span class="oa-ws-section-hint" id="oaCfgReady"></span>
+            <span style="display:flex; gap:8px;">
+                <button type="button" class="pm-button primary" id="oaCfgSubmit" hidden>
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Submit for Review
+                </button>
+                <button type="button" class="pm-button primary" id="oaCfgApprove" hidden>
+                    <i class="fa-solid fa-check" aria-hidden="true"></i> Approve
+                </button>
+            </span>
+        </div>
+    </section>
+
+    @* ---------------- Audit view (sir, 2026-11-13) ----------------
+       The list's 3-dot "View": the Audit Definition view page -- the whole
+       audit, configuration included, read-only (js/Shared/audit-view.js).
+       A row click still opens the step list above. *@
+    <section class="pm-panel oa-ws-view oa-cfg-audit">
+        <div class="pm-toolbar" style="justify-content:space-between">
+            <div style="display:flex; gap:6px; align-items:center;">
+                <span class="pm-badge" id="oaCfgAvStatus">-</span>
+                <span class="pm-badge" id="oaCfgAvVersion" hidden></span>
+            </div>
+            <button class="pm-button icon" id="oaCfgAvRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+        </div>
+        <div class="pm-message" id="oaCfgAvMessage" style="display:none;"></div>
+        <div id="oaCfgAvBody"></div>
+    </section>
+
+    @* ---------------- Step screens (543) ----------------
+       The flow shell, hosted, waits here hidden with every step's panel,
+       and so does the frame an open step is shown in (caption, the panel,
+       Cancel / Save). The Configure button of a step row moves the frame,
+       with that step's panel in it, into a row under the step; closing
+       moves both back. The flag is set before the hosted screens' scripts
+       run: they then leave the address bar alone (no ?definitionId=). *@
+    <div id="oaCfgHolder" hidden>
+        <script>window.__oaHostNoUrl = true;</script>
+        <partial name="Partials/_audit-flow-shell" model="Model" />
+        <div class="oa-cfg-frame" id="oaCfgFrame">
+            <p class="oa-ws-section-hint" id="oaCfgFrameCaption"></p>
+            <div id="oaCfgFrameBody"></div>
+            <div class="oa-flow-nav oa-cfg-savebar">
+                <span class="oa-ws-section-hint" id="oaCfgFrameHint"></span>
+                <span style="display:flex; gap:8px;">
+                    <button type="button" class="pm-button" id="oaCfgFrameCancel">Cancel</button>
+                    <button type="button" class="pm-button primary" id="oaCfgFrameSave">
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save
+                    </button>
+                </span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
+<script src="~/js/Shared/audit-view.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+
+    const root = document.getElementById('oaCfgRoot');
+    const wf   = window.__wfCommon;
+    if (!root || !wf) return;
+
+    const API = '/practice/api/org-assurance';
+    const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const esc = wf.escape;
+    const pick = function (o, a, b) { return o ? (o[a] != null ? o[a] : o[b]) : null; };
+
+    const state = {
+        mode: 'list', orgId: '', definitionId: '', name: '', statusCode: '',
+        steps: [], rows: {},
+        search: '', page: 1, pageSize: 25, total: 0
+    };
+
+    const el = {
+        heading  : document.getElementById('oaCfgHeading'),
+        subtitle : document.getElementById('oaCfgSubtitle'),
+        actions  : document.getElementById('oaCfgActionsBtn'),
+        back     : document.getElementById('oaCfgBack'),
+        backText : document.getElementById('oaCfgBackLabel'),
+        body     : document.getElementById('oaCfgBody'),
+        org      : document.getElementById('oaCfgFilterOrganization'),
+        submit   : document.getElementById('oaCfgSubmit'),
+        approve  : document.getElementById('oaCfgApprove'),
+        holder   : document.getElementById('oaCfgHolder')
+    };
+
+    function chip(status) {
+        const shell = window.__oaFlowShell;
+        return shell ? shell.chipHtml(status || 'NotConfigured') : esc(status || '');
+    }
+    function box(message, type) {
+        if (window.gracUi) return window.gracUi.alert(message, { type: type });
+        window.alert(message);
+        return Promise.resolve();
+    }
+
+    // -----------------------------------------------------------------
+    // Mode
+    // -----------------------------------------------------------------
+    function setMode(mode) {
+        state.mode = mode;
+        root.setAttribute('data-mode', mode);
+        el.actions.hidden = mode !== 'view' && mode !== 'audit';
+        el.back.hidden = mode === 'list';
+        el.backText.textContent = 'Back to audit list';
+        if (mode === 'list') {
+            el.heading.textContent  = 'Audit Configuration';
+            el.subtitle.textContent = 'Draft and Under Review audits: scope, question sets, workflow and scoring.';
+        }
+        window.scrollTo(0, 0);
+    }
+
+    el.back.addEventListener('click', async function () {
+        // An open step closes first (asking when it has changes).
+        if (!(await requestClose())) return;
+        state.definitionId = '';
+        state.statusCode = '';
+        setMode('list');
+        reload();
+    });
+
+    // -----------------------------------------------------------------
+    // Review (542, folded into 543): Submit for Review / Approve.
+    // Same endpoints and body the Audit Definition menu used
+    // (POST definitions/{id}/submit | approve). The 537 gate still checks
+    // the configuration on the server (THROW 53612).
+    // -----------------------------------------------------------------
+    function reviewItems(id, statusCode, openSteps) {
+        const items = [];
+        if (statusCode === 'Draft')
+            items.push({ icon: 'fa-paper-plane', label: 'Submit for Review', run: function () { submitForReview(id, openSteps()); } });
+        if (statusCode === 'UnderReview')
+            items.push({ icon: 'fa-check', label: 'Approve', run: function () { approve(id); } });
+        return items;
+    }
+
+    async function submitForReview(id, open) {
+        if (open && open.length) {
+            await box('Complete every step before submitting the audit for review. Not complete: ' + open.join(', ') + '.', 'warning');
+            return;
+        }
+        const reason = await window.gracUi.prompt('Reason (optional):',
+            { title: 'Submit for Review', inputLabel: 'Reason', confirmText: 'Submit' });
+        if (reason === null) return;   // cancelled
+        await transition(id, 'submit', reason, 'Submitted for review.');
+    }
+    // 544 (sir): approving makes the audit Active at once -- the approve
+    // procedure runs Approved and then Active; no separate Activate.
+    async function approve(id) {
+        const reason = await window.gracUi.prompt('Approving makes the audit Active. Reason (optional):',
+            { title: 'Approve and activate', inputLabel: 'Reason', confirmText: 'Approve' });
+        if (reason === null) return;
+        await transition(id, 'approve', reason, 'Audit approved. It is now Active.');
+    }
+    async function transition(id, action, reason, done) {
+        try {
+            const r = await fetch(U(API + '/definitions/' + encodeURIComponent(id) + '/' + action), {
+                method      : 'POST',
+                credentials : 'same-origin',
+                headers     : { 'Content-Type': 'application/json' },
+                body        : JSON.stringify({
+                    organizationId : Number(state.orgId),
+                    definitionId   : Number(id),
+                    reasonText     : reason || null,
+                    actor          : null
+                })
+            });
+            const j = await r.json().catch(function () { return null; });
+            if (!r.ok) { await box('Failed: ' + ((j && (j.error || j.Error)) || ('HTTP ' + r.status)), 'error'); return; }
+            await box(done, 'success');
+        } catch (err) {
+            await box('Failed: ' + (err.message || err), 'error');
+            return;
+        }
+        if (state.mode === 'view' && state.definitionId === String(id)) loadView();
+        else if (state.mode === 'audit' && state.definitionId === String(id)) loadAuditView();
+        else reload();
+    }
+
+    if (window.gracPageActions) {
+        window.gracPageActions.attach('oaCfgActionsBtn', function () {
+            if (!state.definitionId) return [];
+            const id = state.definitionId;
+            // The audit view (3-dot View) offers the step list too.
+            const head = state.mode === 'audit'
+                ? [{ icon: 'fa-pen', label: 'Configure', run: function () { openView(id); } }]
+                : [];
+            return head.concat(reviewItems(id, state.statusCode, openStepNames));
+        });
+    }
+    el.submit.addEventListener('click', function () { submitForReview(state.definitionId, openStepNames()); });
+    el.approve.addEventListener('click', function () { approve(state.definitionId); });
+
+    // -----------------------------------------------------------------
+    // List
+    // -----------------------------------------------------------------
+    // The row's step statuses: no longer columns (sir), still read for the
+    // 3-dot Submit for Review, which names the steps not yet complete.
+    const LIST_STEPS = [
+        ['Scope Builder',    'scopeStatus',           'ScopeStatus'],
+        ['Question Sets',    'questionsStatus',       'QuestionsStatus'],
+        ['Workflow',         'workflowStatus',        'WorkflowStatus'],
+        ['Scoring',          'scoringStatus',         'ScoringStatus']
+    ];
+
+    async function reload() {
+        if (!state.orgId) {
+            el.body.innerHTML = '<tr><td colspan="7" class="pm-empty">Select an organization to load audits.</td></tr>';
+            wf.updatePager('oa-cfg', { pageNumber: 1, totalCount: 0, pageSize: 1 });
+            return;
+        }
+        el.body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.search) qs.set('search', state.search);
+            qs.set('page', String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/configuration-audits?' + qs.toString()), { credentials: 'same-origin' });
+            const body = await r.json().catch(function () { return null; });
+            if (!r.ok) throw new Error((body && (body.error || body.Error)) || ('HTTP ' + r.status));
+            state.total = Number(pick(body, 'totalCount', 'TotalCount') || 0);
+            const rows = pick(body, 'rows', 'Rows') || [];
+            renderRows(rows);
+            wf.updatePager('oa-cfg', { pageNumber: state.page, totalCount: state.total, pageSize: state.pageSize, rowCount: rows.length });
+        } catch (err) {
+            el.body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function renderRows(rows) {
+        state.rows = {};
+        if (!rows.length) {
+            el.body.innerHTML = '<tr><td colspan="7" class="pm-empty">No audits to configure. A new audit appears here once its details are saved in Audit Definition.</td></tr>';
+            return;
+        }
+        el.body.innerHTML = rows.map(function (row) {
+            const p = function (a, b) { return pick(row, a, b); };
+            const id = String(p('definitionId', 'DefinitionId'));
+            state.rows[id] = row;
+            const owner = wf.personWithRole(p('ownerDisplayName', 'OwnerDisplayName'), p('ownerRoleName', 'OwnerRoleName'));
+            const ver = p('currentVersionLabel', 'CurrentVersionLabel') || (p('currentVersionNumber', 'CurrentVersionNumber') ? String(p('currentVersionNumber', 'CurrentVersionNumber')) : '');
+            const done = Number(p('configuredSteps', 'ConfiguredSteps') || 0);
+            const all  = Number(p('configurationSteps', 'ConfigurationSteps') || 4);
+            return '<tr class="pm-row-clickable" data-id="' + esc(id) + '">'
+                + '<td>' + esc(p('definitionCode', 'DefinitionCode')) + '</td>'
+                + '<td>' + esc(p('definitionName', 'DefinitionName')) + '</td>'
+                + '<td>' + esc(owner) + '</td>'
+                + '<td>' + esc(ver) + '</td>'
+                + '<td>' + esc(p('currentStatusName', 'CurrentStatusName')) + '</td>'
+                + '<td>' + esc(done + '/' + all) + '</td>'
+                + '<td><button type="button" class="pm-action-trigger" data-id="' + esc(id) + '"'
+                + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+                + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+                + '<span class="visually-hidden">Actions</span></button></td>'
+                + '</tr>';
+        }).join('');
+
+        // 3-dot: View, then Submit for Review / Approve by status.
+        if (window.gracPageActions) {
+            el.body.querySelectorAll('.pm-action-trigger').forEach(function (btn) {
+                const id  = btn.getAttribute('data-id');
+                const row = state.rows[id];
+                window.gracPageActions.attach(btn, function () {
+                    // sir, 2026-11-13: View = the whole audit, read-only (the
+                    // Audit Definition view page); Configure = the step list
+                    // (also a row click).
+                    return [{ icon: 'fa-up-right-from-square', label: 'View', run: function () { openAuditView(id); } },
+                            { icon: 'fa-pen', label: 'Configure', run: function () { openView(id); } }]
+                        .concat(reviewItems(id, pick(row, 'currentStatusCode', 'CurrentStatusCode') || '', function () {
+                            return LIST_STEPS.filter(function (s) { return pick(row, s[1], s[2]) !== 'Completed'; })
+                                             .map(function (s) { return s[0]; });
+                        }));
+                });
+            });
+        }
+    }
+
+    // Row click = View (the Audit Definition list's pattern).
+    el.body.addEventListener('click', function (e) {
+        if (e.target.closest('.pm-action-trigger, a, button, input, label, select')) return;
+        const tr = e.target.closest('tr.pm-row-clickable[data-id]');
+        if (tr) openView(tr.getAttribute('data-id'));
+    });
+
+    // -----------------------------------------------------------------
+    // View: facts and the six steps; Configure opens a step under its row.
+    // -----------------------------------------------------------------
+    function fmtDate(v) {
+        if (!v) return '';
+        if (typeof window.gracFormatDisplayDate === 'function') {
+            const g = window.gracFormatDisplayDate(v); if (g !== v) return g;
+        }
+        return String(v).slice(0, 10);
+    }
+    function facts(rows) {
+        return rows.map(function (r) {
+            return '<div><dt>' + esc(r[0]) + '</dt>'
+                 + (r[1] ? '<dd>' + esc(r[1]) + '</dd>' : '<dd class="oa-wv-empty">Not set</dd>') + '</div>';
+        }).join('');
+    }
+    function setMessage(text) {
+        const m = document.getElementById('oaCfgMessage');
+        m.style.display = text ? 'block' : 'none';
+        m.style.background = 'var(--danger-100)'; m.style.color = 'var(--danger-700)';
+        m.textContent = text || '';
+    }
+
+    // The list's 3-dot View (sir): the Audit Definition view page, the whole
+    // audit read-only -- js/Shared/audit-view.js, shared with that page.
+    async function openAuditView(id) {
+        if (!(await requestClose())) return;
+        if (String(id || '') !== state.definitionId) { state.name = ''; state.statusCode = ''; state.steps = []; }
+        state.definitionId = String(id || '');
+        setMode('audit');
+        el.heading.textContent  = state.name || 'Audit Configuration';
+        el.subtitle.textContent = 'This audit, read-only: its details and its configuration.';
+        loadAuditView();
+    }
+    async function loadAuditView() {
+        if (!state.definitionId || !state.orgId) return;
+        const msg = document.getElementById('oaCfgAvMessage');
+        msg.style.display = 'none'; msg.textContent = '';
+        try {
+            const d = await window.gracAuditView.render(document.getElementById('oaCfgAvBody'), {
+                orgId: state.orgId, definitionId: state.definitionId, chipHtml: chip,
+                onSteps: function (steps) { state.steps = steps; }
+            });
+            if (!d) return;
+            state.name = pick(d, 'definitionName', 'DefinitionName') || '';
+            state.statusCode = pick(d, 'currentStatusCode', 'CurrentStatusCode') || '';
+            el.heading.textContent = state.name || 'Audit Configuration';
+            document.getElementById('oaCfgAvStatus').textContent = pick(d, 'currentStatusName', 'CurrentStatusName') || '-';
+            const ver = window.gracAuditView.versionLabel(d);
+            const verEl = document.getElementById('oaCfgAvVersion');
+            verEl.textContent = ver; verEl.hidden = !ver;
+        } catch (err) {
+            msg.style.display = 'block';
+            msg.style.background = 'var(--danger-100)'; msg.style.color = 'var(--danger-700)';
+            msg.textContent = 'Could not load this audit: ' + (err.message || err);
+        }
+    }
+    document.getElementById('oaCfgAvRefreshBtn').addEventListener('click', loadAuditView);
+
+    function openView(id) {
+        const changed = String(id || '') !== state.definitionId;
+        // A different audit never shows the previous one's name or steps.
+        if (changed) { state.name = ''; state.statusCode = ''; state.steps = []; }
+        state.definitionId = String(id || '');
+        setMode('view');
+        el.heading.textContent  = state.name || 'Audit Configuration';
+        el.subtitle.textContent = 'Use Configure on a step to open it under its row. Each step is saved there.';
+        // Bind the hosted step screens to this audit now, so a step opens
+        // on loaded data.
+        if (window.__oaFlowShell) window.__oaFlowShell.setContext(state.orgId, state.definitionId);
+        loadView();
+    }
+
+    async function loadView() {
+        if (!state.definitionId || !state.orgId) return;
+        const id  = encodeURIComponent(state.definitionId);
+        const org = encodeURIComponent(state.orgId);
+        const get = function (path) {
+            return fetch(U(API + path), { credentials: 'same-origin' })
+                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+        };
+        setMessage('');
+        try {
+            const res = await Promise.all([
+                get('/definitions/' + id + '?organizationId=' + org),
+                get('/definitions/' + id + '/setup-status?organizationId=' + org)
+            ]);
+            const d = res[0] && (res[0].data || res[0].Data);
+            if (!d) throw new Error('Audit not found.');
+            renderFacts(d);
+            renderSteps((res[1] && (res[1].steps || res[1].Steps)) || []);
+        } catch (err) {
+            setMessage('Could not load this audit: ' + (err.message || err));
+        }
+    }
+
+    function renderFacts(d) {
+        const p = function (a, b) { return pick(d, a, b); };
+        state.name = p('definitionName', 'DefinitionName') || '';
+        state.statusCode = p('currentStatusCode', 'CurrentStatusCode') || '';
+        el.heading.textContent = state.name || 'Audit Configuration';
+        el.subtitle.textContent = state.statusCode === 'Draft'
+            ? 'Use Configure on a step to open it under its row. Each step is saved there.'
+            : 'Read-only: the audit is ' + (p('currentStatusName', 'CurrentStatusName') || state.statusCode) + '. Use View on a step to see it.';
+        document.getElementById('oaCfgStatus').textContent = p('currentStatusName', 'CurrentStatusName') || '-';
+        const ver = p('currentVersionLabel', 'CurrentVersionLabel') || (p('currentVersionNumber', 'CurrentVersionNumber') ? 'v' + p('currentVersionNumber', 'CurrentVersionNumber') : '');
+        const verEl = document.getElementById('oaCfgVersion');
+        verEl.textContent = ver; verEl.hidden = !ver;
+        document.getElementById('oaCfgFacts').innerHTML = facts([
+            ['Code',               p('definitionCode', 'DefinitionCode')],
+            ['Name',               p('definitionName', 'DefinitionName')],
+            ['Assurance Category', p('assuranceCategoryName', 'AssuranceCategoryName')],
+            ['Owner',              wf.personWithRole(p('ownerDisplayName', 'OwnerDisplayName'), p('ownerRoleName', 'OwnerRoleName'))],
+            ['Effective Date',     fmtDate(p('effectiveDate', 'EffectiveDate'))],
+            ['Status',             p('currentStatusName', 'CurrentStatusName')],
+            ['Version',            ver]
+        ]);
+    }
+
+    function findStep(key) {
+        return state.steps.find(function (x) { return pick(x, 'stepKey', 'StepKey') === key; }) || null;
+    }
+    // 564: an Optional step (Control and Practice Mapping, nothing mapped)
+    // is not open -- it never blocks Submit for Review.
+    function openStepNames() {
+        return state.steps.filter(function (s) {
+                              const st = pick(s, 'status', 'Status');
+                              return st !== 'Completed' && st !== 'Optional';
+                          })
+                          .map(function (s) { return pick(s, 'stepName', 'StepName'); });
+    }
+
+    // Why a step cannot be opened yet, or '' when it can; and a short line
+    // under a step's name when its status needs explaining. 545: the only
+    // rules (Scope Resolution needs a saved, unchanged scope) left with
+    // that step, so every step opens; the hooks stay for the next rule.
+    function blockedReason(key) { return ''; }
+    function stepNote(key, status, items) { return ''; }
+
+    function renderSteps(steps) {
+        state.steps = steps.filter(function (s) { return pick(s, 'stepKey', 'StepKey') !== 'details'; });
+        document.getElementById('oaCfgSteps').innerHTML = state.steps.map(function (s) {
+            const key    = pick(s, 'stepKey', 'StepKey');
+            const status = pick(s, 'status', 'Status');
+            const items  = pick(s, 'itemCount', 'ItemCount');
+            const note   = stepNote(key, status, items);
+            const blocked = blockedReason(key);
+            const label   = state.statusCode === 'Draft' ? 'Configure' : 'View';
+            return '<tr data-step="' + esc(key) + '">'
+                 + '<td>' + esc(pick(s, 'stepName', 'StepName'))
+                 + (note ? '<div class="oa-cfg-step-note">' + esc(note) + '</div>' : '') + '</td>'
+                 + '<td>' + chip(status) + '</td>'
+                 + '<td>' + esc(items) + '</td>'
+                 + '<td><button type="button" class="pm-button icon" data-configure="' + esc(key) + '"'
+                 + ' aria-expanded="false" title="' + esc(blocked || label) + '" aria-label="' + esc(label + ' ' + pick(s, 'stepName', 'StepName')) + '"'
+                 + (blocked ? ' disabled' : '') + '>'
+                 + '<i class="fa-solid fa-pen" aria-hidden="true"></i></button></td></tr>';
+        }).join('') || '<tr><td colspan="4" class="pm-empty">No status available.</td></tr>';
+        // The step list was rebuilt: an open step goes back under its row.
+        mountFrame();
+
+        // 542: Submit for Review shows on a Draft, enabled once every step
+        // is Completed; Approve shows Under Review.
+        const open  = openStepNames();
+        const draft = state.statusCode === 'Draft';
+        el.submit.hidden   = !draft;
+        el.submit.disabled = open.length > 0;
+        el.submit.title    = open.length ? 'Not complete: ' + open.join(', ') : '';
+        el.approve.hidden  = state.statusCode !== 'UnderReview';
+        document.getElementById('oaCfgReady').textContent = !draft
+            ? (state.statusCode === 'UnderReview' ? 'Under review. The configuration is read-only.' : '')
+            : (open.length
+                ? 'Not complete: ' + open.join(', ') + '. The audit can be submitted for review once every step is complete.'
+                : 'Configuration complete. Submit the audit for review.');
+    }
+    document.getElementById('oaCfgViewRefreshBtn').addEventListener('click', loadView);
+
+    // 543 (sir): a step opens from its Configure button only, not a row click.
+    document.getElementById('oaCfgSteps').addEventListener('click', function (e) {
+        const btn = e.target.closest('button[data-configure]');
+        if (!btn || btn.closest('.oa-cfg-expand')) return;
+        toggleStep(btn.getAttribute('data-configure'));
+    });
+
+    // -----------------------------------------------------------------
+    // Step row expand (543, sir): the Configure button opens the step's
+    // screen in a row under it, the Question Sets grid's expand pattern.
+    // -----------------------------------------------------------------
+    // Steps with a Save of their own. msg: the screen's inline message,
+    // hidden by [hidden] (byHidden) or by style.display.
+    const SAVE = {
+        'scope'     : { api: '__oaScopeBuilder',   msg: 'oaScopeMessage', byHidden: true  },
+        'mapping'   : { api: '__oaMapping',        msg: 'oaMapMessage',   byHidden: false },   // 564
+        'questions' : { api: '__oaAdoption',       msg: 'oaAdoptMessage', byHidden: false },
+        'workflow'  : { api: '__oaWorkflowConfig', msg: 'oaWfMessage',    byHidden: true  },
+        'scoring'   : { api: '__oaScoringConfig',  msg: 'oaScMessage',    byHidden: true  }
+    };
+    // A line beside Cancel / Save for steps that need one (the Scope
+    // Builder's Preview reads the saved scope).
+    const ACT_NOW = {
+        'scope'   : 'Save the subjects before Step 2: Discover reads the saved subjects.'   // 562
+    };
+    // The frame around an open step (caption, the step's panel, Cancel /
+    // Save). It and every step panel wait in the hidden holder; the open
+    // step's panel goes into the frame and the frame into the expand row.
+    const frame = {
+        root    : document.getElementById('oaCfgFrame'),
+        caption : document.getElementById('oaCfgFrameCaption'),
+        body    : document.getElementById('oaCfgFrameBody'),
+        hint    : document.getElementById('oaCfgFrameHint'),
+        cancel  : document.getElementById('oaCfgFrameCancel'),
+        save    : document.getElementById('oaCfgFrameSave')
+    };
+    const home = {};   // stepKey -> the panel's place in the flow shell
+    const pop  = { key: '', panel: null, dirty: false, saving: false };
+
+    function clearStepMessage(key) {
+        const cfg  = SAVE[key];
+        const node = cfg && document.getElementById(cfg.msg);
+        if (!node) return;
+        if (cfg.byHidden) node.hidden = true; else node.style.display = 'none';
+        node.textContent = '';
+    }
+    function shownStepMessage(key) {
+        const cfg  = SAVE[key];
+        const node = cfg && document.getElementById(cfg.msg);
+        if (!node) return null;
+        const shown = cfg.byHidden ? !node.hidden : node.style.display !== 'none';
+        return shown && String(node.textContent || '').trim() ? node : null;
+    }
+
+    // Puts the frame in an expand row under the open step's row. Also run
+    // after the step list is re-rendered (its rows are rebuilt), so an open
+    // step stays open; the frame and panel are kept by reference meanwhile.
+    function mountFrame() {
+        if (!pop.key) return;
+        const body = document.getElementById('oaCfgSteps');
+        const row  = body.querySelector('tr[data-step="' + pop.key + '"]');
+        if (!row) return;
+        const tr = document.createElement('tr');
+        tr.className = 'oa-cfg-expand is-selected';
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.appendChild(frame.root);
+        tr.appendChild(td);
+        row.insertAdjacentElement('afterend', tr);
+        // The open step's row stays highlighted while it is open (sir).
+        row.classList.add('oa-cfg-step-open', 'is-selected');
+        const btn = row.querySelector('[data-configure]');
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+    }
+
+    // Closes the open step: its panel goes back to the flow shell, the
+    // frame back to the holder, the expand row away.
+    function unmountStep() {
+        if (pop.panel && home[pop.key]) home[pop.key].appendChild(pop.panel);
+        document.getElementById('oaCfgHolder').appendChild(frame.root);
+        const tr = document.querySelector('#oaCfgSteps tr.oa-cfg-expand');
+        if (tr) tr.remove();
+        const row = document.querySelector('#oaCfgSteps tr.oa-cfg-step-open');
+        if (row) row.classList.remove('oa-cfg-step-open', 'is-selected');
+        const btn = document.querySelector('#oaCfgSteps [data-configure][aria-expanded="true"]');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+        pop.key = '';
+        pop.panel = null;
+        pop.dirty = false;
+    }
+
+    async function openStep(key) {
+        if (!state.definitionId || !key) return;
+        const blocked = blockedReason(key);
+        if (blocked) { await box(blocked, 'warning'); return; }
+        const panel = document.querySelector('#oaCfgHolder [data-flow-panel="' + key + '"]');
+        if (!panel) return;
+
+        const editable = state.statusCode === 'Draft';
+        const caption  = panel.querySelector(':scope > .oa-ws-section-hint');
+        frame.caption.textContent = caption ? caption.textContent : '';
+        frame.save.hidden   = !(SAVE[key] && editable);
+        frame.save.disabled = false;
+        frame.cancel.textContent = SAVE[key] && editable ? 'Cancel' : 'Close';
+        frame.hint.textContent = editable ? (ACT_NOW[key] || '') : 'Read-only: the audit is not a Draft.';
+
+        home[key] = home[key] || panel.parentNode;
+        frame.body.appendChild(panel);
+        pop.key = key;
+        pop.panel = panel;
+        pop.dirty = false;
+        clearStepMessage(key);
+        // Re-apply the audit (a no-op once the screen is bound; binds it if
+        // its own pickers were still loading when the view opened), then
+        // re-read what is saved, so edits thrown away last time are gone.
+        if (window.__oaFlowShell) window.__oaFlowShell.setContext(state.orgId, state.definitionId);
+        const api = SAVE[key] && window[SAVE[key].api];
+        if (api && typeof api.reload === 'function') {
+            try { api.reload(); } catch (_) { /* the screen shows its own error */ }
+        }
+        // The page does not scroll: the step opens downward from its row,
+        // where the user clicked (sir).
+        mountFrame();
+    }
+
+    // Configure button: open the step, or close it when it is the open one.
+    // Another step open first asks to close it (when it has changes).
+    async function toggleStep(key) {
+        if (pop.saving) return;
+        const same = pop.key === key;
+        if (pop.key && !(await requestClose())) return;
+        if (!same) openStep(key);
+    }
+
+    // A change the user makes inside the open step -- typing, picking, or a
+    // button of the step screen -- makes it "dirty", and closing then asks
+    // first. Not counted: Cancel / Save, a message box over it, and change
+    // events raised by code (not isTrusted).
+    function markDirty(e) {
+        if (!e.isTrusted || !pop.key) return;
+        const t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('.grac-dialog-overlay, #oaCfgFrameSave, #oaCfgFrameCancel')) return;
+        if (e.type === 'click' && !t.closest('button')) return;
+        pop.dirty = true;
+    }
+    frame.root.addEventListener('input',  markDirty, true);
+    frame.root.addEventListener('change', markDirty, true);
+    frame.root.addEventListener('click',  markDirty, true);
+
+    // Resolves true when the step was closed (or none was open).
+    async function requestClose() {
+        if (pop.saving) return false;
+        if (!pop.key) return true;
+        if (pop.dirty && SAVE[pop.key] && state.statusCode === 'Draft') {
+            const ok = await window.gracUi.confirm('Close without saving? The changes made here will be lost.',
+                { type: 'warning', title: 'Unsaved changes', confirmText: 'Close without saving' });
+            if (!ok) return false;
+        }
+        unmountStep();
+        // The scope Preview saves while open: show what is saved.
+        loadView();
+        return true;
+    }
+    frame.cancel.addEventListener('click', requestClose);
+
+    async function saveStep() {
+        const key = pop.key;
+        const cfg = SAVE[key];
+        const api = cfg && window[cfg.api];
+        if (!api || pop.saving) return;
+        pop.saving = true;
+        frame.save.disabled = true;
+        clearStepMessage(key);
+        let ok = false;
+        try {
+            ok = await api.save();
+        } catch (_) {
+            ok = false;
+        } finally {
+            pop.saving = false;
+            frame.save.disabled = false;
+        }
+        if (!ok) {
+            // The step screen's own message says why; the step stays open on it.
+            const m = shownStepMessage(key);
+            if (m) m.scrollIntoView({ block: 'nearest' });
+            else await box('Not saved.', 'error');
+            return;
+        }
+        const s = findStep(key);
+        const title = (s && pick(s, 'stepName', 'StepName')) || key;
+        clearStepMessage(key);
+        unmountStep();
+        await loadView();
+        await box(title + ' saved.', 'success');
+    }
+    frame.save.addEventListener('click', saveStep);
+
+    // -----------------------------------------------------------------
+    // Boot
+    // -----------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        setMode('list');
+
+        wf.wirePager('oa-cfg', function (delta) {
+            const next = state.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.page = next;
+            reload();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            el.org.innerHTML = '<option value="">No accessible organizations</option>';
+            reload();
+            return;
+        }
+        wf.populateOrgSelect('oaCfgFilterOrganization', orgs);
+        state.orgId = el.org.value || '';
+
+        el.org.addEventListener('change', function () {
+            state.orgId = el.org.value || '';
+            state.page = 1;
+            reload();
+        });
+        document.getElementById('oaCfgSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.page = 1;
+            clearTimeout(state.searchTimer);
+            state.searchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaCfgRefreshBtn').addEventListener('click', reload);
+
+        // Opened from Audit Definition on one audit (537): the audit and
+        // its organization are in the navigation code. 543: straight to its
+        // view, the step list; Back goes to the list.
+        const ctx = window.gracSecureNav ? await window.gracSecureNav.context('org-audit-configuration') : null;
+        if (ctx && ctx.error) {
+            reload();
+            await box(ctx.error, 'error');
+            return;
+        }
+        if (ctx && ctx.filterType === 'AuditDefinition' && ctx.filterId) {
+            const org = ctx.organizationId ? String(ctx.organizationId) : '';
+            if (org && Array.prototype.some.call(el.org.options, function (o) { return o.value === org; })) el.org.value = org;
+            state.orgId = el.org.value || state.orgId;
+            reload();
+            openView(String(ctx.filterId));
+            return;
+        }
+        reload();
+    }
+})();
+</script>

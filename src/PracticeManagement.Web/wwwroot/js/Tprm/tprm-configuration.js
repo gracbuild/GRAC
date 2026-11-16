@@ -28,7 +28,7 @@
   const CAN_APPROVE = root.dataset.canApprove === "1";
   const ORIGIN = { GRAC: "GRAC", GRAC_OVERRIDDEN: "GRAC, changed", ORGANIZATION: "Organization" };
   const LIBRARIES = [{ value: "SAFEGUARD", label: "Safeguards" }, { value: "EVIDENCE_REQUIREMENT", label: "Evidence requirements" }, { value: "TREATMENT_ACTION", label: "Treatment actions" }];
-  const ENTITIES = [{ value: "THIRD_PARTY", label: "Third party" }, { value: "ENGAGEMENT", label: "Engagement" }, { value: "FINDING", label: "Finding" }, { value: "REVIEW", label: "Review" }];
+  const ENTITIES = [{ value: "THIRD_PARTY", label: "Vendor" }, { value: "ENGAGEMENT", label: "Engagement" }, { value: "FINDING", label: "Finding" }, { value: "REVIEW", label: "Review" }];
   const DATA_TYPES = ["TEXT", "NUMBER", "DATE", "BOOLEAN", "SINGLE_SELECT", "MULTI_SELECT", "REFERENCE"].map(x => ({ value: x, label: x }));
   const PREFILL = ["SERVICE_CRITICALITY", "DATA_EXPOSURE", "ACCESS", "FOURTH_PARTY_COUNT", "IS_EXISTING", "SERVICE_MODEL", "LOCATION_COUNT"].map(x => ({ value: x, label: x }));
   const RESPONSE_TYPES = ["YES_NO", "SINGLE", "MULTI", "TEXT", "NUMBER", "DATE"].map(x => ({ value: x, label: x }));
@@ -486,7 +486,7 @@
     state.data.fields = r.data.data || [];
     panel.innerHTML = `
       <div class="pm-toolbar">${picker("entity", ENTITIES, state.entity)}${CAN_CHANGE ? btn("field-add", "fa-plus", "Add field") : ""}</div>
-      <p class="tprm-note">Fields the organization adds to third parties, engagements, findings and reviews. Mandatory fields are enforced on save; access by role limits who can change a field.</p>
+      <p class="tprm-note">Fields the organization adds to vendors, engagements, findings and reviews. Mandatory fields are enforced on save; access by role limits who can change a field.</p>
       <div class="pm-table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Rules</th><th>Visible when</th><th>Use</th><th>Status</th><th></th></tr></thead><tbody>${
         state.data.fields.map(f => `<tr class="${F(f, "status") !== "Active" ? "cf-hidden-row" : ""}"><td><strong>${esc(F(f, "fieldCode"))}</strong> ${esc(F(f, "label"))}</td>
           <td>${esc(F(f, "dataType"))}${F(f, "referenceKind") ? ` (${esc(F(f, "referenceKind"))})` : ""}</td>
@@ -505,7 +505,9 @@
         { name: "label", label: "Label", required: true, maxLength: 200, value: F(f, "label") },
         { name: "dataType", label: "Type", type: "select", options: DATA_TYPES, required: true, value: F(f, "dataType") || "TEXT", readonly: !!f },
         { name: "referenceKind", label: "Reference to (REFERENCE type)", type: "select", value: F(f, "referenceKind"),
-          options: ["EMPLOYEE", "THIRD_PARTY", "VENDOR", "BUSINESS_FUNCTION"].map(x => ({ value: x, label: x })) },
+          // 521: VENDOR (the legacy GRAC vendor) removed; THIRD_PARTY = a Vendor Registry vendor
+          options: [{ value: "EMPLOYEE", label: "Employee" }, { value: "THIRD_PARTY", label: "Vendor (Vendor Registry)" },
+                    { value: "BUSINESS_FUNCTION", label: "Business function" }] },
         { name: "options", label: "Options (select types) -- one per line: code | label", type: "textarea", rows: 3, value: optionLines },
         { name: "description", label: "Help text", type: "textarea", rows: 2, maxLength: 1000, value: F(f, "description") },
         { name: "isMandatory", label: "Mandatory", type: "checkbox", value: F(f, "isMandatory") },

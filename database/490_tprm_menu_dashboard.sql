@@ -27,7 +27,9 @@
 --        tprm-reviews         Reviews          373
 --        tprm-configuration   TPRM Configuration 374
 --      Also carried in 274_menu_master_seed.sql (the authoritative
---      snapshot).
+--      snapshot). 524 (CR 2 Round C) adds tprm-risk-register "TP Risk
+--      Register" (374, under nav-tprm); this file carries it too, so a
+--      re-run keeps it.
 --   3. Grants (420 rule): every Active 'Admin' role -- VIEW / ADD / EDIT /
 --      APPROVE (no DELETE: nothing in TPRM deletes; records are retired,
 --      cancelled or exited). Missing rows only, so a re-run never
@@ -297,12 +299,18 @@ GO
 -- =====================================================================
 MERGE grac_practice.menu_master AS t
 USING (VALUES
-    (N'nav-tprm',           N'Third-Party Risk',   CAST(NULL AS NVARCHAR(400)),            370, N'handshake',      N'Third-Party Risk'),
-    (N'tprm-dashboard',     N'Dashboard',          N'Practice/Index/tprm-dashboard',       369, N'chart-pie',      N'Third-Party Risk'),
-    (N'tprm-third-parties', N'Third Parties',      N'Practice/Index/tprm-third-parties',   371, N'building',       N'Third-Party Risk'),
-    (N'tprm-engagements',   N'Engagements',        N'Practice/Index/tprm-engagements',     372, N'file-signature', N'Third-Party Risk'),
-    (N'tprm-reviews',       N'Reviews',            N'Practice/Index/tprm-reviews',         373, N'calendar-check', N'Third-Party Risk'),
-    (N'tprm-configuration', N'TPRM Configuration', N'Practice/Index/tprm-configuration',   374, N'sliders',        N'Third-Party Risk')
+    -- Names and module_type as renamed by 521 (Third-Party Management) and
+    -- 522 (CR 2: "Engagement Management"; the configuration screen is
+    -- "Third-Party Settings" under Settings), so a re-run keeps them.
+    -- 522's show_in_sidebar = 0 on the dashboard and reviews is not touched.
+    (N'nav-tprm',           N'Third-Party Management', CAST(NULL AS NVARCHAR(400)),          370, N'handshake',      N'Third-Party Management'),
+    (N'tprm-dashboard',     N'Dashboard',              N'Practice/Index/tprm-dashboard',     369, N'chart-pie',      N'Third-Party Management'),
+    (N'tprm-third-parties', N'Vendor Registry',        N'Practice/Index/tprm-third-parties', 371, N'building',       N'Third-Party Management'),
+    (N'tprm-engagements',   N'Engagement Management',  N'Practice/Index/tprm-engagements',   372, N'file-signature', N'Third-Party Management'),
+    (N'tprm-reviews',       N'Reviews & Monitoring',   N'Practice/Index/tprm-reviews',       373, N'calendar-check', N'Third-Party Management'),
+    (N'tprm-configuration', N'Third-Party Settings',   N'Practice/Index/tprm-configuration', 266, N'sliders',        N'Organization'),
+    -- 524 (CR 2 menu 3.3)
+    (N'tprm-risk-register', N'TP Risk Register',       N'Practice/Index/tprm-risk-register', 374, N'shield-halved',  N'Third-Party Management')
 ) AS s(menu_key, menu_name, menu_url, display_order, icon_class, module_type)
 ON t.menu_key = s.menu_key
 WHEN MATCHED AND (ISNULL(t.menu_name, N'') <> s.menu_name
@@ -324,7 +332,14 @@ UPDATE c
    SET parent_menu_id = p.menu_id, updated_by = N'seed-490', updated_dt = SYSUTCDATETIME()
   FROM grac_practice.menu_master c
   JOIN grac_practice.menu_master p ON p.menu_key = N'nav-tprm'
- WHERE c.menu_key IN (N'tprm-dashboard', N'tprm-third-parties', N'tprm-engagements', N'tprm-reviews', N'tprm-configuration')
+ WHERE c.menu_key IN (N'tprm-dashboard', N'tprm-third-parties', N'tprm-engagements', N'tprm-reviews', N'tprm-risk-register')
+   AND ISNULL(c.parent_menu_id, -1) <> p.menu_id;
+-- 522: the configuration screen sits under Settings.
+UPDATE c
+   SET parent_menu_id = p.menu_id, updated_by = N'seed-490', updated_dt = SYSUTCDATETIME()
+  FROM grac_practice.menu_master c
+  JOIN grac_practice.menu_master p ON p.menu_key = N'nav-organization'
+ WHERE c.menu_key = N'tprm-configuration'
    AND ISNULL(c.parent_menu_id, -1) <> p.menu_id;
 UPDATE grac_practice.menu_master
    SET parent_menu_id = NULL, updated_by = N'seed-490', updated_dt = SYSUTCDATETIME()
@@ -350,7 +365,8 @@ SELECT r.role_id, m.menu_id, 1,
        N'Active', @active_rs, N'seed-490', SYSUTCDATETIME()
   FROM grac_practice.organization_role r
   JOIN grac_practice.menu_master m
-       ON m.menu_key IN (N'nav-tprm', N'tprm-dashboard', N'tprm-third-parties', N'tprm-engagements', N'tprm-reviews', N'tprm-configuration')
+       ON m.menu_key IN (N'nav-tprm', N'tprm-dashboard', N'tprm-third-parties', N'tprm-engagements', N'tprm-reviews', N'tprm-configuration',
+                         N'tprm-risk-register')
  WHERE r.role_name = N'Admin' AND r.status = N'Active'
    AND NOT EXISTS (SELECT 1 FROM grac_practice.organization_role_menu_permission e
                     WHERE e.role_id = r.role_id AND e.menu_id = m.menu_id);
@@ -361,7 +377,8 @@ PRINT CONCAT('490: Admin grants inserted: ', @@ROWCOUNT);
 INSERT grac_practice.organization_role_menu_permission
     (role_id, menu_id, can_view, can_add, can_edit, can_delete, can_approve, status, record_status_id, entered_by, entered_dt)
 SELECT DISTINCT p.role_id, d.menu_id, 1, 0, 0, 0, 0, N'Active', @active_rs, N'seed-490', SYSUTCDATETIME()
-  FROM (VALUES (N'tprm-third-parties'), (N'tprm-engagements'), (N'tprm-reviews'), (N'tprm-configuration')) x(child_key)
+  -- (522: tprm-configuration is a Settings screen, not a child of nav-tprm)
+  FROM (VALUES (N'tprm-third-parties'), (N'tprm-engagements'), (N'tprm-reviews'), (N'tprm-risk-register')) x(child_key)
   JOIN grac_practice.menu_master d ON d.menu_key IN (N'nav-tprm', N'tprm-dashboard')
   JOIN grac_practice.menu_master c ON c.menu_key = x.child_key AND c.status = N'Active'
   JOIN grac_practice.organization_role_menu_permission p ON p.menu_id = c.menu_id AND p.can_view = 1 AND p.status = N'Active'
@@ -376,10 +393,10 @@ GO
 SELECT '490-a procedure' AS Check_,
        CASE WHEN OBJECT_ID('grac_practice.sp_dashboard_tprm','P') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS Result
 UNION ALL
-SELECT '490-b menu: 5 active children under Third-Party Risk',
+SELECT '490-b menu: 4 active children under Third-Party Management (configuration under Settings, 522)',
        CASE WHEN (SELECT COUNT(*) FROM grac_practice.menu_master c
                    JOIN grac_practice.menu_master p ON p.menu_id = c.parent_menu_id AND p.menu_key = N'nav-tprm'
-                  WHERE c.status = N'Active') = 5 THEN 'PASS' ELSE 'FAIL' END
+                  WHERE c.status = N'Active') = 4 THEN 'PASS' ELSE 'FAIL' END
 UNION ALL
 SELECT '490-c menu: Dashboard is the first child',
        CASE WHEN (SELECT TOP (1) c.menu_key FROM grac_practice.menu_master c

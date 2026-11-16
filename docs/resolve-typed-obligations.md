@@ -1,5 +1,7 @@
 # Typed obligation detail on Operationalize — developer notes
 
+> **2026-11-04:** Assurance is Scheduled only; the event cascade (People / Asset -> Event, Due Within days) moved to Event Response. See `event-response-event-driven.md`.
+
 The obligation card on the Resolve / Operationalize workspace now shows
 the fields the admin module actually captured for that obligation's
 type, instead of the same four for every one of them.

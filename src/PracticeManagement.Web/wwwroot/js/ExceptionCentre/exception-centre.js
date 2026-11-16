@@ -351,7 +351,7 @@
         <td>${escapeHtml(displayRequestTitle(r.requestTitle))}</td>
         <td>${window.gracFormatDisplayDate(r.requestedOn)}</td>
         <td>${chip}</td>
-        <td>${escapeHtml(r.requestedByName || "system")}</td>
+        <td>${escapeHtml(r.ownerName || "--")}</td>
         <td>${effective}</td>
         <td>${escapeHtml(r.approvedByName || "--")}</td>
         <td>

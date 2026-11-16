@@ -145,6 +145,26 @@
                     <input type="date" id="gracTaskFormTargetDate" />
                 </label>
 
+                @* Migration 526. New Task (Custom) only. Both optional: with
+                   a reviewer and/or approver, Complete Task sends the task
+                   to them before it closes; with neither it closes on
+                   Complete, as before. *@
+                <label class="gtf-field" id="gracTaskFormReviewerRow">
+                    <span class="gtf-label">Reviewer</span>
+                    <select id="gracTaskFormReviewer">
+                        <option value="">&mdash; no review &mdash;</option>
+                    </select>
+                    <span class="gtf-note">Optional. Reviews the task when it is completed.</span>
+                </label>
+
+                <label class="gtf-field" id="gracTaskFormApproverRow">
+                    <span class="gtf-label">Approver</span>
+                    <select id="gracTaskFormApprover">
+                        <option value="">&mdash; no approval &mdash;</option>
+                    </select>
+                    <span class="gtf-note">Optional. Approves the task after review; it closes on approval.</span>
+                </label>
+
                 @* Sub task only. BRD §12: a mandatory child blocks its
                    parent's completion, which is the gate Risk Centre's
                    residual analysis depends on -- a real decision, not a

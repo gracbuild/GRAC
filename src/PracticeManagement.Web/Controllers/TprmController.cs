@@ -1,12 +1,13 @@
 // =====================================================================
-// TprmController (Web tier)  (migrations 486-490, Third-Party Risk)
+// TprmController (Web tier)  (migrations 486-490, Third-Party Management;
+// Vendor Registry rules from 521; TP Risk Register from 524)
 //
 // Thin proxy: /practice/api/tprm/*  ->  /api/practice/tprm/*
 // (the AssetConfigController pattern: session, organization and the menu
 // grant of the screen are checked here; the procedures decide the rest --
 // scope, segregation of duties, lifecycle gates, versioning).
 //
-//   GET  lookups                         VIEW on any TPRM screen
+//   GET  lookups                         VIEW on any TPRM screen (524: incl. TP Risk Register)
 //   config/...  (tprm-configuration)
 //     GET                                VIEW
 //     POST .../activate, .../retire      APPROVE (a version / template in force)
@@ -14,16 +15,31 @@
 //     other POSTs                        ADD or EDIT
 //     organizationId absent = the GRAC baseline: platform administrator
 //     (PM_ADMIN) only, for reads and changes
-//   third-parties..., vendors..., samples/load  (tprm-third-parties)
+//   third-parties..., samples/load  (tprm-third-parties, Vendor Registry)
 //     GET                                VIEW
 //     POST third-parties                 ADD (new, no thirdPartyId) / EDIT
-//     POST third-parties/{id}/status     EDIT
-//     POST vendors/{id}/import           ADD
+//     POST third-parties/{id}/status     APPROVE -- SUSPEND, REINSTATE,
+//                                        INACTIVATE, REACTIVATE, ARCHIVE,
+//                                        RESTORE (521; 522 retired ACTIVATE:
+//                                        registration activates. The
+//                                        procedure checks that the action is
+//                                        a transition allowed from the
+//                                        vendor's current state)
+//     POST third-parties/{id}/match-reviews
+//                                        decision NOT_DUPLICATE -> EDIT,
+//                                        DUPLICATE (archives it) -> APPROVE
 //     POST samples/load                  ADD
+//   (521 removed the legacy vendors... routes: the Vendor Registry has no
+//   link to the GRAC vendor dependency register.)
 //   engagements..., risk-assessments..., due-diligence..., evidence...,
-//   findings..., decisions..., onboarding..., deviations...  (tprm-engagements)
+//   findings..., decisions..., onboarding..., deviations..., admissions... (tprm-engagements)
 //     GET                                VIEW
 //     POST engagements                   ADD (new, no engagementId) / EDIT
+//     POST engagements/{id}/exposure     EDIT (522: Scope & Exposure)
+//     POST engagements/{id}/screening    EDIT (523: refresh the screening report)
+//     POST engagements/{id}/applicability APPROVE (523: client decision)
+//     POST admissions/{id}/act           APPROVE (523: approver role and SoD in SQL)
+//     POST admissions/{id}/withdraw      EDIT (523: decision-maker or admin, in SQL)
 //     POST decisions/{id}/act            APPROVE (approver role and SoD in SQL)
 //     POST engagements/{id}/activate     APPROVE
 //     POST findings/{id}/action          WAIVE -> APPROVE, others EDIT
@@ -33,6 +49,16 @@
 //                                        SUSPEND / RESUME / START_EXIT /
 //                                        COMPLETE_EXIT / CANCEL -> APPROVE
 //     other POSTs                        EDIT
+//   risk-register...  (tprm-risk-register, TP Risk Register, 524)
+//     GET                                VIEW
+//     POST risk-register/{id}/ratings    EDIT (vendor-level area rating)
+//     POST risk-register/{id}/profile-reviews
+//                                        EDIT (525: periodic vendor profile review)
+//     POST risk-register/impact-reviews/{id}/decide
+//                                        APPROVE (SoD in SQL: not the decision-maker
+//                                        who included the engagement)
+//     POST risk-register/{id}/close      APPROVE (SoD in SQL: not the person whose
+//                                        action started the exit)
 //   reviews..., monitoring/run  (tprm-reviews)
 //     GET reviews                        VIEW
 //     POST engagements/{id}/reviews      tprm-reviews ADD or tprm-engagements EDIT
@@ -69,6 +95,7 @@ public sealed class TprmController(
     private const string EngagementArea    = "tprm-engagements";
     private const string ReviewArea        = "tprm-reviews";
     private const string ConfigurationArea = "tprm-configuration";
+    private const string RegisterArea      = "tprm-risk-register";
     private const string PlatformAdminRole = "PM_ADMIN";
     private const string CallerPlatformAdminHeader = "X-PM-Caller-Is-Platform-Admin";
 
@@ -103,7 +130,8 @@ public sealed class TprmController(
 
         bool allowed;
         if (lower == "lookups")
-            allowed = Can(ThirdPartyArea, "VIEW") || Can(EngagementArea, "VIEW") || Can(ReviewArea, "VIEW") || Can(ConfigurationArea, "VIEW");
+            allowed = Can(ThirdPartyArea, "VIEW") || Can(EngagementArea, "VIEW") || Can(ReviewArea, "VIEW") || Can(ConfigurationArea, "VIEW")
+                      || Can(RegisterArea, "VIEW");
         else if (lower.StartsWith("config/"))
         {
             if (orgId <= 0)
@@ -115,10 +143,12 @@ public sealed class TprmController(
             }
             allowed = Can(ConfigurationArea, "VIEW");
         }
-        else if (lower.StartsWith("third-parties") || lower == "vendors")
+        else if (lower.StartsWith("third-parties"))
             allowed = Can(ThirdPartyArea, "VIEW");
         else if (lower == "reviews")
             allowed = Can(ReviewArea, "VIEW");
+        else if (lower == "risk-register" || lower.StartsWith("risk-register/"))
+            allowed = Can(RegisterArea, "VIEW");
         else if (lower.StartsWith("engagements") || lower.StartsWith("risk-assessments/") || lower.StartsWith("evidence/"))
             // the Reviews screen opens the engagement it reviews
             allowed = Can(EngagementArea, "VIEW") || (lower.StartsWith("engagements/") && Can(ReviewArea, "VIEW"));
@@ -141,7 +171,7 @@ public sealed class TprmController(
         var body = await reader.ReadToEndAsync(ct);
         if (string.IsNullOrWhiteSpace(body)) body = "{}";
         long.TryParse(ReadString(body, "organizationId"), out var orgId);
-        var action = (ReadString(body, "action") ?? "").ToUpperInvariant();
+        var action = (ReadString(body, "action") ?? "").Trim().ToUpperInvariant();
 
         bool allowed;
         if (lower.StartsWith("config/"))
@@ -159,12 +189,27 @@ public sealed class TprmController(
         }
         else if (lower == "third-parties")
             allowed = HasId(body, "thirdPartyId") ? Can(ThirdPartyArea, "EDIT") : Can(ThirdPartyArea, "ADD");
+        else if (segments.Length == 3 && segments[0] == "third-parties" && segments[2] == "status")
+            allowed = Can(ThirdPartyArea, "APPROVE");
+        else if (segments.Length == 3 && segments[0] == "third-parties" && segments[2] == "match-reviews")
+            // Trimmed like the procedure does, so " DUPLICATE" cannot pass as EDIT.
+            allowed = (ReadString(body, "decision") ?? "").Trim().Equals("DUPLICATE", StringComparison.OrdinalIgnoreCase)
+                ? Can(ThirdPartyArea, "APPROVE") : Can(ThirdPartyArea, "EDIT");
         else if (lower.StartsWith("third-parties/"))
             allowed = Can(ThirdPartyArea, "EDIT");
-        else if (lower.StartsWith("vendors/") || lower == "samples/load")
+        else if (lower == "samples/load")
             allowed = Can(ThirdPartyArea, "ADD");
         else if (lower == "monitoring/run")
             allowed = Can(ReviewArea, "APPROVE");
+        // 524 (CR 2 8): rating a vendor-level area is EDIT; the impact
+        // review outcome and closing a record are APPROVE (segregation of
+        // duties in the procedures).
+        else if (segments.Length == 3 && segments[0] == "risk-register" && segments[2] is "ratings" or "profile-reviews")
+            allowed = Can(RegisterArea, "EDIT");
+        else if (segments.Length == 4 && segments[0] == "risk-register" && segments[1] == "impact-reviews" && segments[3] == "decide")
+            allowed = Can(RegisterArea, "APPROVE");
+        else if (segments.Length == 3 && segments[0] == "risk-register" && segments[2] == "close")
+            allowed = Can(RegisterArea, "APPROVE");
         else if (lower.StartsWith("reviews/"))
             allowed = Can(ReviewArea, "EDIT");
         else if (segments.Length == 3 && segments[0] == "engagements" && segments[2] == "reviews")
@@ -173,6 +218,15 @@ public sealed class TprmController(
             allowed = HasId(body, "engagementId") ? Can(EngagementArea, "EDIT") : Can(EngagementArea, "ADD");
         else if (lower.StartsWith("decisions/") && lower.EndsWith("/act"))
             allowed = Can(EngagementArea, "APPROVE");
+        // 523 (CR 2 7): the client's applicability decision and the
+        // admission approval are APPROVE; withdrawing a pending admission
+        // is EDIT (the procedure allows only the decision-maker or an admin).
+        else if (segments.Length == 3 && segments[0] == "engagements" && segments[2] == "applicability")
+            allowed = Can(EngagementArea, "APPROVE");
+        else if (segments.Length == 3 && segments[0] == "admissions" && segments[2] == "act")
+            allowed = Can(EngagementArea, "APPROVE");
+        else if (segments.Length == 3 && segments[0] == "admissions" && segments[2] == "withdraw")
+            allowed = Can(EngagementArea, "EDIT");
         else if (segments.Length == 3 && segments[0] == "engagements" && segments[2] == "activate")
             allowed = Can(EngagementArea, "APPROVE");
         else if (segments.Length == 3 && segments[0] == "engagements" && segments[2] == "lifecycle")

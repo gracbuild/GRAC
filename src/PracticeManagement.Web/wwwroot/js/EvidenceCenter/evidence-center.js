@@ -48,6 +48,14 @@
     const params = new URLSearchParams(window.location.search);
     const linkOrg = params.get("organizationId");
     if (linkOrg && [...sel.options].some(o => o.value === linkOrg)) sel.value = linkOrg;
+    // 508: opened from the Policies & Documents dashboard (?validity= /
+    // ?usage=): the page's own Validity / Used-in filters, plus the banner.
+    const drill = window.__pmDrill ? window.__pmDrill.read() : null;
+    if (drill && drill.active) {
+      window.__pmDrill.preselect("ecValidityFilter", drill.validity);
+      window.__pmDrill.preselect("ecUsageFilter", drill.usage);
+      window.__pmDrill.banner("ecDrillBanner", drill);
+    }
     await changeOrg(Number(sel.value) || null);
     const itemId = Number(params.get("itemId"));
     if (itemId > 0 && state.organizationId) openItem(itemId);

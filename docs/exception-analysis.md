@@ -427,3 +427,126 @@ section); only the label text changed, from `Justification (analyst)` to
 unaffected either way.
 
 UI only, label text alone. No API or database change.
+
+## 498 on production: "Invalid column name 'exception_number'" (2026-11-02)
+
+Running `498_exception_designated_approver.sql` against production printed
+
+```
+Msg 207, Level 16, State 1, Procedure sp_exception_request_list, Line 23 [Batch Start Line 153]
+Invalid column name 'exception_number'.
+498 complete: designated approver added; submit/list/get re-issued; candidates proc ready.
+```
+
+— an error **and** a success line, which is the tell.
+
+### What actually happened
+`exception_request.exception_number` is owned by migration **470**, which had never been
+applied to production. 498 re-issues `sp_exception_request_list` from the 472 body, and that
+body projects `r.exception_number`. A re-issued procedure body is validated against the live
+columns at CREATE time, so the missing column failed **that one** `CREATE OR ALTER` with
+Msg 207 — which does not stop the script, only its own batch. Everything after it ran,
+including the final `PRINT '498 complete...'`.
+
+So production was left half-applied:
+
+| 498 step | Outcome |
+|---|---|
+| `designated_approver_employee_id` column + FK | applied |
+| `sp_exception_approver_candidates` | created |
+| `sp_exception_request_submit_for_approval` | re-issued |
+| `sp_exception_request_list` | **failed — still the 472 body** |
+| `sp_exception_request_get` | re-issued |
+
+The consequence that matters: the list procedure kept its old body, so it returns no
+`DesignatedApproverEmployeeId` / `DesignatedApproverName` — the two fields the Exception Centre
+grid needs to show Approve only to the designated approver. Submit would store an approver that
+the list could not surface.
+
+### The defect was in 498, not in production
+This is the second time this exact trap has been hit (the first was 306 against a database
+without 254). The house rule from that one — *when a migration re-issues an earlier proc body,
+guard on every COLUMN that body reads, not just on the proc existing* — was not applied here:
+498's only guard checked `designated_approver_employee_id`, the column it adds itself.
+
+A sweep of 498's four procedure bodies against the `ALTER TABLE ... ADD` history shows they read
+**20** columns owned by other migrations: nine from 166, three from 184, five from 192, two from
+260 and one from 470. 498 now checks all twenty against `sys.columns` before writing anything,
+and on a miss prints
+
+```
+ABORT (498): exception_request is missing column(s) that this migration's procedure bodies
+read: exception_number (migration 470). Run the migration named beside each, in number order,
+then re-run 498. Nothing was changed.
+```
+
+and sets `NOEXEC ON`, so the body of the migration is skipped and the "498 complete" line can
+no longer appear. It names the owning migration rather than adding the column inline, because
+470 also backfills `E-nnn` numbers and installs the per-organization sequence trigger —
+half-applying that would leave numbering broken.
+
+498 now ends with `SET NOEXEC OFF`, so an aborted run does not leave the operator's session
+silently swallowing the next script.
+
+### What the diagnostic found on production (2026-11-02)
+- Of the 20 prerequisite columns, **19 present, 1 missing**: `exception_number` (470). So 166,
+  184, 192 and 260 are all applied there; only 470 is not.
+- `designated_approver_employee_id` and its FK: present.
+- `sp_exception_request_submit_for_approval`, `sp_exception_request_get`: the 498 body.
+- `sp_exception_request_list`: the old body, as predicted.
+- `sp_exception_approver_candidates`: reported "OLD BODY" — a **false negative in the first
+  version of the diagnostic**, not a real failure. Section 2 matched every body against
+  `designated_approver_employee_id`, but that procedure is new in 498 and never mentions the
+  column; it lists eligible approvers by menu permission. It now matches per procedure, on
+  `55295` (its own error number) for the candidates proc and `DesignatedApproverName` for the
+  two list/get procs.
+- Gap side: `custom_gap.gap_number` **missing** (469) and `sp_gap_centre_list` does not project
+  `GapNumber` (471). So production is behind on that pair too.
+
+### Fix for production
+Run in this order. The order is not cosmetic: **the last migration to re-issue a procedure
+wins**, so a predecessor run after its successor silently reverts it.
+
+| # | Script | Why, and why here |
+|---|---|---|
+| 1 | `469_gap_number_per_org_sequential.sql` | adds `custom_gap.gap_number`, backfills `G-nnn`, installs the per-organization trigger. Re-issues no procedure, so it cannot hit Msg 207. |
+| 2 | `471_gap_centre_list_gap_number_column.sql` | re-issues `sp_gap_centre_list` to project `GapNumber`. Its only late dependency is `gap_number` itself, so step 1 must precede it. **471 is the newest owner of that procedure** — nothing after it re-issues `sp_gap_centre_list` — so running it now is safe. |
+| 3 | `470_exception_number_per_org_sequential.sql` | adds `exception_request.exception_number`, backfills `E-nnn`, installs the trigger. Re-issues no procedure. |
+| 4 | `498_exception_designated_approver.sql` | re-run. Idempotent, and its prerequisite guard now passes. |
+
+`472_exception_list_exception_number_column.sql` is **optional and must not be run after 498**.
+498's `sp_exception_request_list` body is a strict superset of 472's — same `ExceptionNumber`
+plus the two designated-approver fields — so 472 adds nothing, and running it *after* 498 would
+overwrite the 498 body and take the approver fields away again. Skip it, or run it between
+steps 3 and 4.
+
+Then re-run the diagnostic: section 1 all `present`, section 2 "has the 498 body" four times,
+section 3 yes to both, section 5 `present` / yes, section 6 READY. Finally restart the Api and
+Web tiers, as 498 already required.
+
+## Exception Centre list: Owner column showed the requester (migration 527, 2026-11-10)
+
+> "exception center le list lum athil click cheythu pokumbo kanunna page lum oru exception
+> nte owner ne different ayi kanikunnundu."
+
+**Cause.** The list's **Owner** column printed `requestedByName`, the person who raised the
+request (`requested_by_employee_id`). Exception View and Exception Analysis show the exception's
+**owner** (`owner_employee_id`, `sp_exception_request_get`.`OwnerName`). New Exception and
+Analysis set the owner separately from the requester, so the two pages disagreed whenever the
+owner was not the requester. The column change of 2026-09-22 used the requester because
+`sp_exception_request_list` returned no owner. The Issues & Actions dashboard's **No owner** drill
+(414) already filters on `owner_employee_id`, so it opened a list whose Owner cells were all
+filled in.
+
+**Change**
+
+| Layer | File | What |
+|---|---|---|
+| SQL | `527_exception_list_owner.sql` (+ rollback = 498 body) | `sp_exception_request_list` also returns `OwnerEmployeeId` and `OwnerName`. Otherwise it is the 498 body verbatim: same rows, filters, order and paging. |
+| Api | `ExceptionCentreModels.cs`, `ExceptionCentreService.ListAsync` | `ExceptionRequestRow` gains trailing optional `OwnerEmployeeId` and `OwnerName`, read tolerantly, so an Api deployed before 527 still lists. |
+| API contract | `GET /api/practice/exception-centre` (list) | Each row now also carries `ownerEmployeeId` and `ownerName`. `requestedByName` is unchanged. |
+| Web | `exception-centre.js`, `exception-centre.cshtml` | The Owner cell shows `ownerName`. An unassigned owner reads `--`, like Approved By. |
+
+The Gap View exception card is unchanged: it labels the requester **Requested By**, which is correct.
+
+**Deploy:** run 527, then deploy the Api and Web, then hard-refresh the browser. No Api restart is needed.

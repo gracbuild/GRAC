@@ -31,6 +31,13 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // Evidence Automation intake (migration 530): the public, token-only
+    // POST /intake/evidence. Per client address; generous enough for a
+    // scheduler posting many controls at once, small enough to blunt token
+    // guessing (a token is 256 random bits anyway).
+    options.AddPolicy("evidence-intake", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto);

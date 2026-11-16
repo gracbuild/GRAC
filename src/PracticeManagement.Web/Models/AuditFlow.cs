@@ -33,4 +33,8 @@ public sealed record AuditFlowStep(
 /// those nested headings via CSS).</param>
 /// <param name="ShellId">DOM id for the shell root; must be unique per page.</param>
 /// <param name="Steps">Ordered steps. Order is the flow order shown to the user.</param>
-public sealed record AuditFlowShell(PracticeScreen Screen, string ShellId, AuditFlowStep[] Steps);
+/// <param name="Hosted">537: the shell is driven by a host page (Audit
+/// Configuration's list / view / configure workspace). It then renders no page
+/// heading and no Organization / Audit context bar, never writes the URL, and
+/// takes its audit from <c>window.__oaFlowShell.setContext</c>.</param>
+public sealed record AuditFlowShell(PracticeScreen Screen, string ShellId, AuditFlowStep[] Steps, bool Hosted = false);

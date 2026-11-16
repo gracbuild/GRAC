@@ -90,6 +90,25 @@
 // EvidenceExpiryEnabled=false leaves it to SQL Agent:
 //     EXEC grac_practice.sp_evidence_expiry_sweep;
 //
+// EVIDENCE AUTOMATION (migration 530)
+// -----------------------------------
+// Two more passes, each guarded on its own like the ones above:
+//   * file drop -- every EvidenceFileDropIntervalMinutes (default 5) it
+//     picks up the files written to the watched folders of the active
+//     file-drop sources (IEvidenceAutomationService.RunFileDropAsync). Off
+//     when EvidenceAutomation:FileDropRoot is empty. Files are never
+//     deleted: stored ones move to _processed/, refused ones to _failed/.
+//   * not received -- every EvidenceAutomationIntervalMinutes (default 60)
+//     it runs grac_practice.sp_evidence_automation_missing_sweep, which
+//     raises one notice per missed period to the source owner and the
+//     obligation owner (My Notifications). Idempotent; application lock.
+// EvidenceAutomationEnabled=false leaves the sweep to SQL Agent:
+//     EXEC grac_practice.sp_evidence_automation_missing_sweep;
+//   * email (531) -- every EvidenceEmailIntervalMinutes (default 5) it reads
+//     the intake mailbox over IMAP (IEvidenceAutomationService.RunEmailAsync).
+//     Off while EvidenceAutomation:Email:Host is empty. Read mail is moved to
+//     the processed / failed folders, never deleted.
+//
 // TPRM MONITORING (migrations 486-490)
 // ------------------------------------
 // A sixth pass: every TprmMonitoringIntervalMinutes (default 60) it runs
@@ -157,6 +176,18 @@ public sealed class TaskNotificationOptions
     public bool TprmMonitoringEnabled { get; set; } = true;
     /// <summary>486-490: minutes between monitoring passes (dates are per day).</summary>
     public int TprmMonitoringIntervalMinutes { get; set; } = 60;
+    /// <summary>530: raise "automated evidence not received" notices.</summary>
+    public bool EvidenceAutomationEnabled { get; set; } = true;
+    /// <summary>530: minutes between not-received passes (cadences are per day).</summary>
+    public int EvidenceAutomationIntervalMinutes { get; set; } = 60;
+    /// <summary>530: pick up file-drop evidence (no-op while EvidenceAutomation:FileDropRoot is empty).</summary>
+    public bool EvidenceFileDropEnabled { get; set; } = true;
+    /// <summary>530: minutes between file-drop passes.</summary>
+    public int EvidenceFileDropIntervalMinutes { get; set; } = 5;
+    /// <summary>531: read the evidence intake mailbox (no-op while EvidenceAutomation:Email:Host is empty).</summary>
+    public bool EvidenceEmailEnabled { get; set; } = true;
+    /// <summary>531: minutes between mailbox passes.</summary>
+    public int EvidenceEmailIntervalMinutes { get; set; } = 5;
 }
 
 public sealed class TaskNotificationWorker(
@@ -170,7 +201,8 @@ public sealed class TaskNotificationWorker(
         configuration.GetSection(TaskNotificationOptions.SectionName).Bind(options);
 
         if (!options.Enabled && !options.AssetSchedulerEnabled && !options.ScheduledObligationTasksEnabled && !options.AssetReportDeliveryEnabled
-            && !options.EvidenceExpiryEnabled && !options.TprmMonitoringEnabled)
+            && !options.EvidenceExpiryEnabled && !options.TprmMonitoringEnabled
+            && !options.EvidenceAutomationEnabled && !options.EvidenceFileDropEnabled && !options.EvidenceEmailEnabled)
         {
             logger.LogInformation(
                 "TaskNotificationWorker disabled by configuration; SLA notifications must be swept manually via sp_task_notification_sweep.");
@@ -189,6 +221,12 @@ public sealed class TaskNotificationWorker(
         DateTime? lastEvidenceRun = null;   // 477
         var tprmInterval = TimeSpan.FromMinutes(Math.Clamp(options.TprmMonitoringIntervalMinutes, 5, 1440));
         DateTime? lastTprmRun = null;   // 486-490
+        var automationInterval = TimeSpan.FromMinutes(Math.Clamp(options.EvidenceAutomationIntervalMinutes, 5, 1440));
+        DateTime? lastAutomationRun = null;   // 530
+        var fileDropInterval = TimeSpan.FromMinutes(Math.Clamp(options.EvidenceFileDropIntervalMinutes, 1, 1440));
+        DateTime? lastFileDropRun = null;   // 530
+        var emailInterval = TimeSpan.FromMinutes(Math.Clamp(options.EvidenceEmailIntervalMinutes, 1, 1440));
+        DateTime? lastEmailRun = null;   // 531
 
         var interval = TimeSpan.FromSeconds(Math.Clamp(options.IntervalSeconds, 30, 86400));
 
@@ -370,6 +408,91 @@ public sealed class TaskNotificationWorker(
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "TPRM monitoring pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 530: evidence automation -- file drop pick-up, at most every fileDropInterval.
+            if (options.EvidenceFileDropEnabled && (lastFileDropRun is null || DateTime.UtcNow - lastFileDropRun.Value >= fileDropInterval))
+            {
+                lastFileDropRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var automation = scope.ServiceProvider.GetService<IEvidenceAutomationService>();
+                    if (automation is not null)
+                    {
+                        var run = await automation.RunFileDropAsync(options.OrganizationId, stoppingToken);
+                        if (run.Received > 0 || run.Failed > 0)
+                            logger.LogInformation(
+                                "Evidence file drop pass: {Received} file(s) received, {Failed} refused, across {Bindings} source(s).",
+                                run.Received, run.Failed, run.Bindings);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Evidence file drop pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 531: evidence automation -- intake mailbox, at most every emailInterval.
+            if (options.EvidenceEmailEnabled && (lastEmailRun is null || DateTime.UtcNow - lastEmailRun.Value >= emailInterval))
+            {
+                lastEmailRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var automation = scope.ServiceProvider.GetService<IEvidenceAutomationService>();
+                    if (automation is not null)
+                    {
+                        var run = await automation.RunEmailAsync(stoppingToken);
+                        if (run.Received > 0 || run.Refused > 0)
+                            logger.LogInformation(
+                                "Evidence email pass: {Messages} mail(s) read, {Received} stored, {Refused} refused.",
+                                run.Messages, run.Received, run.Refused);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Exception ex)
+                {
+                    // Mailbox unreachable, wrong password: logged, retried next interval.
+                    logger.LogError(ex, "Evidence email pass failed; will retry on the next interval.");
+                }
+            }
+
+            // 530: evidence automation -- "not received" notices, at most every automationInterval.
+            if (options.EvidenceAutomationEnabled && (lastAutomationRun is null || DateTime.UtcNow - lastAutomationRun.Value >= automationInterval))
+            {
+                lastAutomationRun = DateTime.UtcNow;   // also after a failure: retry on the next interval
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var automation = scope.ServiceProvider.GetService<IEvidenceAutomationService>();
+                    if (automation is not null)
+                    {
+                        var run = await automation.RunMissingSweepAsync(options.OrganizationId, stoppingToken);
+                        if (run.NoticesRaised > 0)
+                            logger.LogInformation("Evidence automation pass: {Raised} not-received notice(s) raised.", run.NoticesRaised);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;   // shutting down
+                }
+                catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2812)
+                {
+                    // A database without 530: nothing to sweep yet.
+                    logger.LogDebug("Evidence automation pass skipped: migration 530 not applied.");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Evidence automation pass failed; will retry on the next interval.");
                 }
             }
         }

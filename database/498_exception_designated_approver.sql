@@ -17,9 +17,78 @@
 --      (327) to return DesignatedApproverEmployeeId / Name so the UI can
 --      show Approve only to the designated approver.
 --
--- Idempotent. ASCII only. Depends on 161 (exception_request), 260/472/327.
+-- Idempotent. ASCII only.
+--
+-- DEPENDS ON, and now checks: 162 (exception_request), 166, 184, 192,
+-- 260, 327, 470, 472. The prerequisite block below enforces it -- see
+-- the note there for why it has to.
 -- =====================================================================
 SET NOCOUNT ON;
+SET NOEXEC OFF;
+GO
+
+-- =====================================================================
+-- Prerequisites -- every column the four procedure bodies below READ
+-- =====================================================================
+-- A re-issued procedure body is validated against the live columns when
+-- it is created, so one missing column fails that single CREATE with
+-- Msg 207 and leaves the OLD body deployed -- while the rest of the
+-- script carries on and still PRINTs its success. The run then reads as
+-- complete and is not.
+--
+-- That happened on production on 2026-11-02: migration 470 had never
+-- been applied, exception_request.exception_number did not exist, the
+-- CREATE OR ALTER of sp_exception_request_list failed, and the script
+-- still printed "498 complete". The list procedure silently kept its
+-- 472 body, without DesignatedApproverEmployeeId / Name -- which is the
+-- one thing the UI needs to decide who may approve.
+--
+-- Checked here instead, before anything is written, naming the migration
+-- that owns each missing column rather than adding it inline: the owning
+-- migration also seeds, backfills and updates its matching save path,
+-- and half-applying it would leave a field on screen that cannot persist.
+DECLARE @missing NVARCHAR(MAX) = NULL;
+
+SELECT @missing = STRING_AGG(x.col + N' (migration ' + x.mig + N')', N', ')
+FROM (VALUES
+    (N'exception_type_id',         N'166'),
+    (N'owner_employee_id',         N'166'),
+    (N'review_frequency_id',       N'166'),
+    (N'justification',             N'166'),
+    (N'risk_impact',               N'166'),
+    (N'compensating_control',      N'166'),
+    (N'effective_from',            N'166'),
+    (N'linked_practice_id',        N'166'),
+    (N'linked_requirement_ref',    N'166'),
+    (N'request_type_code',         N'184'),
+    (N'sla_days_original',         N'184'),
+    (N'sla_days_requested',        N'184'),
+    (N'task_id',                   N'192'),
+    (N'due_at_original',           N'192'),
+    (N'due_at_requested',          N'192'),
+    (N'priority_original',         N'192'),
+    (N'priority_requested',        N'192'),
+    (N'proposed_effective_from',   N'260'),
+    (N'proposed_effective_until',  N'260'),
+    (N'exception_number',          N'470')
+) AS x(col, mig)
+WHERE NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+     WHERE c.object_id = OBJECT_ID('grac_practice.exception_request')
+       AND c.name = x.col);
+
+IF OBJECT_ID('grac_practice.exception_request','U') IS NULL
+BEGIN
+    PRINT 'ABORT (498): grac_practice.exception_request does not exist. Run 162 first. Nothing was changed.';
+    SET NOEXEC ON;
+END
+ELSE IF @missing IS NOT NULL
+BEGIN
+    PRINT 'ABORT (498): exception_request is missing column(s) that this migration''s procedure bodies read: '
+          + @missing
+          + '. Run the migration named beside each, in number order, then re-run 498. Nothing was changed.';
+    SET NOEXEC ON;
+END
 GO
 
 IF COL_LENGTH('grac_practice.exception_request','designated_approver_employee_id') IS NULL
@@ -292,4 +361,8 @@ GO
 
 
 PRINT '498 complete: designated approver added; submit/list/get re-issued; candidates proc ready.';
+GO
+-- Clears the guard above so an aborted run does not leave the session in
+-- NOEXEC, silently swallowing whatever the operator runs next.
+SET NOEXEC OFF;
 GO

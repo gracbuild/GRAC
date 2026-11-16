@@ -60,6 +60,14 @@ Web, then enable SSO per organization in Organization Administration. SSO users 
 earlier single-tenant setup cannot sign in by SSO until their organization's
 policy is saved (with that tenant id).
 
+**Card only when SSO is configured (2026-11-15).** The Single Sign-On card is
+rendered only when this deployment has at least one provider configured --
+`Sso:Microsoft` or `Sso:Google` with both `ClientId` and `ClientSecret` set
+(`SsoProviders.Enabled`, the same test the login page and `Program.cs` use).
+With no `Sso` section (single sign-on is on hold) the card does not appear;
+`Manage.cshtml` decides it at render time and `practice.js` already skips the
+card when it is absent. An organization's saved policy is kept either way.
+
 ## Auto-create users on first SSO sign-in (migration 467, 2026-10-13)
 
 Three more settings on the same Single Sign-On card:

@@ -458,6 +458,10 @@
                                            ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
 
     let practiceId = null, organizationId = null, requirementId = null, practice = null;
+    // 519: the framework release the Practices grid was showing when this
+    // practice was opened. When set, the published obligations are only that
+    // framework's (sp_pm_view_obligations_typed @@p_release_id).
+    let releaseId = null;
     // Set once the shared obligation form has a type list; the Actions
     // menu offers "Add Obligation" only after that (see actionItems).
     let obligationTypesReady = false;
@@ -527,6 +531,7 @@
 
         organizationId = Number(ctx.organizationId || 0) || null;
         requirementId  = requirementId || Number(ctx.organizationRequirementId || 0) || null;
+        releaseId      = Number(ctx.releaseId || 0) || null;
 
         if (!practiceId && !requirementId)
             return unavailable('No practice was identified in the link.',
@@ -1452,6 +1457,8 @@
                     practiceId:                practiceId || undefined,
                     organizationRequirementId: requirementId || undefined,
                     organizationId:            organizationId || undefined,
+                    // 519: undefined (no framework) = every framework, as before.
+                    releaseId:                 releaseId || undefined,
                     pageNumber:                1,
                     pageSize:                  200
                 }})

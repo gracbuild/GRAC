@@ -75,13 +75,13 @@
                Date, Approved By", with Actions still last. Type/Gap/Att
                were dropped from the grid -- their data, and the Type
                filter above, are untouched; they are just no longer
-               columns here. "Owner" is the existing requester
-               (requestedByName), split out of what used to be one
-               "Requested" cell holding both the date and the name -- the
-               list API has no separate assigned-owner field (that only
-               exists on the single-request detail read), and adding one
-               would mean changing the API/stored proc, which this change
-               deliberately does not touch. See exception-centre.js's
+               columns here. "Owner" is the exception's assigned owner
+               (ownerName, owner_employee_id -- migration 527), the same
+               Owner Exception View and Exception Analysis show. It used to
+               print the requester (requestedByName), because the list
+               procedure returned no owner; the two differed whenever the
+               owner was not the person who raised the request. Unassigned
+               reads "--", like Approved By. See exception-centre.js's
                refresh() for the matching row markup and displayRequestTitle()
                for the "Exception: " prefix strip (display only -- the
                stored request_title is untouched). *@

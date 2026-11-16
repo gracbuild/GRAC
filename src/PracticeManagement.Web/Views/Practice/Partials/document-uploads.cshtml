@@ -51,6 +51,8 @@
             <i class="fa-solid fa-plus"></i> New Document
         </button>
     </div>
+    @* 508: Policies & Documents dashboard drill-down banner (Shared/dashboard-drill.js). *@
+    <div id="docDrillBanner" hidden></div>
 
     <div class="pm-table-wrap">
         <table id="docTable">
@@ -369,4 +371,5 @@
     }
 </style>
 
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 508: Policies & Documents dashboard drill-down *@
 <script src="~/js/DocumentUpload/document-uploads.js" asp-append-version="true"></script>

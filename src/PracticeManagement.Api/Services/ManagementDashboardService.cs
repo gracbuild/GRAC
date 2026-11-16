@@ -8,6 +8,7 @@
 //   audit-assurance  sp_dashboard_audit_assurance
 //   asset-contract   sp_dashboard_asset_contract    (451)
 //   tprm             sp_dashboard_tprm              (490)
+//   documents        sp_dashboard_documents         (508, + caller scoping)
 // Risk Management keeps its own dashboard (RiskCentreService, 413).
 //
 // Every number is computed in SQL; this class only maps rows.
@@ -36,7 +37,14 @@ public sealed class ManagementDashboardService(IConfiguration configuration) : I
         ["issues-actions"]  = "grac_practice.sp_dashboard_issues_actions",
         ["audit-assurance"] = "grac_practice.sp_dashboard_audit_assurance",
         ["asset-contract"]  = "grac_practice.sp_dashboard_asset_contract",      // 451
-        ["tprm"]            = "grac_practice.sp_dashboard_tprm"                 // 490
+        ["tprm"]            = "grac_practice.sp_dashboard_tprm",                // 490
+        ["documents"]       = "grac_practice.sp_dashboard_documents"            // 508
+    };
+
+    // Procedures that take @caller_employee_id / @is_admin.
+    private static readonly HashSet<string> CallerScoped = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "governance", "documents"
     };
 
     public async Task<ManagementDashboard?> GetAsync(string module, long organizationId,
@@ -50,8 +58,10 @@ public sealed class ManagementDashboardService(IConfiguration configuration) : I
         command.CommandText = procedure;
         AddParam(command, "@organization_id", DbType.Int64, organizationId);
         // Governance applies Operationalize's ownership rule (a non-admin
-        // sees the instances they own), so it needs the caller.
-        if (module!.Equals("governance", StringComparison.OrdinalIgnoreCase))
+        // sees the instances they own); Policies & Documents (508) applies
+        // the Evidence Center visibility rule (fn_pm_evidence_item_visible)
+        // to its evidence figures. Both need the caller.
+        if (CallerScoped.Contains(module!))
         {
             AddParam(command, "@caller_employee_id", DbType.Int64, (object?)callerEmployeeId ?? DBNull.Value);
             AddParam(command, "@is_admin", DbType.Boolean, callerIsAdmin);

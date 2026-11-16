@@ -140,6 +140,19 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
             shim = isManage
                 ? "grac_practice.sp_org_role_repository_manage"
                 : "grac_practice.sp_org_role_repository_get";
+        // Organizations (migration 510): READ ONLY. The Organization
+        // Management landing is now a list of organizations, and two of
+        // its columns are not in the monolith's fixed 'organizations'
+        // projection -- SpocName (the organization's Admin employee, the
+        // "Admin Full Name" captured at onboarding) and FrameworkSummary
+        // (up to three subscribed artifact codes, then "+N more"). The
+        // read shim returns the monolith's own columns verbatim plus
+        // those two, because this same branch seeds the organization
+        // form behind the list. Saving an organization is unchanged, so
+        // there is deliberately NO manage shim here and writes keep
+        // going to the monolith.
+        else if (!isManage && entityType.Equals("organizations", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_org_organizations_repository_get";
         // Location (change request 2026-09-20, migration 361): needs the
         // new Time Zone + address columns the monolith's fixed 'locations'
         // projection does not know about. Same split as users/teams above.
@@ -152,6 +165,10 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         // pattern as asset-taxonomy / connection-types below.
         else if (isQuery && entityType.Equals("time-zones", StringComparison.OrdinalIgnoreCase))
             shim = "grac_practice.sp_get_time_zone_lookup";
+        // 553: Role Responsibilities lookup (Role Master's Responsibilities
+        // multi-select) -- read-only, same shape as time-zones above.
+        else if (isQuery && entityType.Equals("role-responsibilities", StringComparison.OrdinalIgnoreCase))
+            shim = "grac_practice.sp_get_role_responsibility_lookup";
         // Migration 241: asset save has to write the new asset_subcategory_id
         // and asset_type_id columns, and the monolith predates them.
         // Migration 419: the list moves to a _get shim as well. The monolith's
@@ -260,6 +277,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 ? "grac_practice.sp_repository_subscription_request_manage"
                 : "grac_practice.sp_repository_subscription_request_get";
 
+
         if (shim is null) return procedure;
         return await ShimExistsAsync(connection, shim, cancellationToken) ? shim : procedure;
     }
@@ -295,6 +313,39 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         {
             // A failed probe must not take the screen down. Assume absent and
             // use the monolith, which was working before 134 existed.
+            exists = false;
+        }
+
+        ShimAvailability[cacheKey] = exists;
+        return exists;
+    }
+
+    // 519: does a procedure take a given parameter? Lets the Api send a NEW
+    // optional parameter only once the database has the procedure body that
+    // declares it, so SQL and Api can be deployed in either order -- passing
+    // an undeclared parameter fails the whole call ("too many arguments",
+    // see 463). Same cache and same failure rule as ShimExistsAsync: cached
+    // per process (restart the Api after a rollback), and a failed probe
+    // answers "absent", which is the behaviour before the parameter existed.
+    private static async Task<bool> ProcedureHasParameterAsync(DbConnection connection, string procedure,
+        string parameterName, CancellationToken cancellationToken)
+    {
+        var cacheKey = procedure + ":" + parameterName;
+        if (ShimAvailability.TryGetValue(cacheKey, out var cached)) return cached;
+
+        bool exists;
+        try
+        {
+            await using var probe = connection.CreateCommand();
+            probe.CommandType = CommandType.Text;
+            probe.CommandText = "SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID(@name, N'P') AND name = @parameter) THEN 1 ELSE 0 END";
+            Add(probe, "@name", procedure);
+            Add(probe, "@parameter", parameterName);
+            var raw = await probe.ExecuteScalarAsync(cancellationToken);
+            exists = raw is not null && raw != DBNull.Value && Convert.ToInt32(raw) == 1;
+        }
+        catch
+        {
             exists = false;
         }
 
@@ -1113,6 +1164,32 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                   AND EXISTS(SELECT 1 FROM subscribed s2 WHERE s2.organization_id=m.organization_id)
                 GROUP BY m.organization_id,m.framework_statement_id
             ),
+            -- 2026-11-10: mapped practices still to be implemented (not marked
+            -- Not Applicable / Deferred / ...) that have no active practice
+            -- instance. statement_implementation counts instances only, so it
+            -- cannot see them; a statement is Implemented only when this is 0.
+            -- Same rule as QueryReleaseStatementsAsync's ImplementationStatus.
+            statement_pending_practices AS (
+                SELECT m.organization_id,
+                       m.framework_statement_id,
+                       COUNT(DISTINCT m.org_practice_id) PracticeWithoutInstanceCount
+                FROM grac_practice.organization_statement_practice_mapping m
+                JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
+                    AND q.status='Active'
+                LEFT JOIN grac_practice.applicability_status_master qa ON qa.applicability_status_id=q.applicability_status_id
+                WHERE m.status='Active'
+                  AND EXISTS(SELECT 1 FROM subscribed s2 WHERE s2.organization_id=m.organization_id)
+                  AND COALESCE(qa.status_name,q.applicability_status,N'Not Updated') NOT IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired')
+                  AND NOT EXISTS(SELECT 1
+                                   FROM grac_practice.practice p
+                                   JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                                       AND pi.organization_id=m.organization_id
+                                       AND pi.status='Active'
+                                  WHERE p.organization_requirement_id=q.organization_requirement_id
+                                    AND p.organization_id=m.organization_id
+                                    AND p.status='Active')
+                GROUP BY m.organization_id,m.framework_statement_id
+            ),
             -- Statement-level counts. The organization's copied repository
             -- statements (393: organization_framework_statements content columns,
             -- attached to an Active node of the organization's structure copy)
@@ -1134,6 +1211,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                     COUNT(DISTINCT CASE WHEN aps.status_name=N'Applicable'
                                          AND si.InstanceCount>0
                                          AND si.InstanceCount=si.ImplementedInstanceCount
+                                         AND sp.framework_statement_id IS NULL   -- 2026-11-10
                                         THEN fs.framework_statement_id END) ImplementedStatementsCount,
                     COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,N'Not Updated')=N'Not Updated' THEN fs.framework_statement_id END) NotUpdatedStatementsCount,
                     COUNT(DISTINCT CASE WHEN aps.status_name IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN fs.framework_statement_id END) NotApplicableStatementsCount
@@ -1156,6 +1234,8 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=ofs.applicability_status_id
                 LEFT JOIN statement_implementation si ON si.organization_id=sub.organization_id
                     AND si.framework_statement_id=fs.framework_statement_id
+                LEFT JOIN statement_pending_practices sp ON sp.organization_id=sub.organization_id
+                    AND sp.framework_statement_id=fs.framework_statement_id
                 GROUP BY sub.organization_id,sub.release_id
             )
             SELECT
@@ -1260,6 +1340,7 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                         COUNT(DISTINCT CASE WHEN st.StatusName=N'Applicable'
                                              AND st.InstanceCount>0
                                              AND st.InstanceCount=st.ImplementedInstanceCount
+                                             AND st.PracticeWithoutInstanceCount=0   -- 2026-11-10
                                             THEN st.custom_statement_id END) ImplementedStatementsCount,
                         COUNT(DISTINCT CASE WHEN COALESCE(st.StatusName,N'Not Updated')=N'Not Updated' THEN st.custom_statement_id END) NotUpdatedStatementsCount,
                         COUNT(DISTINCT CASE WHEN st.StatusName IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN st.custom_statement_id END) NotApplicableStatementsCount
@@ -1293,7 +1374,27 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                                       AND ism.status_code=N'Implemented'
                                  WHERE m.org_statement_id=ofs.org_statement_id
                                    AND m.organization_id=s.organization_id
-                                   AND m.status='Active') ImplementedInstanceCount
+                                   AND m.status='Active') ImplementedInstanceCount,
+                               -- 2026-11-10: mapped practices still to be implemented
+                               -- with no active instance (same rule as the
+                               -- repository releases' statement_pending_practices).
+                               (SELECT COUNT(DISTINCT m.org_practice_id)
+                                  FROM grac_practice.organization_statement_practice_mapping m
+                                  JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
+                                      AND q.status='Active'
+                                  LEFT JOIN grac_practice.applicability_status_master qa ON qa.applicability_status_id=q.applicability_status_id
+                                 WHERE m.org_statement_id=ofs.org_statement_id
+                                   AND m.organization_id=s.organization_id
+                                   AND m.status='Active'
+                                   AND COALESCE(qa.status_name,q.applicability_status,N'Not Updated') NOT IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired')
+                                   AND NOT EXISTS(SELECT 1
+                                                    FROM grac_practice.practice p
+                                                    JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                                                        AND pi.organization_id=m.organization_id
+                                                        AND pi.status='Active'
+                                                   WHERE p.organization_requirement_id=q.organization_requirement_id
+                                                     AND p.organization_id=m.organization_id
+                                                     AND p.status='Active')) PracticeWithoutInstanceCount
                         FROM grac_practice.custom_release_statement cs
                         LEFT JOIN grac_practice.organization_framework_statements ofs ON ofs.source_type=N'Custom'
                             AND ofs.custom_statement_id=cs.custom_statement_id
@@ -1357,17 +1458,38 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                   AND n.release_id=@release_id
                   AND n.status='Active'
             ),
+            -- 2026-11-10: practices (organization_requirement) holding at least
+            -- one active practice instance -- the same practice / instance joins
+            -- the implementation roll-up walks.
+            requirement_has_instance AS (
+                SELECT DISTINCT p.organization_requirement_id
+                FROM grac_practice.practice p
+                JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                    AND pi.organization_id=p.organization_id
+                    AND pi.status='Active'
+                WHERE p.organization_id=@organization_id
+                  AND p.status='Active'
+            ),
             statement_practice_counts AS (
                 -- Practices are linked to statements through
                 -- organization_statement_practice_mapping (a practice exists once per
                 -- organization but can be mapped to many applicable statements).
                 SELECT m.framework_statement_id FrameworkStatementId,
                        COUNT(DISTINCT m.org_practice_id) PracticeCount,
-                       COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,q.applicability_status)=N'Applicable' THEN m.org_practice_id END) ApplicablePracticeCount
+                       COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,q.applicability_status)=N'Applicable' THEN m.org_practice_id END) ApplicablePracticeCount,
+                       -- 2026-11-10: mapped practices still to be implemented (not
+                       -- marked Not Applicable / Deferred / ...) that have no active
+                       -- practice instance. The instance roll-up below cannot see
+                       -- them, so without this a statement with one Implemented
+                       -- practice and one never configured read Implemented.
+                       COUNT(DISTINCT CASE WHEN hi.organization_requirement_id IS NULL
+                                            AND COALESCE(aps.status_name,q.applicability_status,N'Not Updated') NOT IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired')
+                                           THEN m.org_practice_id END) PracticeWithoutInstanceCount
                 FROM grac_practice.organization_statement_practice_mapping m
                 JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
                     AND q.status='Active'
                 LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=q.applicability_status_id
+                LEFT JOIN requirement_has_instance hi ON hi.organization_requirement_id=q.organization_requirement_id
                 WHERE m.organization_id=@organization_id
                   AND m.status='Active'
                 GROUP BY m.framework_statement_id
@@ -1449,7 +1571,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                    CASE
                        WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
                             AND COALESCE(si.InstanceCount,0)>0
-                            AND si.InstanceCount=si.ImplementedInstanceCount THEN N'Implemented'
+                            AND si.InstanceCount=si.ImplementedInstanceCount
+                            -- 2026-11-10: and no mapped practice left without instances
+                            AND COALESCE(spc.PracticeWithoutInstanceCount,0)=0 THEN N'Implemented'
                        WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
                             AND COALESCE(si.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
                        WHEN COALESCE(aps.status_name,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
@@ -1732,14 +1856,31 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                   AND n.organization_id=@organization_id
                   AND n.status=N'Active'
             ),
+            -- 2026-11-10: practices (organization_requirement) holding at least
+            -- one active practice instance -- the same practice / instance joins
+            -- the implementation roll-up walks.
+            requirement_has_instance AS (
+                SELECT DISTINCT p.organization_requirement_id
+                FROM grac_practice.practice p
+                JOIN grac_practice.practice_instance pi ON pi.practice_id=p.practice_id
+                    AND pi.organization_id=p.organization_id
+                    AND pi.status='Active'
+                WHERE p.organization_id=@organization_id
+                  AND p.status='Active'
+            ),
             statement_practice_counts AS (
                 SELECT m.org_statement_id OrgStatementId,
                        COUNT(DISTINCT m.org_practice_id) PracticeCount,
-                       COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,q.applicability_status)=N'Applicable' THEN m.org_practice_id END) ApplicablePracticeCount
+                       COUNT(DISTINCT CASE WHEN COALESCE(aps.status_name,q.applicability_status)=N'Applicable' THEN m.org_practice_id END) ApplicablePracticeCount,
+                       -- 2026-11-10: same as the repository query's column.
+                       COUNT(DISTINCT CASE WHEN hi.organization_requirement_id IS NULL
+                                            AND COALESCE(aps.status_name,q.applicability_status,N'Not Updated') NOT IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired')
+                                           THEN m.org_practice_id END) PracticeWithoutInstanceCount
                 FROM grac_practice.organization_statement_practice_mapping m
                 JOIN grac_practice.organization_requirement q ON q.organization_requirement_id=m.org_practice_id
                     AND q.status='Active'
                 LEFT JOIN grac_practice.applicability_status_master aps ON aps.applicability_status_id=q.applicability_status_id
+                LEFT JOIN requirement_has_instance hi ON hi.organization_requirement_id=q.organization_requirement_id
                 WHERE m.organization_id=@organization_id
                   AND m.status='Active'
                   AND m.org_statement_id IS NOT NULL
@@ -1792,7 +1933,9 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                 CASE
                     WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
                          AND COALESCE(si.InstanceCount,0)>0
-                         AND si.InstanceCount=si.ImplementedInstanceCount THEN N'Implemented'
+                         AND si.InstanceCount=si.ImplementedInstanceCount
+                         -- 2026-11-10: and no mapped practice left without instances
+                         AND COALESCE(spc.PracticeWithoutInstanceCount,0)=0 THEN N'Implemented'
                     WHEN COALESCE(aps.status_name,N'Not Updated')=N'Applicable'
                          AND COALESCE(si.ImplementedInstanceCount,0)>0 THEN N'Partially Implemented'
                     WHEN COALESCE(aps.status_name,N'Not Updated') IN (N'Not Applicable',N'Deferred',N'Accepted Risk',N'Not Implemented',N'Retired') THEN N'Not Applicable'
@@ -1993,12 +2136,16 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
     // Responsibility, StateRulesJson, ExecutionSpecsJson, AssuranceSpecsJson,
     // EventResponsesJson, ConstraintRulesJson, RetentionSpecsJson,
     // EvidenceJson (all *Json fields are JSON string arrays, default '[]').
+    // 519: optional releaseId (> 0) narrows the rows to obligations mapped
+    // under that framework release -- Practice View opened from the
+    // Practices grid with a framework selected. Absent = every framework.
     private static async Task<List<List<Dictionary<string, object?>>>> QueryObligationsTypedAsync(
         DbConnection connection, string search, string payload, CancellationToken cancellationToken)
     {
         var organizationRequirementId = JsonInt(payload, "organizationRequirementId");
         var practiceId = JsonInt(payload, "practiceId");
         var practiceInstanceId = JsonInt(payload, "practiceInstanceId");
+        var releaseId = JsonInt(payload, "releaseId");
         var pageNumber = JsonInt(payload, "pageNumber") ?? 1;
         var pageSize = JsonInt(payload, "pageSize") ?? 200;
         if (pageNumber < 1) pageNumber = 1;
@@ -2018,6 +2165,11 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
         Add(command, "@p_search", search ?? "");
         Add(command, "@p_offset", offset);
         Add(command, "@p_page_size", pageSize);
+        // 519. A custom release's synthetic id is negative and has no map
+        // rows, so only a real repository release narrows the list.
+        if (releaseId is > 0
+            && await ProcedureHasParameterAsync(connection, "dbo.sp_pm_view_obligations_typed", "@p_release_id", cancellationToken))
+            AddNullable(command, "@p_release_id", releaseId);
         return await ReadTablesAsync(command, cancellationToken);
     }
 

@@ -1,0 +1,328 @@
+@*
+    Risk Methodology -- migration 532 (2026-11-12).
+
+    Screen key : `risk-methodology`
+    Group      : Risk Management (533)
+    Menu       : risk-centre (Risk Management) -> risk-centre-settings
+                 (Settings) -> Risk Methodology; under nav-organization
+                 before 533
+
+    The organisation's own risk methodology: the extra dimensions the
+    scoring pages ask (velocity, proximity, persistence, control
+    effectiveness, confidence, or its own), the scoring mode (matrix,
+    priority, 3D), appetite, target rating, impact by area, trend and
+    quantification.
+
+    VERSIONED. The published version is what the risk pages use. Changes
+    are made to a Draft (started from the published version or from a
+    template) and Publish makes the draft the next version. Assessments
+    keep the version they were made under.
+
+    Follows risk-settings' conventions: pm-page-heading compact, an org
+    picker in a pm-toolbar, pm-panel sections, pm-table-wrap grids.
+    Edit = the organisation administrator (menu EDIT on this screen; the
+    Web proxy refuses the writes otherwise).
+
+    Backend:
+        GET  /practice/api/risk-centre/methodology?organizationId=
+        POST /practice/api/risk-centre/methodology/draft          { organizationId, templateCode, replace }
+        POST /practice/api/risk-centre/methodology/draft/save     { organizationId, draft }
+        POST /practice/api/risk-centre/methodology/draft/discard  { organizationId }
+        POST /practice/api/risk-centre/methodology/publish        { organizationId }
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>
+            How this organization assesses risk beyond likelihood and impact. Changes are
+            made in a draft and take effect when published; risks keep the version they
+            were assessed under.
+        </p>
+    </div>
+</div>
+
+<section class="pm-panel" id="rmRoot">
+    <div class="pm-toolbar pm-toolbar-fields" style="flex-wrap:wrap; gap:8px; align-items:end;">
+        <label class="pm-field">
+            <span>Organization</span>
+            <select class="pm-input" id="rmPickOrg" style="min-width:260px;">
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        @* Where a new draft starts -- choosing it STARTS the draft, there is
+           no separate button (2026-11-12). "Published version" is offered
+           only when the organisation has one (risk-methodology.js); "From a
+           template" opens the Template combo, and picking a template starts
+           the draft. Replacing an open draft asks first. *@
+        <label class="pm-field">
+            <span>Draft</span>
+            <select class="pm-input" id="rmStartFrom" style="min-width:260px;">
+                <option value="">-- choose --</option>
+                @* Shown and selected while a draft is open: the form below is
+                   that draft. Choosing another option replaces it. *@
+                <option value="DRAFT">Current draft</option>
+                <option value="BLANK">New &mdash; blank</option>
+                <option value="PUBLISHED">New &mdash; copy of the published version</option>
+                <option value="TEMPLATE">New &mdash; from a template</option>
+            </select>
+        </label>
+        <label class="pm-field" id="rmTemplateWrap" hidden>
+            <span>Template</span>
+            <select class="pm-input" id="rmTemplate" style="min-width:180px;">
+                <option value="">-- choose --</option>
+                <option value="ISO31000">ISO 31000</option>
+                <option value="COSO_ERM">COSO ERM</option>
+                <option value="ISO27005">ISO 27005</option>
+            </select>
+        </label>
+        @* Standard icon refresh button (same markup as the dashboards'
+           mdRefreshBtn); .pm-toolbar-fields lines it up with the combos. *@
+        <button class="pm-button icon" id="rmReloadBtn" type="button" title="Reload" aria-label="Reload">
+            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+        </button>
+    </div>
+
+    <p class="rm-status" id="rmStatus" role="status" aria-live="polite"></p>
+</section>
+
+<form id="rmForm" hidden>
+    @* 2026-11-12: every option is one row, and the configuration an option
+       needs (3D bands, impact areas, appetite, currency) opens directly
+       beneath it -- not as a separate card further down the page. *@
+    <section class="pm-panel">
+        <div class="pm-section-heading">
+            <h2>Scoring &amp; options</h2>
+            <p>How a risk is scored, and what else the risk pages ask.</p>
+        </div>
+
+        <div class="rm-options">
+            <div class="rm-opt">
+                <div class="rm-opt-text">
+                    <span class="rm-opt-title">Methodology name<span class="pm-required">*</span></span>
+                    <span class="rm-opt-hint">Shown on the risk pages and in the version history. Required to publish.</span>
+                </div>
+                <input class="pm-input rm-opt-control" type="text" id="rmName" maxlength="200" placeholder="e.g. ISMS risk methodology 2026" />
+            </div>
+            <div class="rm-opt">
+                <div class="rm-opt-text">
+                    <span class="rm-opt-title">Scoring mode</span>
+                    <span class="rm-opt-hint">Matrix keeps likelihood &times; impact. Priority adds a ranking score; the rating does not change. 3D multiplies a third dimension into the score.</span>
+                </div>
+                <select class="pm-input rm-opt-control" id="rmScoringMode">
+                    <option value="Matrix">Matrix (likelihood &times; impact)</option>
+                    <option value="Priority">Priority score</option>
+                    <option value="3D">3D score</option>
+                </select>
+            </div>
+            <div class="rm-sub" id="rmBandsPanel">
+                <div class="rm-sub-row" id="rmThirdWrap">
+                    <label class="pm-field">
+                        <span>Third dimension</span>
+                        <select class="pm-input" id="rmThirdAxis"></select>
+                    </label>
+                    <p class="rm-sub-hint" id="rmBandsHint">Every score from 1 to the maximum must fall in exactly one band.</p>
+                </div>
+                <div class="pm-table-wrap rm-compact">
+                    <table>
+                        <thead><tr><th>From score</th><th>To score</th><th>Rating</th><th aria-label="Actions"></th></tr></thead>
+                        <tbody id="rmBandBody"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="pm-button ghost rm-add" id="rmAddBand"><i class="fa-solid fa-plus"></i> Add band</button>
+            </div>
+
+            <div class="rm-opt">
+                <div class="rm-opt-text">
+                    <span class="rm-opt-title">Overall impact</span>
+                    <span class="rm-opt-hint">One impact for the risk, or impact rated per area with the highest or the average counting.</span>
+                </div>
+                <select class="pm-input rm-opt-control" id="rmImpactMode">
+                    <option value="Single">One impact for the risk</option>
+                    <option value="Max">Per area &mdash; highest counts</option>
+                    <option value="Average">Per area &mdash; average counts</option>
+                </select>
+            </div>
+            <div class="rm-sub" id="rmAreasPanel">
+                <div class="pm-table-wrap rm-compact">
+                    <table>
+                        <thead><tr><th>Code</th><th>Impact area</th><th aria-label="Actions"></th></tr></thead>
+                        <tbody id="rmAreaBody"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="pm-button ghost rm-add" id="rmAddArea"><i class="fa-solid fa-plus"></i> Add impact area</button>
+            </div>
+
+            <label class="rm-opt rm-toggle">
+                <input type="checkbox" id="rmTarget" />
+                <span class="rm-opt-text">
+                    <span class="rm-opt-title">Target risk rating</span>
+                    <span class="rm-opt-hint">Ask for the rating treatment should reach; the register shows it until the residual rating gets there.</span>
+                </span>
+            </label>
+
+            <label class="rm-opt rm-toggle">
+                <input type="checkbox" id="rmAppetite" />
+                <span class="rm-opt-text">
+                    <span class="rm-opt-title">Risk appetite</span>
+                    <span class="rm-opt-hint">Flag a risk whose current rating (residual, else inherent) is above the highest acceptable rating. A category row overrides the default; with several categories the strictest applies.</span>
+                </span>
+            </label>
+            <div class="rm-sub" id="rmAppetitePanel">
+                <div class="pm-table-wrap rm-compact">
+                    <table>
+                        <thead><tr><th>Category</th><th>Highest acceptable rating</th><th>Appetite statement</th><th aria-label="Actions"></th></tr></thead>
+                        <tbody id="rmAppetiteBody"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="pm-button ghost rm-add" id="rmAddAppetite"><i class="fa-solid fa-plus"></i> Add appetite</button>
+            </div>
+
+            <label class="rm-opt rm-toggle">
+                <input type="checkbox" id="rmTrend" />
+                <span class="rm-opt-text">
+                    <span class="rm-opt-title">Trend</span>
+                    <span class="rm-opt-hint">Show whether the rating went up, down or stayed the same since the previous assessment.</span>
+                </span>
+            </label>
+
+            <label class="rm-opt rm-toggle">
+                <input type="checkbox" id="rmQuant" />
+                <span class="rm-opt-text">
+                    <span class="rm-opt-title">Quantification</span>
+                    <span class="rm-opt-hint">Capture the single loss expectancy and the annual rate; ALE = SLE &times; ARO.</span>
+                </span>
+            </label>
+            <div class="rm-sub" id="rmCurrencyWrap">
+                <label class="pm-field rm-currency">
+                    <span>Currency</span>
+                    <input class="pm-input" type="text" id="rmCurrency" maxlength="10" placeholder="e.g. INR" />
+                </label>
+            </div>
+
+            <div class="rm-opt rm-opt-notes">
+                <div class="rm-opt-text">
+                    <span class="rm-opt-title">Notes</span>
+                    <span class="rm-opt-hint">Anything the next person editing the methodology should know.</span>
+                </div>
+                <textarea class="pm-input rm-opt-control" id="rmNotes" rows="2" maxlength="1000"></textarea>
+            </div>
+        </div>
+    </section>
+
+    <section class="pm-panel">
+        <div class="pm-section-heading">
+            <h2>Dimensions</h2>
+            <p>Asked beside likelihood and impact. For every dimension a <strong>higher level means more risk</strong>. The weight is used by the priority score.</p>
+        </div>
+        <div class="pm-table-wrap rm-compact">
+            <table>
+                <thead>
+                    <tr>
+                        <th>On</th><th>Dimension</th><th>Required</th>
+                        <th>Inherent</th><th>Residual</th><th>Review</th>
+                        <th>Weight</th><th>Levels</th><th aria-label="Actions"></th>
+                    </tr>
+                </thead>
+                <tbody id="rmDimBody"></tbody>
+            </table>
+        </div>
+        <button type="button" class="pm-button ghost rm-add" id="rmAddDim"><i class="fa-solid fa-plus"></i> Add dimension</button>
+    </section>
+
+    <div class="rm-actions">
+        <p class="pm-form-message" id="rmMessage" role="status" aria-live="polite"></p>
+        <button type="button" class="pm-button" id="rmDiscardBtn">Discard draft</button>
+        <button type="submit" class="pm-button" id="rmSaveBtn"><i class="fa-solid fa-floppy-disk"></i> Save draft</button>
+        <button type="button" class="pm-button primary" id="rmPublishBtn"><i class="fa-solid fa-upload"></i> Publish</button>
+    </div>
+</form>
+
+<section class="pm-panel" id="rmHistoryPanel" hidden>
+    <div class="pm-section-heading">
+        <h2>Version history</h2>
+    </div>
+    <div class="pm-table-wrap">
+        <table>
+            <thead><tr><th>Version</th><th>Name</th><th>Status</th><th>Scoring</th><th>Template</th><th>Published</th><th>By</th></tr></thead>
+            <tbody id="rmHistoryBody"></tbody>
+        </table>
+    </div>
+</section>
+
+<style>
+    /* Page-local, like risk-settings' .rs-check (risk-centre.cshtml's
+       style block is not loaded on this page). Tokens only. */
+    /* .pm-field sets display:grid, which beats the browser's [hidden]. */
+    #rmRoot .pm-field[hidden] { display: none; }
+    #rmRoot .rm-status { margin: 8px 0 0; font-size: 12px; color: var(--fg-secondary); }
+
+    /* Options: one row each; an option's configuration (.rm-sub) opens
+       directly under it. */
+    #rmForm .rm-options { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+    /* One grid for every row: [checkbox | title + hint | control].
+       Rows without a checkbox leave the first column empty, so every
+       title starts at the same x and every control has the same width
+       and right edge. */
+    #rmForm .rm-opt {
+        display: grid; grid-template-columns: 16px minmax(0, 1fr) 320px;
+        column-gap: 12px; align-items: center;
+        padding: 10px 4px; border-bottom: 1px solid var(--border); margin: 0;
+    }
+    #rmForm .rm-opt > .rm-opt-text { grid-column: 2; }
+    #rmForm .rm-opt > .rm-opt-control { grid-column: 3; width: 100%; height: 34px; margin: 0; }
+    #rmForm .rm-opt > textarea.rm-opt-control { height: auto; min-height: 56px; }
+    #rmForm .rm-toggle { cursor: pointer; align-items: start; }
+    #rmForm .rm-toggle > input { grid-column: 1; margin: 2px 0 0; width: 16px; height: 16px; }
+    #rmForm .rm-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    #rmForm .rm-opt-title { font-size: 13px; font-weight: 600; color: var(--fg-default); }
+    #rmForm .rm-opt-hint { font-size: 12px; font-weight: 400; color: var(--fg-muted); line-height: 1.4; }
+    #rmForm .rm-opt-notes { align-items: start; }
+    @@media (max-width: 900px) {
+        #rmForm .rm-opt { grid-template-columns: 16px minmax(0, 1fr); row-gap: 8px; }
+        #rmForm .rm-opt > .rm-opt-control { grid-column: 2; }
+    }
+    #rmForm .rm-sub {
+        margin: 0 0 0 32px; padding: 10px 12px 12px; border-left: 2px solid var(--primary-200);
+        background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+    }
+    #rmForm .rm-sub-row { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 8px; }
+    #rmForm .rm-sub-row .pm-field { width: 260px; }
+    #rmForm .rm-sub-hint { margin: 0 0 6px; font-size: 12px; color: var(--fg-muted); }
+    #rmForm .rm-currency { width: 160px; }
+    #rmForm .rm-add { margin-top: 8px; }
+
+    /* Compact grids: tighter cells, 30px controls. */
+    #rmForm .rm-compact td, #rmForm .rm-compact th { padding: 6px 8px; }
+    #rmForm .rm-compact .pm-input { height: 30px; padding: 4px 8px; font-size: 12px; }
+    #rmForm .rm-compact td .pm-input[type="number"] { min-width: 64px; }
+    #rmForm .rm-sub .pm-table-wrap { background: var(--bg-surface); }
+
+    /* Dimension cell: the name with its fixed code beside it, the
+       description below in a quieter, smaller field. */
+    #rmForm td.rm-name-cell { min-width: 280px; white-space: normal; }
+    #rmForm .rm-name-row { display: flex; align-items: center; gap: 8px; }
+    #rmForm .rm-name-row .pm-input { flex: 1 1 auto; font-weight: 600; }
+    #rmForm .rm-code {
+        flex: none; padding: 2px 8px; border-radius: var(--radius-sm);
+        background: var(--bg-subtle); color: var(--fg-muted);
+        font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    }
+    #rmForm .rm-name-row .rm-code-input { flex: 0 0 140px; font-weight: 400; text-transform: uppercase; }
+    #rmForm .rm-compact .pm-input.rm-desc { margin-top: 4px; height: 28px; color: var(--fg-secondary); }
+    #rmForm td.rm-center { text-align: center; }
+    #rmForm .rm-levels td { background: var(--bg-subtle); }
+    #rmForm .rm-chip, #rmRoot .rm-chip {
+        display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
+        background: var(--bg-subtle); color: var(--neutral-700); font-size: 11px; font-weight: 600;
+    }
+
+    /* Save / Discard / Publish at the end of the form, not in a card. */
+    #rmForm .rm-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: 4px 0 16px; }
+    #rmForm .rm-actions .pm-form-message { margin: 0 auto 0 0; }
+</style>
+
+<partial name="Partials/_workflow-common" />
+<script src="~/js/RiskCentre/risk-methodology.js" asp-append-version="true"></script>

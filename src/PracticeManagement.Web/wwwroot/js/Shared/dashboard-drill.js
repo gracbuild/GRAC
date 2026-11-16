@@ -20,6 +20,10 @@
 //     overdue         1 = the page's own overdue filter (Task Board)
 //     priority        the page's own priority filter (Task Board)
 //     requestType     the page's own request-type filter (Exceptions)
+//     source          504: the Gap Register's Source filter (gaps.cshtml reads it)
+//     stage, type     508: Document Library stage / type CODE (with status:
+//                     its status code); the page maps codes to its options
+//     validity, usage 508: Evidence Center Validity / Used-in filter values
 //     tab             451: the tab of an asset screen holding the list
 //     kind            451: a kind filter (reconciliation exception kind)
 //     pending         451: 1 = only records awaiting approval
@@ -37,7 +41,9 @@
   const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[ch]);
   // Everything a dashboard link may add; Clear filter removes all of it.
   const DRILL_KEYS = ["drill", "statusText", "severity", "minAge", "maxAge", "noOwner", "drillLabel", "from",
-                      "status", "overdue", "priority", "requestType", "tab", "kind", "pending"];   // 451: tab, kind, pending
+                      "status", "overdue", "priority", "requestType", "tab", "kind", "pending",   // 451: tab, kind, pending
+                      "source",    // 504: Gap Register's Source preset (Open issues by source)
+                      "stage", "type", "validity", "usage"];   // 508: Document Library, Evidence Center
 
   function read() {
     const q = new URLSearchParams(window.location.search);
@@ -60,8 +66,13 @@
     d.tab     = q.get("tab") || "";           // 451
     d.kind    = q.get("kind") || "";          // 451
     d.pending = q.get("pending") === "1";     // 451
+    d.stage    = q.get("stage") || "";        // 508
+    d.type     = q.get("type") || "";         // 508
+    d.validity = q.get("validity") || "";     // 508
+    d.usage    = q.get("usage") || "";        // 508
     d.active = !!(d.drill || d.statusText || d.severity || d.minAge !== null || d.maxAge !== null
-                  || d.noOwner || d.label || d.status || d.overdue || d.priority || d.tab || d.kind || d.pending);
+                  || d.noOwner || d.label || d.status || d.overdue || d.priority || d.tab || d.kind || d.pending
+                  || d.stage || d.type || d.validity || d.usage);
     return d;
   }
 

@@ -176,6 +176,83 @@ public sealed class PracticeLoginService(
         return envelope?.Success == true;
     }
 
+    // =================================================================
+    // Forgot password -- reset by email link (migration 529, 2026-11-10).
+    // Same bootstrap transport as sign-in. The API decides whether a link
+    // is issued and returns the raw token only so this tier can email it;
+    // it is never shown to the visitor.
+    // =================================================================
+
+    /// <summary>
+    /// Available = false when the API or 529 is not there. Issue is null for
+    /// every other "no" -- the caller shows one message either way.
+    /// </summary>
+    public async Task<PasswordResetRequestResult> RequestPasswordResetAsync(string loginId, string? requestedIp, CancellationToken cancellationToken)
+    {
+        var request = new SecureRepositoryRequest
+        {
+            EntityType = "password-reset-request",
+            Action = "RESET_REQUEST",
+            Data = JsonSerializer.SerializeToElement(new { loginId, requestedIp })
+        };
+        try
+        {
+            var envelope = Deserialize<PasswordResetIssueResult>(
+                await client.PasswordResetRequestAsync(BootstrapToken(loginId), request, cancellationToken));
+            if (envelope is null || !envelope.Success) return new PasswordResetRequestResult(false, null);
+            return new PasswordResetRequestResult(true, envelope.Data);
+        }
+        catch (PracticeApiException ex)
+        {
+            logger.LogError(ex, "Password reset request for {LoginId} could not reach the practice API.", loginId);
+            return new PasswordResetRequestResult(false, null);
+        }
+    }
+
+    /// <summary>The account behind a reset link, or null when the link is not usable.</summary>
+    public async Task<PasswordResetTargetResult?> ValidatePasswordResetAsync(string token, CancellationToken cancellationToken)
+    {
+        var request = new SecureRepositoryRequest
+        {
+            EntityType = "password-reset-validate",
+            Action = "RESET_VALIDATE",
+            Data = JsonSerializer.SerializeToElement(new { token })
+        };
+        try
+        {
+            var envelope = Deserialize<PasswordResetTargetResult>(
+                await client.PasswordResetValidateAsync(BootstrapToken("password-reset"), request, cancellationToken));
+            return envelope is { Success: true } ? envelope.Data : null;
+        }
+        catch (PracticeApiException ex)
+        {
+            logger.LogError(ex, "Password reset link check could not reach the practice API.");
+            return null;
+        }
+    }
+
+    /// <summary>True when the password was changed; false otherwise.</summary>
+    public async Task<bool> CompletePasswordResetAsync(string token, string newPassword, CancellationToken cancellationToken)
+    {
+        var request = new SecureRepositoryRequest
+        {
+            EntityType = "password-reset-complete",
+            Action = "RESET_COMPLETE",
+            Data = JsonSerializer.SerializeToElement(new { token, newPassword })
+        };
+        try
+        {
+            var envelope = Deserialize<PracticeLoginResult>(
+                await client.PasswordResetCompleteAsync(BootstrapToken("password-reset"), request, cancellationToken));
+            return envelope?.Success == true;
+        }
+        catch (PracticeApiException ex)
+        {
+            logger.LogError(ex, "Password reset could not reach the practice API.");
+            return false;
+        }
+    }
+
     // A validly-signed token whose PM_LOGIN role carries no entity permissions.
     // Subject is only for correlation in logs.
     private string BootstrapToken(string subject) => tokenService.Issue(subject, BootstrapRoles);
@@ -248,3 +325,14 @@ public sealed record PracticeLoginResult(
     IReadOnlyList<string> Permissions,
     IReadOnlyList<long> AllowedOrganizationIds,
     bool MustChangePassword);
+
+/// <summary>Forgot password (529): the API's PasswordResetIssue -- the raw
+/// token to email, the account's email and name, and how long the link lives.</summary>
+public sealed record PasswordResetIssueResult(string Token, string Email, string EmployeeName, int ExpiresInMinutes);
+
+/// <summary>Available = false: reset is not possible right now (API / 529).
+/// Issue = null with Available = true: nothing to send (one answer for every refusal).</summary>
+public sealed record PasswordResetRequestResult(bool Available, PasswordResetIssueResult? Issue);
+
+/// <summary>Forgot password (529): who a valid reset link belongs to.</summary>
+public sealed record PasswordResetTargetResult(string Email, string EmployeeName);

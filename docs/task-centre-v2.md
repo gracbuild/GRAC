@@ -1607,3 +1607,116 @@ their hosts, so they are not affected.
 
 No database change, no API change (both `/{id}/edit-options` routes already exist).
 Web rebuild only.
+
+## Review / approval cycle on task completion (migration 526, 2026-11-09)
+
+> "task nte module le task close cheyyumbo oru review and approve introduce cheyyan
+> pattanam. custom task adikumbo avarku review/approver ne choose cheyyan ulla option
+> venam. select cheythal aa cycle koodi ponam. illenkil athu venda. athu pole thanne
+> task nte schedule nte view/calender view lu ee schedule nte review/approve aranennu
+> update cheyyan ulla option venam. athu cheythal cycle follow cheyyanam."
+
+Decided with sir before building:
+
+- **Two optional people**, Reviewer then Approver. Only the steps that are chosen run. With
+  neither, Complete closes the task exactly as before.
+- **Return** from either step sends the task back to the assignee, **In Progress**, with the
+  reason. Completing it again restarts the cycle.
+- A **schedule's** reviewer / approver apply to tasks the schedule raises **after** the change.
+  Tasks already raised keep what they had.
+
+### The cycle
+
+| Who | Action | Task goes to |
+|---|---|---|
+| Assignee | Complete Task, reviewer set | **Pending Review** |
+| Assignee | Complete Task, approver only | **Pending Approval** |
+| Assignee | Complete Task, neither | Closed (unchanged) |
+| Reviewer | Approve | Pending Approval if an approver is set, otherwise Closed |
+| Approver | Approve | Closed |
+| Reviewer or Approver | Return (reason required) | In Progress, back to the assignee |
+
+- **Completed by** stays the person who did the work. The transition log records who approved.
+- **Who may act:** only the designated reviewer or approver, and never the person who completed
+  the task. An organisation admin (Web `CallerIdentityHandler` rule) may act only when the
+  designated person is no longer an active employee; otherwise the task could never close.
+- `practice_task.review_stage` (`Review` / `Approval`), not the status, says where the task is in
+  the cycle. If the SLA sweep (037) escalates a task in review, the reviewer can still act on it.
+- A Custom task's reviewer and approver must be two different people, neither of them the
+  assignee. A schedule's must not be the Practice Instance Owner, who does the scheduled task.
+  Implementation tasks close through their gates and cannot take a reviewer.
+
+### Database -- `526_task_review_approval_cycle.sql` (+ rollback)
+
+| Object | Change |
+|---|---|
+| `practice_task` | `reviewer_employee_id`, `approver_employee_id`, `review_stage` (CHECK Review/Approval), `review_submitted_by_employee_id`, `review_submitted_dt`, `review_submitted_remark`; filtered index on `review_stage` |
+| `assurance_schedule_rule` | `reviewer_employee_id`, `approver_employee_id` |
+| `entity_status_master` | Task status **Pending Approval** (45). Pending Review already existed (035). |
+| `entity_state_transition_rule` | Open / Assigned / InProgress / Escalated -> PendingReview and -> PendingApproval; PendingReview -> PendingApproval; PendingApproval -> Closed; PendingReview / PendingApproval / Escalated -> InProgress (Return); PendingApproval -> Escalated; PendingReview / PendingApproval -> Cancelled. All in the 350 shape (no role). |
+| `sp_task_complete` (200 body) | A task with a reviewer / approver goes to Pending Review / Pending Approval instead of closing. `@review_finalize` closes it on the last approval, `@completed_by_employee_id` keeps the doer, `@suppress_result` is used for the inner call. Refuses a second Complete while the task is in review (55961). |
+| `sp_task_list` (414 body) | `@review_employee_id`: tasks waiting for that employee's review or approval. |
+| `sp_schedule_obligation_tasks_generate` (459 body) | Copies the schedule's reviewer / approver onto each task it raises, leaving out anyone who is also that task's assignee. |
+| new `sp_task_review_settings_set` | Sets a task's reviewer / approver, with the validations above. |
+| new `sp_task_review_get` | The cycle of one task, including who it is waiting for. |
+| new `sp_task_review_decide` | Approve / Return. The final approval calls `sp_task_complete`, so it does not copy the close logic. |
+| new `sp_schedule_rule_review_get` / `_save` | A schedule's reviewer / approver. Save enforces the Edit Schedule rule: Practice Instance Owner or system admin (PM_ADMIN). |
+
+The rollback refuses to run while any task is in the cycle. Approve or return those tasks first.
+
+**Errors** (`TaskService.HandleSqlError`):
+
+| Number | Reason code | HTTP |
+|---|---|---|
+| 55961 | `AWAITING_REVIEW` (already completed, waiting) | 409 |
+| 55966 | `NOT_AWAITING_REVIEW` | 409 |
+| 55967, 55968, 55976 | `REVIEW_FORBIDDEN` (not the designated person / own work / not the schedule owner) | 403 |
+| 55965, 55975 | `TASK_NOT_FOUND` | 404 |
+| others in 55960-55979 | `VALIDATION_ERROR` (the message is a sentence for the user) | 400 |
+
+### API
+
+| Verb | Web route (`/practice/api/tasks/...`) | Api route (`/api/practice/tasks/...`) | Notes |
+|---|---|---|---|
+| POST | `` (create) | `` | `TaskOpenRequest` gains optional `reviewerEmployeeId`, `approverEmployeeId`. They are set in the **same transaction** as the open, so a refused choice creates no task. |
+| GET | `?...&awaitingMyReview=true` | same | Tasks waiting for the signed-in employee. The employee comes from `X-PM-Caller-Employee-Id`, never from the query. |
+| GET | `{id}` | same | The detail response gains `review`: `{ reviewerEmployeeId, reviewerName, approverEmployeeId, approverName, reviewStage, submittedByEmployeeId, submittedByName, submittedDt, submittedRemark, awaitingEmployeeId, awaitingName }`. It is null before 526. |
+| POST | `{id}/review-decision` | same | `{ decision: "Approve" \| "Return", remark }`. The admin flag is stamped. |
+| GET | `schedule-rules/{ruleId}/review?organizationId=` | same | Web checks the session, the organization and `assurance-calendar` VIEW. |
+| POST | `schedule-rules/{ruleId}/review` | same | `{ organizationId, reviewerEmployeeId, approverEmployeeId }`. Web checks the organization and `assurance-calendar` EDIT/ADD, and stamps `X-PM-Caller-Is-System-Admin` from the session. |
+
+The Api probes `sp_task_list @review_employee_id` and `sp_task_review_get` before using them, so an
+Api deployed before the SQL keeps working. The probe is cached per process: **restart the Api
+after running 526** (and after the rollback).
+
+### UI
+
+- **New Task (Custom)** (`_task-form-dialog.cshtml`, `Shared/task-form.js`): optional **Reviewer** and
+  **Approver** selects, from the same employee list as Assigned To. They are shown only for a
+  Custom task, not for a sub task, and the form checks the same rules before posting.
+- **Complete Task** (`_task-action-dialogs.cshtml`, `Shared/task-actions.js`): a notice says where the
+  task goes next ("goes for review by X, then approval by Y").
+- **Review / Approve** action (`buildMenu`): offered in Task Board's row menu and Task View's Actions
+  menu while the task is Pending Review / Pending Approval. Task View also offers it when an
+  escalated task is still in the cycle. **Complete Task** is withheld in that state. The dialog shows
+  who completed the task, when and with what remark, the reviewer, the approver and who it is
+  waiting for, with **Approve** and **Return to assignee** (remark required).
+- **Task Board** (`tasks.cshtml`): a **Review / approval** filter, *All tasks* or *Awaiting my
+  review / approval*.
+- **Task View** (`TaskCentre/task-view.js`): Reviewer, Approver and Waiting For facts.
+- **Task Calendar** (`Calendar.cshtml`, `practice-calendar.js`): a **Review / Approval** button in an
+  occurrence's side panel, and a **Review / Approval** item in the Scheduler List row menu. Both use
+  the same gate as Edit Schedule (EDIT/ADD and Practice Instance Owner or system admin), but are
+  offered for daily and past occurrences too, because this is a schedule-level setting.
+
+### Not changed
+
+- Task **Edit** does not change the reviewer or approver; they are chosen when the task is created.
+- Sub tasks, and tasks raised by other modules (Gap, Risk, Exception, Asset, TPRM...), have no
+  reviewer, so they close on Complete as before.
+
+### Deploy
+
+1. Run `526_task_review_approval_cycle.sql`.
+2. Deploy and **restart the Api**.
+3. Deploy Web, then hard-refresh the browser.

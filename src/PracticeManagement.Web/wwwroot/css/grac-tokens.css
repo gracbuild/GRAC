@@ -35,6 +35,10 @@
     /* 1. Brand + chrome ------------------------------------------- */
     --grac-navy-deep: #0C1129;               /* sidebar / chrome            */
     --grac-gold:      #E8A33D;               /* BRAND ONLY -- never a control */
+    --grac-navy-top:  #0A1838;               /* top of the navy scene gradient
+                                                (login screen + sidebar)     */
+    --grac-glow:      #4C8DFF;               /* glow edge: login hub, active
+                                                menu item (2026-11-03)       */
     --bg-page:        #F9FAFB;               /* near-white page             */
     --bg-surface:     #FFFFFF;               /* work surface                */
     --bg-subtle:      #F3F4F6;               /* table head, muted fills     */

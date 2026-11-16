@@ -24,7 +24,11 @@ public static class ManagementDashboards
             [
                 ("frameworks", "organization-controls"),
                 ("practices",  "organization-requirements"),
-                ("instances",  "resolve")
+                ("instances",  "resolve"),
+                // 503: evidence and dependency position of the same
+                // instances -- both are captured on Operationalize.
+                ("evidence",     "resolve"),
+                ("dependencies", "resolve")
             ],
             ["issues-actions-dashboard"] =
             [
@@ -53,7 +57,7 @@ public static class ManagementDashboards
                 ("relationships", "asset-relationships"),
                 ("notifications", "asset-notifications")
             ],
-            // 490: Third-Party Risk dashboard (sp_dashboard_tprm).
+            // 490: Third-Party Management dashboard (sp_dashboard_tprm; module renamed by 521).
             ["tprm-dashboard"] =
             [
                 ("tprmthirdparties", "tprm-third-parties"),
@@ -61,9 +65,36 @@ public static class ManagementDashboards
                 ("tprmdiligence",    "tprm-engagements"),
                 ("tprmfindings",     "tprm-engagements"),
                 ("tprmreviews",      "tprm-reviews"),
-                ("tprmacceptance",   "tprm-engagements")
+                ("tprmacceptance",   "tprm-engagements"),
+                ("tprmregister",     "tprm-risk-register")   // 525: TP Risk Register (CR 2 8)
+            ],
+            // 508: Policies & Documents dashboard (sp_dashboard_documents).
+            ["documents-dashboard"] =
+            [
+                ("documents",        "document-uploads"),
+                ("acknowledgements", "document-acknowledgements"),
+                ("docevidence",      "evidence-center")   // "evidence" is Governance's (503)
             ]
         };
+
+    /// <summary>
+    /// 503 (Dashboard UI specification v2, Home): the module dashboards Home
+    /// offers as snapshot cards, in display order. Module = the data route
+    /// segment (management-dashboard/{module}; "risk" reads the Risk Centre
+    /// dashboard), ScreenKey = the dashboard page the card opens. Home shows
+    /// a card only when PracticeController.CanViewScreen(ScreenKey) -- the
+    /// rule the dashboard page itself applies.
+    /// </summary>
+    public static readonly (string Module, string ScreenKey, string Title)[] HomeSnapshots =
+    [
+        ("governance",      "governance-dashboard",      "Governance"),
+        ("issues-actions",  "issues-actions-dashboard",  "Issues & Actions"),
+        ("risk",            "risk-centre-dashboard",     "Risk Management"),
+        ("audit-assurance", "audit-assurance-dashboard", "Audit Assurance"),
+        ("tprm",            "tprm-dashboard",            "Third-Party Management"),   // 521
+        ("documents",       "documents-dashboard",       "Policies & Documents"),   // 508
+        ("asset-contract",  "asset-contract-dashboard",  "Asset & Contract")
+    ];
 
     /// <summary>API module key (route segment) of a dashboard screen:
     /// "governance-dashboard" -> "governance".</summary>

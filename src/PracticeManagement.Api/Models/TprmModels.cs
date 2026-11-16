@@ -378,28 +378,23 @@ public sealed record TprmSaveThirdPartyRequest(
     long? RelationshipOwnerEmployeeId = null,
     string? ContactsJson = null,
     string? CustomJson = null,
-    bool? ConfirmDuplicates = null,
+    string? MatchReviewsJson = null,
     long? ExpectedRecordVersion = null);
 
 /// <summary>POST third-parties/{thirdPartyId}/status -> grac_practice.sp_tprm_third_party_status.</summary>
 public sealed record TprmSetThirdPartyStatusRequest(
     long? OrganizationId = null,
+    string? Action = null,
     string? StatusCode = null,
-    bool? Archive = null,
-    string? Reason = null);
+    string? Reason = null,
+    string? EvidenceReference = null);
 
-/// <summary>GET vendors -> grac_practice.sp_tprm_vendor_discovery.</summary>
-public sealed record TprmVendorsQuery(
+/// <summary>POST third-parties/{thirdPartyId}/match-reviews -> grac_practice.sp_tprm_vendor_match_review_save.</summary>
+public sealed record TprmReviewVendorMatchRequest(
     long? OrganizationId = null,
-    string? Search = null,
-    bool? OnlyUnlinked = null);
-
-/// <summary>POST vendors/{vendorId}/import -> grac_practice.sp_tprm_vendor_import.</summary>
-public sealed record TprmImportVendorRequest(
-    long? OrganizationId = null,
-    long? ThirdPartyId = null,
-    bool? CreateEngagement = null,
-    bool? ConfirmDuplicates = null);
+    long? MatchedThirdPartyId = null,
+    string? Decision = null,
+    string? Rationale = null);
 
 /// <summary>POST samples/load -> grac_practice.sp_tprm_sample_load.</summary>
 public sealed record TprmLoadSamplesRequest(
@@ -415,6 +410,7 @@ public sealed record TprmEngagementsQuery(
     string? CriticalityCode = null,
     long? OwnerEmployeeId = null,
     string? Attention = null,
+    string? ApplicabilityStatus = null,
     int? PageNumber = null,
     int? PageSize = null);
 
@@ -428,34 +424,126 @@ public sealed record TprmSaveEngagementRequest(
     long? EngagementId = null,
     long? ThirdPartyId = null,
     string? EngagementTitle = null,
-    string? ServiceDescription = null,
-    string? ScopeDescription = null,
-    string? BusinessPurpose = null,
     string? ServiceCategoryCode = null,
+    string? ServiceDescription = null,
+    string? BusinessPurpose = null,
+    string? ServiceRecipient = null,
     string? EngagementTypeCode = null,
     string? ServiceModelCode = null,
     string? DeliveryLocations = null,
+    DateTime? ProposedStartDt = null,
+    DateTime? ProposedEndDt = null,
+    long? RelationshipOwnerEmployeeId = null,
+    string? ScopeDescription = null,
     bool? IsExisting = null,
+    long? BusinessOwnerEmployeeId = null,
+    long? AssessorEmployeeId = null,
+    DateTime? ActualStartDt = null,
+    DateTime? ActualEndDt = null,
+    string? Notes = null,
+    string? CustomJson = null,
+    long? ExpectedRecordVersion = null);
+
+/// <summary>POST engagements/{engagementId}/exposure -> grac_practice.sp_tprm_engagement_exposure_save.</summary>
+public sealed record TprmSaveEngagementExposureRequest(
+    long? OrganizationId = null,
+    string? AppAccessAnswer = null,
+    string? PremisesAccessAnswer = null,
+    string? DataProcessingAnswer = null,
+    string? SubcontractingAnswer = null,
+    string? ImportantProcessAnswer = null,
+    string? DisruptionImpactAnswer = null,
+    string? ServiceCommitmentAnswer = null,
+    string? ContractAnswer = null,
+    string? ServiceCriticalityCode = null,
+    string? DataProcessingDetails = null,
+    string? CustomerImpactCode = null,
+    string? SubstitutabilityCode = null,
+    string? ExitDependencies = null,
+    string? SlaSummary = null,
+    int? RtoHours = null,
+    int? RpoHours = null,
     long? ContractId = null,
     string? ContractReference = null,
     decimal? ContractValue = null,
     string? CurrencyCode = null,
-    DateTime? ProposedStartDt = null,
-    DateTime? ProposedEndDt = null,
-    DateTime? ActualStartDt = null,
-    DateTime? ActualEndDt = null,
+    DateTime? ContractStartDt = null,
+    DateTime? ContractEndDt = null,
     DateTime? RenewalDt = null,
-    long? BusinessOwnerEmployeeId = null,
-    long? RelationshipOwnerEmployeeId = null,
-    long? AssessorEmployeeId = null,
-    string? ServiceCriticalityCode = null,
-    string? DataExposureCode = null,
-    int? RtoHours = null,
-    int? RpoHours = null,
-    string? SlaSummary = null,
-    string? Notes = null,
-    string? CustomJson = null,
+    string? ContractDocuments = null,
+    string? ScopeJson = null,
     long? ExpectedRecordVersion = null);
+
+/// <summary>GET engagements/{engagementId}/applicability -> grac_practice.sp_tprm_applicability_get.</summary>
+public sealed record TprmApplicabilityQuery(
+    long? OrganizationId = null,
+    long? ReportId = null);
+
+/// <summary>POST engagements/{engagementId}/screening -> grac_practice.sp_tprm_screening_run.</summary>
+public sealed record TprmRunScreeningRequest(
+    long? OrganizationId = null);
+
+/// <summary>POST engagements/{engagementId}/applicability -> grac_practice.sp_tprm_applicability_decide.</summary>
+public sealed record TprmDecideApplicabilityRequest(
+    long? OrganizationId = null,
+    string? Decision = null,
+    string? Rationale = null,
+    DateTime? DecisionDt = null,
+    string? EvidenceReferences = null,
+    string? ApprovalReference = null,
+    string? InformationRequest = null,
+    long? InformationFromEmployeeId = null,
+    long? ExpectedReportId = null);
+
+/// <summary>POST admissions/{admissionId}/act -> grac_practice.sp_tprm_admission_act.</summary>
+public sealed record TprmActOnAdmissionRequest(
+    long? OrganizationId = null,
+    string? Action = null,
+    string? Rationale = null,
+    long? OnBehalfOfEmployeeId = null);
+
+/// <summary>POST admissions/{admissionId}/withdraw -> grac_practice.sp_tprm_admission_withdraw.</summary>
+public sealed record TprmWithdrawAdmissionRequest(
+    long? OrganizationId = null,
+    string? Note = null);
+
+/// <summary>GET risk-register -> grac_practice.sp_tprm_register_list.</summary>
+public sealed record TprmRiskRegisterQuery(
+    long? OrganizationId = null,
+    string? Status = null,
+    string? BandCode = null,
+    string? Attention = null,
+    string? Search = null,
+    int? PageNumber = null,
+    int? PageSize = null);
+
+/// <summary>GET risk-register/{registerId} -> grac_practice.sp_tprm_register_get.</summary>
+public sealed record TprmRiskRegisterRecordQuery(
+    long? OrganizationId = null);
+
+/// <summary>POST risk-register/{registerId}/ratings -> grac_practice.sp_tprm_register_rating_save.</summary>
+public sealed record TprmRateProfileAreaRequest(
+    long? OrganizationId = null,
+    string? AreaCode = null,
+    string? BandCode = null,
+    string? Rationale = null,
+    string? EvidenceReference = null);
+
+/// <summary>POST risk-register/impact-reviews/{impactReviewId}/decide -> grac_practice.sp_tprm_register_impact_review_decide.</summary>
+public sealed record TprmDecideImpactReviewRequest(
+    long? OrganizationId = null,
+    string? Outcome = null,
+    string? Rationale = null);
+
+/// <summary>POST risk-register/{registerId}/close -> grac_practice.sp_tprm_register_close.</summary>
+public sealed record TprmCloseRegisterRecordRequest(
+    long? OrganizationId = null,
+    string? Rationale = null);
+
+/// <summary>POST risk-register/{registerId}/profile-reviews -> grac_practice.sp_tprm_register_profile_review_save.</summary>
+public sealed record TprmRecordProfileReviewRequest(
+    long? OrganizationId = null,
+    string? Rationale = null);
 
 /// <summary>POST engagements/{engagementId}/scope -> grac_practice.sp_tprm_scope_item_save.</summary>
 public sealed record TprmSaveScopeItemRequest(

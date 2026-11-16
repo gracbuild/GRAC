@@ -1,0 +1,27 @@
+@*
+    Audit Configuration -- the Scope Builder step (545, 2026-11-13).
+
+    REQUEST (sir): resolving the scope at configuration time is too early
+    -- planning and the execution come later, by when the data has changed.
+    The scope is now resolved when an execution is created
+    (sp_org_assurance_execution_materialize, 545), and Scope Resolution is
+    no longer a configuration step.
+
+    What stays is the Preview: under the Scope Builder, the existing Scope
+    Resolution screen ("Preview Resolve Now", the snapshots it made and
+    their entities) shows what the SAVED scope matches today -- a check
+    only; nothing uses these PREVIEW snapshots any more.
+
+    Both screens are hosted unchanged. The flow shell binds both to the
+    audit for this step (SCOPED 'scope' -> oaScope and oaRs,
+    Partials/_audit-flow-shell).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/org-assurance-scope-builder" model="Model" />
+
+<div class="oa-scope-preview">
+    <div class="oa-ws-section-head"><h2>Preview</h2></div>
+    <p class="oa-ws-section-hint">What the saved scope matches today. Save the scope first. This is only a check: the scope is resolved again when an execution is created.</p>
+    <partial name="Partials/org-assurance-scope-resolution" model="Model" />
+</div>

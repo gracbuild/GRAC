@@ -76,6 +76,24 @@
     text-transform: uppercase;
 }
 
+/* The page-heading eyebrow printed "<Group> / <Title>", which the header
+   breadcrumb now says as well ("Home / <Group> / <Title>" -- see the
+   currentGroup note in _Layout.cshtml). Two copies of the same path, one
+   above the other.
+
+   Hidden here rather than deleted from the markup: the line is written out
+   by hand in 84 places across 76 views, so one rule removes it from every
+   page that exists today AND from any page added later, and it is one line
+   to revert. The <p> stays in the DOM, so nothing that reads the heading
+   block changes.
+
+   .pm-dashboard-heading is excluded on purpose: its eyebrow is "Home", not
+   a repeat of the breadcrumb. .pm-hero (the Home landing section) is not
+   matched at all -- its eyebrow is "GRAC Part 2". */
+.pm-page-heading:not(.pm-dashboard-heading) .pm-eyebrow {
+    display: none;
+}
+
 .pm-actions {
     align-items: center;
     display: flex;
@@ -210,6 +228,24 @@
     color: var(--primary-600);
 }
 
+/* Labelled-field toolbar (2026-11-13). Opt in with .pm-toolbar-fields on a
+   .pm-toolbar whose filters are <label class="pm-field"> blocks with an
+   icon button beside them (the settings pages: org picker + Reload).
+   AdminLTE's label{margin-bottom:.5rem} leaves 8px under each field, so
+   the controls end above the toolbar's bottom edge and a bottom-aligned
+   button sits 8px low. Dropping that margin, and sizing the icon button
+   to the 34px control height, puts its icon on the controls' middle line. */
+.pm-toolbar.pm-toolbar-fields > .pm-field {
+    margin-bottom: 0;
+}
+
+.pm-toolbar.pm-toolbar-fields > .pm-button.icon {
+    align-self: flex-end;
+    flex: 0 0 auto;
+    height: 34px;
+    width: 34px;
+}
+
 /* ------------------------------------------------------------------
    4. Toolbars (matches .toolbar)
    ------------------------------------------------------------------ */
@@ -270,6 +306,16 @@
 .pm-recommendation-toolbar span {
     color: var(--fg-muted);
     font-size: 12px;
+}
+
+/* [hidden] must beat .pm-setup-toolbar label's own display:inline-flex just
+   above. An author rule setting display beats the browser's own [hidden]
+   default -- the same gotcha .pm-inline-actions and .pm-modal further down
+   document. Inside the Organization Management module the Organization combo
+   is hidden (2026-11-02): the organization comes from the row clicked on the
+   landing list, not from a selection. */
+.pm-setup-toolbar label[hidden] {
+    display: none;
 }
 
 /* ------------------------------------------------------------------
@@ -378,7 +424,15 @@
 }
 
 .pm-form-grid .form-field.full,
-.pm-form-grid label.full {
+.pm-form-grid label.full,
+/* Any other direct child marked .full -- a dialog's message line, its
+   notes, sub-sections and the Save / Cancel footer
+   (<footer class="pm-modal-footer full">) -- spans the whole grid too.
+   Before 2026-11-07 only labels and .form-field did, so those elements
+   fell into one grid column: the footer sat beside the fields as a tall
+   strip with the buttons stretched to the form's height (TPRM, Asset &
+   Contract and other dialogs built on .pm-form-grid). */
+.pm-form-grid > .full {
     grid-column: 1 / -1;
 }
 
@@ -964,94 +1018,9 @@ textarea.pm-input {
     padding: 0 10px;
 }
 
-.pm-dashboard-kpi-grid {
-    display: grid;
-    gap: 14px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    margin-bottom: 14px;
-}
-
-.pm-dashboard-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-card);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-}
-
-.pm-dashboard-card-title {
-    align-items: center;
-    color: var(--primary-600);
-    display: flex;
-    gap: 10px;
-}
-
-.pm-dashboard-card-title h2 {
-    color: var(--fg-default);
-    font-size: 15px;
-    font-weight: 750;
-    margin: 0;
-}
-
-.pm-dashboard-card-title i {
-    color: var(--primary-600);
-    font-size: 18px;
-}
-
-.pm-dashboard-primary {
-    align-items: baseline;
-    color: var(--primary-800);
-    display: flex;
-    gap: 8px;
-}
-
-.pm-dashboard-primary span {
-    color: var(--primary-800);
-    display: block;
-    font-size: 26px;
-    font-weight: 800;
-    line-height: 1;
-    padding: 4px 0;
-}
-
-.pm-dashboard-primary small {
-    color: var(--fg-muted);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-}
-
-.pm-mini-metrics {
-    color: var(--fg-muted);
-    display: grid;
-    gap: 4px 12px;
-    /* Responsive (2026-10-08): at most two columns, but a column never gets
-       narrower than 110px -- in a narrow card (laptop at 125% scaling) the
-       metrics drop to one column instead of the labels running into the
-       next column ("Applicable0 Not Updated"). */
-    grid-template-columns: repeat(auto-fit, minmax(max(110px, calc((100% - 12px) / 2)), 1fr));
-    font-size: 12px;
-}
-
-.pm-mini-metrics span {
-    align-items: baseline;
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 2px 6px;
-    line-height: 1.3;
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
-.pm-mini-metrics b {
-    color: var(--fg-default);
-    font-size: 13px;
-    font-weight: 750;
-}
+/* 503: the Home Overview card rules (.pm-dashboard-kpi-grid, .pm-dashboard-card*,
+   .pm-dashboard-primary, .pm-mini-metrics) were removed with that panel;
+   Home's module overview uses the .pm-dx-* components (11c). */
 
 .pm-dashboard-layout {
     display: grid;
@@ -1117,48 +1086,9 @@ textarea.pm-input {
 .risk-two-col, .pm-dash-two-col { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 16px; }
 @media (max-width: 900px) { .risk-two-col, .pm-dash-two-col { grid-template-columns: 1fr; } }
 
-/* Management dashboards layout (2026-10-01).
-   .pm-dash-split -- KPI cards (left half) beside the ageing groups
-     (right half), so the cards no longer leave the right side empty.
-     In the half width every KPI section is a fixed six-column row (the
-     largest section has six cards; a smaller one leaves the rest empty),
-     so the six cards stay on one row whatever the screen scaling -- a
-     px floor gave five at 125% Windows scaling (2026-10-02). The ageing
-     groups sit one column each
-     (--pm-dash-cols, set by management-dashboard.js) with a narrower
-     label column. Below 1400px the two halves stack again.
-   .pm-dash-grid-dist -- distributions on a 180px floor (auto-fit: the groups
-     share the full width) so all six groups
-     of Issues & Actions fit one row on a wide screen.
-   .pm-dash-lists -- each list a full row (or, beside the KPIs, under the
-     ageing -- see .pm-dash-side); the title column may wrap so the table
-     does not scroll sideways. */
-.pm-dash-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
-.pm-dash-split .pm-dash-tiles { grid-template-columns: repeat(auto-fit, minmax(max(120px, calc((100% - 50px) / 6)), 1fr)); } /* at most 6 (5 x 10px gaps), fewer when the half is narrow */
-.pm-dash-split .pm-dash-grid-ageing { grid-template-columns: repeat(var(--pm-dash-cols, 3), minmax(0, 1fr)); }
-.pm-dash-split .pm-dash-bar-row { grid-template-columns: minmax(64px, 100px) minmax(0, 1fr) 32px; }
-/* Right half (2026-10-02): ageing, then the lists filling what is left.
-   contain:size keeps this column from adding height to the row, so the
-   row is as tall as the KPI cards; the grid then stretches the column to
-   that height (align-self), and the list tables share the space below
-   the ageing and scroll inside it with their sticky header. */
-.pm-dash-split > .pm-dash-side { align-self: stretch; contain: size; display: flex; flex-direction: column; min-height: 0; }
-.pm-dash-side > .pm-dash-lists { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.pm-dash-side > .pm-dash-lists > div { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.pm-dash-side > .pm-dash-lists .pm-table-wrap { flex: 1 1 0; min-height: 0; max-height: none; }
-@media (max-width: 1400px) {
-    .pm-dash-split { grid-template-columns: minmax(0, 1fr); gap: 0; }
-    .pm-dash-split .pm-dash-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-    /* Stacked: the lists flow at their own height again. */
-    .pm-dash-split > .pm-dash-side { contain: none; display: block; }
-    .pm-dash-side > .pm-dash-lists { display: grid; }
-    .pm-dash-side > .pm-dash-lists .pm-table-wrap { max-height: var(--pm-grid-max-h); }
-    .pm-dash-split .pm-dash-grid-ageing { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-}
-.pm-dash-grid-dist { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-.pm-dash-grid-dist .pm-dash-bar-row { grid-template-columns: minmax(70px, 110px) minmax(0, 1fr) 36px; }
-.pm-dash-lists { display: grid; gap: 8px; }
-.pm-dash-lists td:nth-child(2) { white-space: normal; }
+/* The 414 dashboard layout (.pm-dash-split / -side / -lists / -grid-dist /
+   -grid-ageing) was removed by 509: every module dashboard uses the v2
+   layout (section 11c). */
 
 /* A bar chart made of divs. Deliberate: dashboards render with no
    charting dependency, and a labelled proportional bar is what these
@@ -1177,6 +1107,219 @@ textarea.pm-input {
 .risk-bar-row.is-clickable, .pm-dash-bar-row.is-clickable { cursor: pointer; }
 .risk-bar-row.is-clickable:hover .lbl, .pm-dash-bar-row.is-clickable:hover .lbl { color: var(--primary-600); text-decoration: underline; }
 
+/* ------------------------------------------------------------------
+   11c. Dashboard v2 components (.pm-dx-*) -- migration 503
+   Dashboard UI / Functional Specification v2. Drawn by
+   js/ManagementDashboard/dashboard-components.js (window.gracDash);
+   Governance is the first dashboard on it. Tokens only (grac-tokens.css):
+   white cards, 1px border, 8px radius, one soft shadow, Inter for
+   numbers, colour reserved for status (success / warning / danger) and
+   blue for links. No gradients, no coloured card borders.
+   ------------------------------------------------------------------ */
+.pm-dx { display: flex; flex-direction: column; gap: 16px; margin-top: 4px; }
+.pm-dx-context { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--fg-muted); }
+.pm-dx-context i { margin-right: 4px; color: var(--fg-subtle); }
+.pm-dx-scope {
+    display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: var(--radius-pill);
+    background: var(--bg-subtle); color: var(--fg-muted); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .02em; text-transform: none; vertical-align: 1px; white-space: nowrap;
+}
+.pm-dx-muted { color: var(--fg-muted); font-weight: 400; }
+
+/* KPI row: 6 across on a wide screen, reflowing to 3 / 2. */
+.pm-dx-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.pm-dx-kpi {
+    display: flex; flex-direction: column; gap: 6px; min-height: 118px;
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card); padding: 14px 16px; color: inherit; text-decoration: none;
+}
+.pm-dx-kpi.is-link { transition: border-color var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard); }
+.pm-dx-kpi.is-link:hover { border-color: var(--primary-500); background: var(--primary-50); text-decoration: none; }
+.pm-dx-kpi.is-link:focus-visible, .pm-dx-att-row.is-link:focus-visible, .pm-dx-leg-row.is-link:focus-visible, .pm-dx-rank-row.is-link:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.pm-dx-kpi-label { font-size: 12px; font-weight: 700; color: var(--fg-secondary); line-height: 1.3; }
+.pm-dx-kpi-value {
+    font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 600;
+    color: var(--fg-strong); line-height: 1.1;
+}
+.pm-dx-kpi-value small { font-size: 14px; color: var(--fg-muted); margin-left: 4px; font-weight: 500; }
+.pm-dx-kpi-value.tone-danger { color: var(--danger-700); }
+.pm-dx-kpi-value.tone-warning { color: var(--warning-700); }
+.pm-dx-kpi-q { font-size: 12px; color: var(--fg-muted); line-height: 1.35; margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 6px; }
+.pm-dx-kpi-q .pm-dx-scope { margin-left: 0; }
+.pm-dx-kpi-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-dx-meter { display: block; height: 6px; border-radius: var(--radius-pill); background: var(--bg-subtle); overflow: hidden; }
+.pm-dx-meter > span { display: block; height: 100%; border-radius: var(--radius-pill); }
+/* 2026-11-10: a split KPI meter -- segments side by side (implemented, then the rest). */
+.pm-dx-meter.is-split { display: flex; }
+.pm-dx-meter.is-split > span { flex: none; border-radius: 0; }
+.pm-dx-kpi-q .pm-dx-dot { width: 8px; height: 8px; vertical-align: 0; }
+
+/* Home module snapshot (gracDash.snapshot): the whole card links to the
+   module dashboard; three figures, each value / label / qualifier. */
+.pm-dx-snap.is-link { color: inherit; text-decoration: none; transition: border-color var(--duration-fast) var(--ease-standard); }
+.pm-dx-snap.is-link:hover { border-color: var(--primary-500); text-decoration: none; }
+.pm-dx-snap.is-link:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.pm-dx-snap .pm-dx-card-head { justify-content: space-between; }
+.pm-dx-snap-title { font-size: 14px; font-weight: 700; color: var(--fg-default); }
+.pm-dx-snap-go { font-size: 12px; font-weight: 600; color: var(--primary-600); white-space: nowrap; }
+.pm-dx-snap-go i { font-size: 10px; margin-left: 2px; }
+.pm-dx-snap.is-link:hover .pm-dx-snap-go { text-decoration: underline; }
+.pm-dx-snap-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pm-dx-snap-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pm-dx-snap-stat .v { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 600; color: var(--fg-strong); line-height: 1.1; }
+.pm-dx-snap-stat .k { font-size: 12px; font-weight: 700; color: var(--fg-secondary); line-height: 1.3; }
+.pm-dx-snap-stat .q { font-size: 11.5px; color: var(--fg-muted); line-height: 1.35; }
+.pm-dx-snap-stat .pm-dx-meter { margin: 2px 0; }
+
+/* Any v2 link -- an <a> or, 505, an in-page drill button. */
+.pm-dx .is-link, .pm-dx-snap.is-link { cursor: pointer; }
+
+/* Card container shared by attention, charts and tables. */
+.pm-dx-card {
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card); display: flex; flex-direction: column; min-width: 0;
+}
+.pm-dx-card-head {
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+.pm-dx-card-head h3 { margin: 0; font-size: 14px; font-weight: 700; color: var(--fg-default); flex: 1 1 auto; min-width: 0; }
+.pm-dx-meta { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.pm-dx-total { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; color: var(--fg-strong); white-space: nowrap; }
+.pm-dx-total small { font-family: var(--font-ui); font-size: 11px; font-weight: 400; color: var(--fg-muted); margin-left: 4px; }
+.pm-dx-card-body { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-width: 0; }
+.pm-dx-empty { font-size: 13px; color: var(--fg-muted); padding: 14px 0; text-align: center; }
+.pm-dx-note { margin: 0; font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; }
+.pm-dx-note .pm-dx-dot { margin: 0 4px 0 8px; }
+.pm-dx-note .pm-dx-dot:first-child { margin-left: 0; }
+.pm-dx-foot { margin: 0; display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--fg-secondary);
+    border-top: 1px dashed var(--border); padding-top: 8px; }
+.pm-dx-foot + .pm-dx-foot { border-top: 0; padding-top: 0; }
+.pm-dx-foot strong { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg-strong); }
+
+/* Row 2: Needs attention beside framework coverage. */
+/* stretch + last card grows (2026-11-02): with gracDash.balance moving
+   cards between the columns, the two column bottoms line up instead of
+   leaving a blank block beside the shorter one. */
+.pm-dx-row-2 { display: grid; grid-template-columns: minmax(340px, 5fr) minmax(0, 7fr); gap: 16px; align-items: stretch; }
+.pm-dx-row-2.single { grid-template-columns: minmax(0, 1fr); }
+/* 506: two equal columns (Audit Assurance watchlists). */
+.pm-dx-row-2.pm-dx-row-even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.pm-dx-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.pm-dx-row-2 > .pm-dx-col > :last-child { flex-grow: 1; }
+.pm-dx-grid.pm-dx-grid-2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+@media (max-width: 1280px) { .pm-dx-row-2, .pm-dx-row-2.pm-dx-row-even { grid-template-columns: minmax(0, 1fr); } }
+
+.pm-dx-att-list { display: flex; flex-direction: column; }
+.pm-dx-att-row {
+    display: grid; grid-template-columns: 64px minmax(0, 1fr) auto 14px; align-items: center; gap: 10px;
+    padding: 9px 4px; border-bottom: 1px solid var(--neutral-100); color: inherit; text-decoration: none;
+}
+.pm-dx-att-row:last-child { border-bottom: 0; }
+.pm-dx-att-row.is-link:hover { background: var(--primary-50); text-decoration: none; }
+.pm-dx-att-sev { font-size: 10.5px; font-weight: 700; text-align: center; padding: 2px 0; border-radius: var(--radius-sm); }
+.pm-dx-att-sev.sev-danger  { background: var(--danger-50);  color: var(--danger-700); }
+.pm-dx-att-sev.sev-warning { background: var(--warning-50); color: var(--warning-700); }
+.pm-dx-att-sev.sev-info    { background: var(--primary-50); color: var(--primary-700); }
+.pm-dx-att-text { display: flex; flex-direction: column; min-width: 0; }
+.pm-dx-att-text strong { font-size: 13px; font-weight: 700; color: var(--fg-default); }
+.pm-dx-att-text span { font-size: 11.5px; color: var(--fg-muted); line-height: 1.35; }
+.pm-dx-att-count { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; color: var(--fg-strong); }
+.pm-dx-att-go { color: var(--primary-600); font-size: 11px; }
+.pm-dx-att-clear { margin: 4px 0 0; font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; }
+.pm-dx-att-clear i { color: var(--success-600); margin-right: 4px; }
+
+/* Signature analytics grid. */
+.pm-dx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: stretch; }
+
+/* Stacked bar (parts of one whole) + legend. */
+.pm-dx-stack { display: flex; gap: 2px; height: 14px; border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-subtle); }
+.pm-dx-stack > span { display: block; min-width: 3px; height: 100%; }
+.pm-dx-stack.sm { height: 10px; min-width: 80px; }
+.pm-dx-legend { display: flex; flex-direction: column; gap: 2px; }
+.pm-dx-leg-row {
+    display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 40px; align-items: center; gap: 8px;
+    font-size: 12.5px; padding: 4px 4px; border-radius: var(--radius-sm); color: inherit; text-decoration: none;
+}
+.pm-dx-leg-row.is-link:hover { background: var(--primary-50); text-decoration: none; }
+.pm-dx-leg-row.is-link:hover .lbl { color: var(--primary-600); text-decoration: underline; }
+.pm-dx-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.pm-dx-leg-row .lbl { color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-dx-leg-row .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg-strong); text-align: right; }
+.pm-dx-leg-row .pc { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--fg-muted); text-align: right; font-size: 11.5px; }
+
+/* Ranked bars (comparison between categories). */
+.pm-dx-rank { display: flex; flex-direction: column; gap: 4px; }
+.pm-dx-rank-row {
+    display: grid; grid-template-columns: minmax(80px, 130px) minmax(0, 1fr) 40px; align-items: center; gap: 8px;
+    font-size: 12.5px; padding: 3px 4px; border-radius: var(--radius-sm); color: inherit; text-decoration: none;
+}
+.pm-dx-rank-row.is-link:hover { background: var(--primary-50); text-decoration: none; }
+.pm-dx-rank-row .lbl { color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-dx-rank-row .trk { height: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); overflow: hidden; }
+.pm-dx-rank-row .trk > span { display: block; height: 100%; border-radius: var(--radius-sm); }
+.pm-dx-rank-row .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; color: var(--fg-strong); }
+
+/* Ageing (gracDash.ageing, 504): one row per band, one thin bar per
+   series on a shared scale. */
+.pm-dx-age-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg-secondary); }
+.pm-dx-age-legend .pm-dx-dot { margin-right: 6px; vertical-align: -1px; }
+.pm-dx-age { display: flex; flex-direction: column; gap: 8px; }
+.pm-dx-age-row { display: grid; grid-template-columns: minmax(70px, 110px) minmax(0, 1fr); gap: 10px; align-items: center; }
+.pm-dx-age-row .lbl { font-size: 12.5px; color: var(--fg-secondary); }
+.pm-dx-age-row .bars { display: flex; flex-direction: column; gap: 2px; }
+.pm-dx-age-bar {
+    display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 8px;
+    color: inherit; text-decoration: none; border-radius: var(--radius-sm);
+}
+.pm-dx-age-bar.is-link:hover { background: var(--primary-50); text-decoration: none; }
+.pm-dx-age-bar .trk { height: 8px; background: var(--bg-subtle); border-radius: var(--radius-sm); overflow: hidden; }
+.pm-dx-age-bar .trk > span { display: block; height: 100%; border-radius: var(--radius-sm); }
+.pm-dx-age-bar .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600; text-align: right; color: var(--fg-strong); }
+
+/* Three a row on a wide screen (505: six Risk distributions = two full
+   rows), then two, then one. */
+.pm-dx-grid.pm-dx-grid-3 { grid-template-columns: repeat(auto-fill, minmax(max(300px, calc((100% - 32px) / 3)), 1fr)); }
+
+/* Watchlists side by side (504); stack below ~1100px. */
+.pm-dx-grid.pm-dx-grid-watch { grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); }
+@media (max-width: 1100px) { .pm-dx-grid.pm-dx-grid-watch { grid-template-columns: minmax(0, 1fr); } }
+
+/* Tables inside a card (coverage, watchlist). */
+.pm-dx-table { margin: 0 -16px; border-left: 0; border-right: 0; border-radius: 0; max-height: 420px; }
+.pm-dx-card-body > .pm-dx-table:first-child { margin-top: -12px; }
+.pm-dx-table td { white-space: nowrap; }
+.pm-dx-table th { white-space: normal; vertical-align: bottom; line-height: 1.25; }
+.pm-dx-table td:first-child { white-space: normal; min-width: 140px; }
+.pm-dx-table td:nth-child(2) { white-space: normal; }
+.pm-dx-table th.num, .pm-dx-table td.num { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.pm-dx-table td.bar { width: 18%; min-width: 90px; }
+.pm-dx-pill { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600; }
+.pm-dx-pill.tone-success { background: var(--success-50); color: var(--success-700); }
+.pm-dx-pill.tone-danger  { background: var(--danger-50);  color: var(--danger-700); }
+.pm-dx-pill.tone-info    { background: var(--primary-50); color: var(--primary-700); }
+.pm-dx-pill.tone-muted   { background: var(--bg-subtle);  color: var(--fg-secondary); }
+
+/* Loading skeleton + error. */
+.pm-dx-skel { border-radius: var(--radius-md); background: var(--bg-subtle); animation: pm-dx-pulse 1.2s ease-in-out infinite; }
+.pm-dx-skel.kpi { height: 118px; }
+.pm-dx-skel.panel { height: 260px; }
+.pm-dx-skel.chart { height: 220px; }
+@keyframes pm-dx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .pm-dx-skel { animation: none; } }
+.pm-dx-errors { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.pm-dx-error {
+    display: flex; gap: 10px; align-items: flex-start; width: 100%; box-sizing: border-box;
+    background: var(--danger-50); border: 1px solid var(--danger-200); border-radius: var(--radius-md);
+    padding: 10px 14px; color: var(--danger-700); font-size: 13px;
+}
+.pm-dx-error > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pm-dx-card-body > .pm-dx-error { width: auto; }
+.pm-dx-card-body > [data-home-retry] { align-self: flex-start; }
+.pm-dx-error span { color: var(--fg-secondary); font-size: 12px; }
+
 /* Filter banner -- "this list is filtered, and here is the way out".
    Same look as the Gap Register's observation banner; used by every
    list a dashboard drills into (414). */
@@ -1188,36 +1331,22 @@ textarea.pm-input {
 .pm-filter-banner[hidden] { display: none; }
 .pm-filter-banner-actions { display: inline-flex; gap: 8px; }
 
-/* Home -- "My work" (change requests 2026-09-27 / 2026-09-28)
-   My work is the primary column. On wide viewports the row is a
-   two-column grid: a larger left ("primary") column stacking the My work
-   summary above the "Needs your attention" list, beside a compact right
-   column holding the Organization overview cards (which collapse behind
-   their heading). Built on the dashboard's own .pm-panel /
-   .pm-section-heading / .pm-attention-list pieces; only the row anatomy,
-   the summary list and the overview collapse control are new. */
+/* Home -- "My work" (change requests 2026-09-27 / 2026-09-28; row
+   anatomy 503 -- Dashboard UI specification v2, section 5).
+   Row 1 is a two-column grid: My work (a narrow column) beside "Needs
+   your attention" (the rest of the width). On wide viewports both share
+   one fixed height and scroll inside, so the row ends level whatever
+   each holds. Row 2 is the module overview (.pm-home-modules).
+   Built on the dashboard's own .pm-panel / .pm-section-heading /
+   .pm-attention-list pieces. The 2026-09-29 organisation Overview and
+   its collapse control were removed by 503. */
 .pm-home-work {
-    /* start: the primary column carries its own stacked panels and the
-       overview may be collapsed, so the two columns keep their natural
-       heights rather than stretching to match. */
     align-items: start;
     display: grid;
     gap: 14px;
-    /* Expanded (default): My work shrinks to a narrow strip -- the same
-       width the overview takes when collapsed -- and the overview fills the
-       rest for a roomy two-column card view. The two states are mirrors:
-       whichever side is collapsed is the strip, the other takes the width. */
     grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
     margin-bottom: 18px;
 }
-
-.pm-home-work.org-collapsed {
-    /* Mirror of the expanded state: the overview narrows to the strip (cards
-       stay visible in one column, so height is kept) and My work reclaims
-       the full remaining width. */
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
-}
-
 
 .pm-home-attention,
 .pm-home-summary {
@@ -1227,13 +1356,7 @@ textarea.pm-input {
 .pm-home-attention {
     display: flex;
     flex-direction: column;
-}
-
-.pm-home-org {
-    display: flex;
-    flex-direction: column;
     min-width: 0;
-    padding: 14px;
 }
 
 .pm-home-summary {
@@ -1241,69 +1364,29 @@ textarea.pm-input {
     flex-direction: column;
 }
 
-.pm-home-org .pm-dashboard-kpi-grid {
-    margin-bottom: 0;
-}
-
 @media (min-width: 1181px) {
-    /* Responsive (2026-10-08): at most three cards a row, never narrower
-       than 210px -- so the overview drops to two or one column by its own
-       width (laptop / Windows display scaling) rather than squeezing. */
-    .pm-home-work:not(.org-collapsed) .pm-home-org .pm-dashboard-kpi-grid {
-        grid-template-columns: repeat(auto-fit, minmax(max(210px, calc((100% - 28px) / 3)), 1fr));
-    }
-
-    .pm-home-work.org-collapsed .pm-home-org .pm-dashboard-kpi-grid {
-        grid-template-columns: 1fr;
-    }
-
-    /* My work and the Overview share one fixed height so the two cards line
-       up regardless of how much data each holds. Each panel's list / cards
-       scroll inside rather than growing the row -- which is what pushed
-       "Needs your attention" down and left an empty gap beside a short My
-       work list, most visible once the Overview is collapsed to a single,
-       tall card column. */
     .pm-home-work .pm-home-summary,
-    .pm-home-work .pm-home-org {
+    .pm-home-work .pm-home-attention {
         height: 430px;
     }
 
     .pm-home-work .pm-home-summary .pm-home-summary-list,
-    .pm-home-work .pm-home-org .pm-dashboard-kpi-grid {
+    .pm-home-work .pm-home-attention #homeAttentionList {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
     }
 }
 
-/* Overview collapse control -- chevron button on the left of the heading,
-   matching the mapping-tree toggles (primary-50 chip, primary-600 glyph).
-   The heading row keeps the toggle and title on one line; the caption
-   sits below as before. */
-.pm-home-org-heading-row {
-    align-items: center;
-    display: flex;
-    gap: 8px;
-}
-
-.pm-home-org-toggle {
-    background: var(--primary-50);
-    border: 0;
-    border-radius: var(--radius-md);
-    color: var(--primary-600);
-    cursor: pointer;
-    display: grid;
-    flex: none;
-    /* 18px matches the mapping-tree toggles and stays within the h2 line box,
-       so the Overview heading lines up with the My work heading. */
-    height: 18px;
-    place-items: center;
-    width: 18px;
-}
-
-.pm-home-org-toggle i {
-    font-size: 10px;
-}
+/* 503: module overview -- snapshot cards (.pm-dx-snap, section 11c) and
+   the Upcoming table. */
+.pm-home-modules { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+.pm-home-modules > .pm-section-heading { margin: 0; }
+#homeModuleBody { display: flex; flex-direction: column; gap: 16px; }
+/* Three cards a row on a wide screen (six modules = two full rows), two
+   then one as the width drops. */
+.pm-home-snaps { grid-template-columns: repeat(auto-fill, minmax(max(380px, calc((100% - 32px) / 3)), 1fr)); }
+.pm-dashboard-heading .pm-dx-context { margin: 6px 0 0; }
 
 .pm-home-attention #homeAttentionList {
     align-content: start;
@@ -1436,10 +1519,6 @@ textarea.pm-input {
     color: var(--fg-muted);
     font-size: 12px;
     margin: 10px 0 0;
-}
-
-.pm-home-org-heading {
-    margin-top: 0;
 }
 
 @media (max-width: 1180px) {
@@ -2417,7 +2496,6 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
    15. Responsive fallbacks (mirrors CM breakpoints)
    ------------------------------------------------------------------ */
 @media (max-width: 1180px) {
-    .pm-dashboard-kpi-grid,
     .pm-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -2429,11 +2507,9 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
 }
 
 @media (max-width: 720px) {
-    .pm-dashboard-kpi-grid,
     .pm-grid,
     .pm-form-grid,
-    .pm-form-grid.pm-form-grid-locations,
-    .pm-mini-metrics {
+    .pm-form-grid.pm-form-grid-locations {
         grid-template-columns: 1fr;
     }
 
@@ -3311,37 +3387,151 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     padding: 12px;
 }
 
+/* 2026-11-05: three rows (labels / boxes / hints) on one grid, so the two
+   boxes share a top line; the button columns centre on the boxes. */
 .oa-adopt-grid {
-    align-items: center;
+    align-items: start;
+    column-gap: 12px;
     display: grid;
-    gap: 10px;
-    grid-template-columns: 1fr auto 1fr auto;
+    grid-template-areas:
+        "alabel .    slabel .    "
+        "abox   move sbox   order"
+        "ahint  .    shint  .    ";
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+    row-gap: 6px;
 }
+.oa-adopt-a-label { grid-area: alabel; }
+.oa-adopt-s-label { grid-area: slabel; }
+.oa-adopt-a-box   { grid-area: abox; }
+.oa-adopt-s-box   { grid-area: sbox; }
+.oa-adopt-move    { grid-area: move; }
+.oa-adopt-order   { grid-area: order; }
+.oa-adopt-a-hint  { grid-area: ahint; }
+.oa-adopt-s-hint  { grid-area: shint; }
 
 @media (max-width: 900px) {
-    .oa-adopt-grid { grid-template-columns: 1fr; }
+    .oa-adopt-grid {
+        grid-template-areas: "alabel" "abox" "ahint" "move" "slabel" "sbox" "shint" "order";
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .oa-adopt-grid .oa-adopt-actions { flex-direction: row; justify-content: center; }
 }
 
-.oa-adopt-grid select {
+.oa-adopt-grid select.oa-adopt-box {
+    background: var(--bg-surface);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    padding: 4px;
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, .04);
+    font-size: 13px;
+    height: 260px;
+    padding: 6px;
     width: 100%;
+}
+.oa-adopt-grid select.oa-adopt-box:focus {
+    border-color: var(--primary-500, var(--border-strong));
+    outline: 2px solid var(--primary-100, transparent);
+    outline-offset: 0;
+}
+.oa-adopt-grid select.oa-adopt-box option {
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+}
+.oa-adopt-grid select.oa-adopt-box option:checked {
+    background: var(--primary-100) linear-gradient(0deg, var(--primary-100), var(--primary-100));
+    color: var(--primary-700);
 }
 
 .oa-adopt-label {
+    align-items: center;
     color: var(--fg-secondary);
-    display: block;
+    display: flex;
     font-size: 12px;
     font-weight: 700;
-    margin-bottom: 4px;
+    gap: 6px;
+    margin: 0;
 }
 
 .oa-adopt-actions {
+    align-self: center;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.oa-adopt-actions .pm-button {
+    height: 36px;
+    justify-content: center;
+    padding: 0;
+    width: 36px;
+}
+
+.oa-adopt-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+
+/* Read-only legacy scope in the Scope Builder (2026-11-13): the
+   view page's group cards (.oa-wv-group, shared selectors above). */
+.oa-scope-legacy { margin-top: 12px; }
+.oa-scope-legacy #oaScopeReplaceBtn { margin-top: 4px; }
+
+/* Source Statement tree picker (534) -- window.gracStatementTreePicker,
+   js/Shared/statement-tree-picker.js. It sits on the .oa-adopt-grid above
+   (same labels, same icon-only move buttons) with the two <select> boxes
+   replaced by trees: Framework -> Release -> Source Structure -> Source
+   Statement. Box styling matches .oa-adopt-box. */
+.oa-stmt-side {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;
 }
+.oa-stmt-side .pm-input {
+    box-sizing: border-box;
+    height: 34px;
+}
+.oa-stmt-tree {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, .04);
+    font-size: 13px;
+    height: 320px;
+    overflow: auto;
+    padding: 4px;
+}
+.oa-stmt-node {
+    align-items: center;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    gap: 4px;
+    padding-bottom: 4px;
+    padding-right: 6px;
+    padding-top: 4px;
+    user-select: none;
+}
+.oa-stmt-node:hover { background: var(--neutral-50); }
+.oa-stmt-node.is-marked { background: var(--primary-100); color: var(--primary-700); }
+.oa-stmt-node[data-level="0"] { font-weight: 700; }
+.oa-stmt-node[data-level="1"],
+.oa-stmt-node[data-level="2"] { font-weight: 600; }
+.oa-stmt-node.is-empty .oa-stmt-label { color: var(--fg-muted); }
+.oa-stmt-caret {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--fg-subtle);
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 18px;
+    font-size: 10px;
+    height: 18px;
+    justify-content: center;
+    padding: 0;
+    width: 18px;
+}
+.oa-stmt-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.oa-stmt-label strong { font-weight: 600; }
+.oa-stmt-count { color: var(--fg-muted); font-size: 11px; font-weight: 600; }
+.oa-stmt-empty { color: var(--fg-subtle); font-size: 12px; padding: 8px; }
+.oa-stmt-picker.is-readonly .oa-stmt-node { cursor: default; }
 
 .oa-adopt-hint {
     color: var(--fg-muted);
@@ -3369,28 +3559,289 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
 
 /* ------------------------------------------------------------------
    Audit Definition workspace -- Phase 3 (migration 279)
-   One audit list, and a 3-tab page per audit. Mode is driven entirely
-   by [data-mode] on .oa-ws, so the hosted screens stay untouched.
+   One audit list, and one page per audit (2026-11-13: three section cards
+   and one Save; the tabs are gone). Mode is driven entirely by
+   [data-mode] / [data-new] on .oa-ws, so the hosted screens stay
+   untouched.
    ------------------------------------------------------------------ */
 
 /* --- list mode: only the audit list is visible --- */
 .oa-ws[data-mode="list"] .oa-ws-detail { display: none; }
-.oa-ws[data-mode="list"] #oaWsPanel-scope,
-.oa-ws[data-mode="list"] #oaWsPanel-questions { display: none; }
 /* The definitions screen's list panel is the master list. Its form
    (the dialog) stays closed in this mode by the screen's own logic. */
 .oa-ws[data-mode="list"] #oaWsPanel-details { display: block; }
 
-/* --- detail mode: tabs, and the list is out of the way --- */
-.oa-ws[data-mode="detail"] .oa-ws-panel { display: none; }
-.oa-ws[data-mode="detail"] .oa-ws-panel.active { display: block; }
+/* --- detail mode (2026-11-13): the three sections one under the other,
+   each a card like the page heading above them --- */
+.oa-ws[data-mode="detail"] .oa-ws-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    display: block;
+    margin-bottom: 12px;
+    padding: 14px 20px 16px;
+}
+.oa-ws-section-head {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.oa-ws-section-head h2 {
+    color: var(--fg-strong);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: .1px;
+    margin: 0;
+}
+.oa-ws-section-hint {
+    color: var(--fg-muted);
+    font-size: 12px;
+    margin: 0 0 10px;
+}
+/* 543: Scope and Question Sets left this page for Audit Configuration,
+   and with them the "save the audit details first" placeholders. */
+/* The one Save sits under the last section, on the right; its outcome
+   is a message box, so the bar holds only the button. */
+.oa-ws .oa-ws-savebar { border-top: 0; justify-content: flex-end; margin-top: 4px; padding-top: 0; }
 /* Hide the audit list itself while an audit is open -- the tab shows the
    form, not the list it came from. #oaDefRoot is the list panel. */
 .oa-ws[data-mode="detail"] #oaDefRoot { display: none; }
 
+/* --- view mode (2026-11-04): the audit's read-only view page. Only
+   #oaWsView shows -- no tabs, no hosted screens. Facts styled as the
+   Gap / Task View fact grids. --- */
+.oa-ws-view { display: none; }
+.oa-ws[data-mode="view"] .oa-ws-view { display: block; }
+.oa-ws[data-mode="view"] .oa-ws-detail,
+.oa-ws[data-mode="view"] .oa-ws-panel { display: none; }
+.oa-ws-view .oa-wv-section {
+    margin: 18px 0 8px; font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--fg-secondary);
+}
+.oa-ws-view .oa-wv-facts {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
+    gap: 8px 20px; margin: 0 0 8px;
+    padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md);
+}
+.oa-ws-view .oa-wv-facts-wide { grid-template-columns: 1fr; }
+.oa-ws-view .oa-wv-facts dt {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted);
+}
+.oa-ws-view .oa-wv-facts dd {
+    margin: 0 0 6px; font-size: 13px; color: var(--neutral-700); overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.oa-ws-view .oa-wv-facts dd.oa-wv-empty { color: var(--fg-subtle); font-style: italic; }
+.oa-ws-view .oa-wv-group,
+.oa-scope-legacy .oa-wv-group {
+    padding: 10px 14px; background: var(--neutral-50); border-radius: var(--radius-md); margin-bottom: 8px;
+}
+.oa-ws-view .oa-wv-group-title,
+.oa-scope-legacy .oa-wv-group-title { font-size: 13px; font-weight: 600; color: var(--fg-strong); margin-bottom: 6px; }
+.oa-ws-view .oa-wv-group ul,
+.oa-scope-legacy .oa-wv-group ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--neutral-700); }
+.oa-ws-view .oa-wv-group li,
+.oa-scope-legacy .oa-wv-group li { margin: 2px 0; }
+.oa-ws-view .oa-wv-op,
+.oa-scope-legacy .oa-wv-op { font-size: 11px; font-weight: 700; color: var(--primary-600); }
+.oa-ws-view .oa-wv-join,
+.oa-scope-legacy .oa-wv-join { font-size: 11px; font-weight: 700; color: var(--primary-600); margin: 0 0 8px 14px; }
+
 /* Hosted screens render their own page heading; the workspace already
    shows one. Same rule as the flow shell. */
 .oa-ws-panel .pm-page-heading { display: none; }
+
+/* Audit Configuration workspace (537): list / view / configure on one
+   page, by [data-mode] on .oa-cfg. The view reuses .oa-ws-view's facts
+   layout; configure hosts the flow shell. Inside it the hosted screens'
+   own Organization / Audit pickers are hidden -- the audit is chosen in
+   the list -- and a picker toolbar left with nothing else in it goes too
+   (Scope Resolution keeps its toolbar for "Preview Resolve Now"). */
+.oa-cfg .oa-cfg-list { display: none; }
+.oa-cfg[data-mode="list"] .oa-cfg-list { display: block; }
+.oa-cfg[data-mode="view"] .oa-ws-view { display: block; }
+/* The list's 3-dot View (sir): the whole audit, read-only -- the Audit
+   Definition view page (js/Shared/audit-view.js). Only in mode "audit";
+   the step list (mode "view") is the other .oa-ws-view. */
+.oa-cfg[data-mode="view"] .oa-cfg-audit { display: none; }
+.oa-cfg[data-mode="audit"] .oa-cfg-audit { display: block; }
+.oa-cfg .oa-flow-panel .pm-toolbar > label.pm-field:has(select[id$="PickOrg"]),
+.oa-cfg .oa-flow-panel .pm-toolbar > label.pm-field:has(select[id$="PickDef"]),
+.oa-cfg .oa-flow-panel .pm-toolbar:has(> label > select[id$="PickOrg"]):not(:has(button)) { display: none; }
+/* Configure is one page of sections (2026-11-13): each step a card like
+   the Audit Definition sections; the shell itself loses its own frame.
+   The hosted screens' audit banners (name / status / version -- the page
+   heading already names the audit) and their Save buttons go; the one
+   Save under the sections runs Workflow and Scoring. Reload, Add Trigger
+   and Preview Resolve Now stay. */
+/* (2026-11-13, "neat"): .content-wrapper .pm-panel (master-layout.css)
+   gives every .pm-panel 16px 20px of padding at the same specificity as
+   the frame-dropping rules, so the shell and the hosted screens kept
+   theirs and each section's content sat ~45px in. These selectors carry
+   one more class so they win. */
+.oa-cfg .oa-flow-shell.pm-panel { background: transparent; border: 0; box-shadow: none; padding: 0; }
+.oa-cfg .oa-cfg-section > .pm-panel { background: transparent; border: 0; box-shadow: none; padding: 0; }
+.oa-cfg .oa-cfg-section {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    margin-bottom: 12px;
+    padding: 14px 20px 16px;
+}
+/* Workflow / Scoring banners hold only the audit name, Reload and their
+   own Save -- all redundant here (the page opens freshly loaded, the one
+   Save runs both), so the whole bar goes and the form starts right under
+   the section caption. Triggers keep only Add Trigger, on the right. */
+.oa-cfg #oaWfBanner,
+.oa-cfg #oaScBanner,
+.oa-cfg #oaRsBanner,
+.oa-cfg #oaTgBanner > div:first-child,
+.oa-cfg #oaTgReloadBtn { display: none !important; }
+.oa-cfg #oaTgBanner { justify-content: flex-end !important; margin: 0 0 8px; padding: 0; }
+.oa-cfg #oaWfHeaderForm,
+.oa-cfg #oaScHeaderForm { margin-top: 0 !important; }
+.oa-cfg .oa-cfg-section > .oa-ws-section-hint { margin: 2px 0 12px; }
+.oa-cfg .oa-cfg-savebar { align-items: center; border-top: 0; justify-content: space-between; margin-top: 4px; padding-top: 0; }
+
+/* 543 (sir): a step opens in a row under it -- the Configure button of
+   the step list. #oaCfgFrame (caption, the step's panel, Cancel / Save)
+   sits in one cell spanning the row. The step list's wrap is not capped
+   (a scope fills more than the grid's max height) and the expand row is
+   not a grid row: no hover, no stripe, no centred / 58px last cell, text
+   wraps. Its class is-selected keeps the shared hover rule off it; the
+   step screens' own tables inside keep their stripes and hover. The panel
+   loses its section card and its own heading / caption (the step row and
+   the frame show them). The Scope Builder's banner (name, Reload, Save
+   Scope) and the Question Sets Save go: the frame's Save runs them. A step
+   row that cannot open yet carries a short note under its name. */
+.oa-cfg .oa-cfg-steps-wrap { max-height: none; overflow: visible; }
+.oa-cfg .pm-table-wrap tbody tr.oa-cfg-expand > td,
+.oa-cfg .pm-table-wrap tbody tr.oa-cfg-expand:nth-child(even) > td {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px 16px;
+    text-align: left;
+    white-space: normal;
+    width: auto;
+}
+.oa-cfg tr.oa-cfg-expand .pm-table-wrap tbody tr:nth-child(odd) td { background: transparent; }
+.oa-cfg .oa-cfg-frame > .oa-ws-section-hint { margin: 0 0 12px; }
+.oa-cfg .oa-cfg-frame .oa-cfg-section {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+}
+.oa-cfg-frame .oa-cfg-section > .oa-ws-section-head,
+.oa-cfg-frame .oa-cfg-section > .oa-ws-section-hint { display: none; }
+.oa-cfg .oa-cfg-frame .oa-flow-panel > .oa-adopt-panel,
+.oa-cfg .oa-cfg-frame .oa-flow-panel > .oa-map-panel { background: transparent; border: 0; box-shadow: none; padding: 0; }   /* 564: the mapping step */
+.oa-cfg #oaScopeBanner,
+.oa-cfg #oaAdoptSave { display: none !important; }
+.oa-cfg-step-note { color: var(--fg-muted); font-size: 11px; margin-top: 2px; }
+/* 545: the Scope Builder step's Preview (the Scope Resolution screen under
+   the builder, Partials/_audit-scope-step) -- a divided sub-section; the
+   hosted screen loses its own panel frame like the others. */
+.oa-cfg .oa-scope-preview { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.oa-cfg .oa-scope-preview > .pm-panel { background: transparent; border: 0; box-shadow: none; padding: 0; }
+/* The open step's row stays highlighted -- one step darker than the row
+   hover tint (sir: primary-100, not primary-50), so it reads as selected
+   rather than hovered; the hover accent runs down its left edge and on
+   through the expand row. */
+.oa-cfg .pm-table-wrap tbody tr.oa-cfg-step-open > td { background: var(--primary-100); color: var(--grac-row-hover-text); }
+.oa-cfg .pm-table-wrap tbody tr.oa-cfg-step-open > td:first-child,
+.oa-cfg .pm-table-wrap tbody tr.oa-cfg-expand > td { box-shadow: inset 3px 0 0 var(--grac-row-hover-border); }
+
+/* Spreadsheet grid (.qs-grid) -- the Question Sets grid's look (2026-11-13),
+   (558 shared it with My Audits' Answer Questions; 567 replaced that grid
+   with Workpapers, so its #oaMyRoot rules went): the cells carry the
+   lines, inputs have no border of their own, the focused cell is outlined.
+   Scoped by page id, as Question Sets had it, so the shared .pm-table-wrap
+   stripe / hover / last-cell rules stay off these cells exactly as before.
+   A cell holding text rather than an input gets .qs-cell-text. */
+/* 564: and the Control and Practice Mapping step's manual mappings (#oaMapRoot). */
+#qsSetView .qs-grid, #oaMapRoot .qs-grid { border-collapse: collapse; width: 100%; }
+#qsSetView .qs-grid th, #oaMapRoot .qs-grid th { border: 1px solid var(--border); }
+#qsSetView .qs-grid tbody td, #oaMapRoot .qs-grid tbody td {
+    border: 1px solid var(--border); padding: 0; vertical-align: top; background: var(--bg-surface);
+}
+#qsSetView .qs-grid .pm-input, #oaMapRoot .qs-grid .pm-input {
+    width: 100%; min-width: 0; border: 0; border-radius: 0; background: transparent;
+    box-shadow: none; padding: 9px 10px; min-height: 40px; height: auto; margin: 0; font-size: 13px;
+    box-sizing: border-box;   /* so an auto-sized textarea's height includes its padding */
+}
+#qsSetView .qs-grid .pm-input:focus, #oaMapRoot .qs-grid .pm-input:focus {
+    outline: 2px solid var(--primary-500); outline-offset: -2px; background: var(--bg-surface);
+}
+#qsSetView .qs-grid .pm-input:disabled, #oaMapRoot .qs-grid .pm-input:disabled { color: var(--fg-muted); background: var(--neutral-50); }
+
+/* --- Audit Plans: one plan list, a plan's slots as a child row ---
+   2026-11-14 (sir). The plan row's chevron is the Task Board's
+   .task-tree-toggle. The open plan's row stays highlighted like an open
+   configuration step (primary-100, accent down the left edge and on
+   through the child row). The child row holds the slots' own small grid:
+   it is not a grid row itself -- no hover, no stripe, no centred / 58px
+   last cell, text wraps -- while the slot grid inside keeps the shared
+   grid rules. The list is not height-capped, so open plans do not scroll
+   inside it. */
+.oa-pl-wrap { max-height: none; overflow: visible; }
+.oa-pl-wrap > table > tbody > tr.oa-pl-open > td { background: var(--primary-100); color: var(--grac-row-hover-text); }
+.oa-pl-wrap > table > tbody > tr.oa-pl-open > td:first-child,
+.oa-pl-wrap > table > tbody > tr.oa-pl-items-row > td { box-shadow: inset 3px 0 0 var(--grac-row-hover-border); }
+.oa-pl-wrap > table > tbody > tr.oa-pl-items-row > td,
+.oa-pl-wrap > table > tbody > tr.oa-pl-items-row:nth-child(even) > td {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px 12px 44px;
+    text-align: left;
+    white-space: normal;
+    width: auto;
+}
+.oa-pl-items .pm-table-wrap { max-height: none; }
+.oa-pl-items .pm-table-wrap tbody tr:nth-child(odd) td { background: transparent; }
+.oa-pl-items-foot { align-items: center; display: flex; gap: 16px; margin-top: 8px; }
+.oa-pl-items .oa-pl-add,
+.oa-pl-items .oa-pl-more { color: var(--primary-600); font-size: 12px; font-weight: 600; text-decoration: none; }
+.oa-pl-items .oa-pl-add:hover,
+.oa-pl-items .oa-pl-more:hover { text-decoration: underline; }
+/* 565: a plan's child row -- a facts line, its programmes; a programme's
+   engagements open in a nested child row (same accent, a step further in);
+   the inline programme form is a row of the programme grid. Not grid rows:
+   no stripe, no centred / 58px last cell, text wraps. */
+.oa-pl-plan-facts { color: var(--fg-muted); font-size: 12px; margin: 0 0 8px; }
+.oa-pl-items .pm-table-wrap tbody tr.oa-pl-prog-open > td { background: var(--primary-50); }
+.oa-pl-items .pm-table-wrap tbody tr.oa-pl-prog-items > td,
+.oa-pl-items .pm-table-wrap tbody tr.oa-pl-prog-form > td {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: inset 3px 0 0 var(--grac-row-hover-border);
+    padding: 8px 12px 10px 32px;
+    text-align: left;
+    white-space: normal;
+    width: auto;
+}
+/* 2026-11-16 (sir): the plan form in full view -- one 4-column grid
+   (identity / period, name / owner, annual figures, the four texts) so it
+   fits without a scrollbar; two columns on a narrow screen. */
+.oa-pl-plan-grid {
+    align-items: start;
+    display: grid;
+    gap: 12px 14px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.oa-pl-plan-grid > .pm-field { min-width: 0; }
+.oa-pl-plan-grid > .oa-pl-span-2 { grid-column: span 2; }
+.oa-pl-plan-grid > .oa-pl-span-all { grid-column: 1 / -1; }   /* a text on its own row */
+.oa-pl-plan-grid textarea.pm-input { resize: vertical; }
+@media (max-width: 991.98px) {
+    .oa-pl-plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* 552: View Scope -- the per-type counts above the scope list. */
+.oa-pl-scope-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.oa-pl-scope-summary:empty { display: none; }
 
 /* --- the definition form, rendered inline instead of as a modal --- */
 /* The screen calls dialog.show() (non-modal) when window.__oaDefInlineForm
@@ -3411,14 +3862,15 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
 .oa-ws[data-mode="detail"] #oaDefDialog[open] > form { padding: 4px 0 0; }
 
 /* The inline form's own close/cancel buttons have nothing to close back
-   to, so they are hidden rather than left as dead controls. */
+   to, so they are hidden rather than left as dead controls.
+   2026-11-13: its heading and Save go too -- the section heading names
+   it and the page's one Save runs it. (543: the Scope Builder and
+   Question Sets moved to Audit Configuration, which hides their picker
+   row and Save bars there.) */
 .oa-ws[data-mode="detail"] #oaDefClose,
-.oa-ws[data-mode="detail"] #oaDefCancel { display: none; }
-
-/* Scope Builder and Question Sets keep their pickers when opened on their
-   own routes; inside the workspace the audit is already chosen, so the
-   duplicate picker row is suppressed. Driven by the workspace instead. */
-.oa-ws[data-mode="detail"] #oaScopeBackBtn { display: none; }
+.oa-ws[data-mode="detail"] #oaDefCancel,
+.oa-ws[data-mode="detail"] #oaDefForm > .pm-dialog-heading,
+.oa-ws[data-mode="detail"] #oaDefForm > .pm-dialog-actions { display: none !important; }
 
 .oa-ws-panel > .pm-panel {
     background: transparent;
@@ -3446,35 +3898,15 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
      with the modal presentation and changing them would break it.
    ------------------------------------------------------------------ */
 
-/* --- Tab strip: evenly spaced, no numerals ------------------------- */
-.oa-ws .oa-flow-steps {
-    gap: 4px;
-    margin-bottom: 10px;
-}
-
-.oa-ws .oa-flow-steps button {
-    font-size: 13.5px;
-    font-weight: 700;
-    padding: 10px 18px;
-}
-
-/* The chip only appears once an audit is selected; keep it from
-   crowding the label when it does. */
-.oa-ws .oa-flow-steps .oa-step-chip {
-    margin-left: 8px;
-}
-
-.oa-ws .oa-flow-caption {
-    margin: 0 0 10px;
-}
-
 /* --- Form card: fills the panel, so its edges match the page heading
        card above it instead of floating in the left third ----------- */
 .oa-ws[data-mode="detail"] #oaDefDialog[open] {
-    background: var(--bg-surface);
-    border: 1px solid var(--border) !important;
-    border-radius: var(--radius-md) !important;
-    box-shadow: var(--shadow-card) !important;
+    /* 2026-11-13: the section card is the frame now, so the form itself
+       has none (a card inside a card read as nested). */
+    background: transparent;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
     max-width: none !important;
     width: 100% !important;
 }
@@ -3486,7 +3918,7 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
 .oa-ws[data-mode="detail"] #oaDefDialog[open] > #oaDefForm {
     margin: 0 !important;
     max-width: none;          /* fill the card -- no dead strip on the right */
-    padding: 14px 20px 16px !important;
+    padding: 0 !important;    /* the section card pads it (2026-11-13) */
 }
 
 /* Form title matches the page's typographic scale. */
@@ -3515,12 +3947,12 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     gap: 16px !important;
 }
 
-/* Objective / Description are single-column rows, so on a wide monitor
-   they would run to ~1800px -- past a comfortable reading measure.
-   Cap the free-text fields only; every gridded field still fills its
-   track, so the left and right edges of the form stay flush. */
+/* Objective / Description fill the form's full width, so their right
+   edge lines up with Effective Date above (2026-11-13, sir: "width ellam
+   oru pole akki right side oru pole"). They were capped at 1100px for
+   reading measure, which left them short of every other row. */
 .oa-ws #oaDefForm > label > textarea {
-    max-width: 1100px;
+    max-width: none;
 }
 
 /* Consistent vertical rhythm between every field block. */
@@ -3530,7 +3962,11 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
 }
 
 /* --- Labels and controls ------------------------------------------ */
-.oa-ws #oaDefForm label,
+/* 560: the Applicable Frameworks multi-select (.pm-checkcombo) is left
+   out of the form's label / input rules below -- its option labels,
+   checkboxes and search box keep the shared .pm-checkcombo look (a
+   36-px, full-width "input" rule turned each checkbox into a wide box). */
+.oa-ws #oaDefForm label:not([data-checkcombo-option]),
 .oa-ws #oaDefForm > div > div > span,
 .oa-ws #oaDefForm > div > label > span {
     font-size: 12px;
@@ -3538,7 +3974,7 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     letter-spacing: .1px;
 }
 
-.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm input:not([type="checkbox"]):not([data-checkcombo-search]),
 .oa-ws #oaDefForm select,
 .oa-ws #oaDefForm textarea {
     border: 1px solid var(--border) !important;
@@ -3550,9 +3986,17 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     width: 100%;
 }
 
-.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm input:not([type="checkbox"]):not([data-checkcombo-search]),
 .oa-ws #oaDefForm select {
     height: 36px;
+}
+
+/* 560: the multi-select's trigger sits on the same line as the inputs of
+   this form (same top gap, height and border as its selects). */
+.oa-ws #oaDefForm .pm-checkcombo-trigger {
+    border-color: var(--border);
+    margin-top: 5px;
+    min-height: 36px;
 }
 
 .oa-ws #oaDefForm textarea {
@@ -3561,7 +4005,16 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     min-height: 56px;
 }
 
-.oa-ws #oaDefForm input:focus,
+/* Description gets six lines (2026-11-13, sir: four, then "kurachu koodi
+   kootanam"). 6 x 1.4 line-height at 13px + 16px padding + 2px border,
+   border-box. The id selector outranks the short-viewport rule below, so
+   it keeps its six lines there too; Objective stays at two. */
+.oa-ws #oaDefForm #oaDefDescription {
+    height: calc(8.4em + 18px);
+    min-height: calc(8.4em + 18px);
+}
+
+.oa-ws #oaDefForm input:not([type="checkbox"]):not([data-checkcombo-search]):focus,
 .oa-ws #oaDefForm select:focus,
 .oa-ws #oaDefForm textarea:focus {
     border-color: var(--primary-500) !important;
@@ -3594,9 +4047,6 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
         grid-template-columns: 1fr !important;
     }
 
-    .oa-ws .oa-flow-steps button {
-        padding: 10px 12px;
-    }
 }
 
 /* ------------------------------------------------------------------
@@ -3623,19 +4073,21 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
 }
 
 /* Label-to-control gap, applied once for every control type. */
-.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm input:not([type="checkbox"]):not([data-checkcombo-search]),
 .oa-ws #oaDefForm select,
-.oa-ws #oaDefForm textarea {
+.oa-ws #oaDefForm textarea,
+.oa-ws #oaDefForm .pm-checkcombo-trigger {   /* 560 */
     margin-top: 4px !important;
 }
 
 /* Equal control height across the two field rows, so Audit Category,
    Owner and the role select sit on one baseline with the inputs above. */
-.oa-ws #oaDefForm input,
+.oa-ws #oaDefForm input:not([type="checkbox"]):not([data-checkcombo-search]),
 .oa-ws #oaDefForm select {
     height: 34px;
     padding: 6px 10px !important;
 }
+.oa-ws #oaDefForm .pm-checkcombo-trigger { min-height: 34px; }   /* 560 */
 
 /* Objective / Description keep the same left and right edges as the
    gridded rows above -- they are single-column rows in the same form,
@@ -3655,7 +4107,7 @@ dialog.pm-dialog-add-release [data-add-release-panel="repository"] .pm-table-wra
     }
 
     .oa-ws[data-mode="detail"] #oaDefDialog[open] > #oaDefForm {
-        padding: 12px 20px 14px !important;
+        padding: 0 !important;
     }
 }
 
@@ -4023,7 +4475,9 @@ dialog.pm-dialog-fullpage form {
 }
 
 /* #recordFields is the field grid; it, not the dialog/form shell, is what
-   scrolls once the picker below makes the form taller than the dialog. */
+   scrolls once the picker below makes the form taller than the dialog.
+   2026-11-16: the Audit Plans plan form (.oa-pl-plan-fields) the same. */
+dialog.pm-dialog-fullpage .oa-pl-plan-fields,
 dialog.pm-dialog-fullpage #recordFields {
     flex: 1 1 auto;
     overflow-y: auto;

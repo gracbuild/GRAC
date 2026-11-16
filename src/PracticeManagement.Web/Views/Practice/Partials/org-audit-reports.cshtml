@@ -1,0 +1,673 @@
+@*
+    Audit Reports (568, Audit Change spec 4.9 -- reports)
+
+    Sir's answers (2026-11-16): one report per ENGAGEMENT (all its
+    executions), built in the app from the audit data with editable
+    narrative sections, printed / saved as PDF from the browser; a report
+    TEMPLATE = which sections, their order, headings and standard text.
+
+    UX (the Audit Plans list and child rows, no popups):
+      * View "Reports": the engagements that have executions, with their
+        report's status. A row (or its chevron) opens the report under it as
+        a document -- each section's data (objective and mandate, scope and
+        methodology, period, coverage, findings with risk ratings,
+        management responses, recommendations, conclusions, history) with
+        the lead's narrative. The lead writes it while Draft / Returned.
+        3-dot: Create Report, Open, Submit, Approve, Return, Issue, Revise,
+        Print. An issued report shows its frozen data; earlier issued
+        versions can be read.
+      * View "Report Templates": the organization's templates; a row opens
+        its editor in a child row (order, heading, include, standard text
+        per section). "+ Add Template".
+    The server checks every action (lead / reviewer / state).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaRpUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-file-lines pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaRpUnavailableTitle">Audit Reports are not available.</h2>
+        <p id="oaRpUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaRpRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaRpFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaRpFilterView">
+            <option value="reports">Reports</option>
+            <option value="templates">Report Templates</option>
+        </select>
+        <select id="oaRpFilterStatus">
+            <option value="">All reports</option>
+            <option value="NONE">No report yet</option>
+            <option value="Draft">Draft</option>
+            <option value="InReview">In Review</option>
+            <option value="Returned">Returned</option>
+            <option value="Approved">Approved</option>
+            <option value="Issued">Issued</option>
+        </select>
+        <input id="oaRpSearch" type="text" placeholder="Search engagement / report..." />
+        <button class="pm-button icon" id="oaRpRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaRpAddTemplateBtn" type="button" hidden>
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Template
+        </button>
+    </div>
+    <div class="pm-message" id="oaRpMessage" style="display:none;"></div>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:12px;">
+        <table>
+            <thead id="oaRpHead"></thead>
+            <tbody id="oaRpBody">
+                <tr><td class="pm-empty">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<style>
+    /* The report document in its child row. */
+    .oa-rp-doc h3 { font-size: 14px; margin: 16px 0 6px; color: var(--fg-strong); }
+    .oa-rp-doc h3:first-of-type { margin-top: 4px; }
+    .oa-rp-doc .oa-rp-narrative { white-space: pre-wrap; margin: 4px 0 8px; }
+    .oa-rp-doc .pm-table-wrap { margin: 6px 0; }
+    .oa-rp-doc .oa-rp-left-out { color: var(--fg-subtle); font-style: italic; }
+    .oa-rp-doc .oa-rp-title { font-size: 16px; font-weight: 600; margin: 0 0 2px; color: var(--fg-strong); }
+    /* Print / Save as PDF (the Risk Centre's way): only the report shows. */
+    @@media print {
+        body.oa-rp-printing * { visibility: hidden !important; }
+        body.oa-rp-printing .oa-rp-print-target,
+        body.oa-rp-printing .oa-rp-print-target * { visibility: visible !important; }
+        body.oa-rp-printing .oa-rp-print-target { position: absolute; left: 0; top: 0; width: 100%; padding: 0 12px; }
+        body.oa-rp-printing .oa-rp-noprint { display: none !important; }
+        body.oa-rp-printing .oa-rp-print-target .pm-table-wrap { overflow: visible !important; max-height: none !important; }
+        body.oa-rp-printing .oa-rp-print-target h3 { break-after: avoid; page-break-after: avoid; }
+    }
+</style>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const STATUS  = { NONE: 'No report', Draft: 'Draft', InReview: 'In Review', Returned: 'Returned', Approved: 'Approved', Issued: 'Issued' };
+    const ACTION  = { CREATE: 'Created', SUBMIT: 'Submitted for review', RETURN: 'Returned', APPROVE: 'Approved', ISSUE: 'Issued', REVISE: 'Revised' };
+    const TEAM    = { LEAD: 'Lead Auditor', MEMBER: 'Team Member', REVIEWER: 'Engagement Reviewer', SME: 'Subject Matter Expert', EXTERNAL: 'External Auditor' };
+
+    const state = {
+        orgId     : '',
+        view      : 'reports',
+        status    : '',
+        search    : '',
+        rows      : {},          // reports view: engagementId -> row; templates view: templateId -> row
+        open      : null,        // the open row's key
+        report    : null,        // { key, report, sections, history, versions, data, version }
+        create    : null,        // engagementId whose "create report" form is open
+        templates : [],
+        master    : [],
+        tpl       : null         // { id|null, sections }
+    };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data)) || []); }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    function d10(x) { return x ? String(x).substring(0, 10) : ''; }
+    function period(a, b) { const f = d10(a), t = d10(b); return f || t ? (f || '...') + ' to ' + (t || '...') : '--'; }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function trigger(id) {
+        return '<button type="button" class="pm-action-trigger" data-menu="' + esc(id) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span></button>';
+    }
+    function toggleCell(id, open, title, text) {
+        return '<span class="task-tree-cell"><button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '"'
+             + ' aria-expanded="' + (open ? 'true' : 'false') + '" title="' + esc(title) + '">'
+             + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span class="visually-hidden">' + esc(title) + '</span></button>'
+             + '<span>' + esc(text) + '</span></span>';
+    }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaRpUnavailable', 'oaRpUnavailableTitle', 'oaRpUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaRpFilterOrg', orgs);
+        state.orgId = document.getElementById('oaRpFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaRpUnavailable', 'oaRpUnavailableTitle', 'oaRpUnavailableBody',
+                'Audit Reports are not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaRpRoot').hidden = false;
+        wire();
+        reload();
+    }
+
+    function wire() {
+        document.getElementById('oaRpFilterOrg').addEventListener('change', function (e) { state.orgId = e.target.value || ''; closeAll(); reload(); });
+        document.getElementById('oaRpFilterView').addEventListener('change', function (e) {
+            state.view = e.target.value; closeAll();
+            document.getElementById('oaRpFilterStatus').hidden = state.view !== 'reports';
+            document.getElementById('oaRpAddTemplateBtn').hidden = state.view !== 'templates';
+            reload();
+        });
+        document.getElementById('oaRpFilterStatus').addEventListener('change', function (e) { state.status = e.target.value || ''; reload(); });
+        document.getElementById('oaRpSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            clearTimeout(window.__oaRpSearchTimer);
+            window.__oaRpSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaRpRefreshBtn').addEventListener('click', function () { reload(); });
+        document.getElementById('oaRpAddTemplateBtn').addEventListener('click', function () { openTemplate(null); });
+        const body = document.getElementById('oaRpBody');
+        body.addEventListener('click', onClick);
+        body.addEventListener('change', onChange);
+        window.addEventListener('afterprint', function () { document.body.classList.remove('oa-rp-printing'); });
+    }
+    function closeAll() { state.open = null; state.report = null; state.create = null; state.tpl = null; }
+
+    async function reload() {
+        const head = document.getElementById('oaRpHead');
+        const body = document.getElementById('oaRpBody');
+        if (!state.orgId) { body.innerHTML = '<tr><td class="pm-empty">Select an organization.</td></tr>'; return; }
+        if (state.view === 'templates') {
+            head.innerHTML = '<tr><th>Code</th><th>Template</th><th>Default</th><th>Sections</th><th>Reports</th><th>Active</th><th></th></tr>';
+            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+            try {
+                state.templates = rowsOf(await getJson(API + '/report-templates?organizationId=' + encodeURIComponent(state.orgId)));
+                if (!state.master.length) state.master = rowsOf(await getJson(API + '/report-sections'));
+                renderTemplates();
+            } catch (err) { body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+            return;
+        }
+        head.innerHTML = '<tr><th>Engagement</th><th>Name</th><th>Plan</th><th>Lead / Reviewer</th><th>Executions Approved</th>'
+                       + '<th>Findings</th><th>Report</th><th>Status</th><th>Issued</th><th></th></tr>';
+        body.innerHTML = '<tr><td colspan="10" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.status) qs.set('status', state.status);
+            if (state.search) qs.set('search', state.search);
+            const rows = rowsOf(await getJson(API + '/reports?' + qs.toString()));
+            if (!state.templates.length) {
+                try { state.templates = rowsOf(await getJson(API + '/report-templates?organizationId=' + encodeURIComponent(state.orgId))); } catch (_) { }
+            }
+            renderReports(rows);
+        } catch (err) { body.innerHTML = '<tr><td colspan="10" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+    }
+
+    // -----------------------------------------------------------------
+    // Reports view
+    // -----------------------------------------------------------------
+    function renderReports(rows) {
+        const body = document.getElementById('oaRpBody');
+        state.rows = {};
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="10" class="pm-empty">No engagement has an execution yet. Reports are written once an engagement\'s audits have started.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(function (x) {
+            const id = String(g(x, 'engagementId'));
+            state.rows[id] = x;
+            const open = state.open === id;
+            const st = g(x, 'reportStatus') || 'NONE';
+            const rev = g(x, 'reviewerName');
+            return '<tr class="pm-row-clickable oa-rp-row' + (open ? ' oa-pl-open is-selected' : '') + '" data-key="' + esc(id) + '">'
+                 + '<td>' + toggleCell(id, open, 'Show the report', g(x, 'engagementCode')) + '</td>'
+                 + '<td>' + esc(g(x, 'engagementName')) + '</td>'
+                 + '<td>' + esc(g(x, 'planCode') || (g(x, 'engagementOrigin') === 'INDEPENDENT' ? 'Independent' : '--')) + '</td>'
+                 + '<td>' + esc(g(x, 'leadAuditorName') || '') + (rev && rev !== g(x, 'leadAuditorName') ? ' <span style="color:var(--fg-subtle);">/ ' + esc(rev) + '</span>' : '') + '</td>'
+                 + '<td>' + esc(String(g(x, 'executionApproved') || 0) + ' / ' + String(g(x, 'executionTotal') || 0)) + '</td>'
+                 + '<td>' + esc(String(g(x, 'findingCount') || 0)) + '</td>'
+                 + '<td>' + esc(g(x, 'reportCode') ? g(x, 'reportCode') + ' v' + g(x, 'versionNo') : '--') + '</td>'
+                 + '<td>' + wf.badge(STATUS[st] || st) + '</td>'
+                 + '<td>' + esc(d10(g(x, 'issuedDt')) || '--') + '</td>'
+                 + '<td>' + trigger(id) + '</td></tr>';
+        }).join('');
+        body.querySelectorAll('[data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () { return reportMenu(id); });
+        });
+        // the open row stays open: its report, or its Create form
+        if (state.open && state.rows[state.open] && g(state.rows[state.open], 'reportId') != null) openReport(state.open, true);
+        else if (state.open && state.rows[state.open] && state.create === state.open) openCreate(state.open);
+        else if (state.open) closeAll();
+    }
+
+    function reportMenu(id) {
+        const x = state.rows[id] || {};
+        const st = g(x, 'reportStatus');
+        const lead = !!g(x, 'isLead'), reviewer = !!g(x, 'isReviewer');
+        const items = [];
+        if (!g(x, 'reportId')) {
+            if (lead) items.push({ icon: 'fa-plus', label: 'Create Report', run: function () { openCreate(id); } });
+            return items;
+        }
+        items.push({ icon: 'fa-eye', label: state.open === id ? 'Hide Report' : 'Open Report', run: function () { toggle(id); } });
+        if (lead && (st === 'Draft' || st === 'Returned')) items.push({ icon: 'fa-paper-plane', label: 'Submit for Review', run: function () { act(id, 'SUBMIT', false, null); } });
+        if (reviewer && st === 'InReview') {
+            items.push({ icon: 'fa-check', label: 'Approve', run: function () { act(id, 'APPROVE', false, 'Approve the report? Comments (optional):'); } });
+            items.push({ icon: 'fa-rotate-left', label: 'Return', run: function () { act(id, 'RETURN', true, 'Why is the report returned?'); } });
+        }
+        if (lead && st === 'Approved') items.push({ icon: 'fa-stamp', label: 'Issue', run: function () { issue(id); } });
+        if (lead && st === 'Issued') items.push({ icon: 'fa-code-branch', label: 'Revise', run: function () { act(id, 'REVISE', true, 'Why is the issued report revised? It goes back to Draft as a new version; the issued version stays readable.'); } });
+        items.push({ icon: 'fa-print', label: 'Print / Save as PDF', run: function () { printReport(id); } });
+        return items;
+    }
+
+    function onClick(e) {
+        const t = e.target;
+        if (t.closest('.pm-action-trigger, .pm-action-menu')) return;
+        const a = t.closest('[data-do]');
+        if (a) { e.preventDefault(); doLink(a.getAttribute('data-do'), a); return; }
+        if (t.closest('.oa-pl-items, input, select, textarea, a, button')) return;
+        const tr = t.closest('tr[data-key]');
+        if (!tr) return;
+        if (state.view === 'templates') openTemplate(tr.getAttribute('data-key'));
+        else {
+            const id = tr.getAttribute('data-key');
+            if (g(state.rows[id], 'reportId') != null) toggle(id);
+            else if (g(state.rows[id], 'isLead')) openCreate(id);
+        }
+    }
+    function onChange(e) {
+        const v = e.target.closest('[data-version]');
+        if (v && state.report) loadReport(state.report.key, v.value ? Number(v.value) : null);
+    }
+    function doLink(what, el) {
+        if (what === 'create') createReport();
+        else if (what === 'cancel-create') { state.create = null; state.open = null; reload(); }
+        else if (what === 'save-sections') saveSections();
+        else if (what === 'print') printReport(state.report && state.report.key);
+        else if (what === 'save-template') saveTemplate();
+        else if (what === 'cancel-template') { state.tpl = null; state.open = null; renderTemplates(); }
+    }
+
+    function rowEl(id) { return document.querySelector('#oaRpBody tr[data-key="' + id + '"]'); }
+    function setOpen(id, open) {
+        const tr = rowEl(id);
+        if (!tr) return;
+        tr.classList.toggle('oa-pl-open', open); tr.classList.toggle('is-selected', open);
+        const b = tr.querySelector('.task-tree-toggle');
+        if (b) { b.classList.toggle('is-open', open); b.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+    }
+    function host(id, cols) {
+        document.querySelectorAll('#oaRpBody tr.oa-pl-items-row').forEach(function (r) { if (r.getAttribute('data-child') !== id) r.remove(); });
+        let child = document.querySelector('#oaRpBody tr.oa-pl-items-row[data-child="' + id + '"]');
+        if (!child) {
+            const parent = rowEl(id);
+            if (!parent) return null;
+            child = document.createElement('tr');
+            child.className = 'oa-pl-items-row is-selected';
+            child.setAttribute('data-child', id);
+            child.innerHTML = '<td colspan="' + cols + '"><div class="oa-pl-items"></div></td>';
+            parent.insertAdjacentElement('afterend', child);
+        }
+        return child.querySelector('.oa-pl-items');
+    }
+    function toggle(id) {
+        if (state.open === id) {
+            const child = document.querySelector('#oaRpBody tr.oa-pl-items-row');
+            if (child) child.remove();
+            setOpen(id, false); state.open = null; state.report = null;
+            return;
+        }
+        if (state.open) setOpen(state.open, false);
+        openReport(id, false);
+    }
+
+    // Create: the template to use (the default chosen).
+    function openCreate(id) {
+        if (state.open && state.open !== id) setOpen(state.open, false);
+        state.open = id; state.create = id; state.report = null;
+        setOpen(id, true);
+        const h = host(id, 10);
+        const active = state.templates.filter(function (t) { return g(t, 'isActive'); });
+        h.innerHTML = '<p class="oa-pl-plan-facts"><strong>Create the audit report</strong> -- its sections come from the template; the data is read from the engagement.</p>'
+            + '<div class="oa-pl-plan-grid"><label class="pm-field oa-pl-span-2"><span>Report Template</span>'
+            + '<select class="pm-input" id="oaRpCreateTpl">' + active.map(function (t) {
+                  return '<option value="' + esc(g(t, 'reportTemplateId')) + '"' + (g(t, 'isDefault') ? ' selected' : '') + '>'
+                       + esc(g(t, 'templateName') + (g(t, 'isDefault') ? ' (default)' : '')) + '</option>';
+              }).join('') + '</select></label></div>'
+            + '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="create">Create Report</a>'
+            + '<a href="#" class="oa-pl-more" data-do="cancel-create">Cancel</a></div>';
+    }
+    async function createReport() {
+        const id = state.create;
+        const sel = document.getElementById('oaRpCreateTpl');
+        try {
+            await post('/reports', { organizationId: Number(state.orgId), engagementId: Number(id),
+                                     reportTemplateId: sel && sel.value ? Number(sel.value) : null, actor: null });
+            state.create = null;
+            state.open = id;
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    async function openReport(id, fresh) {
+        if (state.open && state.open !== id) setOpen(state.open, false);
+        state.open = id; state.create = null;
+        setOpen(id, true);
+        await loadReport(id, fresh && state.report && state.report.key === id ? state.report.version : null);
+    }
+    async function loadReport(id, version) {
+        const h = host(id, 10);
+        if (!h) return;
+        const rid = g(state.rows[id], 'reportId');
+        h.innerHTML = '<p class="oa-pl-plan-facts">Loading the report...</p>';
+        try {
+            const j = await getJson(API + '/reports/' + encodeURIComponent(rid) + '?organizationId=' + encodeURIComponent(state.orgId)
+                                    + (version != null ? '&versionNo=' + encodeURIComponent(version) : ''));
+            const rep = g(j, 'report') || {};
+            let data = {};
+            try { data = JSON.parse(g(rep, 'dataJson') || '{}') || {}; } catch (_) { data = {}; }
+            state.report = { key: id, report: rep, sections: g(j, 'sections') || [], history: g(j, 'history') || [],
+                             versions: g(j, 'versions') || [], data: data, version: version };
+            h.innerHTML = reportHtml();
+        } catch (err) { h.innerHTML = '<p class="oa-pl-plan-facts">Failed to load: ' + esc(err.message || err) + '</p>'; }
+    }
+
+    function editable() {
+        const r = state.report.report;
+        return !g(r, 'isFrozen') && !!g(r, 'isLead') && (g(r, 'reportStatus') === 'Draft' || g(r, 'reportStatus') === 'Returned');
+    }
+    function table(head, rows, empty) {
+        return '<div class="pm-table-wrap"><table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('')
+             + '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" class="pm-empty">' + esc(empty) + '</td></tr>')
+             + '</tbody></table></div>';
+    }
+    function tr(cells) { return '<tr>' + cells.map(function (c) { return '<td style="white-space:normal;">' + esc(c == null || c === '' ? '--' : c) + '</td>'; }).join('') + '</tr>'; }
+    function facts(pairs) {
+        return '<div class="oa-pl-plan-grid">' + pairs.map(function (p) {
+            const v = p[1];
+            return '<div class="pm-field pm-view-field' + (p[2] ? ' full oa-pl-span-all' : '') + '"><span>' + esc(p[0]) + '</span>'
+                 + '<span class="pm-view-value' + (v ? '' : ' pm-field-empty') + '">' + esc(v || '--') + '</span></div>';
+        }).join('') + '</div>';
+    }
+
+    // Each section's data, from the report data document.
+    function sectionData(code) {
+        const d = state.report.data || {};
+        const e = g(d, 'engagement') || {};
+        const ex = g(d, 'executions') || [], fx = g(d, 'findings') || [];
+        switch (code) {
+            case 'OBJECTIVE':
+                return facts([['Engagement Objective', g(e, 'engagementObjective'), true], ['Audit Subject', g(e, 'auditSubject')],
+                              ['Auditee', wf.personWithRole(g(e, 'auditeeName'), g(e, 'auditeeRoleName'))],
+                              ['Engagement Type', g(e, 'engagementOrigin') === 'INDEPENDENT' ? 'Independent' + (g(e, 'initiationSourceName') ? ' -- ' + g(e, 'initiationSourceName') : '') : 'Planned'],
+                              ['Approval Reference', g(e, 'approvalReference')]])
+                     + table(['Audit', 'Version', 'Audit Mandate'], ex.map(function (x) {
+                           return tr([g(x, 'definitionCode') + ' - ' + g(x, 'definitionName'), g(x, 'versionNumber'), g(x, 'mandates')]); }), 'No audits.');
+            case 'SCOPE': {
+                const m = g(d, 'methods') || [];
+                return facts([['Scope', g(e, 'scopeSummary'), true], ['Branch', g(e, 'branchName')], ['Department', g(e, 'departmentName')]])
+                     + table(['Audit', 'Approach', 'Items in Scope', 'Status'], ex.map(function (x) {
+                           return tr([g(x, 'definitionName'), g(x, 'approachName'), g(x, 'itemsInScope'), g(x, 'executionStatus')]); }), 'No audits.')
+                     + '<p class="oa-rp-narrative"><strong>Testing methods used:</strong> '
+                     + esc(m.length ? m.map(function (x) { return g(x, 'methodName') + ' (' + g(x, 'paperCount') + ')'; }).join(', ') : '--') + '</p>'
+                     + table(['Team Role', 'Name', 'Designation / Organisation'], (g(d, 'team') || []).map(function (t) {
+                           return tr([TEAM[g(t, 'teamRole')] || g(t, 'teamRole'), g(t, 'memberName'), g(t, 'externalOrganisation') || g(t, 'designation')]); }), 'No team.');
+            }
+            case 'PERIOD':
+                return facts([['Planned', period(g(e, 'plannedStart'), g(e, 'plannedEnd'))], ['Actual', period(g(e, 'actualStart'), g(e, 'actualEnd'))],
+                              ['Audit Plan', g(e, 'planCode') ? g(e, 'planCode') + ' - ' + (g(e, 'planName') || '') : null],
+                              ['Financial Year', g(e, 'financialYear')], ['Programme', g(e, 'programmeName')]]);
+            case 'EXEC_SUMMARY': {
+                const sev = {};
+                fx.forEach(function (f) { const s = g(f, 'severity') || 'Unrated'; sev[s] = (sev[s] || 0) + 1; });
+                return '<p class="oa-rp-narrative">' + esc(ex.length + ' audit(s); ' + fx.length + ' finding(s)'
+                     + (fx.length ? ' -- ' + Object.keys(sev).map(function (k) { return sev[k] + ' ' + k; }).join(', ') : '') + '.') + '</p>';
+            }
+            case 'COVERAGE':
+                return table(['Audit', 'Execution', 'Questions Concluded', 'Partial', 'Unsatisfactory', 'Working Papers', 'Score'], ex.map(function (x) {
+                    return tr([g(x, 'definitionName'), g(x, 'executionCode'), g(x, 'concludedCount') + ' / ' + g(x, 'questionCount'),
+                               g(x, 'partialCount'), g(x, 'unsatisfactoryCount'), g(x, 'paperCount'),
+                               g(x, 'scorePct') != null ? Number(g(x, 'scorePct')).toFixed(2) + '%' + (g(x, 'scoreBandName') ? ' (' + g(x, 'scoreBandName') + ')' : '') : null]); }), 'No audits.');
+            case 'FINDINGS':
+                return table(['Finding', 'Title', 'Risk Rating', 'Condition', 'Root Cause', 'Status'], fx.map(function (f) {
+                    return tr([g(f, 'observationCode'), g(f, 'title'), g(f, 'severity'), g(f, 'conditionText') || g(f, 'description'), g(f, 'rootCause'), g(f, 'status')]); }), 'No findings.');
+            case 'RESPONSES':
+                return table(['Finding', 'Management Response', 'Corrective Action', 'Owner', 'Target Date'], fx.map(function (f) {
+                    return tr([g(f, 'observationCode'), g(f, 'managementResponse'), g(f, 'correctiveAction'), g(f, 'ownerName'), d10(g(f, 'targetDate'))]); }), 'No findings.');
+            case 'RECOMMENDATIONS':
+                return table(['Finding', 'Risk Rating', 'Recommendation'], fx.map(function (f) {
+                    return tr([g(f, 'observationCode') + ' - ' + g(f, 'title'), g(f, 'severity'), g(f, 'recommendation')]); }), 'No findings.');
+            case 'CONCLUSION':
+                return table(['Audit', 'Score', 'Audit Conclusion'], ex.map(function (x) {
+                    return tr([g(x, 'definitionName'), g(x, 'scoreBandName') || (g(x, 'scorePct') != null ? Number(g(x, 'scorePct')).toFixed(2) + '%' : null), g(x, 'auditConclusion')]); }), 'No audits.');
+            case 'HISTORY':
+                return table(['Version', 'Action', 'By', 'When', 'Comment'], state.report.history.map(function (h) {
+                    return tr(['v' + g(h, 'versionNo'), ACTION[g(h, 'actionCode')] || g(h, 'actionCode'), g(h, 'actorName'),
+                               String(g(h, 'enteredDt') || '').replace('T', ' ').substring(0, 16), g(h, 'comment')]); }), 'No history.');
+            default: return '';
+        }
+    }
+
+    function reportHtml() {
+        const r = state.report.report, ed = editable();
+        const st = g(r, 'reportStatus');
+        const vers = state.report.versions;
+        let html = '<div class="oa-rp-doc oa-rp-print-target">'
+            + '<p class="oa-rp-title">' + esc(g(r, 'reportTitle')) + '</p>'
+            + '<p class="oa-pl-plan-facts">' + esc(g(r, 'reportCode') + '  |  Version ' + g(r, 'shownVersionNo') + (g(r, 'isFrozen') ? ' (issued ' + d10(g(r, 'issuedDt') || '') + ', frozen)' : '')
+                  + '  |  ' + (STATUS[st] || st) + '  |  Prepared by ' + (g(r, 'preparedBy') || '--')
+                  + (g(r, 'approvedBy') ? '  |  Approved by ' + g(r, 'approvedBy') + ' ' + d10(g(r, 'approvedDt')) : '')
+                  + (g(r, 'issuedBy') ? '  |  Issued by ' + g(r, 'issuedBy') + ' ' + d10(g(r, 'issuedDt')) : '')
+                  + (g(r, 'templateName') ? '  |  Template ' + g(r, 'templateName') : '')) + '</p>';
+        if (vers.length)
+            html += '<div class="oa-rp-noprint" style="margin-bottom:6px;"><label class="pm-field" style="max-width:320px;"><span>Version shown</span>'
+                  + '<select class="pm-input" data-version="1"><option value="">Current (v' + esc(g(r, 'versionNo')) + ')</option>'
+                  + vers.map(function (v) {
+                        const n = g(v, 'versionNo');
+                        return '<option value="' + esc(n) + '"' + (String(state.report.version) === String(n) ? ' selected' : '') + '>v' + esc(n) + ' issued ' + esc(d10(g(v, 'issuedDt'))) + '</option>';
+                    }).join('') + '</select></label></div>';
+        state.report.sections.forEach(function (s) {
+            const code = g(s, 'sectionCode'), inc = !!g(s, 'isIncluded'), nar = g(s, 'narrative') || '';
+            if (!inc && !ed) return;
+            html += '<h3>' + esc(g(s, 'heading')) + (inc ? '' : ' <span class="oa-rp-left-out">(left out)</span>')
+                  + (ed ? ' <label class="oa-rp-noprint" style="font-size:12px; font-weight:400; margin-left:8px;"><input type="checkbox" data-incl="' + esc(code) + '"' + (inc ? ' checked' : '') + ' /> Include</label>' : '')
+                  + '</h3>';
+            html += sectionData(code);
+            if (ed)
+                html += '<textarea class="pm-input oa-rp-noprint" rows="' + (code === 'EXEC_SUMMARY' || code === 'CONCLUSION' ? 4 : 2) + '" data-nar="' + esc(code) + '"'
+                      + ' placeholder="' + esc(code === 'EXEC_SUMMARY' ? 'Executive summary (required to submit)' : code === 'CONCLUSION' ? 'Overall audit conclusion (required to submit)' : 'Narrative for this section (optional)') + '">'
+                      + esc(nar) + '</textarea>';
+            else if (nar)
+                html += '<p class="oa-rp-narrative">' + esc(nar) + '</p>';
+        });
+        html += '</div><div class="oa-pl-items-foot oa-rp-noprint">'
+              + (ed ? '<a href="#" class="oa-pl-add" data-do="save-sections">Save Report</a>' : '')
+              + '<a href="#" class="oa-pl-more" data-do="print">Print / Save as PDF</a></div>';
+        return html;
+    }
+
+    async function saveSections() {
+        const sections = state.report.sections.map(function (s) {
+            const code = g(s, 'sectionCode');
+            const inc = document.querySelector('#oaRpBody [data-incl="' + code + '"]');
+            const nar = document.querySelector('#oaRpBody [data-nar="' + code + '"]');
+            return { sectionCode: code, isIncluded: inc ? inc.checked : !!g(s, 'isIncluded'), narrative: nar ? nar.value : (g(s, 'narrative') || null) };
+        });
+        try {
+            await post('/reports/' + encodeURIComponent(g(state.report.report, 'reportId')) + '/sections',
+                       { organizationId: Number(state.orgId), sections: sections, actor: null });
+            wf.setMessage('oaRpMessage', 'Report saved.', 'ok');
+            await loadReport(state.report.key, null);
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    async function act(id, action, required, message) {
+        let comment = null;
+        if (message) {
+            comment = required ? await window.gracUi.promptRequired(message, { title: ACTION[action] || action, confirmText: 'OK', multiline: true })
+                               : await window.gracUi.prompt(message, { title: ACTION[action] || action, confirmText: 'OK', multiline: true });
+            if (comment == null) return;
+        } else if (!await window.gracUi.confirm('Submit the report for review? It cannot be changed while it is in review.',
+                     { type: 'confirm', title: 'Submit for Review', confirmText: 'Submit' })) return;
+        try {
+            await post('/reports/' + encodeURIComponent(g(state.rows[id], 'reportId')) + '/action',
+                       { organizationId: Number(state.orgId), action: action, comment: comment, actor: null });
+            state.open = id;
+            if (state.report && state.report.key === id) state.report.version = null;
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    async function issue(id) {
+        if (!await window.gracUi.confirm('Issue the report? Its data and sections are frozen as this version; a later change needs a revision.',
+              { type: 'warning', title: 'Issue Report', confirmText: 'Issue' })) return;
+        try {
+            await post('/reports/' + encodeURIComponent(g(state.rows[id], 'reportId')) + '/action',
+                       { organizationId: Number(state.orgId), action: 'ISSUE', comment: null, actor: null });
+            state.open = id;
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    async function printReport(id) {
+        if (!id) return;
+        if (state.open !== id || !state.report) await openReport(id, false);
+        document.body.classList.add('oa-rp-printing');
+        window.print();
+    }
+
+    // -----------------------------------------------------------------
+    // Templates view
+    // -----------------------------------------------------------------
+    function renderTemplates() {
+        const body = document.getElementById('oaRpBody');
+        state.rows = {};
+        let html = '';
+        if (state.tpl && state.tpl.id == null)
+            html += '<tr class="oa-pl-items-row is-selected" data-child="new"><td colspan="7"><div class="oa-pl-items">' + templateForm() + '</div></td></tr>';
+        html += state.templates.map(function (t) {
+            const id = String(g(t, 'reportTemplateId'));
+            state.rows[id] = t;
+            const open = state.tpl && String(state.tpl.id) === id;
+            return '<tr class="pm-row-clickable' + (open ? ' oa-pl-open is-selected' : '') + '" data-key="' + esc(id) + '">'
+                 + '<td>' + toggleCell(id, open, 'Edit the template', g(t, 'templateCode')) + '</td>'
+                 + '<td>' + esc(g(t, 'templateName')) + (g(t, 'description') ? '<br /><span style="color:var(--fg-subtle);">' + esc(g(t, 'description')) + '</span>' : '') + '</td>'
+                 + '<td>' + (g(t, 'isDefault') ? wf.badge('Default') : '--') + '</td>'
+                 + '<td>' + esc(g(t, 'includedSectionCount')) + '</td>'
+                 + '<td>' + esc(g(t, 'reportCount')) + '</td>'
+                 + '<td>' + esc(g(t, 'isActive') ? 'Yes' : 'No') + '</td>'
+                 + '<td>' + trigger(id) + '</td></tr>'
+                 + (open ? '<tr class="oa-pl-items-row is-selected" data-child="' + esc(id) + '"><td colspan="7"><div class="oa-pl-items">' + templateForm() + '</div></td></tr>' : '');
+        }).join('');
+        body.innerHTML = html || '<tr><td colspan="7" class="pm-empty">No templates.</td></tr>';
+        body.querySelectorAll('[data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () {
+                return [{ icon: 'fa-pen', label: 'Edit', run: function () { openTemplate(id); } }];
+            });
+        });
+    }
+    async function openTemplate(id) {
+        if (id != null && state.tpl && String(state.tpl.id) === String(id)) { state.tpl = null; renderTemplates(); return; }
+        try {
+            if (!state.master.length) state.master = rowsOf(await getJson(API + '/report-sections'));
+            let sections;
+            if (id == null)
+                sections = state.master.map(function (m) {
+                    return { sectionCode: g(m, 'sectionCode'), heading: g(m, 'defaultHeading'), displayOrder: g(m, 'displayOrder'),
+                             isIncluded: true, standardText: '', description: g(m, 'description') };
+                });
+            else
+                sections = rowsOf(await getJson(API + '/report-templates/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId)))
+                    .map(function (s) {
+                        return { sectionCode: g(s, 'sectionCode'), heading: g(s, 'heading'), displayOrder: g(s, 'displayOrder'),
+                                 isIncluded: !!g(s, 'isIncluded'), standardText: g(s, 'standardText') || '', description: g(s, 'description') };
+                    });
+            state.tpl = { id: id, sections: sections, row: id == null ? null : state.rows[id] };
+            renderTemplates();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    function templateForm() {
+        const t = state.tpl, row = t.row || {};
+        const yes = function (v) { return '<option value="1"' + (v ? ' selected' : '') + '>Yes</option><option value="0"' + (v ? '' : ' selected') + '>No</option>'; };
+        return '<p class="oa-pl-plan-facts"><strong>' + esc(t.id == null ? 'New Report Template' : 'Edit ' + g(row, 'templateCode')) + '</strong>'
+             + ' -- reports already made keep their own sections.</p>'
+             + '<div class="oa-pl-plan-grid">'
+             + '<label class="pm-field oa-pl-span-2"><span>Template Name <span class="required">*</span></span><input class="pm-input" id="oaRpTplName" maxlength="200" value="' + esc(g(row, 'templateName') || '') + '" /></label>'
+             + '<label class="pm-field"><span>Default</span><select class="pm-input" id="oaRpTplDefault">' + yes(!!g(row, 'isDefault')) + '</select></label>'
+             + '<label class="pm-field"><span>Active</span><select class="pm-input" id="oaRpTplActive">' + yes(t.id == null ? true : !!g(row, 'isActive')) + '</select></label>'
+             + '<label class="pm-field oa-pl-span-all"><span>Description</span><textarea class="pm-input" id="oaRpTplDesc" rows="2" maxlength="1000">' + esc(g(row, 'description') || '') + '</textarea></label>'
+             + '</div>'
+             + '<div class="pm-table-wrap" style="margin-top:8px;"><table><thead><tr><th style="width:80px;">Order</th><th>Section</th><th>Heading</th><th style="width:80px;">Include</th><th>Standard Text</th></tr></thead><tbody>'
+             + t.sections.map(function (s, i) {
+                   return '<tr><td><input class="pm-input" type="number" step="1" data-tpl-order="' + i + '" value="' + esc(s.displayOrder) + '" /></td>'
+                        + '<td style="white-space:normal;"><strong>' + esc(s.sectionCode) + '</strong><br /><span style="color:var(--fg-subtle);">' + esc(s.description || '') + '</span></td>'
+                        + '<td><input class="pm-input" maxlength="200" data-tpl-heading="' + i + '" value="' + esc(s.heading) + '" /></td>'
+                        + '<td><input type="checkbox" data-tpl-incl="' + i + '"' + (s.isIncluded ? ' checked' : '') + ' /></td>'
+                        + '<td><textarea class="pm-input" rows="2" data-tpl-text="' + i + '" placeholder="Text the report starts with (optional)">' + esc(s.standardText) + '</textarea></td></tr>';
+               }).join('')
+             + '</tbody></table></div>'
+             + '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="save-template">Save Template</a>'
+             + '<a href="#" class="oa-pl-more" data-do="cancel-template">Cancel</a></div>';
+    }
+    async function saveTemplate() {
+        const t = state.tpl;
+        const q = function (attr, i) { return document.querySelector('#oaRpBody [' + attr + '="' + i + '"]'); };
+        const name = document.getElementById('oaRpTplName').value.trim();
+        if (!name) { await window.gracUi.alert('Give the template a name.', { type: 'error' }); return; }
+        const sections = t.sections.map(function (s, i) {
+            return { sectionCode: s.sectionCode, heading: q('data-tpl-heading', i).value.trim() || null,
+                     displayOrder: Number(q('data-tpl-order', i).value || 0), isIncluded: q('data-tpl-incl', i).checked,
+                     standardText: q('data-tpl-text', i).value || null };
+        });
+        try {
+            await post('/report-templates', {
+                organizationId: Number(state.orgId), reportTemplateId: t.id != null ? Number(t.id) : null, templateName: name,
+                description: document.getElementById('oaRpTplDesc').value.trim() || null,
+                isDefault: document.getElementById('oaRpTplDefault').value === '1',
+                isActive: document.getElementById('oaRpTplActive').value === '1',
+                sections: sections, actor: null });
+            state.tpl = null;
+            wf.setMessage('oaRpMessage', 'Template saved.', 'ok');
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+})();
+</script>

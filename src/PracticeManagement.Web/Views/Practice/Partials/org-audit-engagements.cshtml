@@ -1,0 +1,524 @@
+@*
+    Audit Engagements (566, Audit Change spec 4.5)
+
+    Every engagement of the organization as a record of its own:
+      * PLANNED -- in a programme of an audit plan, approved with the plan
+        (added and changed from Audit Plans, or Edit here while the plan is
+        Draft / Submitted).
+      * INDEPENDENT -- outside the annual plan (Board / Audit Committee,
+        Regulator / RBI, CAE, management request, fraud, incident, follow-
+        up, other): initiation source, the reason, and approval by the
+        authority (approval reference). "+ Add Independent Engagement".
+    Both run the same lifecycle: Start Execution starts one execution per
+    audit (planned: plan Approved / Active; independent: approved). Status
+    is derived -- Draft (independent, not approved) / Planned / In Progress
+    / Completed -- or Cancelled (with the reason; no live execution).
+
+    UX (the Audit Plans list, as sir set it):
+      * One list, filters as selects (organization, status, type, plan),
+        search; 3-dot row menus.
+      * A row's chevron -- or a click on the row -- opens the engagement's
+        details in a child row (no popup): the record, its audits and its
+        audit team with the trail (removed members, who / when).
+      * Add / Edit / Audit Team open the shared engagement form in full
+        view (Partials/_audit-engagement-form).
+    Gated by the Audit Plans feature (screen.org-assurance-plans).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaEnUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-briefcase pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaEnUnavailableTitle">Audit Engagements are not available.</h2>
+        <p id="oaEnUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaEnRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaEnFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaEnFilterStatus">
+            <option value="">All statuses</option>
+            <option value="Draft">Draft</option>
+            <option value="Planned">Planned</option>
+            <option value="InProgress">In Progress</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
+        </select>
+        <select id="oaEnFilterOrigin">
+            <option value="">All types</option>
+            <option value="PLANNED">Planned</option>
+            <option value="INDEPENDENT">Independent</option>
+        </select>
+        <select id="oaEnFilterPlan"><option value="">All plans</option></select>
+        <input id="oaEnSearch" type="text" placeholder="Search code / name / subject / auditor..." />
+        <button class="pm-button icon" id="oaEnRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaEnAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Independent Engagement
+        </button>
+    </div>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Engagement</th>
+                    <th>Type</th>
+                    <th>Plan / Programme</th>
+                    <th>Audit Subject</th>
+                    <th>Lead Auditor</th>
+                    <th>Planned</th>
+                    <th>Audits</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="oaEnBody">
+                <tr><td colspan="10" class="pm-empty">Select an organization to load engagements.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="oa-engagements">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+@* The engagement form (full view) and View Scope -- shared with Audit Plans. *@
+<partial name="Partials/_audit-engagement-form" />
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const STATUS_LABEL = { Draft: 'Draft', Planned: 'Planned', InProgress: 'In Progress', Completed: 'Completed', Cancelled: 'Cancelled' };
+    const TEAM_LABEL   = { LEAD: 'Lead Auditor', MEMBER: 'Team Member', REVIEWER: 'Reviewer', SME: 'Subject Matter Expert', EXTERNAL: 'External Auditor' };
+
+    const state = {
+        orgId    : '',
+        status   : '',
+        origin   : '',
+        planId   : '',
+        search   : '',
+        page     : 1,
+        pageSize : 25,
+        total    : 0,
+        rows     : {},          // id -> row
+        open     : new Set(),   // engagements showing their details
+        details  : {}           // id -> { engagement, audits, team (with the trail) }
+    };
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        wf.wirePager('oa-engagements', function (delta) {
+            const next = state.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.page = next; reload();
+        });
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaEnUnavailable', 'oaEnUnavailableTitle', 'oaEnUnavailableBody',
+                'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaEnFilterOrg', orgs);
+        state.orgId = document.getElementById('oaEnFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaEnUnavailable', 'oaEnUnavailableTitle', 'oaEnUnavailableBody',
+                'Audit Engagements are not available for this organization.',
+                'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaEnRoot').hidden = false;
+        wireControls();
+        await loadPlanFilter();
+        reload();
+    }
+
+    function wireControls() {
+        document.getElementById('oaEnFilterOrg').addEventListener('change', async function (e) {
+            state.orgId = e.target.value || '';
+            state.page = 1; state.planId = ''; state.open.clear(); state.details = {};
+            if (window.__roleHolderPicker && typeof window.__roleHolderPicker.invalidateCaches === 'function')
+                window.__roleHolderPicker.invalidateCaches();
+            await loadPlanFilter();
+            reload();
+        });
+        document.getElementById('oaEnFilterStatus').addEventListener('change', function (e) { state.status = e.target.value || ''; state.page = 1; reload(); });
+        document.getElementById('oaEnFilterOrigin').addEventListener('change', function (e) { state.origin = e.target.value || ''; state.page = 1; reload(); });
+        document.getElementById('oaEnFilterPlan').addEventListener('change', function (e) { state.planId = e.target.value || ''; state.page = 1; reload(); });
+        document.getElementById('oaEnSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || ''; state.page = 1;
+            clearTimeout(window.__oaEnSearchTimer);
+            window.__oaEnSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaEnRefreshBtn').addEventListener('click', function () { reload(); });
+        document.getElementById('oaEnAddBtn').addEventListener('click', function () { openForm(null, 'edit', 'INDEPENDENT'); });
+
+        // Chevron or row click: open / close the engagement's details.
+        document.getElementById('oaEnBody').addEventListener('click', function (e) {
+            if (e.target.closest('.pm-action-trigger, .pm-action-menu, .oa-pl-items, a')) return;
+            const tr = e.target.closest('tr.oa-en-row[data-id]');
+            if (tr) toggle(tr.getAttribute('data-id'));
+        });
+    }
+
+    async function loadPlanFilter() {
+        const sel = document.getElementById('oaEnFilterPlan');
+        sel.innerHTML = '<option value="">All plans</option>';
+        if (!state.orgId) return;
+        try {
+            const r = await fetch(U(API + '/plans?organizationId=' + encodeURIComponent(state.orgId) + '&page=1&pageSize=200'), { credentials: 'same-origin' });
+            const b = r.ok ? await r.json() : null;
+            ((b && (b.rows || b.Rows)) || []).forEach(function (p) {
+                const o = document.createElement('option');
+                o.value = String(p.planId ?? p.PlanId);
+                o.textContent = (p.planCode || p.PlanCode || '') + ' - ' + (p.planName || p.PlanName || '');
+                sel.appendChild(o);
+            });
+        } catch (_) { /* the list still loads without the plan filter */ }
+    }
+
+    // -----------------------------------------------------------------
+    // The list
+    // -----------------------------------------------------------------
+    async function reload() {
+        const body = document.getElementById('oaEnBody');
+        if (!state.orgId) { body.innerHTML = '<tr><td colspan="10" class="pm-empty">Select an organization.</td></tr>'; return; }
+        body.innerHTML = '<tr><td colspan="10" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.status) qs.set('status', state.status);
+            if (state.origin) qs.set('origin', state.origin);
+            if (state.planId) qs.set('planId', state.planId);
+            if (state.search) qs.set('search', state.search);
+            qs.set('page', String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/engagements?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="10" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            const payload = await r.json();
+            state.total = Number(payload.totalCount ?? payload.TotalCount ?? 0);
+            render(payload.data || payload.Data || []);
+            wf.updatePager('oa-engagements', { pageNumber: state.page, totalCount: state.total, pageSize: state.pageSize });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="10" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function g(o, a, b) { return o ? (o[a] !== undefined ? o[a] : o[b]) : undefined; }
+    function onlyDate(x) { return x ? String(x).substring(0, 10) : ''; }
+    function period(from, to) {
+        const f = onlyDate(from), t = onlyDate(to);
+        return f || t ? (f || '...') + ' to ' + (t || '...') : '';
+    }
+
+    function render(rows) {
+        const body = document.getElementById('oaEnBody');
+        state.rows = {};
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="10" class="pm-empty">No engagements. Planned engagements are added in Audit Plans; use "Add Independent Engagement" for one outside the plan.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(function (row) {
+            const id = g(row, 'engagementId', 'EngagementId');
+            state.rows[String(id)] = row;
+            const open   = state.open.has(String(id));
+            const indep  = g(row, 'engagementOrigin', 'EngagementOrigin') === 'INDEPENDENT';
+            const plan   = g(row, 'planCode', 'PlanCode') || '';
+            const prog   = g(row, 'programmeName', 'ProgrammeName') || '';
+            const st     = g(row, 'engagementStatus', 'EngagementStatus') || '';
+            const n      = Number(g(row, 'definitionCount', 'DefinitionCount') || 0);
+            const done   = Number(g(row, 'executionDoneCount', 'ExecutionDoneCount') || 0);
+            return '<tr class="pm-row-clickable oa-en-row' + (open ? ' oa-pl-open is-selected' : '') + '" data-id="' + wf.escape(String(id)) + '">'
+                 + '<td><span class="task-tree-cell">'
+                 + '<button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '" data-en-toggle="' + wf.escape(String(id)) + '"'
+                 + ' aria-expanded="' + (open ? 'true' : 'false') + '" title="Show the details">'
+                 + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>'
+                 + '<span class="visually-hidden">Show the details</span></button>'
+                 + '<span>' + wf.escape(g(row, 'engagementCode', 'EngagementCode') || '') + '</span></span></td>'
+                 + '<td>' + wf.escape(g(row, 'engagementName', 'EngagementName') || '') + '</td>'
+                 + '<td>' + wf.escape(indep ? 'Independent' + (g(row, 'initiationSourceName', 'InitiationSourceName') ? ' (' + g(row, 'initiationSourceName', 'InitiationSourceName') + ')' : '') : 'Planned') + '</td>'
+                 + '<td>' + wf.escape(plan ? plan + (prog ? ' / ' + prog : '') : '--') + '</td>'
+                 + '<td>' + wf.escape(g(row, 'auditSubject', 'AuditSubject') || '') + '</td>'
+                 + '<td>' + wf.escape(wf.personWithRole(g(row, 'leadAuditorName', 'LeadAuditorName'), g(row, 'leadAuditorRoleName', 'LeadAuditorRoleName'))) + '</td>'
+                 + '<td>' + wf.escape(period(g(row, 'plannedStart', 'PlannedStart'), g(row, 'plannedEnd', 'PlannedEnd'))) + '</td>'
+                 + '<td>' + wf.escape(n ? done + ' / ' + n + ' done' : '0') + '</td>'
+                 + '<td>' + wf.badge(STATUS_LABEL[st] || st) + '</td>'
+                 + '<td><button type="button" class="pm-action-trigger" data-id="' + wf.escape(String(id)) + '"'
+                 + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+                 + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+                 + '<span class="visually-hidden">Actions</span></button></td>'
+                 + '</tr>';
+        }).join('');
+
+        body.querySelectorAll('.pm-action-trigger').forEach(function (btn) {
+            const id = btn.getAttribute('data-id');
+            window.gracPageActions.attach(btn, function () { return menuItems(id); });
+        });
+        // Engagements that were open stay open, read again.
+        Array.from(state.open).forEach(function (id) {
+            if (state.rows[id]) loadDetail(id); else state.open.delete(id);
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // 3-dot: View, Edit, Audit Team, Approve (independent), Start
+    // Execution, View Scope, Cancel, Delete (independent Draft).
+    // -----------------------------------------------------------------
+    function menuItems(id) {
+        const row    = state.rows[String(id)] || {};
+        const st     = g(row, 'engagementStatus', 'EngagementStatus') || '';
+        const indep  = g(row, 'engagementOrigin', 'EngagementOrigin') === 'INDEPENDENT';
+        const planSt = g(row, 'planStatusCode', 'PlanStatusCode') || '';
+        const live   = Number(g(row, 'executionCount', 'ExecutionCount') || 0);
+        const items  = [{ icon: 'fa-eye', label: state.open.has(String(id)) ? 'Hide Details' : 'View', run: function () { toggle(id); } }];
+        if (st === 'Cancelled') return items;
+        // Edit: an independent one until approved; a planned one while its
+        // plan is Draft / Submitted and nothing has started.
+        if ((indep && st === 'Draft') || (!indep && (planSt === 'Draft' || planSt === 'Submitted') && live === 0))
+            items.push({ icon: 'fa-pen', label: 'Edit', run: function () { openForm(id, 'edit'); } });
+        if (st !== 'Completed')
+            items.push({ icon: 'fa-users', label: 'Audit Team', run: function () { openForm(id, 'team'); } });
+        if (indep && st === 'Draft')
+            items.push({ icon: 'fa-check', label: 'Approve', run: function () { approve(id); } });
+        if (g(row, 'canStart', 'CanStart'))
+            items.push({ icon: 'fa-play', label: 'Start Execution', run: function () { start(id); } });
+        items.push({ icon: 'fa-crosshairs', label: 'View Scope', run: function () {
+            const b = g(row, 'branchName', 'BranchName');
+            window.gracEngagementForm.openScope(state.orgId, { planItemId: Number(id) },
+                (g(row, 'engagementCode', 'EngagementCode') || '') + '  ' + (g(row, 'engagementName', 'EngagementName') || '') + (b ? '  at ' + b : ''));
+        } });
+        if (live === 0 && (st === 'Draft' || st === 'Planned'))
+            items.push({ icon: 'fa-ban', label: 'Cancel Engagement', run: function () { cancel(id); } });
+        if (indep && st === 'Draft' && live === 0)
+            items.push({ icon: 'fa-trash', label: 'Delete', run: function () { remove(id); } });
+        return items;
+    }
+
+    function openForm(id, mode, origin) {
+        window.gracEngagementForm.open({
+            orgId       : state.orgId,
+            origin      : origin || null,
+            engagementId: id,
+            mode        : mode,
+            onSaved     : function (res) {
+                const eid = res && res.engagementId;
+                if (eid != null) { state.open.add(String(eid)); delete state.details[String(eid)]; }
+                reload();
+            }
+        });
+    }
+
+    async function post(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+
+    async function approve(id) {
+        const row = state.rows[String(id)] || {};
+        const ref = await window.gracUi.promptRequired(
+            'Approve ' + (g(row, 'engagementCode', 'EngagementCode') || 'this engagement')
+            + '? Give the authority\'s approval reference (e.g. Audit Committee resolution, RBI letter).',
+            { title: 'Approve Engagement', confirmText: 'Approve', defaultValue: g(row, 'approvalReference', 'ApprovalReference') || '' });
+        if (ref == null) return;
+        try {
+            await post('/engagements/' + encodeURIComponent(id) + '/approve',
+                       { organizationId: Number(state.orgId), approvalReference: ref, actor: null });
+            delete state.details[String(id)];
+            reload();
+        } catch (err) { await window.gracUi.alert('Approve failed: ' + (err.message || err), { type: 'error' }); }
+    }
+
+    async function start(id) {
+        const row = state.rows[String(id)] || {};
+        if (await window.gracEngagementForm.startExecution(state.orgId, g(row, 'planId', 'PlanId'), id,
+                g(row, 'engagementName', 'EngagementName') || g(row, 'engagementCode', 'EngagementCode'))) {
+            delete state.details[String(id)];
+            reload();
+        }
+    }
+
+    async function cancel(id) {
+        const reason = await window.gracUi.promptRequired('Why is this engagement cancelled? The reason is kept with it.',
+            { title: 'Cancel Engagement', confirmText: 'Cancel Engagement', multiline: true });
+        if (reason == null) return;
+        try {
+            await post('/engagements/' + encodeURIComponent(id) + '/cancel',
+                       { organizationId: Number(state.orgId), reason: reason, actor: null });
+            delete state.details[String(id)];
+            reload();
+        } catch (err) { await window.gracUi.alert('Cancel failed: ' + (err.message || err), { type: 'error' }); }
+    }
+
+    async function remove(id) {
+        if (!await window.gracUi.confirm('Delete this draft engagement? It has not been approved or started.',
+              { type: 'warning', title: 'Delete engagement', confirmText: 'Delete' })) return;
+        try {
+            const r = await fetch(U(API + '/engagements/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId)),
+                { method: 'DELETE', credentials: 'same-origin' });
+            let j = null; try { j = await r.json(); } catch (_) { }
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            state.open.delete(String(id));
+            reload();
+        } catch (err) { await window.gracUi.alert('Delete failed: ' + (err.message || err), { type: 'error' }); }
+    }
+
+    // -----------------------------------------------------------------
+    // The details child row (no popup): the record, its audits, its team
+    // with the trail.
+    // -----------------------------------------------------------------
+    function rowEl(id) { return document.querySelector('#oaEnBody tr.oa-en-row[data-id="' + String(id) + '"]'); }
+    function setToggle(id, open) {
+        const tr = rowEl(id);
+        if (tr) { tr.classList.toggle('oa-pl-open', open); tr.classList.toggle('is-selected', open); }
+        const btn = document.querySelector('#oaEnBody [data-en-toggle="' + String(id) + '"]');
+        if (btn) { btn.classList.toggle('is-open', open); btn.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+    }
+    function toggle(id) {
+        const key = String(id);
+        if (state.open.has(key)) {
+            state.open.delete(key);
+            const child = document.querySelector('#oaEnBody tr.oa-pl-items-row[data-en="' + key + '"]');
+            if (child) child.remove();
+            setToggle(key, false);
+            return;
+        }
+        state.open.add(key);
+        setToggle(key, true);
+        loadDetail(key);
+    }
+    function childHost(id) {
+        let child = document.querySelector('#oaEnBody tr.oa-pl-items-row[data-en="' + id + '"]');
+        if (!child) {
+            const parent = rowEl(id);
+            if (!parent) return null;
+            child = document.createElement('tr');
+            child.className = 'oa-pl-items-row is-selected';
+            child.setAttribute('data-en', id);
+            child.innerHTML = '<td colspan="10"><div class="oa-pl-items"></div></td>';
+            parent.insertAdjacentElement('afterend', child);
+        }
+        return child.querySelector('.oa-pl-items');
+    }
+    async function loadDetail(id) {
+        const host = childHost(id);
+        if (!host) return;
+        if (!state.details[id]) {
+            host.innerHTML = '<p class="oa-pl-plan-facts">Loading...</p>';
+            try {
+                const base = API + '/engagements/' + encodeURIComponent(id);
+                const org  = '?organizationId=' + encodeURIComponent(state.orgId);
+                const [dr, tr] = await Promise.all([
+                    fetch(U(base + org), { credentials: 'same-origin' }),
+                    fetch(U(base + '/team' + org + '&includeHistory=true'), { credentials: 'same-origin' })
+                ]);
+                if (!dr.ok) throw new Error('HTTP ' + dr.status);
+                const d = await dr.json();
+                const t = tr.ok ? await tr.json() : null;
+                state.details[id] = { engagement: d.engagement || d.Engagement || {}, audits: d.audits || d.Audits || [],
+                                      team: (t && (t.data || t.Data)) || d.team || d.Team || [] };
+            } catch (err) {
+                host.innerHTML = '<p class="oa-pl-plan-facts">Failed to load: ' + wf.escape(err.message || err) + '</p>';
+                return;
+            }
+        }
+        host.innerHTML = detailHtml(state.details[id]);
+    }
+    function field(label, value, full) {
+        const has = value != null && String(value).trim() !== '';
+        return '<div class="pm-field pm-view-field' + (full ? ' full oa-pl-span-all' : '') + '"><span>' + wf.escape(label) + '</span>'
+             + (has ? '<span class="pm-view-value">' + wf.escape(String(value)) + '</span>'
+                    : '<span class="pm-view-value pm-field-empty">--</span>') + '</div>';
+    }
+    function detailHtml(d) {
+        const e = d.engagement;
+        const indep = g(e, 'engagementOrigin', 'EngagementOrigin') === 'INDEPENDENT';
+        const cancelled = g(e, 'cancelledDt', 'CancelledDt');
+        let html = '<div class="oa-pl-plan-grid">'
+            + field('Engagement Type', indep ? 'Independent' : 'Planned')
+            + field('Audit Plan', g(e, 'planCode', 'PlanCode') ? g(e, 'planCode', 'PlanCode') + ' - ' + (g(e, 'planName', 'PlanName') || '') : null)
+            + field('Programme', g(e, 'programmeName', 'ProgrammeName'))
+            + field('Branch', g(e, 'branchName', 'BranchName'))
+            + field('Audit Subject', g(e, 'auditSubject', 'AuditSubject'))
+            + field('Auditee', wf.personWithRole(g(e, 'auditeeName', 'AuditeeName'), g(e, 'auditeeRoleName', 'AuditeeRoleName')))
+            + field('Planned', period(g(e, 'plannedStart', 'PlannedStart'), g(e, 'plannedEnd', 'PlannedEnd')))
+            + field('Actual', period(g(e, 'actualStart', 'ActualStart'), g(e, 'actualEnd', 'ActualEnd')));
+        if (indep)
+            html += field('Initiation Source', g(e, 'initiationSourceName', 'InitiationSourceName'))
+                  + field('Approval', (g(e, 'approvalStatus', 'ApprovalStatus') || 'Draft')
+                          + (g(e, 'approvedBy', 'ApprovedBy') ? ' by ' + g(e, 'approvedBy', 'ApprovedBy') + ' on ' + onlyDate(g(e, 'approvedDt', 'ApprovedDt')) : ''))
+                  + field('Approval Reference', g(e, 'approvalReference', 'ApprovalReference'))
+                  + field('Department', g(e, 'departmentName', 'DepartmentName'))
+                  + field('Reason for Initiation', g(e, 'initiationReason', 'InitiationReason'), true);
+        if (cancelled)
+            html += field('Cancelled', onlyDate(cancelled) + (g(e, 'cancelledBy', 'CancelledBy') ? ' by ' + g(e, 'cancelledBy', 'CancelledBy') : '') + ' -- ' + (g(e, 'cancelReason', 'CancelReason') || ''), true);
+        html += field('Engagement Objective', g(e, 'engagementObjective', 'EngagementObjective'), true)
+              + field('Scope', g(e, 'scopeSummary', 'ScopeSummary'), true)
+              + field('Engagement Instructions', g(e, 'engagementInstructions', 'EngagementInstructions'), true)
+              + '</div>';
+
+        // The audits
+        html += '<p class="oa-pl-plan-facts" style="margin-top:12px;"><strong>Audits</strong></p>'
+              + '<div class="pm-table-wrap"><table><thead><tr><th>#</th><th>Code</th><th>Audit</th></tr></thead><tbody>'
+              + (d.audits.length ? d.audits.map(function (a) {
+                    return '<tr><td>' + wf.escape(String(g(a, 'displayOrder', 'DisplayOrder') ?? '')) + '</td>'
+                         + '<td>' + wf.escape(g(a, 'definitionCode', 'DefinitionCode') || '') + '</td>'
+                         + '<td>' + wf.escape(g(a, 'definitionName', 'DefinitionName') || '') + '</td></tr>';
+                }).join('') : '<tr><td colspan="3" class="pm-empty">No audits.</td></tr>')
+              + '</tbody></table></div>';
+
+        // The team, with the trail: removed members stay with who / when.
+        const remarks = g(e, 'teamRemarks', 'TeamRemarks');
+        html += '<p class="oa-pl-plan-facts" style="margin-top:12px;"><strong>Audit Team</strong>'
+              + (remarks ? '  --  ' + wf.escape(remarks) : '') + '</p>'
+              + '<div class="pm-table-wrap"><table><thead><tr><th>Role</th><th>Name</th><th>Designation / Organisation</th><th>Added</th><th>Removed</th></tr></thead><tbody>'
+              + (d.team.length ? d.team.map(function (t) {
+                    const active = !!g(t, 'isActive', 'IsActive');
+                    const role   = g(t, 'teamRole', 'TeamRole');
+                    return '<tr' + (active ? '' : ' style="color:var(--fg-subtle);"') + '>'
+                         + '<td>' + wf.escape(TEAM_LABEL[role] || role || '') + '</td>'
+                         + '<td>' + wf.escape(g(t, 'memberName', 'MemberName') || '') + '</td>'
+                         + '<td>' + wf.escape(g(t, 'externalOrganisation', 'ExternalOrganisation') || g(t, 'designation', 'Designation') || g(t, 'roleName', 'RoleName') || '') + '</td>'
+                         + '<td>' + wf.escape(onlyDate(g(t, 'addedDt', 'AddedDt')) + (g(t, 'addedBy', 'AddedBy') ? ' (' + g(t, 'addedBy', 'AddedBy') + ')' : '')) + '</td>'
+                         + '<td>' + wf.escape(active ? '' : onlyDate(g(t, 'removedDt', 'RemovedDt')) + (g(t, 'removedBy', 'RemovedBy') ? ' (' + g(t, 'removedBy', 'RemovedBy') + ')' : '')) + '</td>'
+                         + '</tr>';
+                }).join('') : '<tr><td colspan="5" class="pm-empty">No team yet.</td></tr>')
+              + '</tbody></table></div>';
+        return html;
+    }
+})();
+</script>

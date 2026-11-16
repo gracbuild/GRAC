@@ -1,6 +1,12 @@
 // =====================================================================
-// Risk Settings -- migration 458 (2026-10-08).
+// Workflow Settings (was Risk Settings) -- migration 458 (2026-10-08);
+// renamed and moved to Risk Management -> Settings by 533 (2026-11-13).
 // Loaded by Views/Practice/Partials/risk-settings.cshtml.
+//
+// 533: the page also hosts the Risk Acceptance Approval Authority section
+// (risk-acceptance-authority.js). This file owns the org picker and
+// Reload for both, and hands the organisation to that section through
+// window.gracRiskAcceptanceAuthority.load(orgId) -- see loadAll().
 //
 // Settings -> Risk Settings. The Risk Centre settings (BRD §19, §22)
 // moved here from the modal behind the gear icon on Risk Candidate /
@@ -43,9 +49,9 @@
     if (!document.getElementById("rsRoot")) return;
     document.getElementById("rsPickOrg").addEventListener("change", ev => {
       state.orgId = Number(ev.target.value) || null;
-      load();
+      loadAll();
     });
-    document.getElementById("rsReloadBtn").addEventListener("click", load);
+    document.getElementById("rsReloadBtn").addEventListener("click", loadAll);
     document.getElementById("rsResetBtn").addEventListener("click", () => {
       fill();
       msg("Changes discarded.");
@@ -61,7 +67,16 @@
     }
     wf.populateOrgSelect("rsPickOrg", orgs);   // last-picked org, else lowest id
     state.orgId = Number(document.getElementById("rsPickOrg").value) || null;
-    await load();
+    await loadAll();
+  }
+
+  // Both sections, for the one organisation picked above.
+  function loadAll() {
+    return Promise.all([load(), loadAcceptance()]);
+  }
+  function loadAcceptance() {
+    const raa = window.gracRiskAcceptanceAuthority;
+    return raa ? raa.load(state.orgId) : Promise.resolve();
   }
 
   async function load() {
@@ -158,7 +173,11 @@
       msg((result && result.error) || "Save failed.", true);
       return;
     }
+    // The acceptance section's fallback note reads these settings (approval
+    // on/off, the general approver role), so it is refreshed too -- unless
+    // it has unsaved edits, which a reload would silently throw away.
     await load();
+    if (!window.gracRiskAcceptanceAuthority?.isDirty()) await loadAcceptance();
     msg("Settings saved.");
   }
 

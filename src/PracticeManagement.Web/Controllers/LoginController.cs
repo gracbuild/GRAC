@@ -13,6 +13,8 @@ public sealed class LoginController(
     PasswordHasher passwordHasher,
     SignedAccessTokenService tokenService,
     PracticeLoginService loginService,
+    IPracticeEmailService emailService,
+    IWebHostEnvironment environment,
     ILogger<LoginController> logger) : Controller
 {
     // =================================================================
@@ -81,6 +83,9 @@ public sealed class LoginController(
         // this helper lookup -- gets 403 on time-zones/query and the
         // dropdown silently stays empty.
         "time-zones:VIEW",
+        // 553: Role Master's Responsibilities lookup -- auxiliary, no
+        // menu_master row of its own, same reasoning as time-zones above.
+        "role-responsibilities:VIEW",
         // Migration 362: Team Members tree on Add/Edit/View Team. Both are
         // auxiliary lookups for the Team form (no menu_master row of their
         // own), same reasoning as asset-taxonomy/owners/time-zones above --
@@ -140,6 +145,10 @@ public sealed class LoginController(
             _          => null
         };
         if (ssoMessage is not null) ModelState.AddModelError("", ssoMessage);
+
+        // Forgot password (529): back here after a successful reset.
+        if (Request.Query["reset"] == "done")
+            ViewData["LoginNotice"] = "Your password has been reset. Sign in with your new password.";
 
         return View(new LoginViewModel { ReturnUrl = returnUrl });
     }
@@ -447,6 +456,130 @@ public sealed class LoginController(
         SignIn(signedIn, model.LoginId);
         if (Url.IsLocalUrl(model.ReturnUrl)) return LocalRedirect(model.ReturnUrl!);
         return DefaultRedirect();
+    }
+
+    // =================================================================
+    // Forgot password -- reset by email link (migration 529, 2026-11-10).
+    // docs/forgot-password.md.
+    //
+    // ForgotPassword: the visitor gives a User ID / Email ID. The API issues
+    // a one-time, expiring token for the matching active account (or
+    // nothing), and this tier emails the link. The page answers the same
+    // way whether or not an account matched -- no enumeration oracle.
+    //
+    // ResetPassword: the emailed link. The token is the only credential, so
+    // it is checked when the page opens AND again (atomically, by the
+    // procedure) when the new password is saved. Same password rules as
+    // ChangePassword. On success the visitor signs in normally -- the reset
+    // never creates a session by itself.
+    // =================================================================
+    [HttpGet]
+    public IActionResult ForgotPassword(string? loginId = null) =>
+        View(new ForgotPasswordViewModel { LoginId = loginId ?? "" });
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordViewModel model, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid) return View(model);
+
+        var linkBase = ResetLinkBase();
+        if (!emailService.IsConfigured || linkBase is null)
+        {
+            logger.LogWarning("Forgot password used but email is not set up (Email:SmtpHost / Email:FromAddress{LoginUrl}).",
+                linkBase is null ? " / Email:LoginUrl" : "");
+            ModelState.AddModelError("", "Password reset by email is not set up yet. Contact your administrator.");
+            return View(model);
+        }
+
+        var result = await loginService.RequestPasswordResetAsync(model.LoginId.Trim(),
+            HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+        if (!result.Available)
+        {
+            ModelState.AddModelError("", "Password reset is not available right now. Please try again later or contact your administrator.");
+            return View(model);
+        }
+
+        if (result.Issue is { } issue)
+        {
+            var resetUrl = linkBase + "?token=" + Uri.EscapeDataString(issue.Token);
+            // Best effort: a failed send is logged by the service; the page
+            // still shows the same answer.
+            await emailService.SendPasswordResetAsync(issue.Email, issue.EmployeeName, resetUrl, issue.ExpiresInMinutes, cancellationToken);
+        }
+
+        ModelState.Clear();
+        return View(new ForgotPasswordViewModel { LoginId = model.LoginId, Sent = true });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> ResetPassword(string? token, CancellationToken cancellationToken)
+    {
+        var model = new ResetPasswordViewModel { Token = token ?? "" };
+        var target = string.IsNullOrWhiteSpace(token) ? null : await loginService.ValidatePasswordResetAsync(token, cancellationToken);
+        if (target is null) model.LinkInvalid = true;
+        else model.Account = target.Email;
+        return View(model);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> ResetPassword(ResetPasswordViewModel model, CancellationToken cancellationToken)
+    {
+        var target = string.IsNullOrWhiteSpace(model.Token) ? null : await loginService.ValidatePasswordResetAsync(model.Token, cancellationToken);
+        if (target is null)
+        {
+            ModelState.Clear();
+            return View(new ResetPasswordViewModel { LinkInvalid = true });
+        }
+        model.Account = target.Email;
+        if (!ModelState.IsValid) return View(model);
+
+        // Same rules as ChangePassword.
+        var minimumLength = configuration.GetValue("UserProvisioning:MinimumPasswordLength", 8);
+        if (model.NewPassword.Length < minimumLength)
+        {
+            ModelState.AddModelError(nameof(model.NewPassword), $"The new password must be at least {minimumLength} characters.");
+            return View(model);
+        }
+        if (IsDefaultPassword(model.NewPassword))
+        {
+            ModelState.AddModelError(nameof(model.NewPassword), "The new password cannot be the default password.");
+            return View(model);
+        }
+
+        if (!await loginService.CompletePasswordResetAsync(model.Token, model.NewPassword, cancellationToken))
+        {
+            // Used or expired in the meantime -> the invalid-link page;
+            // otherwise a plain failure on the same form.
+            if (await loginService.ValidatePasswordResetAsync(model.Token, cancellationToken) is null)
+            {
+                ModelState.Clear();
+                return View(new ResetPasswordViewModel { LinkInvalid = true });
+            }
+            ModelState.AddModelError("", "The password could not be changed. Please try again or contact your administrator.");
+            return View(model);
+        }
+
+        logger.LogInformation("Password reset through an emailed link completed for {Account} from {RemoteAddress}.",
+            target.Email, HttpContext.Connection.RemoteIpAddress);
+        return LocalRedirect(LoginUrl("") + "?reset=done");
+    }
+
+    // Absolute address of Login/ResetPassword for the email. Email:LoginUrl
+    // (already used for the administrator credentials email) is
+    // authoritative; outside Development it is REQUIRED, because building
+    // the link from the request's Host header would let a forged Host send
+    // the victim a link to someone else's server. Null = not set up.
+    private string? ResetLinkBase()
+    {
+        var configured = configuration["Email:LoginUrl"];
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.Trim().TrimEnd('/') + "/ResetPassword";
+        if (!environment.IsDevelopment()) return null;
+        return $"{Request.Scheme}://{Request.Host.Value}{LoginUrl("/ResetPassword")}";
     }
 
     private bool RequiresPasswordChange(PracticeLoginResult dbLogin, string suppliedPassword) =>

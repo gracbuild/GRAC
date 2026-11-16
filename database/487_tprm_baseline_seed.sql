@@ -8,6 +8,16 @@
 --   baseline) for every configuration type 486 created:
 --     5.1-1  third-party classification   SERVICE_CATEGORY, PROVIDER_TYPE,
 --                                          CRITICALITY, TP_STATUS
+--            (CHANGED BY 521, Third-Party Management Phase 1: TP_STATUS
+--            holds the Vendor Registry states; new lists
+--            VENDOR_MATCH_ATTRIBUTE, SUBSTITUTABILITY, CUSTOMER_IMPACT.
+--            Re-run this file BEFORE 521: 521 moves organization values
+--            and vendors off the old TP_STATUS meanings and then deletes
+--            the old baseline values. CHANGED BY 522, CR 2: DRAFT retired
+--            -- TP_STATUS is ACTIVE / INACTIVE / SUSPENDED / ARCHIVED;
+--            522 moves draft vendors to ACTIVE and removes the value.
+--            CHANGED BY 523, CR 2 Round B: new list SCREENING_INDICATOR.
+--            CHANGED BY 524, CR 2 Round C: new list VENDOR_PROFILE_AREA.)
 --     5.1-2  engagement classification    SERVICE_MODEL, ENGAGEMENT_TYPE,
 --                                          DATA_EXPOSURE, ACCESS_CATEGORY
 --     5.1-3  risk assessment              risk model GRAC_TPRM_STANDARD v1:
@@ -110,9 +120,9 @@ GO
 MERGE grac_practice.tprm_reference_list AS t
 USING (VALUES
     (N'SERVICE_CATEGORY', N'Service categories', N'What the third party provides. Selects service-specific questionnaires.', N'EXTENSIBLE', NULL, 10),
-    (N'PROVIDER_TYPE', N'Provider types', N'Legal / organizational form of the third party.', N'EXTENSIBLE', NULL, 20),
+    (N'PROVIDER_TYPE', N'Vendor types', N'Legal / organizational form of the vendor.', N'EXTENSIBLE', NULL, 20),
     (N'CRITICALITY', N'Service criticality', N'Criticality of the service to the organization; the rank drives approval and review rules.', N'EXTENSIBLE', NULL, 30),
-    (N'TP_STATUS', N'Third-party lifecycle statuses', N'Lifecycle status of a third party. Each value maps to a lifecycle meaning the workflow uses.', N'MEANING', N'PROSPECTIVE,UNDER_ASSESSMENT,APPROVED,ACTIVE,SUSPENDED,EXITED', 40),
+    (N'TP_STATUS', N'Vendor lifecycle statuses', N'Lifecycle status of a vendor in the Vendor Registry. Registration activates the vendor (522); activation is not a TPRM assessment or admission. Each value maps to a lifecycle meaning; the transitions between meanings are fixed (fn_tprm_vendor_transitions).', N'MEANING', N'ACTIVE,INACTIVE,SUSPENDED,ARCHIVED', 40),
     (N'SERVICE_MODEL', N'Service / delivery models', N'How the service is delivered.', N'EXTENSIBLE', NULL, 50),
     (N'ENGAGEMENT_TYPE', N'Engagement types', N'Nature of the engagement.', N'EXTENSIBLE', NULL, 60),
     (N'DATA_EXPOSURE', N'Data exposure categories', N'Most sensitive data the third party stores, processes or accesses; the rank drives questionnaire applicability.', N'EXTENSIBLE', NULL, 70),
@@ -127,7 +137,12 @@ USING (VALUES
     (N'FOURTH_PARTY_CATEGORY', N'Fourth-party categories', N'Kinds of subcontractors / fourth parties.', N'EXTENSIBLE', NULL, 160),
     (N'ONBOARDING_CHECK', N'Onboarding prerequisites', N'Checks completed (or formally waived) before an engagement is activated. Mandatory checks block activation.', N'EXTENSIBLE', NULL, 170),
     (N'EXIT_CHECK', N'Exit checks', N'Checks completed before an exit is closed. Mandatory checks block closure.', N'EXTENSIBLE', NULL, 180),
-    (N'REPORTING_CATEGORY', N'Reporting categories', N'Organization reporting buckets for third parties.', N'EXTENSIBLE', NULL, 190)
+    (N'REPORTING_CATEGORY', N'Reporting categories', N'Organization reporting buckets for third parties.', N'EXTENSIBLE', NULL, 190),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'Vendor duplicate-detection attributes', N'Identity attributes compared when a vendor is registered or edited. Hide a value to stop matching on it. The rank is the strength: 2 = the same identifier, 1 = a possible match.', N'MEANING', N'REGISTRATION_NUMBER,TAX_ID,LEI,LEGAL_NAME,TRADING_NAME,SIMILAR_NAME,WEBSITE_DOMAIN,EMAIL_DOMAIN', 200),
+    (N'SUBSTITUTABILITY', N'Substitutability', N'How easily the engagement''s service could be moved to another provider or brought in-house. The rank feeds qualification and exposure comparison.', N'EXTENSIBLE', NULL, 210),
+    (N'CUSTOMER_IMPACT', N'Customer impact', N'Effect on the organization''s customers if the engagement''s service fails. The rank feeds qualification and exposure comparison.', N'EXTENSIBLE', NULL, 220),
+    (N'SCREENING_INDICATOR', N'Screening indicators', N'Exposure indicators of the Initial Exposure Screening. Each value is an indicator (its meaning); the rank is its threshold where it has one. Hide a value to switch the indicator off -- the observation is still reported, without making the engagement a potential TPRM case.', N'MEANING', N'CRITICALITY,DATA,ACCESS,CUSTOMER_IMPACT,SUBSTITUTABILITY,IMPORTANT_PROCESS,FOURTH_PARTY_DATA,DISCOVERED_CRITICAL_INSTANCE,DISCOVERED_OPEN_FINDING', 230),
+    (N'VENDOR_PROFILE_AREA', N'Vendor profile areas', N'The vendor-level areas of the TP Risk Register profile (CR 2 8.2). Each area is rated on the bands of the risk model in force, with the rationale and evidence. Add areas, relabel or hide them per organization.', N'EXTENSIBLE', NULL, 240)
 ) AS s(list_code, list_name, description, scope_rule, allowed_meanings, display_order)
 ON t.list_code = s.list_code
 WHEN MATCHED THEN UPDATE SET list_name = s.list_name, description = s.description, scope_rule = s.scope_rule,
@@ -167,12 +182,10 @@ USING (VALUES
     (N'CRITICALITY', N'MEDIUM', N'Medium', NULL, NULL, 2, N'#ca8a04', 0, 20),
     (N'CRITICALITY', N'HIGH', N'High', NULL, NULL, 3, N'#ea580c', 0, 30),
     (N'CRITICALITY', N'CRITICAL', N'Critical', NULL, NULL, 4, N'#dc2626', 0, 40),
-    (N'TP_STATUS', N'PROSPECTIVE', N'Prospective', NULL, N'PROSPECTIVE', NULL, NULL, 0, 10),
-    (N'TP_STATUS', N'UNDER_ASSESSMENT', N'Under assessment', NULL, N'UNDER_ASSESSMENT', NULL, NULL, 0, 20),
-    (N'TP_STATUS', N'APPROVED', N'Approved', NULL, N'APPROVED', NULL, NULL, 0, 30),
-    (N'TP_STATUS', N'ACTIVE', N'Active', NULL, N'ACTIVE', NULL, NULL, 0, 40),
-    (N'TP_STATUS', N'SUSPENDED', N'Suspended', NULL, N'SUSPENDED', NULL, NULL, 0, 50),
-    (N'TP_STATUS', N'EXITED', N'Exited', NULL, N'EXITED', NULL, NULL, 0, 60),
+    (N'TP_STATUS', N'ACTIVE', N'Active', NULL, N'ACTIVE', NULL, N'#16a34a', 0, 10),
+    (N'TP_STATUS', N'INACTIVE', N'Inactive', NULL, N'INACTIVE', NULL, N'#ca8a04', 0, 20),
+    (N'TP_STATUS', N'SUSPENDED', N'Suspended', NULL, N'SUSPENDED', NULL, N'#dc2626', 0, 30),
+    (N'TP_STATUS', N'ARCHIVED', N'Archived', NULL, N'ARCHIVED', NULL, N'#475569', 0, 40),
     (N'SERVICE_MODEL', N'ON_PREMISE', N'On-premise (at the organization)', NULL, NULL, NULL, NULL, 0, 10),
     (N'SERVICE_MODEL', N'SAAS', N'Software as a service', NULL, NULL, NULL, NULL, 0, 20),
     (N'SERVICE_MODEL', N'PAAS', N'Platform as a service', NULL, NULL, NULL, NULL, 0, 30),
@@ -268,7 +281,40 @@ USING (VALUES
     (N'REPORTING_CATEGORY', N'STRATEGIC', N'Strategic partner', NULL, NULL, NULL, NULL, 0, 10),
     (N'REPORTING_CATEGORY', N'MATERIAL_OUTSOURCING', N'Material outsourcing', NULL, NULL, NULL, NULL, 0, 20),
     (N'REPORTING_CATEGORY', N'INTRA_GROUP', N'Intra-group', NULL, NULL, NULL, NULL, 0, 30),
-    (N'REPORTING_CATEGORY', N'OPERATIONAL', N'Operational supplier', NULL, NULL, NULL, NULL, 0, 40)
+    (N'REPORTING_CATEGORY', N'OPERATIONAL', N'Operational supplier', NULL, NULL, NULL, NULL, 0, 40),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'REGISTRATION_NUMBER', N'Registration number', N'Same company / registration number.', N'REGISTRATION_NUMBER', 2, NULL, 0, 10),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'TAX_ID', N'Tax identifier', N'Same tax identifier.', N'TAX_ID', 2, NULL, 0, 20),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'LEI', N'Legal Entity Identifier', N'Same LEI.', N'LEI', 2, NULL, 0, 30),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'LEGAL_NAME', N'Legal name', N'Same legal or trading name after normalisation (case, punctuation and legal-form words ignored).', N'LEGAL_NAME', 1, NULL, 0, 40),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'TRADING_NAME', N'Trading name', N'The trading name equals another vendor''s legal or trading name after normalisation.', N'TRADING_NAME', 1, NULL, 0, 50),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'SIMILAR_NAME', N'Similar name', N'One normalised name contains the other (five characters or more).', N'SIMILAR_NAME', 1, NULL, 0, 60),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'WEBSITE_DOMAIN', N'Website domain', N'Same website domain.', N'WEBSITE_DOMAIN', 1, NULL, 0, 70),
+    (N'VENDOR_MATCH_ATTRIBUTE', N'EMAIL_DOMAIN', N'Contact e-mail domain', N'A contact e-mail domain equals another vendor''s website or contact e-mail domain (public mail domains excluded).', N'EMAIL_DOMAIN', 1, NULL, 0, 80),
+    (N'SUBSTITUTABILITY', N'EASY', N'Easily substitutable', NULL, NULL, 1, NULL, 0, 10),
+    (N'SUBSTITUTABILITY', N'MODERATE', N'Substitutable with moderate effort', NULL, NULL, 2, NULL, 0, 20),
+    (N'SUBSTITUTABILITY', N'DIFFICULT', N'Difficult to substitute', NULL, NULL, 3, NULL, 0, 30),
+    (N'SUBSTITUTABILITY', N'NOT_SUBSTITUTABLE', N'Not substitutable in a reasonable time', NULL, NULL, 4, NULL, 0, 40),
+    (N'CUSTOMER_IMPACT', N'NONE', N'No customer impact', NULL, NULL, 0, NULL, 0, 10),
+    (N'CUSTOMER_IMPACT', N'INDIRECT', N'Indirect impact', NULL, NULL, 1, NULL, 0, 20),
+    (N'CUSTOMER_IMPACT', N'DIRECT', N'Direct impact on customers', NULL, NULL, 2, NULL, 0, 30),
+    (N'CUSTOMER_IMPACT', N'DIRECT_CRITICAL', N'Direct impact on critical customer services', NULL, NULL, 3, NULL, 0, 40),
+    (N'SCREENING_INDICATOR', N'CRITICALITY', N'Business criticality', N'Service criticality at or above the rank (CRITICALITY list).', N'CRITICALITY', 3, NULL, 0, 10),
+    (N'SCREENING_INDICATOR', N'DATA', N'Sensitive data', N'A data category at or above the rank (DATA_EXPOSURE list).', N'DATA', 3, NULL, 0, 20),
+    (N'SCREENING_INDICATOR', N'ACCESS', N'System or privileged access', N'An access category at or above the rank (ACCESS_CATEGORY list).', N'ACCESS', 3, NULL, 0, 30),
+    (N'SCREENING_INDICATOR', N'CUSTOMER_IMPACT', N'Customer impact', N'Customer impact at or above the rank (CUSTOMER_IMPACT list).', N'CUSTOMER_IMPACT', 3, NULL, 0, 40),
+    (N'SCREENING_INDICATOR', N'SUBSTITUTABILITY', N'Hard to substitute', N'Substitutability at or above the rank (SUBSTITUTABILITY list).', N'SUBSTITUTABILITY', 3, NULL, 0, 50),
+    (N'SCREENING_INDICATOR', N'IMPORTANT_PROCESS', N'Important process with disruption impact', N'The service supports an important business process and its disruption affects operations.', N'IMPORTANT_PROCESS', NULL, NULL, 0, 60),
+    (N'SCREENING_INDICATOR', N'FOURTH_PARTY_DATA', N'Subcontracting with data', N'Subcontractors are used and organization or customer data is in scope.', N'FOURTH_PARTY_DATA', NULL, NULL, 0, 70),
+    (N'SCREENING_INDICATOR', N'DISCOVERED_CRITICAL_INSTANCE', N'Critical practice instance discovered', N'GRAC finds a practice instance of high or critical criticality behind the engagement''s applications, processes or business functions.', N'DISCOVERED_CRITICAL_INSTANCE', NULL, NULL, 0, 80),
+    (N'SCREENING_INDICATOR', N'DISCOVERED_OPEN_FINDING', N'Open high assurance finding discovered', N'GRAC finds an open assurance finding of high or critical severity on a related practice instance.', N'DISCOVERED_OPEN_FINDING', NULL, NULL, 0, 90),
+    (N'VENDOR_PROFILE_AREA', N'CORPORATE_PROFILE', N'Vendor identity and corporate profile', N'Legal identity, registration, size, years in business, locations.', NULL, NULL, NULL, 0, 10),
+    (N'VENDOR_PROFILE_AREA', N'OWNERSHIP_GROUP', N'Ownership and group relationships', N'Ultimate ownership, parent and group companies, related parties.', NULL, NULL, NULL, 0, 20),
+    (N'VENDOR_PROFILE_AREA', N'FINANCIAL_STABILITY', N'Financial stability', N'Financial statements, ratings, solvency and concentration.', NULL, NULL, NULL, 0, 30),
+    (N'VENDOR_PROFILE_AREA', N'GOVERNANCE', N'Governance and management', N'Board and management structure, policies, oversight of risk.', NULL, NULL, NULL, 0, 40),
+    (N'VENDOR_PROFILE_AREA', N'LEGAL_REGULATORY', N'Legal and regulatory standing', N'Licences, regulatory actions, litigation, sanctions screening.', NULL, NULL, NULL, 0, 50),
+    (N'VENDOR_PROFILE_AREA', N'INFORMATION_SECURITY', N'Enterprise cybersecurity and information security', N'Security programme, incidents, vulnerability management, privacy.', NULL, NULL, NULL, 0, 60),
+    (N'VENDOR_PROFILE_AREA', N'BUSINESS_CONTINUITY', N'Business continuity capability', N'Continuity and recovery plans, tests, resilience of critical services.', NULL, NULL, NULL, 0, 70),
+    (N'VENDOR_PROFILE_AREA', N'CERTIFICATIONS', N'Certifications and independent assurance', N'Certifications (ISO 27001, SOC 2 ...), audit reports and their validity.', NULL, NULL, NULL, 0, 80)
 ) AS s(list_code, value_code, label, description, meaning_code, rank_no, color_hex, is_mandatory, display_order)
 ON t.organization_id IS NULL AND t.list_code = s.list_code AND t.value_code = s.value_code
 WHEN MATCHED THEN UPDATE SET label = s.label, description = s.description, meaning_code = s.meaning_code,

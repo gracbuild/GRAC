@@ -1,0 +1,224 @@
+@*
+    Subscription Requests -- screen key `subscription-requests` (migration 511).
+
+    Organization Management's approval of the framework subscription
+    requests organizations raise from Standards & Frameworks -> Add Release
+    -> Subscribe from Repository (migration 406). Every organization's
+    requests, Pending first; Approve (comment optional) or Reject (reason
+    required) a Pending one.
+
+    SAME QUEUE AS CONTROL MANAGEMENT. Control Management keeps its own
+    Subscription Requests screen (its migration 068). Both call
+    sp_repository_subscription_request_list / _decide, so a request decided
+    in one module shows as decided in the other, and the procedure refuses
+    to decide it twice (51414).
+
+    Approve subscribes the organization through the existing
+    single-subscription path (pm_manage_practice_repository
+    'repository-subscriptions' SAVE: subscribe or re-activate, copy the
+    release, create the organization controls) -- nothing re-implemented.
+
+    Who may decide: the subscription-requests menu grant (VIEW to see,
+    APPROVE to decide) AND a GLOBAL-scope sign-in, enforced by
+    Controllers/SubscriptionRequestController.cs. The decider is the session
+    sign-in.
+
+    Same layout as Repository Updates (repository-updates.cshtml), the other
+    approve / reject page: toolbar filters, one table, Approve / Reject on
+    the Pending rows. Self-contained: talks to /practice/api/subscription-requests.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var permissions = ViewBag.Permissions as string[] ?? Array.Empty<string>();
+    var canApprove = permissions.Contains("APPROVE");
+    var isGlobal = string.Equals(ViewBag.DataScope as string, "GLOBAL", StringComparison.OrdinalIgnoreCase);
+}
+
+<style>
+    #srRoot .sr-remark { max-width: 280px; white-space: normal; word-break: break-word; }
+    #srRoot .sr-row-actions { white-space: nowrap; display: flex; gap: 6px; }
+</style>
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>Subscription Requests</h1>
+        <p class="pm-hint">Organizations' requests to subscribe to a Repository framework release. Approving one subscribes the organization and copies the release into it.</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="srRoot">
+    <div id="srMessage" class="pm-message" hidden role="status"></div>
+
+    <div class="pm-toolbar">
+        <select id="srStatus" aria-label="Status">
+            <option value="Pending" selected>Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="All">All</option>
+        </select>
+        <input id="srSearch" type="text" placeholder="Search organization / framework / version / requester..." />
+        <button class="pm-button icon" id="srRefresh" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+    </div>
+
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Organization</th>
+                    <th>Release / Framework</th>
+                    <th>Release Code / Version</th>
+                    <th>Requested By</th>
+                    <th>Request Date</th>
+                    <th>Status</th>
+                    <th>Approved / Rejected By</th>
+                    <th>Decision Date</th>
+                    <th>Remark</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="srRows">
+                <tr><td colspan="10" class="pm-empty">Loading subscription requests...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<script>
+(function () {
+    "use strict";
+    // Lazy base path: the layout sets window.appBasePath AFTER this partial
+    // parses (same note as repository-updates.cshtml).
+    const U    = p => String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p;
+    const API  = () => U("/practice/api/subscription-requests");
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const CAN_DECIDE = @(canApprove && isGlobal ? "true" : "false");
+    const IS_GLOBAL  = @(isGlobal ? "true" : "false");
+    const esc  = v => String(v ?? "").replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const F = (row, key) => row == null ? undefined
+        : (row[key] !== undefined ? row[key] : row[key.charAt(0).toLowerCase() + key.slice(1)]);
+    const fmtDate = v => !v ? "" : (typeof window.gracFormatDisplayDate === "function" ? window.gracFormatDisplayDate(v) : String(v).slice(0, 10));
+
+    const statusEl = document.getElementById("srStatus");
+    const searchEl = document.getElementById("srSearch");
+    const rowsEl   = document.getElementById("srRows");
+    const msgEl    = document.getElementById("srMessage");
+    let records = [];
+
+    function setMsg(text, kind) {
+        msgEl.hidden = !text;
+        msgEl.className = "pm-message" + (kind ? " " + kind : "");
+        msgEl.textContent = text || "";
+    }
+
+    async function call(url, options) {
+        const res = await fetch(url, Object.assign({ credentials: "same-origin" }, options));
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* non-JSON */ }
+        if (!res.ok) throw new Error((body && (body.error || body.message)) || `Request failed (HTTP ${res.status})`);
+        return body;
+    }
+
+    function render() {
+        if (!records.length) {
+            rowsEl.innerHTML = `<tr><td colspan="10" class="pm-empty">No subscription requests found.</td></tr>`;
+            return;
+        }
+        rowsEl.innerHTML = records.map((r, i) => {
+            const isPending = F(r, "Status") === "Pending";
+            const org = [F(r, "OrganizationName"), F(r, "OrganizationCode")].filter(Boolean);
+            const release = F(r, "ArtifactName") || F(r, "ArtifactCode") || "";
+            const code = [F(r, "ArtifactCode"), F(r, "ReleaseVersion")].filter(Boolean).join(" / ");
+            const publisher = F(r, "AuthorityName") || F(r, "AuthorityCode") || "";
+            return `<tr>
+                <td class="pm-cell-title">${esc(org[0] || "")}${org[1] && org[1] !== org[0] ? `<div class="pm-cell-muted">${esc(org[1])}</div>` : ""}</td>
+                <td class="pm-cell-title">${esc(release)}${publisher ? `<div class="pm-cell-muted">${esc(publisher)}</div>` : ""}</td>
+                <td>${esc(code)}</td>
+                <td>${esc(F(r, "RequestedBy") || F(r, "RequestedByLogin") || "")}</td>
+                <td>${esc(fmtDate(F(r, "RequestedDate")))}</td>
+                <td><span class="pm-badge">${esc(F(r, "Status") || "")}</span></td>
+                <td>${esc(F(r, "DecidedByLogin") || "")}</td>
+                <td>${esc(fmtDate(F(r, "DecisionDate")))}</td>
+                <td class="sr-remark">${esc(F(r, "DecisionRemark") || "")}</td>
+                <td><div class="sr-row-actions">
+                    ${isPending && CAN_DECIDE
+                        ? `<button type="button" class="pm-button primary small" data-approve="${i}">Approve</button>
+                           <button type="button" class="pm-button small" data-reject="${i}">Reject</button>`
+                        : ""}
+                </div></td>
+            </tr>`;
+        }).join("");
+    }
+
+    async function load() {
+        rowsEl.innerHTML = `<tr><td colspan="10" class="pm-empty">Loading subscription requests...</td></tr>`;
+        const qs = new URLSearchParams({ status: statusEl.value, search: searchEl.value.trim() });
+        try {
+            const body = await call(`${API()}?${qs}`);
+            records = (body && (body.data || body.Data)) || [];
+            render();
+        } catch (err) {
+            records = [];
+            rowsEl.innerHTML = `<tr><td colspan="10" class="pm-empty">Could not load subscription requests.</td></tr>`;
+            setMsg(err.message, "");
+        }
+    }
+
+    async function decide(index, decision) {
+        const r = records[index];
+        if (!r || F(r, "Status") !== "Pending") return;
+        const label = `${F(r, "ArtifactCode") || F(r, "ArtifactName") || "the release"} ${F(r, "ReleaseVersion") || ""}`.trim();
+        const org = F(r, "OrganizationName") || F(r, "OrganizationCode") || "the organization";
+        let remark;
+        if (decision === "Reject") {
+            remark = await window.gracUi.promptRequired(`Why is ${org}'s request for ${label} rejected?`,
+                { title: "Reject subscription request", inputLabel: "Reason", multiline: true,
+                  requiredNote: "A reason is required to reject.", confirmText: "Reject" });
+        } else {
+            remark = await window.gracUi.prompt(
+                `Approve ${org}'s request for ${label}? The organization is subscribed and the release is copied into it.`,
+                { title: "Approve subscription request", inputLabel: "Comments (optional)", multiline: true, confirmText: "Approve" });
+        }
+        if (remark === null) return;   // cancelled
+        setMsg("");
+        try {
+            const body = await call(`${API()}/${Number(F(r, "Id"))}/decision`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": CSRF },
+                body: JSON.stringify({ decision, remark: remark || null })
+            });
+            setMsg(F(body, "message") || (decision === "Approve" ? "Subscription request approved." : "Subscription request rejected."), "success");
+        } catch (err) {
+            setMsg(err.message, "");
+        }
+        await load();
+    }
+
+    rowsEl.addEventListener("click", ev => {
+        const t = ev.target.closest("button");
+        if (!t) return;
+        if (t.dataset.approve !== undefined) decide(Number(t.dataset.approve), "Approve");
+        else if (t.dataset.reject !== undefined) decide(Number(t.dataset.reject), "Reject");
+    });
+    statusEl.addEventListener("change", load);
+    document.getElementById("srRefresh").addEventListener("click", load);
+    let searchTimer = null;
+    searchEl.addEventListener("input", () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(load, 300);
+    });
+
+    function init() {
+        if (!IS_GLOBAL) {
+            rowsEl.innerHTML = `<tr><td colspan="10" class="pm-empty">Subscription requests are decided by a platform (GLOBAL scope) administrator.</td></tr>`;
+            return;
+        }
+        load();
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
+})();
+</script>

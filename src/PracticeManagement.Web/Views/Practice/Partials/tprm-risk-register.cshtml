@@ -1,0 +1,136 @@
+@*
+    TP Risk Register -- Third-Party Management (CR 2 Round C, migration 524).
+    Rendered from Manage.cshtml when Model.Key == "tprm-risk-register".
+
+    Screen key : `tprm-risk-register`
+    Group      : Third-Party Management
+    Menu       : nav-tprm (Third-Party Management) -> TP Risk Register (CR 2 menu 3.3)
+
+    CR 2 section 8: one vendor-level record per vendor admitted to formal
+    TPRM (created by the final admission approval; further admitted
+    engagements join it). The list shows admitted vendors only; a record
+    opens in place of the list (like the engagement workspace) with:
+      * the overall vendor risk status -- the highest of the vendor-level
+        area ratings and the linked engagements' bands, never an average,
+        with what set it (decision 2026-11-08);
+      * the vendor-level profile: one rating per area (VENDOR_PROFILE_AREA)
+        on the bands of the risk model in force, with rationale and
+        evidence; history of superseded ratings;
+      * the highest engagement exposure per risk dimension;
+      * the engagements, each with its own assessment, due diligence,
+        contract, review dates (CR 2 8.3), linking to Engagement Management;
+      * open findings, risk decisions and acceptances, admissions, open
+        reviews, impact reviews (CR 2 8.4) and the record's history;
+      * exit (CR 2 8.5): when the last engagement has left, the record is
+        "exit in progress" until it is closed.
+    Rating is EDIT; impact review outcome and closure are APPROVE
+    (segregation of duties in SQL).
+    525: periodic vendor profile review ("Record profile review", EDIT --
+    every area rated; the next date follows the TPRM review rule), its
+    history on the Vendor profile tab, the "profile review due" filter, and
+    the TPRM dashboard drills (status / band / attention; banner by
+    Shared/dashboard-drill.js). Links carry records in the encrypted
+    navigation code (Shared/secure-nav.js).
+
+    Backend: practice/api/tprm/risk-register... (TprmController)
+    Script : wwwroot/js/Tprm/tprm-common.js, tprm-risk-register.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@using PracticeManagement.Web.Security
+@using Microsoft.AspNetCore.Http
+@{
+    var rrPermissions = ViewBag.Permissions as string[] ?? [];
+    bool rrHas(string action) => rrPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var rrCanEdit = rrHas("EDIT");
+    var rrCanApprove = rrHas("APPROVE");
+    var rrHasEmployee = long.TryParse(Context.Session.GetString(PracticeSessionIdentity.EmployeeIdKey), out var rrEmployeeId) && rrEmployeeId > 0;
+}
+
+<div class="pm-page-heading compact" id="rrHeading">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="rrRoot" data-can-edit="@(rrCanEdit ? "1" : "0")" data-can-approve="@(rrCanApprove ? "1" : "0")"
+     data-employee-id="@(rrHasEmployee ? rrEmployeeId.ToString() : "")">
+
+    @* ======================= List ======================= *@
+    <section class="pm-panel" id="rrList">
+        <div class="pm-toolbar">
+            <select id="rrOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <p class="pm-message" id="rrMessage" role="status" aria-live="polite" hidden></p>
+        <div class="pm-toolbar">
+            <input type="search" id="rrSearch" placeholder="Search record, vendor or engagement" maxlength="200" />
+            <select id="rrStatusFilter" title="Status">
+                <option value="ACTIVE">Active records</option>
+                <option value="OPEN">Open</option>
+                <option value="EXIT_IN_PROGRESS">Exit in progress</option>
+                <option value="CLOSED">Closed</option>
+                <option value="ALL">All</option>
+            </select>
+            <select id="rrBandFilter" title="Overall vendor risk"><option value="">Any overall risk</option></select>
+            <select id="rrAttentionFilter" title="Needs attention">
+                <option value="">All</option>
+                <option value="IMPACT_REVIEW">Impact review open</option>
+                <option value="NOT_RATED">Profile not fully rated</option>
+                <option value="EXIT">Exit in progress</option>
+                <option value="PROFILE_REVIEW_DUE">Profile review due in 30 days</option>
+                <option value="PROFILE_REVIEW_OVERDUE">Profile review overdue</option>
+            </select>
+            <button class="pm-button icon" id="rrRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+        </div>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Record</th><th>Vendor</th><th>Status</th><th>Overall vendor risk</th><th>Engagements</th><th>Vendor profile</th><th>Open findings</th><th>Next review</th></tr></thead>
+                <tbody id="rrListBody"></tbody>
+            </table>
+        </div>
+        <div id="rrPager"></div>
+    </section>
+
+    @* ======================= Record ======================= *@
+    <section class="pm-panel" id="rrRecord" hidden>
+        <div class="rr-head">
+            <button class="pm-button" type="button" id="rrBack"><i class="fa-solid fa-arrow-left"></i> TP Risk Register</button>
+            <div class="rr-title">
+                <h2 id="rrTitle"></h2>
+                <div class="tprm-muted" id="rrSub"></div>
+            </div>
+            <div class="tprm-actions" id="rrActions"></div>
+        </div>
+        <p class="pm-message" id="rrRecordMessage" role="status" aria-live="polite" hidden></p>
+        <div class="tprm-info" id="rrSummary"></div>
+        <div class="pm-tabs" role="tablist" aria-label="Register record">
+            <button role="tab" class="active" data-rr-tab="PROFILE" aria-selected="true">Vendor profile</button>
+            <button role="tab" data-rr-tab="ENGAGEMENTS" aria-selected="false">Engagements</button>
+            <button role="tab" data-rr-tab="OVERSIGHT" aria-selected="false">Findings, decisions &amp; reviews</button>
+            <button role="tab" data-rr-tab="IMPACT" aria-selected="false">Impact reviews<span class="tprm-step-chip" data-rr-chip="IMPACT"></span></button>
+            <button role="tab" data-rr-tab="HISTORY" aria-selected="false">History</button>
+        </div>
+        <div data-rr-panel="PROFILE" id="rrPanelProfile"></div>
+        <div data-rr-panel="ENGAGEMENTS" id="rrPanelEngagements" hidden></div>
+        <div data-rr-panel="OVERSIGHT" id="rrPanelOversight" hidden></div>
+        <div data-rr-panel="IMPACT" id="rrPanelImpact" hidden></div>
+        <div data-rr-panel="HISTORY" id="rrPanelHistory" hidden></div>
+    </section>
+</div>
+
+<partial name="Partials/_tprm-form-dialog" />
+
+<style>
+    .rr-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .rr-title { flex: 1 1 320px; }
+    .rr-title h2 { margin: 0; font-size: 18px; }
+    .rr-head .tprm-actions { margin-bottom: 0; }
+    tr[data-rr-row] { cursor: pointer; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-common.js" asp-append-version="true"></script>
+<script src="~/js/Tprm/tprm-risk-register.js" asp-append-version="true"></script>

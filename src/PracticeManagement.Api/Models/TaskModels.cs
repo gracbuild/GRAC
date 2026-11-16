@@ -40,7 +40,11 @@ public sealed record TaskOpenRequest(
     string? SourceReference = null,
     bool? ResolveOwner = null,
     DateTime? StartDate = null,
-    DateTime? TargetDate = null);
+    DateTime? TargetDate = null,
+    // 526: optional review / approval cycle (New Task (Custom)). Both
+    // null = the task closes on Complete, as before.
+    long? ReviewerEmployeeId = null,
+    long? ApproverEmployeeId = null);
 
 public sealed record TaskAssignRequest(
     long TaskId,
@@ -98,7 +102,9 @@ public sealed record TaskListQuery(
     long? SourceRecordId = null,
     string? Priority = null,
     // Migration 414: management dashboard drill-down (no owner, age band).
-    ListDrillFilter? Drill = null);
+    ListDrillFilter? Drill = null,
+    // 526: only tasks waiting for this employee's review or approval.
+    long? ReviewEmployeeId = null);
 
 public sealed record TaskListRow(
     long TaskId,
@@ -290,7 +296,53 @@ public sealed record TaskDetailResult(
     IReadOnlyList<TaskActivityRow> Activity,
     IReadOnlyList<TaskAttachmentRow> Attachments,
     IReadOnlyList<TaskChildRow> Children,
-    IReadOnlyList<TaskGovernanceRequestRow> GovernanceRequests);
+    IReadOnlyList<TaskGovernanceRequestRow> GovernanceRequests,
+    // 526: the review / approval cycle (sp_task_review_get). Null when
+    // the database has not run 526.
+    TaskReviewInfo? Review = null);
+
+// =====================================================================
+// 526 -- task review / approval cycle
+// =====================================================================
+
+/// <summary>Who reviews and approves a task, and who must act now.
+/// ReviewStage: null (not in the cycle), "Review" or "Approval".</summary>
+public sealed record TaskReviewInfo(
+    long TaskId,
+    long? ReviewerEmployeeId,
+    string? ReviewerName,
+    long? ApproverEmployeeId,
+    string? ApproverName,
+    string? ReviewStage,
+    long? SubmittedByEmployeeId,
+    string? SubmittedByName,
+    DateTime? SubmittedDt,
+    string? SubmittedRemark,
+    long? AwaitingEmployeeId,
+    string? AwaitingName);
+
+/// <summary>Decision: "Approve" or "Return" (Remark required for Return).
+/// The actor is the caller the Web tier stamps, never the body.</summary>
+public sealed record TaskReviewDecisionRequest(
+    string Decision,
+    string? Remark);
+
+/// <summary>A schedule's reviewer / approver (Task Calendar).</summary>
+public sealed record ScheduleReviewSettings(
+    long ScheduleRuleId,
+    long OrganizationId,
+    long PracticeInstanceId,
+    long? OwnerEmployeeId,
+    string? OwnerName,
+    long? ReviewerEmployeeId,
+    string? ReviewerName,
+    long? ApproverEmployeeId,
+    string? ApproverName);
+
+public sealed record ScheduleReviewSaveRequest(
+    long OrganizationId,
+    long? ReviewerEmployeeId,
+    long? ApproverEmployeeId);
 
 // =====================================================================
 // Task Centre v2 — commands

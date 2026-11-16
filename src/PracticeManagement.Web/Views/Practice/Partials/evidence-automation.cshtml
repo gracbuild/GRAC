@@ -1,0 +1,265 @@
+@*
+    Evidence Automation -- migration 530 (plan Part A, Phase 1, 2026-11-12).
+    Rendered from Manage.cshtml when Model.Key == "evidence-automation".
+
+    Screen key : `evidence-automation`
+    Group      : Policies & Documents
+    Menu       : nav-documents (Policies & Documents) -> Evidence Automation
+
+    An organization's own systems send evidence for an obligation through a
+    SOURCE: a webhook (a token, posted to /intake/evidence), a file drop
+    (a watched folder) or, since 531, email (the intake mailbox address
+    with the source code as +tag, from the source's allowed senders). Every file received is stored in the Evidence Center
+    and recorded as WAITING FOR REVIEW. Nothing is attached, completed or
+    changed until a person accepts it here: Accept attaches it through the
+    same link the Operationalize page and the Complete Task dialog use, or
+    keeps it in the Evidence Center only; Reject records why.
+
+    Tabs:
+      Received  what arrived (default: waiting for review), Review dialog.
+      Sources   the configured sources, their health (on track / waiting /
+                overdue / failing) and connection details. The webhook
+                token is shown once when issued; only its hash is stored.
+
+    Who sees what is decided by the procedures: an organization admin, the
+    source owner, or the obligation owner (fn_pm_evidence_automation_can_manage).
+
+    Same layout conventions as the Evidence Center: pm-page-heading compact,
+    an organization picker, pm-tabs, pm-toolbar filters (selects), a
+    pm-table-wrap grid with the pm-grid pager, pm-modal dialogs.
+
+    Backend: practice/api/evidence-automation... (EvidenceAutomationController)
+    Script : wwwroot/js/EvidenceAutomation/evidence-automation.js
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var eaPermissions = ViewBag.Permissions as string[] ?? [];
+    bool eaHas(string action) => eaPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
+    var eaCanAdd = eaHas("ADD");
+    var eaCanEdit = eaHas("EDIT");
+    var eaCanDelete = eaHas("DELETE");
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<div id="eaRoot" data-can-add="@(eaCanAdd ? "1" : "0")" data-can-edit="@(eaCanEdit ? "1" : "0")" data-can-delete="@(eaCanDelete ? "1" : "0")">
+    <section class="pm-panel">
+        <div class="pm-toolbar">
+            <select id="eaOrg" title="Organization"><option value="">Select organization</option></select>
+        </div>
+        <p class="pm-message" id="eaMessage" role="status" aria-live="polite" hidden></p>
+
+        <div class="pm-tabs" role="tablist" aria-label="Evidence Automation">
+            <button role="tab" class="active" data-ea-tab="RECEIVED" aria-selected="true">Received <span class="pm-badge" id="eaWaitingBadge">0</span></button>
+            <button role="tab" data-ea-tab="SOURCES" aria-selected="false">Sources</button>
+        </div>
+
+        @* ---------------- Received ---------------- *@
+        <div data-ea-panel="RECEIVED">
+            <div class="pm-toolbar">
+                <input type="search" id="eaEvSearch" placeholder="Search source, obligation, instance or file" maxlength="200" />
+                <select id="eaEvStatus" title="Review status">
+                    <option value="Proposed">Waiting for review</option>
+                    <option value="Accepted">Accepted</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="All">All</option>
+                </select>
+                <select id="eaEvResult" title="Result">
+                    <option value="">All results</option>
+                    <option value="Pass">Pass</option>
+                    <option value="Fail">Fail</option>
+                    <option value="Unknown">Unknown</option>
+                </select>
+                <select id="eaEvSource" title="Source"><option value="">All sources</option></select>
+                <button class="pm-button icon" id="eaEvRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Received</th><th>Source / obligation</th><th>Period</th><th>Result</th><th>Evidence</th><th>Status</th><th>Actions</th></tr></thead>
+                    <tbody id="eaEvBody"></tbody>
+                </table>
+            </div>
+            <div id="eaEvPager"></div>
+        </div>
+
+        @* ---------------- Sources ---------------- *@
+        <div data-ea-panel="SOURCES" hidden>
+            <div class="pm-toolbar">
+                <input type="search" id="eaBdSearch" placeholder="Search source, obligation or instance" maxlength="200" />
+                <select id="eaBdChannel" title="Channel">
+                    <option value="">All channels</option>
+                    <option value="Webhook">Webhook</option>
+                    <option value="FileDrop">File drop</option>
+                    <option value="Email">Email</option>
+                </select>
+                <select id="eaBdHealth" title="Health">
+                    <option value="">Any health</option>
+                    <option value="OnTrack">On track</option>
+                    <option value="Waiting">Waiting for first evidence</option>
+                    <option value="Overdue">Overdue</option>
+                    <option value="Failing">Last result failed</option>
+                </select>
+                <select id="eaBdStatus" title="Status">
+                    <option value="">Active and paused</option>
+                    <option value="Active">Active</option>
+                    <option value="Paused">Paused</option>
+                    <option value="Retired">Retired</option>
+                    <option value="All">All</option>
+                </select>
+                <button class="pm-button icon" id="eaBdRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+                @if (eaCanAdd)
+                {
+                    <button class="pm-button primary" id="eaBdNew" type="button"><i class="fa-solid fa-plus"></i> New source</button>
+                }
+            </div>
+            <div class="pm-table-wrap">
+                <table>
+                    <thead><tr><th>Source</th><th>Obligation</th><th>Channel</th><th>Expected</th><th>Health</th><th>Last received</th><th>Waiting</th><th>Status</th></tr></thead>
+                    <tbody id="eaBdBody"></tbody>
+                </table>
+            </div>
+            <div id="eaBdPager"></div>
+        </div>
+    </section>
+</div>
+
+@* ======================= Source detail ======================= *@
+<div class="pm-modal" id="eaDetailModal" hidden>
+    <div class="pm-modal-panel ea-wide">
+        <header>
+            <h2 id="eaDetailTitle">Source</h2>
+            <button class="pm-modal-close" type="button" data-close-ea="eaDetailModal" aria-label="Close">&times;</button>
+        </header>
+        <p class="pm-message" id="eaDetailMessage" role="status" aria-live="polite" hidden></p>
+        <div class="ea-info" id="eaDetailInfo"></div>
+        <div class="ea-actions" id="eaDetailActions"></div>
+        <h3 class="ea-subtitle">Connection</h3>
+        <div id="eaConnection"></div>
+        <h3 class="ea-subtitle">Latest evidence received</h3>
+        <div class="pm-table-wrap">
+            <table>
+                <thead><tr><th>Received</th><th>Period</th><th>Result</th><th>File</th><th>Status</th></tr></thead>
+                <tbody id="eaDetailEvents"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ======================= New / edit source ======================= *@
+<div class="pm-modal" id="eaEditModal" hidden>
+    <div class="pm-modal-panel ea-wide">
+        <header>
+            <h2 id="eaEditTitle">New source</h2>
+            <button class="pm-modal-close" type="button" data-close-ea="eaEditModal" aria-label="Close">&times;</button>
+        </header>
+        <form id="eaEditForm" class="pm-form-grid">
+            <label class="full"><span>Name *</span><input type="text" id="eaEdName" maxlength="200" placeholder="e.g. Nightly database backup report" /></label>
+            <label><span>Find obligation *</span><input type="search" id="eaEdObSearch" maxlength="200" placeholder="Obligation, instance name or code" /></label>
+            <label><span>Obligation *</span><select id="eaEdObligation"><option value="">Search, then choose</option></select></label>
+            <label class="full"><span>Evidence it answers</span><select id="eaEdEvidence"><option value="">Not tied to one evidence row</option></select></label>
+            <label><span>Channel *</span><select id="eaEdChannel">
+                <option value="Webhook">Webhook (your system posts to GRAC)</option>
+                <option value="FileDrop">File drop (a watched folder)</option>
+                <option value="Email">Email (send to a mailbox address)</option>
+            </select></label>
+            <label id="eaEdFolderRow" hidden><span>Drop folder</span><input type="text" id="eaEdFolder" maxlength="200" placeholder="Defaults to the source code" /></label>
+            <label class="full" id="eaEdSendersRow" hidden><span>Allowed senders *</span><input type="text" id="eaEdSenders" maxlength="2000" placeholder="reports@example.com, @@backup-vendor.com" /></label>
+            <label><span>Source system</span><input type="text" id="eaEdSourceSystem" maxlength="200" placeholder="e.g. Veeam, Microsoft 365, Qualys" /></label>
+            <label><span>Control ID in that system</span><input type="text" id="eaEdControlRef" maxlength="300" /></label>
+            <label><span>Source independence</span><select id="eaEdIndependence">
+                <option value="SelfAttested">Self-attested (the system that runs the control reports it)</option>
+                <option value="Independent">Independent (another system verifies it)</option>
+            </select></label>
+            <label><span>Expected every</span><select id="eaEdCadence">
+                <option value="None">Not scheduled (no overdue notice)</option>
+                <option value="Daily">Day</option>
+                <option value="Weekly">Week</option>
+                <option value="Monthly">Month</option>
+                <option value="Quarterly">Quarter</option>
+                <option value="HalfYearly">Half year</option>
+                <option value="Yearly">Year</option>
+            </select></label>
+            <label><span>Grace days</span><input type="number" id="eaEdGrace" min="0" max="90" value="1" /></label>
+            <label><span>Valid for (days after the period)</span><input type="number" id="eaEdValidity" min="1" max="3650" placeholder="No expiry" /></label>
+            <label><span>Evidence type</span><select id="eaEdType"><option value="">Same as the evidence row</option></select></label>
+            <label><span>Owner (reviews what arrives)</span><select id="eaEdOwner"><option value="">The obligation owner</option></select></label>
+            <label><span>Classification</span><select id="eaEdClass">
+                <option value="Internal">Internal</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Restricted">Restricted (owner and admins only)</option>
+            </select></label>
+            <p class="ea-note full">Everything received is stored in the Evidence Center and waits for review. Nothing is attached to the obligation or a task until it is accepted.</p>
+            <p class="pm-message full" id="eaEditMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-ea="eaEditModal">Cancel</button>
+                <button type="submit" class="pm-button primary" id="eaEdSubmit"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+@* ======================= Token (shown once) ======================= *@
+<div class="pm-modal" id="eaTokenModal" hidden>
+    <div class="pm-modal-panel">
+        <header>
+            <h2>Webhook token</h2>
+            <button class="pm-modal-close" type="button" data-close-ea="eaTokenModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="pm-form-grid">
+            <p class="pm-message info full">Copy this token now. It is not stored and cannot be shown again; issue a new one if it is lost.</p>
+            <label class="full"><span>Token</span><input type="text" id="eaTokenValue" readonly /></label>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" id="eaTokenCopy"><i class="fa-solid fa-copy"></i> Copy</button>
+                <button type="button" class="pm-button primary" data-close-ea="eaTokenModal">Done</button>
+            </footer>
+        </div>
+    </div>
+</div>
+
+@* ======================= Review ======================= *@
+<div class="pm-modal" id="eaReviewModal" hidden>
+    <div class="pm-modal-panel ea-wide">
+        <header>
+            <h2 id="eaReviewTitle">Review evidence</h2>
+            <button class="pm-modal-close" type="button" data-close-ea="eaReviewModal" aria-label="Close">&times;</button>
+        </header>
+        <div class="ea-info" id="eaReviewInfo"></div>
+        <h3 class="ea-subtitle">Attach to</h3>
+        <div id="eaReviewTargets"></div>
+        <form id="eaReviewForm" class="pm-form-grid">
+            <label class="full"><span>Note (required to reject)</span><textarea id="eaReviewNote" rows="2" maxlength="1000"></textarea></label>
+            <p class="pm-message full" id="eaReviewMessage" role="status" aria-live="polite" hidden></p>
+            <footer class="pm-modal-footer full">
+                <button type="button" class="pm-button" data-close-ea="eaReviewModal">Cancel</button>
+                <button type="button" class="pm-button danger" id="eaReviewReject"><i class="fa-solid fa-xmark"></i> Reject</button>
+                <button type="submit" class="pm-button primary" id="eaReviewAccept"><i class="fa-solid fa-check"></i> Accept</button>
+            </footer>
+        </form>
+    </div>
+</div>
+
+<style>
+    .ea-note { color: var(--fg-secondary); font-size: 12px; margin: 0 0 8px; }
+    .ea-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .ea-subtitle { font-size: 14px; font-weight: 600; color: var(--fg-strong); margin: 14px 0 8px; }
+    .pm-modal-panel.ea-wide { max-width: 1100px; width: 100%; }
+    .ea-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 12px; }
+    .ea-info span { display: block; color: var(--fg-secondary); font-size: 11px; }
+    .ea-code { font-family: Consolas, "Courier New", monospace; font-size: 12px; word-break: break-all; }
+    .ea-pre { font-family: Consolas, "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: var(--surface-2, var(--bg-muted, #f5f5f5)); padding: 8px; border-radius: 6px; margin: 4px 0 8px; }
+    .ea-target { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; font-size: 13px; }
+    .ea-target small { display: block; color: var(--fg-secondary); }
+    .ea-ok      { background: var(--success-100); color: var(--success-700); }
+    .ea-warn    { background: var(--warning-50);  color: var(--warning-700); }
+    .ea-bad     { background: var(--danger-100);  color: var(--danger-700); }
+    tr[data-ea-binding] { cursor: pointer; }
+</style>
+
+<script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/EvidenceAutomation/evidence-automation.js" asp-append-version="true"></script>

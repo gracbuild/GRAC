@@ -84,8 +84,13 @@
     @* Audit & Assurance dashboard drill-down (414). *@
     <div id="oaObDrillBanner" hidden></div>
 
-    <div style="display:grid; grid-template-columns:minmax(480px, 640px) 1fr; gap:12px; margin-top:12px;">
-        @* LEFT: observation list *@
+    @* 2026-11-14 (sir): one full-width list; an observation's details,
+       evidence and history open in a CHILD ROW under it -- the Audit Plans
+       child row (.oa-pl-wrap, tr.oa-pl-items-row > td > .oa-pl-items, the
+       open row .oa-pl-open) -- instead of a panel beside the list. A row
+       click (or View Details) opens it; a second click closes it. *@
+    <div style="margin-top:12px;">
+        @* the observation list *@
         <div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <h2 style="font-size:15px; margin:0; color:var(--fg-strong);">Observations</h2>
@@ -93,7 +98,7 @@
                     <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                 </button>
             </div>
-            <div class="pm-table-wrap">
+            <div class="pm-table-wrap oa-pl-wrap">
                 <table>
                     <thead>
                         <tr>
@@ -117,19 +122,28 @@
             </div>
         </div>
 
-        @* RIGHT: selected observation detail + evidence + history *@
-        <div>
+        @* the selected observation's detail + evidence + history: waits here,
+           shown in the child row under its observation (mountDetail). *@
+        <div id="oaObHolder" hidden><div id="oaObDetailPanel">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
                 <div>
                     <h2 style="font-size:15px; margin:0; color:var(--fg-strong);" id="oaObDetailTitle">Observation Details</h2>
                     <p style="font-size:12px; color:var(--fg-muted); margin:4px 0 0;" id="oaObDetailSubtitle">Select an observation from the list to view details, evidence and history.</p>
                 </div>
+                @* 2026-11-04: Actions -- the row's 3-dot items for the observation
+                   shown here, minus View Details (shared page-actions-menu.js). *@
+                <button type="button" class="pm-button" id="oaObActionsBtn" aria-haspopup="true" aria-expanded="false" hidden>
+                    <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+                    <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+                </button>
             </div>
 
             <div id="oaObDetailTiles" hidden style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
 
             <div id="oaObTabs" hidden style="display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:8px;">
                 <button class="pm-tab active" data-tab="detail"   type="button">Details</button>
+                @* 567: the spec 4.7 details, saved on their own. *@
+                <button class="pm-tab"        data-tab="finding"  type="button">Finding</button>
                 <button class="pm-tab"        data-tab="evidence" type="button">Evidence</button>
                 <button class="pm-tab"        data-tab="history"  type="button">History</button>
             </div>
@@ -143,6 +157,62 @@
                     renderRelatedTasks().
                 *@
                 <div id="oaObRelatedTasks" style="margin-top:14px;"></div>
+            </div>
+
+            @* 567 (spec 4.7): the finding's details -- the auditor's criteria,
+               condition, root cause, risk / impact and recommendation, the
+               owner's management response and corrective action. A finding
+               raised from a working paper (Workpapers) arrives with the
+               auditor's part filled. Not editable once the observation is Closed. *@
+            <div id="oaObTabFinding" hidden>
+                <div class="pm-message" id="oaObFindingMessage" style="display:none;"></div>
+                <div class="oa-pl-plan-grid">
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Origin</span>
+                        <select class="pm-input" id="oaObFndOrigin"></select>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Working Paper</span>
+                        <span class="pm-view-value" id="oaObFndPaper">--</span>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Audit Criteria</span>
+                        <textarea class="pm-input" id="oaObFndCriteria" rows="2" placeholder="What should be"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Condition / Finding</span>
+                        <textarea class="pm-input" id="oaObFndCondition" rows="2" placeholder="What is"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Root Cause</span>
+                        <textarea class="pm-input" id="oaObFndRootCause" rows="2"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Risk and Impact</span>
+                        <textarea class="pm-input" id="oaObFndRisk" rows="2"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-all">
+                        <span>Auditor Recommendation</span>
+                        <textarea class="pm-input" id="oaObFndRecommendation" rows="2"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Management Response</span>
+                        <textarea class="pm-input" id="oaObFndResponse" rows="2"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-2">
+                        <span>Corrective Action</span>
+                        <textarea class="pm-input" id="oaObFndAction" rows="2"></textarea>
+                    </label>
+                    <label class="pm-field oa-pl-span-all">
+                        <span>Supporting Evidence</span>
+                        <textarea class="pm-input" id="oaObFndEvidence" rows="2"></textarea>
+                    </label>
+                </div>
+                <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+                    <button class="pm-button primary" id="oaObFindingSaveBtn" type="button">
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save Finding
+                    </button>
+                </div>
             </div>
 
             <div id="oaObTabEvidence" hidden>
@@ -187,7 +257,7 @@
                     </table>
                 </div>
             </div>
-        </div>
+        </div></div>
     </div>
 </section>
 
@@ -362,6 +432,7 @@
 
 @* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
 <script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -514,6 +585,7 @@
             if (state.selectedObsId) loadDetail(state.selectedObsId);
         });
         document.getElementById('oaObNewBtn').addEventListener('click', function () { openSave(null); });
+        document.getElementById('oaObFindingSaveBtn').addEventListener('click', saveFinding);   // 567
     }
 
     function wireDetailTabs() {
@@ -527,7 +599,7 @@
         document.querySelectorAll('.pm-tab').forEach(function (el) {
             el.classList.toggle('active', el.getAttribute('data-tab') === tab);
         });
-        ['detail','evidence','history'].forEach(function (t) {
+        ['detail','finding','evidence','history'].forEach(function (t) {
             const el = document.getElementById('oaObTab' + t.charAt(0).toUpperCase() + t.slice(1));
             if (el) el.hidden = (t !== tab);
         });
@@ -668,7 +740,8 @@
             return;
         }
         body.innerHTML = state.list.rows.map(function (row) {
-            const id     = row.observationId    || row.ObservationId;
+            // an id is never read with || -- 0 is an id (557)
+            const id     = row.observationId    ?? row.ObservationId;
             const title  = row.observationTitle || row.ObservationTitle || '';
             const code   = row.observationCode  || row.ObservationCode  || '';
             const exec   = row.executionName    || row.ExecutionName    || '';
@@ -678,7 +751,6 @@
             const status = row.statusCode       || row.StatusCode       || '';
             const evCnt  = Number(row.evidenceCount || row.EvidenceCount || 0);
             const gapId  = row.gapId            || row.GapId;
-            const isSel  = state.selectedObsId && String(state.selectedObsId) === String(id);
             // Clickable Gap badge -> Gap Center (Stage 4b: many-to-many).
             // observation.gap_id is the "primary" gap (backward compat);
             // the row may be linked to more. We navigate to Gap Center
@@ -688,8 +760,9 @@
                   + 'title="Open Gap Register filtered to this observation" '
                   + 'style="background:var(--danger-100); color:var(--danger-700); text-decoration:none;">Gaps &raquo;</a>'
                 : '';
-            return '<tr data-id="' + id + '"' + (isSel ? ' style="background:var(--primary-50);"' : '') + '>'
-                 + '<td><div>' + wf.escape(title) + gapBadge + '</div>'
+            // pm-row-clickable: a row click already shows this observation (View Details).
+            return '<tr class="pm-row-clickable" data-id="' + id + '">'
+                 + '<td style="white-space:normal;"><div>' + wf.escape(title) + gapBadge + '</div>'
                  + '<div style="font-size:11px; color:var(--fg-subtle);">' + wf.escape(code) + '</div>'
                  + '<div style="font-size:11px; color:var(--fg-muted);">' + wf.escape(exec) + (ent ? ' &middot; ' + wf.escape(ent) : '') + '</div></td>'
                  + '<td><span class="pm-severity-dot" style="background:' + severityColor(sev) + ';"></span>' + wf.escape(sevN) + '</td>'
@@ -704,7 +777,10 @@
             tr.addEventListener('click', function (ev) {
                 if (ev.target.closest('.pm-action-trigger')) return;
                 const id = tr.getAttribute('data-id');
-                if (id) selectObservation(Number(id));
+                if (id === null || id === '') return;
+                // a second click on the open observation closes its child row
+                if (state.selectedObsId !== null && String(state.selectedObsId) === id) { resetDetail(); return; }
+                selectObservation(Number(id));
             });
         });
         body.querySelectorAll('.pm-action-trigger').forEach(function (btn) {
@@ -712,7 +788,7 @@
                 ev.stopPropagation();
                 const id = Number(btn.getAttribute('data-id'));
                 const row = state.list.rows.find(function (r) {
-                    return String(r.observationId || r.ObservationId) === String(id);
+                    return String(r.observationId ?? r.ObservationId) === String(id);
                 });
                 openRowMenu(btn, id, row);
             });
@@ -726,6 +802,44 @@
                 if (oid) openGapCenterForObservation(oid);
             });
         });
+        mountDetail();   // an open observation stays open under its row
+    }
+
+    // The child row under the open observation (Audit Plans' pattern):
+    // tr.oa-pl-items-row > td > .oa-pl-items holding #oaObDetailPanel.
+    // The panel is held by reference: re-rendering the list replaces the rows
+    // (and the child row with them), which takes the panel out of the page,
+    // so it is never looked up by id here.
+    let obPanel = null;
+    function detailPanel() { return obPanel || (obPanel = document.getElementById('oaObDetailPanel')); }
+    function mountDetail() {
+        const panel = detailPanel();
+        const body = document.getElementById('oaObListBody');
+        const old  = body.querySelector('tr.oa-pl-items-row');
+        document.getElementById('oaObHolder').appendChild(panel);
+        if (old) old.remove();
+        body.querySelectorAll('tr.oa-pl-open').forEach(function (r) { r.classList.remove('oa-pl-open', 'is-selected'); });
+        if (state.selectedObsId === null || state.selectedObsId === undefined) return;
+        const row = body.querySelector('tr[data-id="' + state.selectedObsId + '"]');
+        if (!row) return;   // not on this page of the list: the panel waits in its holder
+        const tr = document.createElement('tr');
+        tr.className = 'oa-pl-items-row is-selected';
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        const host = document.createElement('div');
+        host.className = 'oa-pl-items';
+        host.appendChild(panel);
+        td.appendChild(host);
+        tr.appendChild(td);
+        row.insertAdjacentElement('afterend', tr);
+        row.classList.add('oa-pl-open', 'is-selected');
+    }
+    function unmountDetail() {
+        document.getElementById('oaObHolder').appendChild(detailPanel());
+        const body = document.getElementById('oaObListBody');
+        const tr = body.querySelector('tr.oa-pl-items-row');
+        if (tr) tr.remove();
+        body.querySelectorAll('tr.oa-pl-open').forEach(function (r) { r.classList.remove('oa-pl-open', 'is-selected'); });
     }
 
     function openGapCenterForObservation(observationId) {
@@ -746,11 +860,14 @@
         if (openMenuEl && !openMenuEl.contains(ev.target) && ev.target !== openMenuTrigger) closeRowMenu();
     });
 
-    function openRowMenu(trigger, id, row) {
-        closeRowMenu();
-        const status = row && (row.statusCode || row.StatusCode) || '';
+    // Items of the row menu. 2026-11-04: also the detail panel's Actions
+    // menu (without View Details), so both always offer the same actions.
+    // `rec` is the list row or the loaded detail -- both carry status and gapId.
+    function rowMenuItems(id, rec) {
+        const row    = rec;
+        const status = rec && (rec.statusCode || rec.StatusCode) || '';
         const items = [
-            { icon: 'fa-eye',  label: 'View Details',
+            { key: 'view', icon: 'fa-eye',  label: 'View Details',
                 action: function () { selectObservation(id); } }
         ];
         if (status === 'Open' || status === 'InReview') {
@@ -784,6 +901,12 @@
         if (status === 'Open' || status === 'Rejected') {
             items.push({ icon: 'fa-trash',       label: 'Delete',            action: function () { doDelete(id); } });
         }
+        return items;
+    }
+
+    function openRowMenu(trigger, id, row) {
+        closeRowMenu();
+        const items = rowMenuItems(id, row);
 
         const menu = document.createElement('div');
         menu.className = 'pm-action-menu';
@@ -887,17 +1010,90 @@
     // -----------------------------------------------------------------
     // Detail
     // -----------------------------------------------------------------
+    // Detail panel Actions (2026-11-04).
+    if (window.gracPageActions) {
+        window.gracPageActions.attach('oaObActionsBtn', function () {
+            if (!state.detail || !state.selectedObsId) return [];
+            return rowMenuItems(state.selectedObsId, state.detail)
+                .filter(function (it) { return it.key !== 'view'; })
+                .map(function (it) { return { icon: it.icon, label: it.label, run: it.action }; });
+        });
+    }
+
     async function selectObservation(id) {
         state.selectedObsId = id;
-        document.querySelectorAll('#oaObListBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(id)) ? 'var(--primary-50)' : '';
-        });
+        mountDetail();
         await loadDetail(id);
-        await Promise.all([loadEvidence(id), loadHistory(id)]);
+        await Promise.all([loadEvidence(id), loadHistory(id), loadFinding(id)]);   // 567: + the finding
+    }
+
+    // -----------------------------------------------------------------
+    // 567 (spec 4.7): the Finding tab -- GET / POST observations/{id}/finding.
+    // -----------------------------------------------------------------
+    const FINDING_FIELDS = {
+        oaObFndCriteria: 'auditCriteria', oaObFndCondition: 'conditionText', oaObFndRootCause: 'rootCause',
+        oaObFndRisk: 'riskImpact', oaObFndRecommendation: 'recommendation', oaObFndResponse: 'managementResponse',
+        oaObFndAction: 'correctiveAction', oaObFndEvidence: 'supportingEvidence'
+    };
+    function pickF(o, k) { return o ? (o[k] ?? o[k.charAt(0).toUpperCase() + k.slice(1)]) : undefined; }
+    function findingMessage(kind, text) {
+        const el = document.getElementById('oaObFindingMessage');
+        el.style.display = text ? 'block' : 'none';
+        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
+        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
+        el.textContent = text || '';
+    }
+    async function loadFinding(id) {
+        findingMessage('', '');
+        try {
+            if (!state.origins) {
+                const r0 = await fetch(U(API + '/observation-origins'), { credentials: 'same-origin' });
+                const b0 = r0.ok ? await r0.json() : null;
+                state.origins = (b0 && (b0.data || b0.Data)) || [];
+            }
+            const r = await fetch(U(API + '/observations/' + id + '/finding?organizationId=' + encodeURIComponent(state.orgId)),
+                                  { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const f = await r.json();
+            const origin = document.getElementById('oaObFndOrigin');
+            origin.innerHTML = '<option value="">-- not set --</option>' + state.origins.map(function (o) {
+                const c = pickF(o, 'code');
+                return '<option value="' + wf.escape(c) + '">' + wf.escape(pickF(o, 'name') || c) + '</option>';
+            }).join('');
+            origin.value = pickF(f, 'originCode') || '';
+            document.getElementById('oaObFndPaper').textContent = pickF(f, 'workingPaperCode') || '--';
+            Object.keys(FINDING_FIELDS).forEach(function (elId) {
+                document.getElementById(elId).value = pickF(f, FINDING_FIELDS[elId]) || '';
+            });
+            const closed = pickF(f, 'statusCode') === 'Closed';
+            document.querySelectorAll('#oaObTabFinding select, #oaObTabFinding textarea').forEach(function (el) { el.disabled = closed; });
+            document.getElementById('oaObFindingSaveBtn').hidden = closed;
+        } catch (err) {
+            findingMessage('error', 'Failed to load the finding: ' + (err.message || err));
+        }
+    }
+    async function saveFinding() {
+        if (state.selectedObsId === null || state.selectedObsId === undefined) return;
+        const body = { organizationId: Number(state.orgId), originCode: document.getElementById('oaObFndOrigin').value || null, actor: null };
+        Object.keys(FINDING_FIELDS).forEach(function (elId) {
+            body[FINDING_FIELDS[elId]] = document.getElementById(elId).value.trim() || null;
+        });
+        try {
+            const r = await fetch(U(API + '/observations/' + state.selectedObsId + '/finding'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            let j = null; try { j = await r.json(); } catch (_) { }
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            findingMessage('ok', 'Finding saved.');
+        } catch (err) { findingMessage('error', err.message || String(err)); }
     }
 
     function resetDetail() {
         state.selectedObsId = null; state.detail = null;
+        unmountDetail();
+        document.getElementById('oaObActionsBtn').hidden = true;
         state.evidence = []; state.history = [];
         document.getElementById('oaObDetailTitle').textContent = 'Observation Details';
         document.getElementById('oaObDetailSubtitle').textContent =
@@ -905,7 +1101,7 @@
         document.getElementById('oaObDetailTiles').hidden = true;
         document.getElementById('oaObDetailTiles').innerHTML = '';
         document.getElementById('oaObTabs').hidden = true;
-        ['detail','evidence','history'].forEach(function (t) {
+        ['detail','finding','evidence','history'].forEach(function (t) {
             const el = document.getElementById('oaObTab' + t.charAt(0).toUpperCase() + t.slice(1));
             if (el) el.hidden = true;
         });
@@ -927,6 +1123,7 @@
     function renderDetail() {
         const d = state.detail;
         if (!d) { resetDetail(); return; }
+        document.getElementById('oaObActionsBtn').hidden = false;
         document.getElementById('oaObDetailTitle').textContent =
             (d.observationTitle || d.ObservationTitle || '') + '  (' + (d.observationCode || d.ObservationCode || '') + ')';
         document.getElementById('oaObDetailSubtitle').textContent =
@@ -1159,7 +1356,7 @@
         let presetExec = state.filterExecutionId;
         if (editId) {
             const row = state.list.rows.find(function (r) {
-                return String(r.observationId || r.ObservationId) === String(editId);
+                return String(r.observationId ?? r.ObservationId) === String(editId);
             });
             if (row) {
                 presetExec = row.executionId || row.ExecutionId;
@@ -1321,9 +1518,9 @@
             }
             closeSave();
             setMessage('ok', state.editingId ? 'Observation updated.' : 'Observation created.');
-            const newId = j && (j.observationId || j.ObservationId);
+            const newId = j ? (j.observationId ?? j.ObservationId) : null;
             await reloadList();
-            if (newId) await selectObservation(Number(newId));
+            if (newId !== null && newId !== undefined) await selectObservation(Number(newId));
         } catch (err) {
             showDlgMsg(msgEl, 'error', 'Save failed: ' + (err.message || err));
         }

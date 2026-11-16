@@ -3,10 +3,12 @@
 **Screens:**
 - Practice Management: *Governance → Standards & Frameworks* (`organization-controls`) → **Add Release**
 - Control Management: *Repository Management → Subscription Requests* (`subscription-requests`)
+- Organization Management: *Subscription Requests* (`subscription-requests`, migration 511) — the same queue, decided from Practice Management
 
 **Migrations:**
 - PracticeManagement `406_repository_subscription_requests.sql` (+ rollback)
 - ControlManagement `068_subscription_requests.sql` (+ rollback)
+- PracticeManagement `511_subscription_requests_org_management.sql` (+ rollback)
 
 **Run order:** PM 406 first, then CM 068. Roll back in the reverse order.
 
@@ -16,7 +18,8 @@
 
 ```
 Organization → Add Release → Subscribe from Repository → Request
-   → Pending → Control Management (Subscription Requests) → Approve / Reject
+   → Pending → Organization Management or Control Management
+               (Subscription Requests, one shared queue) → Approve / Reject
 
 Approve → organization subscription created / re-activated → "Subscribed"
 Reject  → request Rejected (reason kept) → no subscription
@@ -213,6 +216,50 @@ The `cm_menu` row `subscription-requests` sits under Repository Management, disp
   - approve dialog title
   - `Pending` badge tone
 
+## 7a. Organization Management approval (migration 511, 2026-11-03)
+
+Request: move the approval of framework subscription requests into Organization Management, as a separate menu page. **Control Management keeps its screen** — both modules work the same queue.
+
+**One queue, one rule set.** The page calls the 406 procedures Control Management already uses, `sp_repository_subscription_request_list` and `sp_repository_subscription_request_decide`. No procedure changed. The decide procedure locks the request and refuses one that is no longer Pending (51414), so a request decided in one module shows as decided in the other and cannot be decided twice.
+
+**Page** — `Views/Practice/Partials/subscription-requests.cshtml`, screen key `subscription-requests`, group Organization Setup:
+- Same layout as Repository Updates, the other approve / reject page in Practice Management.
+- Toolbar: Status (Pending default / Approved / Rejected / All), search, refresh.
+- Columns: Organization, Release / Framework, Release Code / Version, Requested By, Request Date, Status, Approved / Rejected By, Decision Date, Remark, Actions.
+- Pending rows carry **Approve** (comments optional) and **Reject** (reason required).
+- Approved / Rejected By shows the deciding sign-in, for decisions made in either module.
+
+**Who may decide:**
+- The `subscription-requests` menu grant: VIEW to list, APPROVE to approve or reject.
+- **And** a GLOBAL-scope sign-in. A request belongs to another organization, so approving it is a platform decision. An organization admin must never approve its own request, and 274 section 3 / `pm_grant_organization_default_access` give every role every active menu, so the grant alone would not prevent that.
+- Both checks are enforced in the Web tier (`SubscriptionRequestController`).
+- The decider recorded is the session sign-in. The Web tier rebuilds the forwarded body with `actor`, so the browser cannot name anyone else.
+
+**Menu (511, also in 274).** `menu_master` row `subscription-requests` (20, `file-circle-check`, module_type `Organization Setup`) under the inactive `Organization` group, exactly like `organization-setup`. An active row under an inactive parent never reaches the Practice Management sidebar. Organization Management lists it through `PracticeController.OrganizationManagementMenuAreas`, where it is now the **only** entry: the same day, sir asked for Organization Setup and Dependencies to come off this module's menu, so the reachable areas and the menu areas were split into two lists. Dependencies left the module altogether; Organization Setup is still reachable (the organization view page's Actions > Edit and the list's Add Organization go there) but is no longer on the menu. See `organization-management-landing-list.md`. 511 grants VIEW + APPROVE to every Active GLOBAL-scope role (missing rows only).
+
+**API (Practice Management):**
+
+| Method | Web route | Api route | Body | Permission |
+| --- | --- | --- | --- | --- |
+| GET | `/practice/api/subscription-requests?status=&search=` | `/api/practice/subscription-requests` | — | `subscription-requests:VIEW` + GLOBAL scope |
+| POST | `/practice/api/subscription-requests/{id}/decision` | `/api/practice/subscription-requests/{id}/decision` | `{ decision: "Approve" \| "Reject", remark }` | `subscription-requests:APPROVE` + GLOBAL scope |
+
+- **`status`:** `Pending` (default), `Approved`, `Rejected`, or `All`.
+- **List row:** the `sp_repository_subscription_request_list` columns — `Id`, `OrganizationId`, `OrganizationCode`, `OrganizationName`, `AuthorityCode`, `AuthorityName`, `ArtifactCode`, `ArtifactName`, `ReleaseId`, `ReleaseVersion`, `ReleaseStatus`, `Status`, `RequestedBy`, `RequestedByLogin`, `RequestedDate`, `DecidedByLogin`, `DecisionDate`, `DecisionRemark`, `SubscriptionId`.
+- **Decision response:** 200 returns `{ requestId, success, message, subscriptionId }`. A refusal (51411–51417) returns 400 with `{ error, requestId }`.
+- **Errors:** 403 without the grant, or for a non-GLOBAL sign-in.
+- The Api reads the decide procedure's **last** result set that carries `Success`, because Approve runs the subscribe path and that path returns its own row first.
+
+**Files:**
+- `database/511_subscription_requests_org_management.sql` (+ rollback); `database/274_menu_master_seed.sql` (row, parent link, header note)
+- Api: `Controllers/SubscriptionRequestController.cs`, `Services/SubscriptionRequestService.cs`, `Models/SubscriptionRequestModels.cs`, `Infrastructure/SubscriptionRequestServiceRegistration.cs`, `Program.cs` (registration)
+- Web: `Controllers/SubscriptionRequestController.cs`; `Controllers/PracticeController.cs` (area list, attribute routes, menu URL); `Models/PracticeScreen.cs`; `Views/Practice/Manage.cshtml` (workflow screen); `Views/Practice/Partials/subscription-requests.cshtml`; `wwwroot/js/practice.js` (Add Release wording no longer names Control Management as the only reviewer)
+
+**Deploy:**
+1. Run 511. All verification checks should print PASS.
+2. Deploy and restart the Api and Web (Organization Management deployment included).
+3. Sign out and back in. Menu permissions are read at sign-in.
+
 ## 8. Deployment notes
 
 - The PM API caches whether a shim procedure exists (`ShimAvailability`). Restart the PM API after running 406, or the first probe made before the migration keeps answering "not there".
@@ -228,3 +275,6 @@ The `cm_menu` row `subscription-requests` sits under Repository Management, disp
 6. **Approve.** In PM, the release now shows **Subscribed** and appears in Standards & Frameworks with its statements and controls. Nothing is duplicated in `repository_subscription`.
 7. **Reject (with a reason).** PM shows **Rejected**, with the reason on hover, and **Request** is offered again. No subscription is created. The rejected row stays in the CM list.
 8. **Employee-scope user** (non-admin role): Add Release is hidden, and a direct POST is refused.
+9. **Organization Management → Subscription Requests** (GLOBAL-scope sign-in) lists the same Pending request. Approve it there: Control Management now shows it Approved, and its Approve / Reject are gone.
+10. **Decide the same request in both modules** at once: the second one is refused with "already been decided".
+11. **An organization-scoped admin** opening the page sees the GLOBAL-scope message, and a direct POST to `/practice/api/subscription-requests/{id}/decision` returns 403.

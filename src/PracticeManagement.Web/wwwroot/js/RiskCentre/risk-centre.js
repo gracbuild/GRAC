@@ -772,6 +772,9 @@
     fillSelect("rvCategory",   state.options.categories, "categoryCode", "categoryName", "-- select --");
     fillSelect("rvLikelihood", state.options.likelihood, "code", "name", "-- select --");
     fillSelect("rvImpact",     state.options.impact,     "code", "name", "-- select --");
+
+    // 532: the organisation's published risk methodology (null = none).
+    await loadMethodology();
   }
 
   // Threat / vulnerability / business function (migration 216).
@@ -1074,13 +1077,21 @@
     // until the residual page's rail and delta line needed the same
     // answer -- three copies of one lookup is three ways for a screen to
     // disagree with itself about what a score is worth.
-    const cell = resolveRating(lkCode, imCode);
+    const cell = resolveRating(lkCode, imCode, prefix);
     if (!cell) {
-      out.textContent = "No matrix cell configured for this combination";
+      // 532: in 3D scoring the third dimension is part of the rating.
+      const m = state.methodology;
+      const third = m && m.version.scoringMode === "3D" && METHOD_SOURCE[prefix]
+        ? m.dims.find(d => d.dimensionCode === m.version.thirdAxisCode) : null;
+      out.textContent = third && methodLevel(prefix, third.dimensionCode) == null
+        ? `Select ${third.dimensionName}`
+        : third ? "No 3D score band configured for this score"
+        : "No matrix cell configured for this combination";
       out.removeAttribute("data-rating");
       return;
     }
-    out.textContent = `${cell.ratingName}${cell.ratingScore != null ? ` (score ${cell.ratingScore})` : ""}`;
+    out.textContent = `${cell.ratingName}${cell.score3d != null ? ` (3D score ${cell.score3d})`
+      : cell.ratingScore != null ? ` (score ${cell.ratingScore})` : ""}`;
     out.setAttribute("data-rating", cell.ratingCode);
   }
 
@@ -1422,6 +1433,7 @@
         </td>`;
       tbody.appendChild(tr);
     });
+    decorateRegisterMethodology();   // 532: appetite, trend, target, priority
   }
 
   // ---- Register cell renderers (migrations 261-264) -------------------
@@ -3272,6 +3284,7 @@
     setVal("raControls",    risk.existingControls || "");
     setVal("raProcess",     risk.processName || "");
     setVal("raRemarks",     "");
+    await mountMethodology("ra", riskId);   // 532
     renderRating("ra");
 
     // Risk Type (313, 314). Render the options first (in case this is
@@ -3332,8 +3345,13 @@
     // sp_risk_type_selection_set. See the Risk Type section below.
     const riskTypeIds = getRiskTypeIds("raRiskTypeOptions");
     if (!riskTypeIds.length) { msg.textContent = "Select at least one Risk Type (Confidentiality, Integrity or Availability)."; return; }
+    // 532: required dimensions are checked here as an affordance; the
+    // server (58334) is the guarantee.
+    const method = collectMethodology("ra");
+    if (method?.error) { msg.textContent = method.error; return; }
 
     const res = await apiPost(`/register/${riskId}/assess`, {
+      methodology:          method?.payload || null,
       // Legacy scalar column, still written by this same call (the "no
       // wrapper" precedent -- sp_risk_register_assess itself is
       // untouched). The full set goes to /risk-categories below.
@@ -3562,6 +3580,7 @@
     // one. The treatment summary and controls it used to prefill are
     // shown read-only elsewhere on the page instead.
     setVal("rrRemarks",    "");
+    await mountMethodology("rr", riskId);   // 532
     renderRating("rr");
     renderResidualDelta();
 
@@ -3656,7 +3675,7 @@
 
     // Step 3: what is on the form right now, falling back to what is
     // saved. resolveRating returns the same cell renderRating uses.
-    const live = resolveRating(val("rrLikelihood"), val("rrImpact"));
+    const live = resolveRating(val("rrLikelihood"), val("rrImpact"), "rr");
     const resCode = live ? live.ratingCode : risk.residualRatingCode;
     const resSub  = live
       ? `${escapeHtml(optionName("likelihood", val("rrLikelihood")))}`
@@ -3710,11 +3729,14 @@
   // delta line can ask the same question without re-reading the DOM
   // preview's text. One resolver, so three places cannot disagree about
   // what a likelihood and an impact are worth.
-  function resolveRating(likelihoodCode, impactCode) {
+  function resolveRating(likelihoodCode, impactCode, prefix) {
     if (!state.options || !likelihoodCode || !impactCode) return null;
     const lk = state.options.likelihood.find(x => x.code === likelihoodCode);
     const im = state.options.impact.find(x => x.code === impactCode);
     if (!lk || !im) return null;
+    // 532: 3D scoring on a scoring page (prefix ra / rr / rv).
+    if (prefix && METHOD_SOURCE[prefix] && state.methodology?.version.scoringMode === "3D")
+      return resolveRating3d(lk, im, prefix);
     return state.options.matrix.find(c =>
       c.likelihoodValue === lk.levelValue && c.impactValue === im.levelValue) || null;
   }
@@ -3742,7 +3764,7 @@
     const out  = document.getElementById("rrDelta");
     const risk = state.activeRisk;
     if (!out || !risk) return;
-    const cell = resolveRating(val("rrLikelihood"), val("rrImpact"));
+    const cell = resolveRating(val("rrLikelihood"), val("rrImpact"), "rr");
     if (!cell || !risk.inherentRatingCode) {
       out.innerHTML = `<span class="pm-hint">Select a residual likelihood and impact.</span>`;
       return;
@@ -3787,7 +3809,10 @@
     // read-only facts (the treated tasks in step 2, the controls in the
     // scope panel). Retyping them created a second copy that could
     // disagree with the first.
+    const method = collectMethodology("rr");   // 532
+    if (method?.error) { msg.textContent = method.error; return; }
     const res = await apiPost(`/register/${riskId}/residual`, {
+      methodology:            method?.payload || null,
       residualLikelihoodCode: val("rrLikelihood"),
       residualImpactCode:     val("rrImpact"),
       analystRemarks:         val("rrRemarks") || null
@@ -7207,6 +7232,7 @@
       resolveReviewFrequencyId(risk.reviewFrequencyId, risk.reviewFrequencyName),
       "-- select --");
     applyReviewFrequencyToDate("rvReviewFrequency", "rvNextReview");
+    await mountMethodology("rv", riskId);   // 532
     renderRating("rv");
     renderReviewFlow();
 
@@ -7234,7 +7260,7 @@
     const risk = state.activeRisk;
     if (!host || !risk) return;
 
-    const live    = resolveRating(val("rvLikelihood"), val("rvImpact"));
+    const live    = resolveRating(val("rvLikelihood"), val("rvImpact"), "rv");
     const newCode = live ? live.ratingCode : risk.inherentRatingCode;
     const newSub  = live
       ? `${escapeHtml(optionName("likelihood", val("rvLikelihood")))}`
@@ -7302,7 +7328,10 @@
       msg.textContent = "A next review date must be in the future."; return;
     }
 
+    const method = collectMethodology("rv");   // 532
+    if (method?.error) { msg.textContent = method.error; return; }
     const res = await apiPost(`/register/${riskId}/review`, {
+      methodology:          method?.payload || null,
       riskCategoryCode:     val("rvCategory"),
       likelihoodCode:       val("rvLikelihood"),
       impactCode:           val("rvImpact"),
@@ -7773,14 +7802,16 @@
     if (state.tab === "dashboard") await refreshDashboard();
   }
 
-  // ---- 210 / 413: Risk Management dashboard --------------------------
+  // ---- 210 / 413 / 505: Risk Management dashboard --------------------
   // One call to /dashboard (sp_risk_dashboard_counts) paints every block.
-  // Structure (413, laid out 2026-10-01 as two 25|25|50 rows):
-  //   row 1 -- candidate summary | register summary | inherent + residual heatmaps
-  //   row 2 -- candidate ageing  | review ageing    | Top 5 risks by rating
-  // Nothing below that. The approval queue moved to the Candidates tab
-  // (refreshApprovalQueue, called from refresh()); the overdue risk
-  // actions and notification outbox blocks were removed from the screen.
+  // 505 (Dashboard UI specification v2, section 8) lays it out with the
+  // shared components (window.gracDash):
+  //   executive KPIs
+  //   Needs attention | inherent + residual heatmaps, treatment lifecycle
+  //   distributions (inherent / residual rating, treatment option,
+  //     category, candidate ageing, review ageing)
+  //   Top risks by rating (watchlist)
+  // The approval queue stays on the Candidates tab (refreshApprovalQueue).
   //
   // Every clickable element carries an index into dashDrills; the drill
   // itself (which list, which filter) lives here, so a status is never
@@ -7792,101 +7823,240 @@
     dashDrills.push(d);
     return ` data-dash-drill="${dashDrills.length - 1}"`;
   }
+  // A gracDash link target for a drill: { attr } -> an in-page button.
+  const drillTarget = d => d ? { attr: drillAttr(d) } : null;
+
+  // 505: drill buttons are focusable (role=button); Enter / Space act
+  // like a click, which the delegated click handler turns into the drill.
+  document.addEventListener("keydown", ev => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const el = ev.target && ev.target.closest ? ev.target.closest('[data-dash-drill][role="button"]') : null;
+    if (el) { ev.preventDefault(); el.click(); }
+  });
 
   async function refreshDashboard() {
     if (!state.organizationId) return;
-    const d = await apiGet(`/dashboard?organizationId=${state.organizationId}`);
-    if (!d) return;
+    const host = document.getElementById("riskDashBody");
+    const D = window.gracDash;
+    if (!host || !D) return;
+    host.innerHTML = D.skeleton();
+    const res = await apiGetChecked(`/dashboard?organizationId=${state.organizationId}`);
     dashDrills = [];
+    if (!res.ok || !res.data) {
+      host.innerHTML = `<div class="pm-dx">${D.errorCard({ title: "Could not load the Risk Management dashboard", message: res.error || "" })}</div>`;
+      return;
+    }
+    const d = res.data;
+    const c = d.candidates || {}, r = d.register || {}, cov = d.heatmapCoverage || {};
+    // 532: this organisation's published risk methodology and one row per
+    // risk. Only what the methodology switches on is added below; with no
+    // published methodology the dashboard is exactly as before.
+    await loadMethodology();
+    const method = state.methodology;
+    const msum = method ? await fetchMethodologySummary() : null;
+    const mOpen = (msum?.risks || []).filter(x => x.statusCode !== "Closed" && x.statusCode !== "Retired");
+    const mOpenIds = new Set(mOpen.map(x => x.riskRegisterId));
+    const open = Number(cov.openRisks) || 0;
+    const bands = d.reviewAgeing || [];
+    const overdueReviews = bands.filter(b => b.bandGroup === "Overdue").reduce((s, b) => s + (b.riskCount || 0), 0);
+    const dueReviews = bands.filter(b => b.bandGroup === "Pending").reduce((s, b) => s + (b.riskCount || 0), 0);
+    const stages = d.stageCounts || [];
+    const stageN = code => (stages.find(s => s.key === code) || {}).totalCount || 0;
+    const actions = d.overdueActions || [];
+    const actBreached = actions.filter(a => a.slaStatusCode === "Breached").length;
+    const actDueSoon = actions.length - actBreached;
 
-    // ---- A. Risk candidate summary ------------------------------------
-    const c = d.candidates || {};
-    document.getElementById("dashCandidateTiles").innerHTML =
-      dashTile(c.totalCandidates, "Total",
-               { tab: "candidates", statusCode: "", label: "All risk candidates" }) +
-      dashTile(c.analysisCompletedCount, "Assessed",
-               { tab: "candidates", statusCode: "AnalysisCompleted", label: "Assessed candidates (assessment completed)" }) +
-      dashTile(c.convertedToRiskCount, "Converted to risk",
-               { tab: "candidates", statusCode: "Registered", label: "Candidates converted to risks" }) +
-      dashTile(c.openCandidates, "Open",
-               { tab: "candidates", statusCode: "", openOnly: true, label: "Open candidates" });
+    // ---- C. Executive KPIs ----------------------------------------------
+    const kpis = [
+      D.kpiCard({ label: "Open risks", value: open,
+        qualifier: `${D.fmt(r.totalRisks)} registered &middot; ${D.fmt((r.closedCount || 0) + (r.retiredCount || 0))} closed or retired`,
+        href: drillTarget({ tab: "register", openOnly: true, label: "Open risks" }),
+        title: "Registered risks not Closed or Retired." }),
+      D.kpiCard({ label: "Under treatment", value: r.underTreatmentCount || 0,
+        qualifier: `${D.fmt(stageN("InTreatment"))} with treatment in progress`,
+        href: drillTarget({ tab: "register", statusCode: "UnderTreatment", label: "Risks under treatment" }),
+        title: "Risks in status Under treatment." }),
+      D.kpiCard({ label: "Residual assessed", value: cov.residualRated || 0,
+        qualifier: `${D.fmt(cov.residualPending || 0)} awaiting residual assessment`,
+        meter: D.pct(cov.residualRated || 0, open), meterTone: "success",
+        title: "Open risks with a residual likelihood and impact recorded. Bar: assessed / open risks. Pending risks are never given a residual rating here." }),
+      D.kpiCard({ label: "Accepted risks", value: r.acceptedCount || 0,
+        qualifier: "Still part of residual exposure",
+        href: drillTarget({ tab: "register", statusCode: "Accepted", label: "Accepted risks" }),
+        title: "Risks in status Accepted. They stay on the heatmaps and in every open count." }),
+      D.kpiCard({ label: "Reviews overdue", value: overdueReviews,
+        qualifier: `${D.fmt(dueReviews)} due in the next 30 days`,
+        href: drillTarget({ tab: "review", daysOverdueMin: 0, daysOverdueMax: null, label: "Risk reviews overdue" }),
+        title: "Open risks whose next review date is today or earlier." }),
+      D.kpiCard({ label: "Open risk candidates", value: c.openCandidates || 0,
+        qualifier: `${D.fmt(c.awaitingApprovalCount || 0)} awaiting approval &middot; ${D.fmt(c.convertedToRiskCount || 0)} converted`,
+        href: drillTarget({ tab: "candidates", statusCode: "", openOnly: true, label: "Open candidates" }),
+        title: "Candidates still being worked: pending, under analysis, clarification required or assessment completed." })
+    ];
+    // 532: quantification -- the annual loss expectancy of the open risks.
+    if (method?.version.quantificationEnabled && msum) {
+      const quantified = mOpen.filter(x => x.annualLossAmount != null);
+      const ale = quantified.reduce((sum, x) => sum + Number(x.annualLossAmount || 0), 0);
+      kpis.push(D.kpiCard({ label: "Annual loss expectancy",
+        value: Math.round(ale),   // gracDash formats it (en-IN grouping)
+        suffix: method.version.currencyCode || "",
+        qualifier: `${D.fmt(quantified.length)} of ${D.fmt(mOpen.length)} open risks quantified`,
+        title: "Sum of ALE (SLE x ARO) of the open risks, from each risk's current assessment (residual, else inherent)." }));
+    }
 
-    // ---- B. Candidate ageing (open only) ------------------------------
-    dashBars("dashAgeing", (d.candidateAgeing || []).map(b => ({
-      label: b.bandName, count: b.candidateCount,
-      drill: b.minAgeDays == null ? null : {
-        tab: "candidates", statusCode: "", openOnly: true,
-        minAgeDays: b.minAgeDays, maxAgeDays: b.maxAgeDays >= 100000 ? null : b.maxAgeDays,
-        label: `Open candidates aged ${b.bandName}`
-      }
-    })));
+    // ---- D. Needs attention ---------------------------------------------
+    const att = [
+      { title: "Reviews overdue", severity: "High", count: overdueReviews, detail: "Next review date has passed.",
+        href: drillTarget({ tab: "review", daysOverdueMin: 0, daysOverdueMax: null, label: "Risk reviews overdue" }) },
+      { title: "Treatment actions overdue", severity: "High", count: actBreached, detail: "Risk treatment tasks past their SLA due date (Task Board)." },
+      { title: "Residual assessment pending", severity: "High", count: cov.residualPending || 0,
+        detail: "Open risks without a residual rating; shown separately, never as low risk." },
+      { title: "Risks without an owner", severity: "High", count: r.unownedCount || 0, detail: "No accountable owner recorded.",
+        href: drillTarget({ tab: "register", noOwner: true, label: "Risks with no owner" }) },
+      { title: "Treatment option not decided", severity: "Medium", count: stageN("TreatmentDue"), detail: "Analysed risks waiting for a treatment option.",
+        href: drillTarget({ tab: "register", workflowStageCode: "TreatmentDue", label: "Risks: treatment option due" }) },
+      { title: "Analysis due", severity: "Medium", count: stageN("AnalysisDue"), detail: "Registered risks not yet analysed.",
+        href: drillTarget({ tab: "register", workflowStageCode: "AnalysisDue", label: "Risks: analysis due" }) },
+      { title: "Acceptance due", severity: "Medium", count: stageN("AcceptanceDue"), detail: "Residual done; waiting for formal acceptance.",
+        href: drillTarget({ tab: "register", workflowStageCode: "AcceptanceDue", label: "Risks: acceptance due" }) },
+      { title: "Candidates awaiting approval", severity: "Medium", count: c.awaitingApprovalCount || 0, detail: "Assessments waiting for the approver (Risk Candidates tab)." },
+      { title: "Treatment actions due soon", severity: "Medium", count: actDueSoon, detail: "Risk treatment tasks due today or soon." }
+    ].filter(a => a.title !== "Treatment option not decided" || stages.length)
+     .filter(a => !/^(Analysis due|Acceptance due)$/.test(a.title) || stages.length);
+    // 532: appetite and target, when the methodology switches them on.
+    // Not clickable: the register has no filter for them; its rows carry
+    // the same "Above appetite" / "Target" tags.
+    if (method?.version.appetiteEnabled && msum)
+      att.push({ title: "Above risk appetite", severity: "High",
+        count: mOpen.filter(x => x.appetiteStatus === "Above").length,
+        detail: "Current rating (residual, else inherent) is above the highest acceptable rating." });
+    if (method?.version.targetRatingEnabled && msum)
+      att.push({ title: "Target rating not met", severity: "Medium",
+        count: mOpen.filter(x => x.targetMet === false).length,
+        detail: "Residual rating is still above the target set at analysis or review." });
 
-    // ---- Risk register summary ----------------------------------------
-    const r = d.register || {};
-    document.getElementById("dashRegisterTiles").innerHTML =
-      dashTile(r.totalRisks, "Total",
-               { tab: "register", label: "All registered risks" }) +
-      dashTile(r.underTreatmentCount, "Under treatment",
-               { tab: "register", statusCode: "UnderTreatment", label: "Risks under treatment" }) +
-      dashTile(r.acceptedCount, "Accepted",
-               { tab: "register", statusCode: "Accepted", label: "Accepted risks" }) +
-      dashTile(r.retiredCount, "Retired",
-               { tab: "register", statusCode: "Retired", label: "Retired risks" }) +
-      dashTile(r.unownedCount, "No owner",
-               { tab: "register", noOwner: true, label: "Risks with no owner" },
-               (r.unownedCount || 0) > 0);
-
-    // ---- Heatmaps: inherent and residual, never combined ---------------
+    // ---- E1. Heatmaps + lifecycle ---------------------------------------
     const levels = d.matrixLevels || [];
-    const cov = d.heatmapCoverage || {};
+    const heat = D.card({ title: "Risk rating heatmaps", meta: "open risks", body:
+      `<div class="risk-heatmaps">
+        <div><h4 class="risk-subhead">Inherent <span class="pm-hint">likelihood &times; impact</span></h4>
+             <div class="risk-heatmap" id="dashHeatInherent"></div>
+             <p class="pm-hint">${escapeHtml(`${cov.inherentRated || 0} of ${open} open risks plotted.`)}</p></div>
+        <div><h4 class="risk-subhead">Residual <span class="pm-hint">likelihood &times; impact</span></h4>
+             <div class="risk-heatmap" id="dashHeatResidual"></div>
+             <p class="pm-hint">${escapeHtml(`${cov.residualRated || 0} of ${open} open risks plotted`
+               + ((cov.residualPending || 0) > 0 ? `; ${cov.residualPending} awaiting residual assessment.` : "."))}</p></div>
+      </div>` });
+    const lifecycle = stages.length
+      ? D.distCard({ title: "Treatment lifecycle", totalLabel: "open risks", mode: "bars",
+          items: stages.map(s => ({ label: s.label, count: s.totalCount || 0, tone: s.key === "ReviewDue" ? "warning" : "info",
+            href: drillTarget({ tab: "register", workflowStageCode: s.key, label: `Risks: ${(STAGE_LABEL[s.key] || s.label).toLowerCase()}` }) })),
+          footer: `<p class="pm-dx-note">The Risk Register's workflow stage. Review due outranks the other stages.</p>`,
+          emptyText: "No open risks." })
+      : "";
+
+    // ---- E2. Distributions ------------------------------------------------
+    const charts = [];
+    charts.push(D.distCard({ title: "Inherent rating", totalLabel: "open risks",
+      items: (d.risksByRating || []).filter(x => (x.openCount || 0) > 0)
+        .map(x => ({ label: x.label, count: x.openCount || 0, colour: x.colourHex, tone: "neutral" })),
+      emptyText: "No open risks." }));
+    if (d.residualRatings) {
+      const items = d.residualRatings.map(x => ({ label: x.label, count: x.totalCount || 0, colour: x.colourHex, tone: "info" }));
+      if ((cov.residualPending || 0) > 0) items.push({ label: "Residual assessment pending", count: cov.residualPending, tone: "faint" });
+      charts.push(D.distCard({ title: "Residual rating", totalLabel: "open risks", items, emptyText: "No open risks." }));
+    }
+    if (d.treatmentOptions && d.treatmentOptions.length) {
+      const T = { Terminate: "info3", Treat: "info", Transfer: "info2", Tolerate: "neutral", "": "faint" };
+      charts.push(D.distCard({ title: "Treatment option", totalLabel: "open risks",
+        items: d.treatmentOptions.map(x => ({ label: x.label, count: x.totalCount || 0, tone: T[x.key] || "neutral" })),
+        emptyText: "No open risks." }));
+    }
+    charts.push(D.distCard({ title: "Open risks by category", mode: "bars", totalLabel: "open risks",
+      items: (d.risksByCategory || []).filter(x => (x.openCount || 0) > 0).slice(0, 8)
+        .map(x => ({ label: x.label, count: x.openCount || 0, tone: "info" })),
+      emptyText: "No open risks." }));
+    charts.push(D.distCard({ title: "Candidate ageing", mode: "bars", totalLabel: "open candidates",
+      items: (d.candidateAgeing || []).map(b => ({ label: b.bandName, count: b.candidateCount || 0, tone: "info",
+        href: b.minAgeDays == null ? null : drillTarget({ tab: "candidates", statusCode: "", openOnly: true,
+          minAgeDays: b.minAgeDays, maxAgeDays: b.maxAgeDays >= 100000 ? null : b.maxAgeDays, label: `Open candidates aged ${b.bandName}` }) })),
+      emptyText: "No open candidates." }));
+    charts.push(D.distCard({ title: "Review ageing", mode: "bars", totalLabel: "reviews",
+      items: bands.map(b => ({ label: b.bandGroup === "Pending" ? b.bandName : `Overdue ${b.bandName}`, count: b.riskCount || 0,
+        tone: b.bandGroup === "Overdue" ? "warning" : "info",
+        href: drillTarget({ tab: "review", daysOverdueMin: b.minDaysOverdue, daysOverdueMax: b.maxDaysOverdue >= 100000 ? null : b.maxDaysOverdue,
+          label: b.bandGroup === "Pending" ? `Reviews due in ${b.bandName.replace(/^Due in /, "")}` : `Reviews overdue ${b.bandName}` }) })),
+      emptyText: "No reviews scheduled." }));
+
+    // 532: trend and the methodology's dimensions (open risks, from each
+    // risk's current assessment).
+    if (method && msum) {
+      if (method.version.trendEnabled) {
+        const n = k => mOpen.filter(x => x.trend === k).length;
+        charts.push(D.distCard({ title: "Rating trend", totalLabel: "open risks",
+          items: [{ label: "Went up", count: n("Up"), tone: "danger" },
+                  { label: "Unchanged", count: n("Same"), tone: "neutral" },
+                  { label: "Went down", count: n("Down"), tone: "success" },
+                  { label: "First assessment", count: n("New"), tone: "faint" }].filter(i => i.count > 0),
+          footer: `<p class="pm-dx-note">Current rating against the previous assessment of the same stage.</p>`,
+          emptyText: "No open risks." }));
+      }
+      method.dims.forEach(dim => {
+        const vals = msum.values.filter(v => v.dimensionCode === dim.dimensionCode && mOpenIds.has(v.riskRegisterId));
+        const items = dim.levels.map(l => ({ label: `${l.levelValue} \u00b7 ${l.levelName}`,
+          count: vals.filter(v => v.levelValue === l.levelValue).length, tone: "info" })).filter(i => i.count > 0);
+        const notAssessed = mOpen.length - vals.length;
+        if (notAssessed > 0) items.push({ label: "Not assessed yet", count: notAssessed, tone: "faint" });
+        charts.push(D.distCard({ title: dim.dimensionName, mode: "bars", totalLabel: "open risks", items,
+          footer: `<p class="pm-dx-note">Risk methodology version ${escapeHtml(method.version.versionNo)}. Higher level = more risk.</p>`,
+          emptyText: "No open risks." }));
+      });
+    }
+
+    // ---- F. Watchlist -------------------------------------------------------
+    const top = d.topRisks || [];
+    const today = new Date().toISOString().slice(0, 10);
+    const watch = D.table({ title: "Top risks by rating", meta: `${top.length} of ${D.fmt(open)} open risks`,
+      columns: [{ label: "Risk" }, { label: "Title" }, { label: "Owner" }, { label: "Inherent" }, { label: "Residual" }, { label: "Stage" }, { label: "Next review" }],
+      rows: top.map(t => {
+        const due = t.nextReviewDate ? String(t.nextReviewDate).slice(0, 10) : "";
+        return [
+          `<a href="#" data-open-risk="${t.riskRegisterId}">${escapeHtml(t.riskNumber)}</a>`,
+          escapeHtml(t.riskTitle || ""),
+          escapeHtml(t.riskOwnerName || "Unassigned"),
+          t.inherentRatingCode ? severityChip(t.inherentRatingCode) : "&mdash;",
+          t.residualRatingCode ? severityChip(t.residualRatingCode) : `<span class="pm-hint">Residual assessment pending</span>`,
+          t.workflowStageCode ? escapeHtml(STAGE_LABEL[t.workflowStageCode] || t.workflowStageCode) : "&mdash;",
+          due ? (due <= today ? `<span class="pm-dx-pill tone-danger">${escapeHtml(due)}</span>` : escapeHtml(due)) : "&mdash;"
+        ];
+      }),
+      emptyText: "No open risks.",
+      footer: `<p class="pm-dx-note">Highest inherent rating first, then residual. A risk without a residual assessment says so; it is not shown as lower risk.</p>` });
+
+    // Row 2 (2026-11-02): left = Needs attention + Treatment lifecycle;
+    // right = heatmaps + the inherent / residual rating charts, so the two
+    // columns carry similar height. gracDash.balance evens out the rest.
+    const ratings = charts.slice(0, 2), rest = charts.slice(2);
+    host.innerHTML = `<div class="pm-dx">`
+      + `<div class="pm-dx-kpis">${kpis.join("")}</div>`
+      + `<div class="pm-dx-row-2"><div class="pm-dx-col">${D.attention(att)}${lifecycle}</div>`
+      + `<div class="pm-dx-col">${heat}<div class="pm-dx-grid pm-dx-grid-2">${ratings.join("")}</div></div></div>`
+      + `<div class="pm-dx-grid">${rest.join("")}</div>`
+      + watch + `</div>`;
     heatmap("dashHeatInherent", levels, d.inherentHeatmap || [], false);
     heatmap("dashHeatResidual", levels, d.residualHeatmap || [], true);
-    setHint("dashHeatInherentNote",
-      `${cov.inherentRated || 0} of ${cov.openRisks || 0} open risks plotted.`);
-    setHint("dashHeatResidualNote",
-      `${cov.residualRated || 0} of ${cov.openRisks || 0} open risks plotted`
-      + ((cov.residualPending || 0) > 0 ? `; ${cov.residualPending} awaiting residual assessment.` : "."));
+    // A short attention list beside tall heatmaps left a blank block
+    // (2026-11-02): move the lifecycle card to whichever side is shorter.
+    host.querySelectorAll(".pm-dx-row-2").forEach(D.balance);
 
-    // ---- Review ageing: pending and overdue only -----------------------
-    const bands = d.reviewAgeing || [];
-    const rows = [];
-    ["Pending", "Overdue"].forEach(group => {
-      const inGroup = bands.filter(b => b.bandGroup === group);
-      if (!inGroup.length) return;
-      rows.push({ heading: group === "Pending" ? "Pending review" : "Overdue review" });
-      inGroup.forEach(b => rows.push({
-        label: b.bandName, count: b.riskCount,
-        drill: {
-          tab: "review",
-          daysOverdueMin: b.minDaysOverdue,
-          daysOverdueMax: b.maxDaysOverdue >= 100000 ? null : b.maxDaysOverdue,
-          label: group === "Pending" ? `Reviews due in ${b.bandName.replace(/^Due in /, "")}`
-                                     : `Reviews overdue ${b.bandName}`
-        }
-      }));
-    });
-    dashBars("dashReviewAgeing", rows);
-
-    // ---- Top 5 risks by rating ----------------------------------------
-    const top = d.topRisks || [];
-    document.getElementById("topRiskTableBody").innerHTML = top.length
-      ? top.map(t => `<tr class="pm-row-clickable" data-open-risk="${t.riskRegisterId}">
-          <td><a href="#" data-open-risk="${t.riskRegisterId}">${escapeHtml(t.riskNumber)}</a><br>
-              <span class="pm-hint">${escapeHtml(t.riskTitle || "")}</span></td>
-          <td>${escapeHtml(t.riskOwnerName || "—")}</td>
-          <td>${t.inherentRatingCode ? severityChip(t.inherentRatingCode) : "—"}</td>
-          <td>${t.residualRatingCode ? severityChip(t.residualRatingCode) : `<span class="pm-hint">Not assessed</span>`}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="4" class="pm-empty-row">No open risks.</td></tr>`;
-  }
-
-  // A KPI tile. Same .risk-tile the treatment pages use (tile() below);
-  // this one adds the drill-down.
-  function dashTile(value, label, drill, alert) {
-    const cls = `risk-tile${alert ? " is-alert" : ""}${drill ? " is-clickable" : ""}`;
-    return `<div class="${cls}"${drillAttr(drill)} title="${escapeHtml(drill?.label || label)}">
-      <div class="v">${escapeHtml(String(value ?? 0))}</div>
-      <div class="k">${escapeHtml(label)}</div></div>`;
+    const ctx = document.getElementById("dashContext");
+    if (ctx) {
+      const sel = document.getElementById("dashFilterOrganization");
+      const name = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : "";
+      ctx.innerHTML = [name && `<span><i class="fa-regular fa-building" aria-hidden="true"></i> ${escapeHtml(name)}</span>`,
+        `<span><i class="fa-regular fa-clock" aria-hidden="true"></i> Refreshed ${escapeHtml(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</span>`]
+        .filter(Boolean).join("");
+    }
   }
 
   function tile(value, label, alert) {
@@ -7894,30 +8064,6 @@
     return `<div class="${cls}">
       <div class="v">${escapeHtml(String(value ?? 0))}</div>
       <div class="k">${escapeHtml(label)}</div></div>`;
-  }
-
-  function setHint(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-  }
-
-  // Proportional bars (.risk-bars). rows: {label, count, drill} or
-  // {heading} for a group caption. A bar is clickable only when it has
-  // something behind it.
-  function dashBars(hostId, rows) {
-    const host = document.getElementById(hostId);
-    if (!host) return;
-    const list = rows || [];
-    if (!list.some(x => !x.heading)) { host.innerHTML = `<p class="pm-hint">No data.</p>`; return; }
-    const max = Math.max(1, ...list.filter(x => !x.heading).map(x => x.count || 0));
-    host.innerHTML = list.map(x => {
-      if (x.heading) return `<div class="pm-hint">${escapeHtml(x.heading)}</div>`;
-      const clickable = x.drill && (x.count || 0) > 0;
-      return `<div class="risk-bar-row${clickable ? " is-clickable" : ""}"${clickable ? drillAttr(x.drill) : ""}>
-        <span class="lbl" title="${escapeHtml(x.label)}">${escapeHtml(x.label)}</span>
-        <span class="trk"><span class="fil" style="width:${Math.round((x.count || 0) / max * 100)}%"></span></span>
-        <span class="num">${x.count || 0}</span></div>`;
-    }).join("");
   }
 
   // One heatmap: rows = likelihood, highest first; columns = impact.
@@ -7931,6 +8077,7 @@
     const imp = levels.filter(l => l.axis === "I").sort((a, b) => a.levelValue - b.levelValue);
     if (!lik.length || !imp.length || !cells.length) {
       host.style.gridTemplateColumns = "";
+      host.style.gridTemplateRows = "";
       host.innerHTML = `<p class="pm-hint">No risk matrix configured for this organization.</p>`;
       return;
     }
@@ -7939,6 +8086,9 @@
     // the dashboard's 50% column; long axis names ellipsise and keep
     // their full text as a tooltip.
     host.style.gridTemplateColumns = `minmax(64px, 110px) repeat(${imp.length}, minmax(28px, 1fr))`;
+    // 505: likelihood rows may grow a little (40-56px) when the card is
+    // stretched to its row; capped so cells never turn into tall bars.
+    host.style.gridTemplateRows = `repeat(${lik.length}, minmax(40px, 56px)) auto`;
     const kind = residual ? "residual" : "inherent";
     let html = "";
     lik.forEach(l => {
@@ -7994,6 +8144,8 @@
       state.regDrill = { ...d };
       ["regFilterSource", "regFilterCategory", "regFilterRating", "regFilterSearch",
        "regFilterPending", "regFilterStage", "regFilterTreatment"].forEach(id => setVal(id, ""));
+      // 505: a lifecycle drill is the register's own Workflow stage filter.
+      if (d.workflowStageCode) setVal("regFilterStage", d.workflowStageCode);
       pagers.reg?.reset(true);
       showTab("register");
     } else if (d.tab === "review") {
@@ -8257,6 +8409,313 @@
   // matching fix on the Exception Centre grid.
   function displayCandidateTitle(title) {
     return String(title || "").replace(/^\s*Risk:\s*/i, "");
+  }
+
+  // ====================================================================
+  // Risk methodology (migration 532). docs/risk-methodology.md.
+  //
+  // The organisation's PUBLISHED methodology (Settings -> Risk
+  // Methodology) adds fields to the three scoring pages:
+  //   ra = Risk Analysis (inherent)   source "Assess"
+  //   rr = Residual risk analysis     source "Residual"
+  //   rv = Review risk                source "Review"
+  // Each page has a host <div id="{prefix}Methodology"> inside its
+  // scoring panel. No published version = the hosts stay hidden and the
+  // pages behave exactly as before 532.
+  //
+  // The values travel inside the page's own save (assess / residual /
+  // review) as `methodology`, and the Api stores them in the same
+  // transaction. In 3D mode the server resolves the rating with the
+  // third dimension; resolveRating() below mirrors it for the preview.
+  // Convention for every dimension: higher level = more risk.
+  // ====================================================================
+  const METHOD_SOURCE = { ra: "Assess", rr: "Residual", rv: "Review" };
+
+  async function loadMethodology() {
+    state.methodology = null;
+    if (!state.organizationId) return;
+    let body = null;
+    try {
+      const r = await fetch(U(`${base}/methodology?organizationId=${state.organizationId}`), { credentials: "same-origin" });
+      if (r.ok) body = await r.json();
+    } catch (_) { body = null; }
+    const sets = body && body.sets;
+    const v = sets && (sets.versions || []).find(x => x.status === "Published");
+    if (!v) return;
+    const id = v.methodologyVersionId;
+    const mine = rows => (rows || []).filter(x => x.methodologyVersionId === id);
+    const levels = mine(sets.levels);
+    state.methodology = {
+      version: v,
+      dims: mine(sets.dimensions).filter(d => d.isEnabled)
+        .map(d => ({ ...d, levels: levels.filter(l => l.dimensionCode === d.dimensionCode) })),
+      bands: mine(sets.bands),
+      ratings: sets.ratings || [],
+      areas: mine(sets.impactAreas)   // the version's own impact areas
+    };
+  }
+
+  // The dimensions a page asks for.
+  function methodDims(prefix) {
+    const m = state.methodology;
+    if (!m) return [];
+    const src = METHOD_SOURCE[prefix];
+    return m.dims.filter(d => src === "Assess" ? d.askInherent : src === "Residual" ? d.askResidual : d.askReview);
+  }
+
+  // Renders the host and fills it with the saved values (the risk's own
+  // assessment for this stage, when there is one).
+  async function mountMethodology(prefix, riskId) {
+    const host = document.getElementById(prefix + "Methodology");
+    if (!host) return;
+    const m = state.methodology;
+    if (!m) { host.hidden = true; host.innerHTML = ""; unlockImpact(prefix); return; }
+
+    let saved = null;
+    try {
+      const r = await fetch(U(`${base}/register/${riskId}/methodology`), { credentials: "same-origin" });
+      if (r.ok) {
+        const b = await r.json();
+        const as = b.sets?.assessments || [];
+        const slot = prefix === "rr" ? "Residual" : prefix === "ra" ? "Latest" : "Inherent";
+        const a = as.find(x => x.slot === slot) || (prefix === "rr" ? null : as.find(x => x.slot === "Inherent"));
+        if (a) saved = { ...a, values: (b.sets.values || []).filter(x => x.assessmentMethodologyId === a.assessmentMethodologyId) };
+      }
+    } catch (_) { saved = null; }
+
+    const v = m.version;
+    const dims = methodDims(prefix);
+    const showTarget = v.targetRatingEnabled && prefix !== "rr";
+    const multi = v.impactMode === "Max" || v.impactMode === "Average";
+    const quant = !!v.quantificationEnabled;
+    const savedLevel = code => (saved?.values || []).find(x => x.valueKind === "Dimension" && x.valueCode === code)?.levelValue;
+    const savedArea  = code => (saved?.values || []).find(x => x.valueKind === "ImpactArea" && x.valueCode === code)?.levelValue;
+    const impactCodeOf = level => (state.options?.impact || []).find(x => x.levelValue === level)?.code || "";
+
+    if (!dims.length && !showTarget && !multi && !quant && v.scoringMode === "Matrix") {
+      host.hidden = true; host.innerHTML = ""; unlockImpact(prefix); return;
+    }
+
+    const opt = (value, label, sel, title) =>
+      `<option value="${escapeHtml(value)}"${sel ? " selected" : ""}${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(label)}</option>`;
+
+    let html = `<h3 class="risk-subhead">${escapeHtml(v.methodologyName || "Risk methodology")} <span class="pm-hint">version ${escapeHtml(v.versionNo)}`
+      + `${v.scoringMode === "3D" ? " · 3D scoring" : v.scoringMode === "Priority" ? " · priority scoring" : ""}</span></h3>`
+      + `<div class="pm-form-grid ra-grid-score">`;
+
+    dims.forEach(d => {
+      const cur = savedLevel(d.dimensionCode);
+      html += `<label><span title="${escapeHtml(d.description || "")}">${escapeHtml(d.dimensionName)}`
+        + `${d.isRequired ? `<span class="pm-required">*</span>` : ""}</span>`
+        + `<select data-method-dim="${escapeHtml(d.dimensionCode)}" id="${prefix}Dim_${escapeHtml(d.dimensionCode)}">`
+        + opt("", "-- select --", false)
+        + d.levels.map(l => opt(l.levelValue, `${l.levelValue} · ${l.levelName}`, cur === l.levelValue, l.descriptor)).join("")
+        + `</select></label>`;
+    });
+
+    if (showTarget) {
+      const cur = saved?.targetRatingCode || "";
+      html += `<label><span>Target risk rating</span><select id="${prefix}MethodTarget">`
+        + opt("", "-- none --", false)
+        + m.ratings.map(r => opt(r.ratingCode, r.ratingName || r.ratingCode, cur === r.ratingCode)).join("")
+        + `</select></label>`;
+    }
+
+    if (v.scoringMode !== "Matrix")
+      html += `<div class="form-field"><span>${v.scoringMode === "3D" ? "3D score" : "Priority score"}</span>`
+        + `<div class="risk-rating-preview" id="${prefix}MethodScore">--</div></div>`;
+    html += `</div>`;
+
+    if (multi) {
+      html += `<h3 class="risk-subhead">Impact by area <span class="pm-hint">overall impact = `
+        + `${v.impactMode === "Max" ? "the highest" : "the average"} of the areas rated</span></h3>`
+        + `<div class="pm-form-grid ra-grid-score">`
+        + m.areas.map(a => {
+            const cur = savedArea(a.areaCode);
+            return `<label><span>${escapeHtml(a.areaName)}</span>`
+              + `<select data-method-area="${escapeHtml(a.areaCode)}">` + opt("", "-- not affected --", false)
+              + (state.options?.impact || []).map(i => opt(i.code, i.name, cur != null && cur === i.levelValue)).join("")
+              + `</select></label>`;
+          }).join("")
+        + `</div>`;
+    }
+
+    if (quant) {
+      const cur = v.currencyCode || "";
+      html += `<h3 class="risk-subhead">Quantification <span class="pm-hint">${escapeHtml(cur)}</span></h3>`
+        + `<div class="pm-form-grid ra-grid-score">`
+        + `<label><span>Single loss expectancy (SLE)</span><input type="number" min="0" step="0.01" id="${prefix}MethodSle" value="${saved?.singleLossAmount ?? ""}" /></label>`
+        + `<label><span>Annual rate of occurrence (ARO)</span><input type="number" min="0" step="0.0001" id="${prefix}MethodAro" value="${saved?.annualRate ?? ""}" /></label>`
+        + `<div class="form-field"><span>Annual loss expectancy (ALE)</span><div class="risk-rating-preview" id="${prefix}MethodAle">--</div></div>`
+        + `</div>`;
+    }
+
+    host.innerHTML = html;
+    host.hidden = false;
+
+    host.querySelectorAll("[data-method-dim]").forEach(el =>
+      el.addEventListener("change", () => onMethodologyChanged(prefix)));
+    host.querySelectorAll("[data-method-area]").forEach(el =>
+      el.addEventListener("change", () => onMethodologyChanged(prefix)));
+    ["MethodSle", "MethodAro"].forEach(k =>
+      document.getElementById(prefix + k)?.addEventListener("input", () => renderMethodologyScore(prefix)));
+
+    // Multi-dimension impact: the overall impact is derived, not chosen.
+    const impactSel = document.getElementById(prefix + "Impact");
+    if (impactSel) {
+      impactSel.disabled = multi;
+      impactSel.title = multi ? "Derived from Impact by area below." : "";
+    }
+    if (multi && saved && impactSel && !impactSel.value) impactSel.value = impactCodeOf(saved.derivedImpactValue);
+    onMethodologyChanged(prefix);
+  }
+
+  function unlockImpact(prefix) {
+    const sel = document.getElementById(prefix + "Impact");
+    if (sel) { sel.disabled = false; sel.title = ""; }
+  }
+
+  function onMethodologyChanged(prefix) {
+    const m = state.methodology;
+    if (m && (m.version.impactMode === "Max" || m.version.impactMode === "Average")) {
+      const levels = [...document.querySelectorAll(`#${prefix}Methodology [data-method-area]`)]
+        .map(el => (state.options?.impact || []).find(i => i.code === el.value)?.levelValue)
+        .filter(x => x != null);
+      const sel = document.getElementById(prefix + "Impact");
+      if (sel) {
+        const derived = !levels.length ? null
+          : m.version.impactMode === "Max" ? Math.max(...levels)
+          : Math.round(levels.reduce((a, b) => a + b, 0) / levels.length);
+        sel.value = derived == null ? "" : ((state.options?.impact || []).find(i => i.levelValue === derived)?.code || "");
+      }
+    }
+    renderRating(prefix);
+    if (prefix === "rr") { renderResidualDelta(); renderResidualFlow(state.treatmentStateForResidual); }
+    if (prefix === "rv") renderReviewFlow();
+    renderMethodologyScore(prefix);
+  }
+
+  function methodLevel(prefix, code) {
+    const el = document.getElementById(`${prefix}Dim_${code}`);
+    return el && el.value ? Number(el.value) : null;
+  }
+
+  function renderMethodologyScore(prefix) {
+    const m = state.methodology;
+    if (!m) return;
+    const out = document.getElementById(prefix + "MethodScore");
+    if (out) {
+      const lk = (state.options?.likelihood || []).find(x => x.code === val(prefix + "Likelihood"));
+      const im = (state.options?.impact || []).find(x => x.code === val(prefix + "Impact"));
+      let text = "--";
+      if (lk && im) {
+        if (m.version.scoringMode === "3D") {
+          const t = methodLevel(prefix, m.version.thirdAxisCode);
+          if (t != null) text = `${lk.levelValue} × ${im.levelValue} × ${t} = ${lk.levelValue * im.levelValue * t}`;
+        } else {
+          let score = lk.levelValue * im.levelValue;
+          methodDims(prefix).forEach(d => {
+            const lv = methodLevel(prefix, d.dimensionCode);
+            if (lv != null) score += Number(d.priorityWeight || 0) * lv;
+          });
+          text = String(Math.round(score * 100) / 100);
+        }
+      }
+      out.textContent = text;
+    }
+    const ale = document.getElementById(prefix + "MethodAle");
+    if (ale) {
+      const sle = val(prefix + "MethodSle"), aro = val(prefix + "MethodAro");
+      ale.textContent = sle !== "" && aro !== ""
+        ? `${(Math.round(Number(sle) * Number(aro) * 100) / 100).toLocaleString()} ${m.version.currencyCode || ""}`.trim()
+        : "--";
+    }
+  }
+
+  // The `methodology` part of a save, or { error } when a required
+  // dimension is empty. null when the organisation has no methodology.
+  function collectMethodology(prefix) {
+    const m = state.methodology;
+    const host = document.getElementById(prefix + "Methodology");
+    if (!m || !host || host.hidden) return null;
+    const values = [];
+    for (const d of methodDims(prefix)) {
+      const lv = methodLevel(prefix, d.dimensionCode);
+      if (lv == null && d.isRequired) return { error: `${d.dimensionName} is required.` };
+      if (lv != null) values.push({ dimensionCode: d.dimensionCode, levelValue: lv });
+    }
+    const impactAreas = [...host.querySelectorAll("[data-method-area]")]
+      .filter(el => el.value)
+      .map(el => ({ areaCode: el.getAttribute("data-method-area"), impactCode: el.value }));
+    if ((m.version.impactMode === "Max" || m.version.impactMode === "Average") && !impactAreas.length)
+      return { error: "Rate the impact for at least one impact area." };
+    const num = id => { const x = val(id); return x === "" ? null : Number(x); };
+    return {
+      payload: {
+        methodologyVersionId: m.version.methodologyVersionId,
+        values,
+        impactAreas,
+        targetRatingCode: val(prefix + "MethodTarget") || null,
+        singleLossAmount: num(prefix + "MethodSle"),
+        annualRate:       num(prefix + "MethodAro")
+      }
+    };
+  }
+
+  // 3D: the rating the server will store (sp_risk_rating_resolve).
+  // ratingScore stays on the matrix scale, like the server's, so the
+  // inherent / residual comparison on the residual page still holds.
+  function resolveRating3d(lk, im, prefix) {
+    const m = state.methodology;
+    const t = methodLevel(prefix, m.version.thirdAxisCode);
+    if (t == null) return null;
+    const score = lk.levelValue * im.levelValue * t;
+    const band = m.bands.find(b => score >= b.minScore && score <= b.maxScore);
+    if (!band) return null;
+    const r = m.ratings.find(x => x.ratingCode === band.ratingCode);
+    return { ratingCode: band.ratingCode, ratingName: r?.ratingName || band.ratingCode,
+             ratingScore: r?.ratingRank ?? null, colourHex: r?.colourHex, score3d: score };
+  }
+
+  // Register grid: appetite, trend, target and priority beside the
+  // residual cell, from one summary read per refresh.
+  // One row per risk (sp_risk_methodology_register_summary), shared by
+  // the register tags and the dashboard. null when there is nothing to
+  // show (no published methodology, or the read failed).
+  async function fetchMethodologySummary() {
+    if (!state.methodology || !state.organizationId) return null;
+    try {
+      const r = await fetch(U(`${base}/register/methodology-summary?organizationId=${state.organizationId}`), { credentials: "same-origin" });
+      if (!r.ok) return null;
+      const b = await r.json();
+      return { risks: b?.sets?.risks || [], values: b?.sets?.values || [] };
+    } catch (_) { return null; }
+  }
+
+  async function decorateRegisterMethodology() {
+    const summary = await fetchMethodologySummary();
+    if (!summary) return;
+    const rows = summary.risks;
+    const TREND = { Up: ["fa-arrow-trend-up", "Rating went up since the last assessment"],
+                    Down: ["fa-arrow-trend-down", "Rating went down since the last assessment"],
+                    Same: ["fa-arrows-left-right", "Rating unchanged since the last assessment"] };
+    rows.forEach(s => {
+      const tr = document.querySelector(`#regTableBody tr[data-reg-view="${s.riskRegisterId}"]`);
+      const cell = tr && tr.children[5];
+      if (!cell) return;
+      const tags = [];
+      if (s.appetiteStatus === "Above")
+        tags.push(`<span class="risk-method-tag is-alert" title="Above the appetite (${escapeHtml(s.appetiteMaxRatingCode)})">Above appetite</span>`);
+      if (s.targetMet === false)
+        tags.push(`<span class="risk-method-tag" title="Target ${escapeHtml(s.targetRatingCode)} not yet reached">Target ${escapeHtml(s.targetRatingCode)}</span>`);
+      if (s.trend && TREND[s.trend])
+        tags.push(`<span class="risk-method-tag" title="${TREND[s.trend][1]}"><i class="fa-solid ${TREND[s.trend][0]}" aria-hidden="true"></i></span>`);
+      if (s.priorityScore != null)
+        tags.push(`<span class="risk-method-tag" title="Priority score">P ${escapeHtml(s.priorityScore)}</span>`);
+      if (s.score3d != null)
+        tags.push(`<span class="risk-method-tag" title="3D score">3D ${escapeHtml(s.score3d)}</span>`);
+      if (tags.length) cell.insertAdjacentHTML("beforeend", `<div class="risk-method-tags">${tags.join("")}</div>`);
+    });
   }
 
   async function apiGet(path) {

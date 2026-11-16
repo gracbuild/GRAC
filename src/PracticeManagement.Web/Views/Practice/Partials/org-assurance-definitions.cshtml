@@ -111,10 +111,12 @@
         </div>
         @* SAME 1fr/2fr/1fr tracks as the identity row above, so the two
            rows share vertical guides: Audit Category lines up under Code,
-           and the Owner pair spans exactly the width of Name. The third
-           track is intentionally left empty -- an aligned gap under
-           Effective Date reads better than a second row on its own,
-           unrelated rhythm.
+           and the Owner pair spans exactly the width of Name. 560: the third
+           track holds Assurance Approach (how the audit is conducted),
+           under Effective Date -- kept apart from Audit Category (what
+           kind of audit), as the Audit Change spec 4.1 requires. A third
+           row on the same tracks follows: Audit Mandate, Applicable
+           Frameworks, Other Frameworks.
 
            The inner Owner grid keeps minmax(0,1fr) so long <option> text
            cannot push a select wider than its slot and force a
@@ -133,23 +135,63 @@
                Role dropdown = organization_role (assurance-capable roles).
                Employee dropdown = current active holders of the picked role.
                The SP auto-resolves whichever side is left blank (Q1-A). *@
+            @* 2026-11-15 (sir): each Owner select has its own label -- Owner
+               Role (the role) and Responsible Owner (the person holding it)
+               -- instead of one "Owner" over both. Ids, order and the
+               wrapper / inner grid the workspace CSS targets are unchanged. *@
             <div class="pm-field" style="min-width:0;">
-                <span>Owner</span>
-                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                    <select class="pm-input" id="oaDefOwnerRole" style="min-width:0;" aria-label="Owner Role">
-                        <option value="">Loading roles...</option>
-                    </select>
-                    <select class="pm-input" id="oaDefOwnerEmployee" style="min-width:0;" aria-label="Owner Employee (current holder)">
-                        <option value="">-- pick a role first --</option>
-                    </select>
+                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px;">
+                    <label class="pm-field" style="min-width:0;">
+                        <span>Owner Role</span>
+                        <select class="pm-input" id="oaDefOwnerRole" style="min-width:0;">
+                            <option value="">Loading roles...</option>
+                        </select>
+                    </label>
+                    <label class="pm-field" style="min-width:0;">
+                        <span>Responsible Owner</span>
+                        <select class="pm-input" id="oaDefOwnerEmployee" style="min-width:0;">
+                            <option value="">-- pick a role first --</option>
+                        </select>
+                    </label>
                 </div>
             </div>
+            @* 560: Assurance Approach -- org_assurance_approach_master via
+               /practice/api/org-assurance/approaches. *@
+            <label class="pm-field" style="min-width:0;">
+                <span>Assurance Approach</span>
+                <select class="pm-input" id="oaDefApproach">
+                    <option value="">Loading approaches...</option>
+                </select>
+            </label>
         </div>
+        @* 560: third row, same 1fr / 2fr / 1fr tracks as the two above:
+           Audit Mandate (a multi-select, .pm-checkcombo -- the bases of
+           the audit, /practice/api/org-assurance/mandates) under Audit
+           Category; Applicable Frameworks (the organization's subscribed
+           frameworks -- the Practice picker's list, a .pm-checkcombo)
+           across Owner and Assurance Approach. Other Frameworks /
+           Standards (typed by hand for an organization without
+           subscriptions, one per line) has its own full-width row under
+           it, like Objective (sir, 2026-11-15: too congested beside). *@
+        <div style="display:grid; grid-template-columns:1fr 2fr 1fr; gap:10px; margin-top:10px; align-items:start;">
+            <div class="pm-field" style="min-width:0;">
+                <span>Audit Mandate</span>
+                <div id="oaDefMandates"></div>
+            </div>
+            <div class="pm-field" style="min-width:0; grid-column:span 2;">
+                <span>Applicable Frameworks</span>
+                <div id="oaDefFrameworks"></div>
+            </div>
+        </div>
+        <label class="pm-field" style="margin-top:10px;">Other Frameworks / Standards
+            <textarea class="pm-input" id="oaDefFrameworksOther" rows="2" maxlength="4000" placeholder="One per line"></textarea>
+        </label>
         <label class="pm-field" style="margin-top:10px;">Objective
             <textarea class="pm-input" id="oaDefObjective" rows="2" maxlength="4000"></textarea>
         </label>
+
         <label class="pm-field" style="margin-top:10px;">Description
-            <textarea class="pm-input" id="oaDefDescription" rows="3" maxlength="4000"></textarea>
+            <textarea class="pm-input" id="oaDefDescription" rows="6" maxlength="4000"></textarea>
         </label>
         <div class="pm-dialog-actions">
             <button type="button" id="oaDefCancel" class="pm-button">Cancel</button>
@@ -185,6 +227,10 @@
     </div>
 </dialog>
 
+@* 537: Audit Configuration is opened on an audit through the encrypted navigation code. *@
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
+@* 560: shared multi-select (.pm-checkcombo) for Applicable Frameworks. *@
+<script src="~/js/Shared/checkcombo.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -203,7 +249,10 @@
         pageSize   : 25,
         total      : 0,
         statuses   : [],
-        categories : []    // Admin-published assurance categories
+        categories : [],   // Admin-published assurance categories
+        approaches : [],   // 560: Assurance Approaches
+        mandates   : [],   // 560: Audit Mandates
+        frameworksByOrg : {} // 560: subscribed frameworks, per organization
         // 119: employees[] removed -- picker maintains its own per-role holder cache.
     };
 
@@ -250,6 +299,10 @@
         document.getElementById('oaDefRoot').hidden = false;
         await loadStatuses();
         await loadCategories();
+        // 560: Assurance Approach and Audit Mandate dropdowns
+        await loadMaster('approaches', '/approaches', 'oaDefApproach', 'approaches');
+        await loadMaster('mandates',   '/mandates',   null,            'mandates');   // multi-select, drawn per form
+        if (window.gracCheckCombo) window.gracCheckCombo.wire(document.getElementById('oaDefForm'));
         // 119 hybrid Owner picker fetches roles + holders lazily on dialog open
         // via window.__roleHolderPicker.attach() -- no eager employee fetch here.
         wireControls();
@@ -314,6 +367,127 @@
         if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
     }
 
+    // 560: the Definition masters -- Assurance Approach
+    // (org_assurance_approach_master) and Audit Mandate
+    // (org_assurance_mandate_master) -- loaded once per page into
+    // state[key] and, for a dropdown (selectId), drawn into its select.
+    // One loader for both; the mandates are a multi-select (renderMandates).
+    async function loadMaster(key, path, selectId, noun) {
+        const sel = selectId ? document.getElementById(selectId) : null;
+        try {
+            const r = await fetch(U(API + path), { credentials: 'same-origin' });
+            if (!r.ok) {
+                if (sel) sel.innerHTML = '<option value="">(no ' + noun + ' available)</option>';
+                return;
+            }
+            const b = await r.json();
+            state[key] = (b && (b.data || b.Data)) || [];
+            if (sel) renderMasterOptions(key, selectId, noun);
+        } catch (_) {
+            if (sel) sel.innerHTML = '<option value="">(failed to load ' + noun + ')</option>';
+        }
+    }
+
+    // 560: Audit Mandate -- a multi-select (.pm-checkcombo) of the mandate
+    // master; saved values are ticked by mandate id.
+    function renderMandates(saved) {
+        const options = (state.mandates || []).map(function (m) {
+            return { value: String(m.id != null ? m.id : m.Id), label: m.name || m.Name || '' };
+        });
+        const ticked = (saved || []).map(function (m) {
+            return String(m.auditMandateId != null ? m.auditMandateId : m.AuditMandateId);
+        });
+        document.getElementById('oaDefMandates').innerHTML = window.gracCheckCombo
+            ? window.gracCheckCombo.html(options, ticked, { ariaLabel: 'Audit Mandate' })
+            : '';
+    }
+
+    function readMandates() {
+        const combo = document.querySelector('#oaDefMandates [data-checkcombo]');
+        return (window.gracCheckCombo ? window.gracCheckCombo.values(combo) : []).map(Number);
+    }
+
+    function renderMasterOptions(key, selectId, noun, selectedId) {
+        const sel = document.getElementById(selectId);
+        const rows = state[key] || [];
+        sel.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = rows.length ? '-- select --' : '(no ' + noun + ' available)';
+        sel.appendChild(placeholder);
+        for (const a of rows) {
+            const id  = a.id != null ? a.id : a.Id;
+            const opt = document.createElement('option');
+            opt.value = String(id != null ? id : '');
+            opt.textContent = a.name || a.Name || '';
+            sel.appendChild(opt);
+        }
+        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
+    }
+
+    // 560: the organization's subscribed frameworks (Practice picker list;
+    // the "Organization Defined Practices" entry, release -1, is not a framework).
+    async function loadFrameworks(orgId) {
+        if (!orgId) return [];
+        if (state.frameworksByOrg[orgId]) return state.frameworksByOrg[orgId];
+        let rows = [];
+        try {
+            const r = await fetch(U('/practice/api/practice-picker/frameworks?organizationId=' + encodeURIComponent(orgId)),
+                                  { credentials: 'same-origin' });
+            if (r.ok) {
+                const b = await r.json();
+                rows = ((b && (b.data || b.Data)) || [])
+                    .map(function (f) {
+                        return { value: String(f.releaseId != null ? f.releaseId : f.ReleaseId),
+                                 label: f.frameworkName || f.FrameworkName || '' };
+                    })
+                    .filter(function (f) { return f.value !== '-1' && f.value !== 'undefined' && f.label; });
+            }
+        } catch (_) { /* no list -- typed frameworks still work */ }
+        state.frameworksByOrg[orgId] = rows;
+        return rows;
+    }
+
+    // Saved frameworks: a subscribed one is ticked in the combo; one typed by
+    // hand (or no longer subscribed) goes to Other Frameworks, so none is lost.
+    async function renderFrameworks(saved) {
+        const host  = document.getElementById('oaDefFrameworks');
+        const other = document.getElementById('oaDefFrameworksOther');
+        const options = await loadFrameworks(state.orgId);
+        const known = new Set(options.map(function (o) { return o.value; }));
+        const ticked = [], typed = [];
+        (saved || []).forEach(function (f) {
+            const rel = f.releaseId != null ? f.releaseId : f.ReleaseId;
+            const name = f.frameworkName || f.FrameworkName || '';
+            if (rel != null && known.has(String(rel))) ticked.push(String(rel));
+            else if (name) typed.push(name);
+        });
+        host.innerHTML = window.gracCheckCombo
+            ? window.gracCheckCombo.html(options, ticked, { ariaLabel: 'Applicable Frameworks' })
+            : '';
+        if (!options.length) {
+            host.insertAdjacentHTML('beforeend',
+                '<div style="font-size:12px; color:var(--fg-muted); padding-top:4px;">No subscribed frameworks -- type them under Other Frameworks.</div>');
+        }
+        other.value = typed.join('\n');
+    }
+
+    // The list sent on save: ticked subscribed frameworks, then typed ones.
+    function readFrameworks() {
+        const combo = document.querySelector('#oaDefFrameworks [data-checkcombo]');
+        const options = state.frameworksByOrg[state.orgId] || [];
+        const byValue = {};
+        options.forEach(function (o) { byValue[o.value] = o.label; });
+        const list = (window.gracCheckCombo ? window.gracCheckCombo.values(combo) : []).map(function (v) {
+            return { releaseId: Number(v), name: byValue[v] || v };
+        });
+        document.getElementById('oaDefFrameworksOther').value.split(/\r?\n/).forEach(function (line) {
+            const name = line.trim();
+            if (name) list.push({ releaseId: null, name: name });
+        });
+        return list;
+    }
+
     // 119 -- loadEmployees / renderEmployeeOptions retired.
     // Owner picker now uses window.__roleHolderPicker from _workflow-common.cshtml
     // which fetches roles from /practice/api/org-roles and holders per-role
@@ -351,7 +525,24 @@
         window.__oaDefinitions = {
             open   : openDialog,   // (id) edit, (null) create
             reload : reload,
-            orgId  : function () { return state.orgId; }
+            orgId  : function () { return state.orgId; },
+            // 2026-11-13: the Audit Definition page has one Save for the
+            // whole audit. This runs the form's own validation and save
+            // and resolves to the saved definition id, or null when the
+            // form is invalid or the save failed (message in the form).
+            save   : function () {
+                const form = document.getElementById('oaDefForm');
+                if (form && !form.reportValidity()) return Promise.resolve(null);
+                return saveDefinition();
+            },
+            // 2026-11-04: the row menu for one audit, for the audit page's
+            // Actions button. Same items, same handlers. Without arguments it
+            // is the record open in the form.
+            actionItems : function (id, statusCode) {
+                if (id) return buildActionsMenu(String(id), statusCode || '');
+                const formId = document.getElementById('oaDefEditId').value;
+                return formId ? buildActionsMenu(formId, state.loadedStatusCode || '') : [];
+            }
         };
         try {
             document.dispatchEvent(new CustomEvent('audit-definitions-ready'));
@@ -438,8 +629,13 @@
             const statusName   = row.currentStatusName  || row.CurrentStatusName || '';
             const effective    = formatDate(row.currentEffectiveDate || row.CurrentEffectiveDate);
             const versionText  = versionLabel ? versionLabel : (versionNo ? String(versionNo) : '');
+            // 551: plannable = an Active version and not Retired -- a revised
+            // Draft version (e.g. after a question set change) keeps it.
+            (state.plannableById = state.plannableById || {})[String(id)] =
+                !!(row.activeVersionId || row.ActiveVersionId) && statusCode !== 'Retired';
 
-            return '<tr data-id="' + id + '" data-status="' + wf.escape(statusCode) + '">'
+            // 2026-11-04: a row click opens the audit (same as the row's View).
+            return '<tr class="pm-row-clickable" data-id="' + id + '" data-status="' + wf.escape(statusCode) + '">'
                 + '<td>' + wf.escape(code) + '</td>'
                 + '<td>' + wf.escape(name) + '</td>'
                 + '<td>' + wf.escape(category) + '</td>'
@@ -477,38 +673,46 @@
             // (Definition Details / Scope Details / Question Set). It is
             // first because it is now the normal way into an audit -- the
             // per-section entries below stay for direct deep links.
-            { icon: 'fa-up-right-from-square', label: 'View',
+            // 2026-11-04: each item carries its action as `key`, so the
+            // audit page's Actions menu can reuse this list (minus View /
+            // Edit, which that page already is).
+            { key: 'view', icon: 'fa-up-right-from-square', label: 'View',
                 action: function () { handleRowAction(id, 'view'); } },
-            { icon: 'fa-pen',              label: 'Edit',
+            { key: 'edit', icon: 'fa-pen',              label: 'Edit',
                 action: function () { handleRowAction(id, 'edit'); } },
-            { icon: 'fa-diagram-project',  label: 'Scope',
-                action: function () { handleRowAction(id, 'scope'); } },
-            { icon: 'fa-file-circle-check',label: 'Evidence',
-                action: function () { handleRowAction(id, 'evidence'); } },
-            { icon: 'fa-sitemap',          label: 'Workflow',
-                action: function () { handleRowAction(id, 'workflow'); } },
-            { icon: 'fa-gauge',            label: 'Scoring',
-                action: function () { handleRowAction(id, 'scoring'); } },
-            { icon: 'fa-bolt',             label: 'Triggers',
-                action: function () { handleRowAction(id, 'triggers'); } },
-            { icon: 'fa-circle-nodes',     label: 'Resolve Scope',
-                action: function () { handleRowAction(id, 'scope-resolution'); } },
-            { icon: 'fa-play-circle',      label: 'Executions',
+            // 2026-11-13: Scope and Question Set removed -- the audit page is
+            // one page now (details, scope and question sets together), so
+            // Edit opens all three. Evidence removed too (536): evidence is
+            // set per question in the question sets.
+            // 537 (sir): Workflow / Scoring / Triggers / Resolve Scope became
+            // ONE item, Audit Configuration -- the one page that holds all
+            // four, opened on this audit.
+            { key: 'configuration', icon: 'fa-sliders',     label: 'Audit Configuration',
+                action: function () { handleRowAction(id, 'configuration'); } },
+            { key: 'executions', icon: 'fa-play-circle',      label: 'Executions',
                 action: function () { handleRowAction(id, 'executions'); } },
-            { icon: 'fa-clock-rotate-left',label: 'History',
+            { key: 'history', icon: 'fa-clock-rotate-left',label: 'History',
                 action: function () { handleRowAction(id, 'history'); } }
         ];
-        if (statusCode === 'Draft')
-            items.push({ icon: 'fa-paper-plane', label: 'Submit for Review',
-                action: function () { handleRowAction(id, 'submit'); } });
-        if (statusCode === 'UnderReview')
-            items.push({ icon: 'fa-check', label: 'Approve',
-                action: function () { handleRowAction(id, 'approve'); } });
+        // 542 / 543 (sir): Submit for Review and Approve moved to Audit
+        // Configuration -- review is possible only once the configuration
+        // is complete, and that page shows it. Activate / Retire stay here.
+        // 544: Approve now ends Active, so Activate shows only for an audit
+        // left Approved (approved before 544, or if the activation step of
+        // an approval ever failed).
         if (statusCode === 'Approved')
-            items.push({ icon: 'fa-play', label: 'Activate',
+            items.push({ key: 'activate', icon: 'fa-play', label: 'Activate',
                 action: function () { handleRowAction(id, 'activate'); } });
+        // 546 (sir): an Active audit is planned from its own menu too --
+        // the Audit Plans page opens to add it to a plan (as many slots as
+        // needed). Only Active audits can be planned.
+        // 551: an audit with an Active version can be planned while a
+        // revised version is in Draft / Under Review.
+        if (statusCode === 'Active' || (state.plannableById && state.plannableById[String(id)]))
+            items.push({ key: 'plan', icon: 'fa-calendar-plus', label: 'Add to Plan',
+                action: function () { handleRowAction(id, 'plan'); } });
         if (statusCode === 'Active')
-            items.push({ icon: 'fa-box-archive', label: 'Retire',
+            items.push({ key: 'retire', icon: 'fa-box-archive', label: 'Retire',
                 action: function () { handleRowAction(id, 'retire'); } });
         return items;
     }
@@ -564,6 +768,14 @@
                 const statusCode = trigger.getAttribute('data-status') || '';
                 openRowMenu(trigger, buildActionsMenu(id, statusCode));
             });
+            // 2026-11-04: row click = the row's View (Gap / Task / Practice
+            // pattern). The 3-dot trigger and any control keep their own click.
+            body.addEventListener('click', function (e) {
+                if (e.target.closest('.pm-action-trigger, a, button, input, label, select')) return;
+                const tr = e.target.closest('tr.pm-row-clickable[data-id]');
+                if (!tr || !body.contains(tr)) return;
+                handleRowAction(tr.getAttribute('data-id'), 'view');
+            });
         }
         document.addEventListener('click', function (e) {
             if (!openMenuEl) return;
@@ -576,13 +788,30 @@
         window.addEventListener('scroll',  closeRowMenu, true);
     }
 
+    // 2026-11-04: open the audit's edit page ('details' | 'scope' |
+    // 'questions' scrolls to that section since 2026-11-13). Hosted in the
+    // Audit Definition workspace, the host switches in place; anywhere else
+    // this navigates to that page. Only Edit calls it now.
+    function openEditTab(id, step) {
+        const handled = !document.dispatchEvent(new CustomEvent('audit-definition-open', {
+            detail: { definitionId: id, mode: 'edit', step: step }, cancelable: true
+        }));
+        if (handled) return;
+        const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
+        window.location.href = base + '/Practice/org-audit-definition?definitionId=' + encodeURIComponent(id)
+                             + '&step=' + encodeURIComponent(step);
+    }
+
     function handleRowAction(id, action) {
+        // Inside the workspace Edit opens the edit page on Definition Details;
+        // the standalone list keeps its Edit modal.
+        if (action === 'edit' && window.__oaDefInlineForm) return openEditTab(id, 'details');
         if (action === 'view') {
-            // The audit's 3-tab workspace. When this screen is already
+            // The audit's view page. When this screen is already
             // hosted inside that workspace the host intercepts the event
-            // below and switches tabs in place instead of navigating.
+            // below and switches in place instead of navigating.
             const handled = !document.dispatchEvent(new CustomEvent('audit-definition-open', {
-                detail: { definitionId: id }, cancelable: true
+                detail: { definitionId: id, mode: 'view' }, cancelable: true
             }));
             if (handled) return;
             const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
@@ -591,39 +820,26 @@
         }
         if (action === 'edit')     return openDialog(id);
         if (action === 'history')  return openHistory(id);
-        if (action === 'scope') {
-            // Navigate to the Scope Builder screen with the definition
-            // preselected. The builder loads the definition + scope tree
-            // from the ?definitionId= query param.
-            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
-            window.location.href = base + '/Practice/org-assurance-scope-builder?definitionId=' + encodeURIComponent(id);
+        if (action === 'configuration') {
+            // 537: the Audit Configuration page, opened on this audit. The
+            // audit travels in the encrypted navigation code (?code=,
+            // Shared/secure-nav.js), never as a readable ?definitionId=.
+            if (!window.gracSecureNav) { alert('Audit Configuration could not be opened.'); return; }
+            const row = document.querySelector('#oaDefBody tr[data-id="' + String(id).replace(/"/g, '') + '"]');
+            const code = row && row.children[0] ? row.children[0].textContent : '';
+            window.gracSecureNav.open('org-audit-definition', 'org-audit-configuration', 'AuditDefinition', id, state.orgId, code)
+                .then(function (err) { if (err) alert(err); });
             return;
         }
-        if (action === 'evidence') {
-            // Navigate to the Evidence Config screen with the definition
-            // preselected. Same pattern as Scope.
-            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
-            window.location.href = base + '/Practice/org-assurance-evidence-config?definitionId=' + encodeURIComponent(id);
-            return;
-        }
-        if (action === 'workflow') {
-            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
-            window.location.href = base + '/Practice/org-assurance-workflow-config?definitionId=' + encodeURIComponent(id);
-            return;
-        }
-        if (action === 'scoring') {
-            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
-            window.location.href = base + '/Practice/org-assurance-scoring-config?definitionId=' + encodeURIComponent(id);
-            return;
-        }
-        if (action === 'triggers') {
-            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
-            window.location.href = base + '/Practice/org-assurance-triggers?definitionId=' + encodeURIComponent(id);
-            return;
-        }
-        if (action === 'scope-resolution') {
-            const base = String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '');
-            window.location.href = base + '/Practice/org-assurance-scope-resolution?definitionId=' + encodeURIComponent(id);
+        if (action === 'plan') {
+            // 546: the Audit Plans page, opened to add this audit to a plan.
+            // The audit travels in the encrypted navigation code, like
+            // Audit Configuration (537).
+            if (!window.gracSecureNav) { alert('Audit Plans could not be opened.'); return; }
+            const row = document.querySelector('#oaDefBody tr[data-id="' + String(id).replace(/"/g, '') + '"]');
+            const code = row && row.children[0] ? row.children[0].textContent : '';
+            window.gracSecureNav.open('org-audit-definition', 'org-assurance-plans', 'AuditDefinition', id, state.orgId, code)
+                .then(function (err) { if (err) alert(err); });
             return;
         }
         if (action === 'executions') {
@@ -653,6 +869,12 @@
             const j = await safeJson(r);
             if (!r.ok) { alert('Failed: ' + ((j && (j.error || j.Error)) || ('HTTP ' + r.status))); return; }
             reload();
+            // 2026-11-04: run from the audit page's Actions menu, the open
+            // record changed status too -- reload it so the form and the
+            // Actions menu follow the new status, and tell the host page
+            // (its read-only view reloads on audit-setup-changed).
+            if (window.__oaDefInlineForm && document.getElementById('oaDefEditId').value === String(id)) openDialog(id);
+            try { document.dispatchEvent(new CustomEvent('audit-setup-changed')); } catch (_) { /* notification only */ }
         } catch (err) {
             alert('Failed: ' + (err.message || err));
         }
@@ -674,6 +896,7 @@
                 const d = (b && (b.data || b.Data)) || null;
                 if (!d) { alert('Definition not found.'); return; }
                 document.getElementById('oaDefEditId').value        = String(d.definitionId || d.DefinitionId || '');
+                state.loadedStatusCode = d.currentStatusCode || d.CurrentStatusCode || '';
                 document.getElementById('oaDefCode').value          = d.definitionCode || d.DefinitionCode || '';
                 document.getElementById('oaDefCode').disabled       = true; // code is immutable after create
                 document.getElementById('oaDefName').value          = d.definitionName || d.DefinitionName || '';
@@ -694,6 +917,12 @@
                     if (match) selectedCatId = String(match.id || match.Id || '');
                 }
                 renderCategoryOptions(selectedCatId);
+
+                // 560: Assurance Approach, Audit Mandate, Applicable Frameworks.
+                const apId = d.assuranceApproachId != null ? d.assuranceApproachId : d.AssuranceApproachId;
+                renderMasterOptions('approaches', 'oaDefApproach', 'approaches', apId != null ? String(apId) : '');
+                renderMandates(d.auditMandates || d.AuditMandates || []);
+                await renderFrameworks(d.applicableFrameworks || d.ApplicableFrameworks || []);
 
                 // 119 hybrid Owner picker -- seed with the definition's snapshot.
                 if (state.orgId && window.__roleHolderPicker) {
@@ -717,10 +946,14 @@
         } else {
             document.getElementById('oaDefDialogTitle').textContent  = 'Add Audit Definition';
             document.getElementById('oaDefEditId').value             = '';
+            state.loadedStatusCode = '';
             document.getElementById('oaDefCode').disabled            = false;
             document.getElementById('oaDefForm').reset();
             // reset() clears the selects too; repopulate placeholders.
             renderCategoryOptions('');
+            renderMasterOptions('approaches', 'oaDefApproach', 'approaches', '');   // 560
+            renderMandates([]);                                                      // 560
+            await renderFrameworks([]);  // 560
             // 119 hybrid Owner picker -- fresh dialog, no initial snapshot.
             if (state.orgId && window.__roleHolderPicker) {
                 try {
@@ -746,7 +979,26 @@
         document.getElementById('oaDefDialog').close();
     }
 
+    // 2026-11-04: one save at a time. A second click while the first POST
+    // is still running used to send a second CREATE: the first one made
+    // the record, the second hit the per-organization code check (53605)
+    // and showed "already exists" for a record that had just been saved.
+    let saving = false;
+
+    // Resolves to the saved definition id, or null when nothing was saved.
     async function saveDefinition() {
+        if (saving) return null;
+        saving = true;
+        const submitBtn = document.getElementById('oaDefSubmit');
+        if (submitBtn) submitBtn.disabled = true;
+        try { return await saveDefinitionOnce(); }
+        finally {
+            saving = false;
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    }
+
+    async function saveDefinitionOnce() {
         const idStr    = document.getElementById('oaDefEditId').value;
 
         // Assurance Category -- pull id + code + name from the selected option.
@@ -776,7 +1028,12 @@
             assuranceCategoryId     : catId,
             assuranceCategoryCode   : catCode,
             assuranceCategoryName   : catName,
-            actor                   : null
+            actor                   : null,
+            // 560: Assurance Approach, Audit Mandate, Applicable Frameworks
+            assuranceApproachId     : document.getElementById('oaDefApproach').value
+                                          ? Number(document.getElementById('oaDefApproach').value) : null,
+            auditMandateIds         : readMandates(),
+            applicableFrameworks    : readFrameworks()
         };
         try {
             const r = await fetch(U(API + '/definitions'), {
@@ -788,26 +1045,41 @@
             const j = await safeJson(r);
             if (!r.ok) {
                 showMessage('error', (j && (j.error || j.Error)) || ('HTTP ' + r.status));
-                return;
+                return null;
             }
             // Announce what was saved so a host page can react. The POST
             // returns { definitionId, definitionVersionId }, and the id is
             // the ONLY reliable way for the Audit Definition workspace to
             // know which audit a brand-new record became -- guessing it
             // from the reloaded list would be a race.
+            const savedId = (j && (j.definitionId || j.DefinitionId)) || (idStr ? Number(idStr) : null);
+
+            // 2026-11-04: after a CREATE the form now holds the saved record,
+            // exactly as openDialog(id) leaves it. In the inline workspace the
+            // form stays on screen, and without this the next Save created
+            // the definition a second time (53605 "already exists").
+            if (!idStr && savedId) {
+                document.getElementById('oaDefEditId').value          = String(savedId);
+                document.getElementById('oaDefCode').disabled         = true; // code is immutable after create
+                document.getElementById('oaDefDialogTitle').textContent = 'Edit Audit Definition';
+            }
+
             try {
                 document.dispatchEvent(new CustomEvent('audit-definition-saved', {
                     detail: {
-                        definitionId : (j && (j.definitionId || j.DefinitionId)) || (idStr ? Number(idStr) : null),
-                        isNew        : !idStr
+                        definitionId   : savedId,
+                        organizationId : Number(state.orgId) || null,
+                        isNew          : !idStr
                     }
                 }));
             } catch (_) { /* the save already succeeded; never fail on the notification */ }
 
             closeDialog();
             reload();
+            return savedId;
         } catch (err) {
             showMessage('error', err.message || String(err));
+            return null;
         }
     }
 
@@ -864,11 +1136,14 @@
         const d = new Date(v);
         return isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0,10);
     }
+    // The VALUE for <input type="date">, which accepts only yyyy-MM-dd.
+    // 2026-11-13: it used to run gracFormatDisplayDate first, which turns
+    // 2026-11-13 into 13-Nov-2026 -- a value the date input rejects, so
+    // Effective Date came up blank when an audit was opened for editing.
+    // Display formatting is for text, not for an input's value.
     function onlyDate(v) {
         if (!v) return '';
-        if (typeof window.gracFormatDisplayDate === "function") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }
-        const s = String(v);
-        return s.indexOf('T') >= 0 ? s.slice(0, 10) : s.slice(0, 10);
+        return String(v).slice(0, 10);
     }
     async function safeJson(r) {
         try { return await r.json(); } catch (_) { return null; }

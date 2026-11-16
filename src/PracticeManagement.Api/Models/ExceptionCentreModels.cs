@@ -42,7 +42,11 @@ public sealed record ExceptionRequestRow(
     string? ExceptionNumber = null,
     // 498: the designated approver chosen at submit-for-approval.
     long?   DesignatedApproverEmployeeId = null,
-    string? DesignatedApproverName = null);
+    string? DesignatedApproverName = null,
+    // 527: the exception's assigned owner (owner_employee_id) -- what the
+    // list's Owner column shows, the same Owner Exception View shows.
+    long?   OwnerEmployeeId = null,
+    string? OwnerName = null);
 
 public sealed record ExceptionRequestListResult(
     long TotalRows, int Page, int PageSize,

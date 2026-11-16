@@ -58,16 +58,40 @@ public sealed record PracticeScreen(string Key, string Title, string Description
     // Asset & Contract Management (migration 420). Root menu
     // nav-asset-contract; must match menu_master.module_type (page eyebrow).
     public const string AssetContractGroup = "Asset & Contract";
-    // Third-Party Risk Management (migrations 486-490). Root menu nav-tprm;
-    // must match menu_master.module_type (page eyebrow).
-    public const string TprmGroup = "Third-Party Risk";
+    // Third-Party Management (migrations 486-490; renamed by 521 -- TPM
+    // lifecycle redesign). Root menu nav-tprm; must match
+    // menu_master.module_type (page eyebrow).
+    public const string TprmGroup = "Third-Party Management";
 
     public static readonly PracticeScreen[] All =
     [
         new("dashboard","Home","Practice Management summary dashboard","chart-line",["Id","Message"], DashboardGroup),
         new("organization-setup","Organization Setup","GRAC Admin module for organization onboarding, metadata, repository subscription, locations, departments, business functions, teams, committees, and employees","building",["Code","Name","Industry","EntityType","Country","Status"], OrganizationOnboardingGroup),
+        // Migration 511: approve / reject the framework subscription requests
+        // organizations raise from Add Release -> Subscribe from Repository
+        // (406). Organization Management only (PracticeController's
+        // OrganizationManagementAreas); its menu row sits under the inactive
+        // 'Organization' group exactly like organization-setup, so the
+        // Practice Management sidebar never shows it. Own partial, own proxy
+        // (practice/api/subscription-requests) -- no generic grid entity.
+        new("subscription-requests","Subscription Requests","Approve or reject organizations' requests to subscribe to a Repository framework release.","file-circle-check",["Organization","Release","Version","RequestedBy","RequestedDate","Status","DecidedBy","DecisionDate"], OrganizationOnboardingGroup),
         new("organization-administration","Organization Administration","Organization profile, locations, departments, business functions, teams, committees, and employees for organization users","building-user",["Code","Name","Industry","EntityType","Country","Status"], OrganizationAdministrationGroup),
-        new("organizations","Organization Onboarding","Legal entities and organization-level operating context","building",["Code","Name","Industry","EntityType","Country","Status"], OrganizationGroup),
+        // Columns changed 2026-11-02: this screen is now the Organization
+        // Management landing list. SubscriptionStartDate / EndDate come
+        // from 404, SpocName and FrameworkSummary from the 510 read shim.
+        // Headings are overridden per screen in practice.js
+        // (columnLabelsByScreen) -- the generic columnLabel() would turn
+        // "Name" into "Practice Instance Name" from its global map.
+        new("organizations","Organizations","Organizations on the platform, their subscription window, frameworks and SPOC.","building",["Code","Name","SubscriptionStartDate","SubscriptionEndDate","FrameworkSummary","SpocName","Status"], OrganizationGroup),
+        // Full-page, read-only organization view (2026-11-02). Opened by a
+        // row on the Organization Management landing list above; its own
+        // partial (Partials/organization-view.cshtml) and its own JS, so
+        // Organization Setup stays purely the edit/onboarding page. No
+        // menu_master row -- like practice-view it is reached from the
+        // screen that governs it (see ScreenPermissionArea). Columns are
+        // unused (the partial owns its layout) but kept meaningful so the
+        // registry stays self-describing.
+        new("organization-view","Organization","Everything recorded for one organization, read-only.","building",["Code","Name","SpocName","Status"], OrganizationGroup),
         new("organization-metadata","Organization Metadata","Configurable metadata used for applicability discovery","sliders",["OrganizationId","MetadataName","DataType","ValueText","Status"], OrganizationGroup),
         new("repository-subscriptions","Standards & Frameworks","Organization subscriptions to repository artifacts and releases","bookmark",["OrganizationId","AuthorityId","ArtifactId","ReleaseId","SubscriptionStatus","Status"], GovernanceGroup),
         new("locations","Location Management","Organization locations used for operating context, ownership, and responsibility mapping","location-dot",["Organization","Name","LocationType","LocationHead","Region","Status"], OrganizationGroup),
@@ -82,7 +106,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // a column repeating the filter above it. Display only: the list
         // procedure still returns Organization and the Add/Edit form still
         // asks for it.
-        new("roles","Role Master","Organization-specific roles used for menu and action permissions","user-lock",["RoleCode","RoleName","Description","Status"], AdministrationGroup),
+        new("roles","Role Master","Organization-specific roles used for menu and action permissions","user-lock",["RoleCode","RoleName","Responsibilities","Description","Status"], AdministrationGroup),
         new("role-menu-permissions","Role Menu Permission","Assign Practice Management menu permissions to an organization role","list-check",["Organization","RoleName","MenuName","CanView","CanAdd","CanEdit","CanDelete","CanApprove","Status"], AdministrationGroup),
         new("user-role-assignments","User Role Assignment","Assign one or more organization roles to organization users","user-gear",["EmployeeCode","EmployeeName","Email","RoleNames","Status"], AdministrationGroup),
         new("users","User Management","Users available for organization ownership and assignment. Employees and third-party personnel; a third party must name the provider that supplies them","users",["EmployeeCode","EmployeeName","PersonnelType","Email","RoleName","Provider","Designation","Status"], AdministrationGroup),
@@ -231,6 +255,9 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Management exactly as 155 left them. Columns are unused (the
         // partial owns its own layout) but kept meaningful so the screen
         // registry stays self-describing.
+        // 508: Policies & Documents dashboard (management-dashboard
+        // partial, sp_dashboard_documents) -- first child of the folder.
+        new("documents-dashboard","Policies & Documents Dashboard","Controlled documents by stage and status, review calendar, documents awaiting approval, acknowledgement progress and evidence validity for the selected organization.","chart-pie",["Metric","Value"], PoliciesDocumentsGroup),
         new("document-uploads","Document Library","Register controlled documents, distribute them, and route them through review and approval","file-lines",["Code","Name","Type","Version","Stage","Status","NextReview"], PoliciesDocumentsGroup),
         // Phase 2 companion to Document Library (migrations 150-152) --
         // admin batches for tracking user acknowledgement of published
@@ -241,6 +268,11 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // (Operationalize one-time evidence in Phase 1). Own partial, own
         // JS, own proxy (practice/api/evidence-center) -- no generic grid.
         new("evidence-center","Evidence Center","Evidence uploaded once for the organization and reused wherever it is needed: owner, validity, versions and where each item is used","box-archive",["Title","Type","Owner","Validity","Version","UsedIn","Status"], PoliciesDocumentsGroup),
+        // Evidence Automation (migration 530): evidence sent by the
+        // organization's own systems (webhook / file drop) for an obligation,
+        // stored in the Evidence Center and proposed for review. Own partial,
+        // own JS, own proxy (practice/api/evidence-automation).
+        new("evidence-automation","Evidence Automation","Evidence sent automatically by your own systems for an obligation: sources, what was received, and what is waiting for your review","plug",["Source","Obligation","Channel","Health","LastReceived","Status"], PoliciesDocumentsGroup),
         // Phase 3 user-side counterpart (migrations 153-154). Every
         // employee sees their own pending acknowledgements here.
         new("my-acknowledgements","My Acknowledgements","Documents you are asked to acknowledge -- pick a batch and confirm each one","inbox",["Batch","Due","MyDocs","Acknowledged","Pending","Progress","Status"], MyNotificationGroup),
@@ -384,7 +416,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // exactly one implementation and every screen below remains
         // reachable on its own route and its own menu row.
         new("org-audit-definition","Audit Definition","Define an audit in one flow: audit details, then scope, then question sets.","file-shield",["Step","Screen"], AuditManagementGroup),
-        new("org-audit-configuration","Audit Configuration","Configure how a defined audit operates: evidence, workflow, scoring, triggers and scope resolution.","sliders",["Step","Screen"], AuditManagementGroup),
+        new("org-audit-configuration","Audit Configuration","Configure an audit: scope, question sets, workflow and scoring. Opened from Audit Definition.","sliders",["Step","Screen"], AuditManagementGroup),
         new("org-assurance-definitions","Audit Definitions","Organization-level Audit Definitions with lifecycle Draft / Under Review / Approved / Active / Retired (BRD Part 2 Sec 1).","file-shield",["Code","Name","Category","Owner","Version","Status"], AuditManagementGroup),
         // Scope Builder (BRD Part 2 Sec 2). Menu row seeded by
         // migration 075. Loads a definition via ?definitionId=X and
@@ -393,11 +425,11 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Question Builder (BRD Part 2 Sec 4). Menu row seeded by
         // migration 078. Question sets are organization-level reusable
         // artifacts; each definition later ADOPTS one or more sets.
-        new("org-assurance-question-sets","Question Sets","Reusable Question Sets and their Questions -- with Admin-published question types, mandatory / weight / order / expected response (BRD Part 2 Sec 4).","clipboard-list",["Code","Name","Owner","Questions","Status"], AuditManagementGroup),
-        // Evidence Configuration (BRD Part 2 Sec 5). Per-definition-
-        // version evidence expectations. Menu row seeded by migration
-        // 081; reuses PM evidence_type_master + collection_method_master.
-        new("org-assurance-evidence-config","Evidence Config","Configure the evidence expected for a definition -- type, collection method (existing / API / manual), mandatory flag, validity, expiry (BRD Part 2 Sec 5).","file-circle-check",["Label","Type","Method","Mandatory","Validity"], AuditManagementGroup),
+        // 520: one page per set -- its details, then its questions entered
+        // in an editable grid and saved together (the 516 Repository was withdrawn).
+        new("org-assurance-question-sets","Question Sets","Reusable question sets: the set's details and its questions -- code, question, response type, mandatory, evidence required, weight and status -- entered together on one page (BRD Part 2 Sec 4).","clipboard-list",["Code","Name","Questions","Status"], AuditManagementGroup),
+        // org-assurance-evidence-config (Evidence Config) removed by 536:
+        // evidence is set per question in Question Sets. Menu row Inactive.
         // Workflow Configuration (BRD Part 2 Sec 6). Per-definition-
         // version workflow with stages (Auditor / Reviewer / Approver /
         // Custom), assigned role / employee, SLA and escalation.
@@ -425,6 +457,22 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Executions (BRD Part 2 Sec 9-10). Stage 3. Materializes a
         // definition + resolved scope + immutable config snapshot into
         // a live executable record. Menu row seeded by migration 100.
+        // Audit Engagements (migration 566, spec 4.5): every engagement as a
+        // record -- planned (in a plan's programme) and independent (Board /
+        // AC, regulator, CAE, management, fraud, incident, follow-up) -- with
+        // its audit team; the same execution lifecycle for both.
+        new("org-audit-engagements","Audit Engagements","Planned and independent audit engagements: subject, scope, audit team, approval and execution.","briefcase",["Code","Engagement","Type","Plan / Programme","Audit Subject","Lead Auditor","Planned","Audits","Status"], AuditManagementGroup),
+        // My Audits (migration 555, Phase 3): the signed-in auditor's audits.
+        // Executions start on the From date with a LIVE scope; the auditor
+        // reviews it, excludes items (with a reason) and freezes it.
+        new("org-my-audits","My Audits","Your audits: review the live scope, exclude what does not apply and freeze it to start the audit.","user-check",["Engagement","Audit","Branch","Dates","Status","Scope"], AuditManagementGroup),
+        // Workpapers (migration 567, spec 4.6 / 4.7): Test Working Papers per
+        // question, review and approval, question conclusions, the execution
+        // score and audit conclusion, findings raised from a paper.
+        new("org-workpapers","Workpapers","Test working papers per question: procedure performed, sampling, results, review and approval, conclusions and findings.","file-pen",["Execution","Audit","Engagement","Status","Lead / Reviewer","My Role","Concluded","Awaiting Review","Score"], AuditManagementGroup),
+        // Audit Reports (migration 568, spec 4.9): one report per engagement
+        // from a section template; review, approval, issue, revisions.
+        new("org-audit-reports","Audit Reports","Audit reports per engagement: objective, scope, coverage, findings, responses, recommendations and conclusion -- reviewed, approved and issued.","file-lines",["Engagement","Name","Plan","Lead / Reviewer","Executions Approved","Findings","Report","Status","Issued"], AuditManagementGroup),
         new("org-assurance-executions","Executions","Materialize and manage live audit executions against resolved scope snapshots (BRD Part 2 Sec 9-10).","play-circle",["Execution","Definition","Status","Progress"], AuditManagementGroup),
         // Observations (BRD Part 2 Sec 11). Stage 4. Findings recorded
         // during an execution, evidence attachments, review + resolution
@@ -440,24 +488,16 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // process bindings (GAP / TASK / OBSERVATION / EXCEPTION ...).
         // Screen sits under nav-governance (menu seed 180).
         new("org-sla-config","SLA Configuration","Adopt Control Management SLA masters, configure warning + escalation day thresholds, pick notify roles, and bind the tuned SLA against processes (Gap / Task / Observation / Exception).","clock",["SLA","TotalDays","Warning","Escalation","Roles","Processes"], GovernanceGroup),
-        // Risk acceptance approval authority (migration 271).
-        //
-        // OrganizationGroup, not Oversight: this configures the
-        // ORGANISATION -- who may approve accepting a risk at each rating
-        // level -- and the Risk Centre reads it. It is reached from
-        // Organization -> Risk Acceptance Approval Authority, and the
-        // group here is what puts "Organization / ..." in the page
-        // eyebrow so the screen matches the sidebar it hangs off.
-        //
-        // The columns are the grid's real headers. They do NOT name the
-        // rating levels: those come per-organisation from risk_matrix_cell
-        // at runtime, so listing them here would be a second, stale copy
-        // of a vocabulary that is deliberately not fixed.
-        new("risk-acceptance-authority","Risk Acceptance Approval Authority","Set who may approve accepting a risk at each rating level, separately for the inherent score and the residual score after treatment. Levels not set here fall back to the organization's general risk approver.","user-shield",["Risk Level","Inherent Authority","Same as Inherent","Residual Authority"], OrganizationGroup),
-        // Settings -> Risk Settings (migration 458, 2026-10-08). The Risk
-        // Centre settings (BRD §19, §22) moved off the gear icon on Risk
-        // Candidate / Risk Register into their own Settings page.
-        new("risk-settings","Risk Settings","Risk Management settings for an organization: approval before registering a risk, the approver, the treatment-task default, notifications and the residual-analysis rule.","sliders",["Setting","Value"], OrganizationGroup),
+        // Risk acceptance approval authority (migration 271) is no longer a
+        // screen of its own: since 533 (2026-11-13) its grid is a section of
+        // Workflow Settings ("risk-settings" below), and its menu row is
+        // Inactive. The partial and its JS are kept and included there.
+        // Risk Management -> Settings -> Workflow Settings (458; renamed and
+        // moved by 533, 2026-11-13). The Risk Centre settings (BRD §19, §22)
+        // plus, since 533, the risk acceptance approval authority grid.
+        // Group "Risk Management" so the breadcrumb matches the sidebar.
+        new("risk-settings","Workflow Settings","How the risk workflow runs for an organization: approval before registering a risk, the approver, the treatment-task default, notifications, the residual-analysis rule, and who may approve accepting a risk at each rating level.","sliders",["Setting","Value"], "Risk Management"),
+        new("risk-methodology","Risk Methodology","The organization's risk methodology: extra assessment dimensions (velocity, proximity, persistence, control effectiveness, confidence), scoring mode (matrix, priority or 3D), appetite, target rating, multi-dimension impact, trend and quantification. Versioned: edits go to a draft and are published as the next version.","scale-balanced",["Setting","Value"], "Risk Management"),   // under Risk Management -> Settings since 533
         // Asset & Contract Management, Phase 2.1 (migration 420). Field
         // Dictionary is the read-only BRD 5.1 field library; Asset Form
         // Templates is the per-organization, versioned form designer.
@@ -514,14 +554,20 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Phase 5.1 (migration 434): contracts -- contract register,
         // immutable versions with approval, vendor contact mapping.
         new("asset-contracts","Contracts","Maintain contracts with the vendors of the organization: every renewal, amendment, extension or termination is a new version that is reviewed and approved, takes effect on its date and keeps the earlier versions, documents and vendor contacts unchanged.","file-contract",["Contract","Type","Vendor","Status","Version"], AssetContractGroup),
-        // Third-Party Risk Management (migrations 486-490): the module
-        // dashboard, the third-party register, the engagement workspace (the
-        // BRD's five steps), reviews and the three configuration layers.
-        new("tprm-dashboard","Third-Party Risk Dashboard","Third parties, engagements by stage, criticality and risk band, due diligence, open findings and remediation, reviews and expiring risk acceptances for the selected organization.","chart-pie",["Metric","Value"], TprmGroup),
-        new("tprm-third-parties","Third Parties","Register third parties once with their legal identity, services, contacts and lifecycle status: duplicates are found before saving, GRAC vendors can be imported and linked, and every engagement with the third party is listed.","building",["Code","Third party","Type","Category","Status","Engagements","Owner"], TprmGroup),
-        new("tprm-engagements","Engagements","Assess each engagement with a third party: scope and exposure discovered from GRAC, inherent risk, due diligence with safeguards and evidence, residual risk, the risk decision and approvals, onboarding and the engagement lifecycle.","file-signature",["Code","Engagement","Third party","Stage","Criticality","Risk band","Next review","Owner"], TprmGroup),
-        new("tprm-reviews","Third-Party Reviews","Periodic and triggered reviews of third-party engagements: scheduled reviews, contract, certification and risk-acceptance expiry, incidents, material changes and overdue remediation.","calendar-check",["Review","Engagement","Type","Trigger","Due","Owner","Status"], TprmGroup),
-        new("tprm-configuration","TPRM Configuration","GRAC baseline and organization configuration of Third-Party Risk Management: reference lists, safeguard and evidence library, risk models and questionnaires with versions, approval and review rules, delegations and custom fields.","sliders",["Item","Origin","Status"], TprmGroup)
+        // Third-Party Management (migrations 486-490; 521 Phase 1 of the TPM
+        // lifecycle redesign): the module dashboard, the Vendor Registry, the
+        // engagement workspace, reviews & monitoring and the three
+        // configuration layers. Keys unchanged by 521 (grants, drills).
+        // 522 (CR 2): "Engagement Management"; the configuration screen is
+        // "Third-Party Settings" under Settings (OrganizationGroup, like Risk
+        // Settings); the dashboard and reviews are off the sidebar.
+        new("tprm-dashboard","Third-Party Management Dashboard","Vendors, engagements by stage, criticality and risk band, due diligence, open findings and remediation, reviews and expiring risk acceptances for the selected organization.","chart-pie",["Metric","Value"], TprmGroup),
+        new("tprm-third-parties","Vendor Registry","Every registered vendor, whether or not it is in formal TPRM. Registration is lightweight and activates the vendor at once -- available for engagements, not assessed or admitted. Further identity, ownership and profile details are added when they are needed. Possible duplicates are reviewed before registration, never merged.","building",["Code","Vendor","Type","Category","Status","Engagements","Owner"], TprmGroup),
+        new("tprm-engagements","Engagement Management","Each service relationship with a registered vendor is its own engagement: the initial information, then scope and exposure captured progressively -- only the dimensions that apply -- GRAC discovery, risk assessment, due diligence, decision, onboarding and the engagement lifecycle.","file-signature",["Code","Engagement","Vendor","Stage","Criticality","Risk band","Next review","Owner"], TprmGroup),
+        // 524 (CR 2 menu 3.3): admitted vendors only -- one vendor-level record each.
+        new("tprm-risk-register","TP Risk Register","Every vendor admitted to formal TPRM, once: its vendor-level risk profile rated area by area, the overall vendor risk status (the highest of the vendor ratings and the admitted engagements' risk -- never an average), the admitted engagements with their own assessments, due diligence, findings, decisions and reviews, impact reviews when a further engagement is admitted, and the exit and closure of the record.","shield-halved",["Record","Vendor","Status","Overall risk","Engagements","Profile","Open findings","Next review"], TprmGroup),
+        new("tprm-reviews","Reviews & Monitoring","Periodic and triggered reviews of vendor engagements: scheduled reviews, contract, certification and risk-acceptance expiry, incidents, material changes and overdue remediation.","calendar-check",["Review","Engagement","Type","Trigger","Due","Owner","Status"], TprmGroup),
+        new("tprm-configuration","Third-Party Settings","GRAC baseline and organization configuration of Third-Party Management: reference lists (including vendor statuses and duplicate-detection attributes), safeguard and evidence library, risk models and questionnaires with versions, approval and review rules, delegations and custom fields.","sliders",["Item","Origin","Status"], OrganizationGroup)
     ];
 }
 

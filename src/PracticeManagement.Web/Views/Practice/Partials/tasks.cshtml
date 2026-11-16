@@ -71,11 +71,13 @@
            place -- harmless, and still correct for any caller that does
            pass taskTypeCode=Custom.
 
-           Event Driven Assurance stays its own tab: it is not
+           Event Response (named Event Driven Assurance before Control
+           Management 086 moved event-driven obligations to the Event
+           Response type) stays its own tab: it is not
            practice_task, it reads the event engine directly. See
            conflict 4 in docs/task-centre-v2.md. *@
         <button role="tab" data-tab="all" class="active" aria-selected="true">Tasks</button>
-        <button role="tab" data-tab="event-driven"                  aria-selected="false">Event Driven Assurance</button>
+        <button role="tab" data-tab="event-driven"                  aria-selected="false">Event Response</button>
     </div>
 
     <div class="pm-toolbar">
@@ -90,7 +92,8 @@
            migration 215, exactly: Gap / Exception / Risk / RiskRegister /
            ContinuousAssurance / EventAssurance / Custom -- plus Asset
            (migration 438: recurring asset activities) and Schedule
-           (migration 449: scheduled obligations, raised on the due date). An option that
+           (migration 449: scheduled obligations, raised on the due date) and ThirdParty
+           (migration 525: TPRM information requests on a deferred decision). An option that
            is not in that CHECK would be a filter that can never match. *@
         @* Migration 256: options are filled from sp_task_centre_source_counts
            so each carries a count, matching Gap Centre's Source filter.
@@ -108,6 +111,14 @@
             <option value="Custom">Custom</option>
             <option value="Asset">Asset activity</option>
             <option value="Schedule">Scheduled obligation</option>
+            <option value="ThirdParty">Third-party management</option>
+        </select>
+        @* Migration 526: tasks waiting for the signed-in employee's review
+           or approval (sp_task_list @review_employee_id; the Api takes the
+           employee from the session, never from the query string). *@
+        <select id="taskFilterReview" title="Review / approval">
+            <option value="">All tasks</option>
+            <option value="mine">Awaiting my review / approval</option>
         </select>
         <input id="taskCenterSearch" type="text" placeholder="Search subject / instance / practice..." />
         <button class="pm-button icon" id="taskRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
@@ -293,6 +304,12 @@
         // Migration 255: Source replaces the three task-type tabs.
         const srcSel = document.getElementById('taskFilterSource');
         if (srcSel) srcSel.addEventListener('change', function () {
+            pagesByTab[activeTab] = 1;
+            reloadCurrentTab();
+        });
+        // 526
+        const reviewSel = document.getElementById('taskFilterReview');
+        if (reviewSel) reviewSel.addEventListener('change', function () {
             pagesByTab[activeTab] = 1;
             reloadCurrentTab();
         });
@@ -589,11 +606,14 @@
         const q      = document.getElementById('taskCenterSearch').value.trim();
         const srcEl  = document.getElementById('taskFilterSource');
         const source = srcEl ? (srcEl.value || '') : '';
+        const reviewEl = document.getElementById('taskFilterReview');   // 526
+        const awaitingMine = !!(reviewEl && reviewEl.value === 'mine');
         const p = pagesByTab.all;
         const url = U('/practice/api/tasks?organizationId=') + encodeURIComponent(selectedOrgId)
                   + '&page=' + p + '&pageSize=' + PAGE_SIZE
                   + (q ? '&search=' + encodeURIComponent(q) : '')
                   + (source ? '&sourceTypeCode=' + encodeURIComponent(source) : '')
+                  + (awaitingMine ? '&awaitingMyReview=true' : '')
                   + taskDrillQuery();
         const body = document.getElementById('taskBody-all');
         if (body) body.innerHTML = '<tr><td colspan="11" class="pm-empty">Loading...</td></tr>';
@@ -622,7 +642,8 @@
         EventAssurance:      'Event Assurance',
         Custom:              'Custom',
         Asset:               'Asset activity',  // 438
-        Schedule:            'Scheduled obligation'   // 449
+        Schedule:            'Scheduled obligation',  // 449
+        ThirdParty:          'Third-party management' // 525: TPRM information requests
     };
 
     function renderTaskRows(tabKey, payload) {
@@ -1273,7 +1294,9 @@
                 onViewAssuranceActivity: function () { /* wired when Assurance drill-down lands */ },
                 onViewWorkflowHistory:   function () { /* wired when workflow-history viewer lands */ },
                 onClose:       function () { window.gracTaskActions.openClose(taskId, taskNumber, taskTitle); },
-                onReopen:      function () { window.gracTaskActions.openReopen(taskId, taskNumber, taskTitle); }
+                onReopen:      function () { window.gracTaskActions.openReopen(taskId, taskNumber, taskTitle); },
+                // 526: offered while the task is Pending Review / Pending Approval.
+                onReviewDecision: function () { window.gracTaskActions.openReviewDecision(taskId, taskNumber, taskTitle); }
             }
         );
     }

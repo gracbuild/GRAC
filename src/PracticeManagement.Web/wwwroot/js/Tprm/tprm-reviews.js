@@ -6,6 +6,8 @@
 //   POST reviews/{id}/complete { organizationId, outcomeCode, outcomeNote, cancel }
 //   POST monitoring/run        { organizationId }   (APPROVE)
 // Drill parameters (490 dashboard): status, type, dueWithin.
+// 525: opened from an engagement with the encrypted navigation code
+// (TprmEngagement; the review to complete as its number).
 // =====================================================================
 (() => {
   "use strict";
@@ -20,7 +22,7 @@
     { value: "REMEDIATE", label: "Remediation needed (record findings on the engagement)" },
     { value: "REASSESS", label: "Reassess the engagement" },
     { value: "SUSPEND", label: "Suspend the engagement" },
-    { value: "EXIT", label: "Exit the third party" }];
+    { value: "EXIT", label: "Exit the vendor" }];
   const TYPES = { PERIODIC: "Periodic", TRIGGERED: "Triggered", CONTRACT_EXPIRY: "Contract expiry",
                   CERTIFICATION_EXPIRY: "Certification expiry", ACCEPTANCE_EXPIRY: "Risk acceptance expiry" };
   const state = { org: null, lk: null, pager: null, rows: [], engagementId: null };
@@ -32,12 +34,16 @@
     state.pager = window.__pmGrid ? window.__pmGrid.attach({ hostId: "rvPager", onChange: refreshList }) : null;
     bind();
     const q = new URLSearchParams(window.location.search);
-    state.org = await T.orgs("rvOrg");
+    // 525: opened from an engagement, the engagement (and the review to
+    // complete, by its number) travel in the encrypted navigation code.
+    const ctx = await T.navigationContext("tprm-reviews");
+    state.org = await T.orgs("rvOrg", ctx?.organizationId);
     await loadOrg();
+    if (ctx?.error) show("rvMessage", ctx.error);
     if (q.get("status")) setIf("rvStatusFilter", q.get("status"));
     if (q.get("type")) setIf("rvTypeFilter", q.get("type"));
     if (q.get("dueWithin")) setIf("rvDueFilter", q.get("dueWithin"));
-    state.engagementId = Number(q.get("engagementId")) || null;
+    state.engagementId = ctx?.filterType === "TprmEngagement" ? ctx.filterId : null;
     if (state.engagementId) { setIf("rvStatusFilter", "ALL"); }
     const drill = window.__pmDrill?.read();
     if (drill && (q.get("status") || q.get("type") || q.get("dueWithin")) && q.get("from")) {
@@ -46,10 +52,11 @@
       window.__pmDrill.banner(host, { ...drill, active: true });
     }
     await refreshList();
-    const reviewId = Number(q.get("reviewId"));
-    if (reviewId > 0) {
-      const row = state.rows.find(r => Number(F(r, "reviewId")) === reviewId);
+    const reviewNumber = ctx?.filterType === "TprmEngagement" ? ctx.displayCode : "";
+    if (reviewNumber) {
+      const row = state.rows.find(r => F(r, "reviewNumber") === reviewNumber);
       if (row && F(row, "status") === "OPEN" && CAN_EDIT) complete(row);
+      else if (!row) show("rvMessage", `Review ${reviewNumber} is not on this page of the engagement's reviews.`, "info");
     }
   }
   function setIf(id, v) {
@@ -97,12 +104,13 @@
     if (!res.ok) { body.innerHTML = empty(7, res.error); state.pager?.clear(); return; }
     state.rows = res.data.data || [];
     state.pager?.setTotal(res.data.totalRows, state.rows.length);
-    const engHref = id => T.U("/Practice/Index/tprm-engagements") + "?" + qs({ organizationId: state.org, engagementId: id });
+    // 525: the engagement travels in the navigation code, not in the URL
+    const engLink = r => `<a href="${esc(T.U("/Practice/Index/tprm-engagements"))}"${T.navAttrs("tprm-reviews", "tprm-engagements", "TprmEngagement", F(r, "engagementId"), state.org)}>${esc(F(r, "engagementCode"))}</a>`;
     body.innerHTML = state.rows.map(r => {
       const open = F(r, "status") === "OPEN";
       return `<tr>
         <td>${esc(F(r, "reviewNumber"))}${T.yes(F(r, "requiresReassessment")) ? '<div class="tprm-alert">Reassessment</div>' : ""}</td>
-        <td><a href="${esc(engHref(F(r, "engagementId")))}">${esc(F(r, "engagementCode"))}</a> ${esc(F(r, "engagementTitle"))}
+        <td>${engLink(r)} ${esc(F(r, "engagementTitle"))}
           <div class="tprm-muted">${esc(F(r, "thirdPartyName"))} &middot; ${esc(T.stageLabel(F(r, "stageCode")))}</div></td>
         <td>${esc(TYPES[F(r, "reviewType")] || F(r, "reviewType"))}<div class="tprm-muted">${esc(F(r, "triggerLabel") || F(r, "triggerCode"))}</div>
           ${F(r, "triggerDetail") ? `<div class="tprm-muted">${esc(F(r, "triggerDetail"))}</div>` : ""}</td>

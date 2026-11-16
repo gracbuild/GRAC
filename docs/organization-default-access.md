@@ -190,3 +190,8 @@ organisations onboarded before `034`; `pm_create_organization_admin`
 creates only `Admin`. Non-admin roles are still configured through the
 Role Menu Permission screen, which is the intended behaviour — least
 privilege by default, with the org admin deciding who else sees what.
+
+
+## Call-site fix — 518 (2026-11-05)
+
+The Organization Setup call site never reached this endpoint for a new organization: the save returns the new id as `Id`, and `extractNewOrganizationId()` read only `OrganizationId`. It now reads `Id` too. The form also calls this endpoint for an **existing** organization that has no admin yet. See `organization-management-landing-list.md` § 518.

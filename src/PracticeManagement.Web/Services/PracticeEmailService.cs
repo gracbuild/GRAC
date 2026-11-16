@@ -27,6 +27,18 @@ public interface IPracticeEmailService
         string loginUrl,
         string oneTimePassword,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Forgot password (migration 529): the one-time reset link. Same
+    /// best-effort contract -- never throws; Delivered = false when SMTP is
+    /// not configured or the send failed.
+    /// </summary>
+    Task<PracticeEmailResult> SendPasswordResetAsync(
+        string toEmail,
+        string toName,
+        string resetUrl,
+        int expiresInMinutes,
+        CancellationToken cancellationToken);
 }
 
 public sealed record PracticeEmailResult(bool Delivered, string? CorrelationId, string? FailureReason);
@@ -61,6 +73,56 @@ public sealed class PracticeEmailService(IConfiguration configuration, ILogger<P
             return new PracticeEmailResult(false, correlationId, "Recipient email is missing.");
         }
 
+        var subjectTemplate = configuration["Email:CredentialsSubject"]
+            ?? "Your GRAC Organisation Administrator account is ready";
+        var result = await SendAsync(toEmail, toName,
+            subjectTemplate.Replace("{organization}", organizationName),
+            BuildBody(toName, organizationName, loginUrl, oneTimePassword, toEmail),
+            correlationId, cancellationToken);
+        if (result.Delivered)
+            logger.LogInformation(
+                "PracticeEmailService delivered credentials to {Email} for organisation {Organisation}. CorrelationId={CorrelationId}",
+                toEmail, organizationName, correlationId);
+        else
+            logger.LogError(
+                "PracticeEmailService failed to deliver credentials to {Email} for organisation {Organisation}. CorrelationId={CorrelationId}",
+                toEmail, organizationName, correlationId);
+        return result;
+    }
+
+    public async Task<PracticeEmailResult> SendPasswordResetAsync(
+        string toEmail,
+        string toName,
+        string resetUrl,
+        int expiresInMinutes,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = Guid.NewGuid().ToString("N");
+        if (!IsConfigured)
+        {
+            logger.LogWarning("PracticeEmailService is not configured. Skipping password reset email. CorrelationId={CorrelationId}", correlationId);
+            return new PracticeEmailResult(false, correlationId, "Email:SmtpHost or Email:FromAddress is not configured.");
+        }
+        if (string.IsNullOrWhiteSpace(toEmail))
+            return new PracticeEmailResult(false, correlationId, "Recipient email is missing.");
+
+        var result = await SendAsync(toEmail, toName,
+            configuration["Email:PasswordResetSubject"] ?? "Reset your GRAC password",
+            BuildPasswordResetBody(toName, resetUrl, expiresInMinutes),
+            correlationId, cancellationToken);
+        if (result.Delivered)
+            logger.LogInformation("PracticeEmailService delivered a password reset link to {Email}. CorrelationId={CorrelationId}", toEmail, correlationId);
+        else
+            logger.LogError("PracticeEmailService failed to deliver a password reset link to {Email}. CorrelationId={CorrelationId}", toEmail, correlationId);
+        return result;
+    }
+
+    // One SMTP send for every message (administrator credentials, password reset
+    // 529). Never throws -- Rule 6: email failures are reported, not raised.
+    private async Task<PracticeEmailResult> SendAsync(
+        string toEmail, string toName, string subject, string htmlBody,
+        string correlationId, CancellationToken cancellationToken)
+    {
         try
         {
             var host = configuration["Email:SmtpHost"]!;
@@ -71,8 +133,6 @@ public sealed class PracticeEmailService(IConfiguration configuration, ILogger<P
             var fromAddress = configuration["Email:FromAddress"]!;
             var fromName = configuration["Email:FromName"] ?? "GRAC PracticeManagement";
             var replyTo = configuration["Email:ReplyTo"];
-            var subjectTemplate = configuration["Email:CredentialsSubject"]
-                ?? "Your GRAC Organisation Administrator account is ready";
 
             using var client = new SmtpClient(host, port)
             {
@@ -89,29 +149,37 @@ public sealed class PracticeEmailService(IConfiguration configuration, ILogger<P
             using var message = new MailMessage
             {
                 From = new MailAddress(fromAddress, fromName),
-                Subject = subjectTemplate.Replace("{organization}", organizationName),
+                Subject = subject,
                 IsBodyHtml = true,
-                Body = BuildBody(toName, organizationName, loginUrl, oneTimePassword, toEmail)
+                Body = htmlBody
             };
             message.To.Add(new MailAddress(toEmail, string.IsNullOrWhiteSpace(toName) ? toEmail : toName));
             if (!string.IsNullOrWhiteSpace(replyTo)) message.ReplyToList.Add(new MailAddress(replyTo));
             message.Headers.Add("X-Grac-Correlation", correlationId);
 
             await client.SendMailAsync(message, cancellationToken);
-
-            logger.LogInformation(
-                "PracticeEmailService delivered credentials to {Email} for organisation {Organisation}. CorrelationId={CorrelationId}",
-                toEmail, organizationName, correlationId);
             return new PracticeEmailResult(true, correlationId, null);
         }
         catch (Exception ex)
         {
-            // Rule 6 — never let email failures bubble up to the caller.
-            logger.LogError(ex,
-                "PracticeEmailService failed to deliver credentials to {Email} for organisation {Organisation}. CorrelationId={CorrelationId}",
-                toEmail, organizationName, correlationId);
+            // Rule 6 -- never let email failures bubble up to the caller.
+            logger.LogError(ex, "PracticeEmailService send to {Email} failed. CorrelationId={CorrelationId}", toEmail, correlationId);
             return new PracticeEmailResult(false, correlationId, ex.Message);
         }
+    }
+
+    private static string BuildPasswordResetBody(string toName, string resetUrl, int expiresInMinutes)
+    {
+        var greeting = string.IsNullOrWhiteSpace(toName) ? "Hello," : $"Hello {System.Net.WebUtility.HtmlEncode(toName)},";
+        var link = System.Net.WebUtility.HtmlEncode(resetUrl);
+        return $"""
+            <p>{greeting}</p>
+            <p>We received a request to reset the password of your GRAC account.</p>
+            <p><a href="{link}">Reset your password</a></p>
+            <p>This link can be used once and expires in {expiresInMinutes} minutes. If the button does not open, copy this address into your browser:<br><code>{link}</code></p>
+            <p>If you did not ask for this, ignore this email -- your password stays unchanged.</p>
+            <p>-- GRAC PracticeManagement</p>
+            """;
     }
 
     private static string BuildBody(string toName, string organizationName, string loginUrl, string oneTimePassword, string toEmail)

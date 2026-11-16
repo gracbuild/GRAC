@@ -8,6 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <!-- Evidence Automation, Intake email channel (migration 531): reads the
+         intake mailbox over IMAP. .NET has no IMAP client of its own. -->
+    <PackageReference Include="MailKit" Version="4.16.0" />
   </ItemGroup>
 
   <ItemGroup>

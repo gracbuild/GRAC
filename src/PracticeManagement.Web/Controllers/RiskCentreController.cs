@@ -6,6 +6,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using ControlManagement.Security;
 using Microsoft.AspNetCore.Mvc;
 using PracticeManagement.Web.Security;
 
@@ -16,6 +17,7 @@ namespace PracticeManagement.Web.Controllers;
 public sealed class RiskCentreController(
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
+    PermissionPolicy permissionPolicy,
     ILogger<RiskCentreController> logger) : ControllerBase
 {
     private const string ApiBaseKey = "ApiBaseUrl";
@@ -641,7 +643,8 @@ public sealed class RiskCentreController(
             "api/practice/risk-centre/register/bulk-accept", "actorEmployeeId", ct);
 
     // ---- Risk acceptance approval authority (271) -------------------
-    // Organization -> Risk Acceptance Approval Authority.
+    // Risk Management -> Settings -> Workflow Settings, acceptance section
+    // (533; was Organization -> Risk Acceptance Approval Authority).
     //
     // organizationId-scoped, so the FULL org guard applies -- this is
     // configuration that decides who may approve accepting a risk, and a
@@ -752,6 +755,64 @@ public sealed class RiskCentreController(
     }
 
     // ---- helpers (parallel to ExceptionCentreController) ----
+
+    // ---- Risk methodology (532) ------------------------------------
+    // Reads: organisation guard (the methodology) or session guard (one
+    // risk, like every other register/{id} read). Writes: organisation
+    // guard on the BODY's organizationId plus EDIT on the
+    // "risk-methodology" screen, which 532 grants to the organisation
+    // administrator roles only.
+    [HttpGet("methodology")]
+    public Task<IActionResult> GetMethodology(CancellationToken ct)
+    {
+        if (!TryGuardOrganization(out var err)) return Task.FromResult(err!);
+        var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        return ForwardGetAsync($"api/practice/risk-centre/methodology{qs}", ct);
+    }
+
+    [HttpGet("register/methodology-summary")]
+    public Task<IActionResult> GetMethodologySummary(CancellationToken ct)
+    {
+        if (!TryGuardOrganization(out var err)) return Task.FromResult(err!);
+        var qs = Request.QueryString.HasValue ? Request.QueryString.Value : "";
+        return ForwardGetAsync($"api/practice/risk-centre/register/methodology-summary{qs}", ct);
+    }
+
+    [HttpGet("register/{riskId:long}/methodology")]
+    public Task<IActionResult> GetRiskMethodology(long riskId, CancellationToken ct)
+    {
+        if (!TryGuardSession(out var err)) return Task.FromResult(err!);
+        return ForwardGetAsync($"api/practice/risk-centre/register/{riskId}/methodology", ct);
+    }
+
+    [HttpPost("methodology/draft")]
+    public Task<IActionResult> CreateMethodologyDraft(CancellationToken ct) =>
+        MethodologyWriteAsync("api/practice/risk-centre/methodology/draft", ct);
+
+    [HttpPost("methodology/draft/save")]
+    public Task<IActionResult> SaveMethodologyDraft(CancellationToken ct) =>
+        MethodologyWriteAsync("api/practice/risk-centre/methodology/draft/save", ct);
+
+    [HttpPost("methodology/publish")]
+    public Task<IActionResult> PublishMethodology(CancellationToken ct) =>
+        MethodologyWriteAsync("api/practice/risk-centre/methodology/publish", ct);
+
+    [HttpPost("methodology/draft/discard")]
+    public Task<IActionResult> DiscardMethodologyDraft(CancellationToken ct) =>
+        MethodologyWriteAsync("api/practice/risk-centre/methodology/draft/discard", ct);
+
+    private Task<IActionResult> MethodologyWriteAsync(string relativeUrl, CancellationToken ct)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Task.FromResult<IActionResult>(Unauthorized(new { error = "Session expired." }));
+        var roles = (HttpContext.Session.GetString(PracticeSessionIdentity.RolesKey) ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries);
+        if (!permissionPolicy.IsAllowed(roles, PermissionAreaMap.For("risk-methodology"), "EDIT"))
+            return Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status403Forbidden,
+                new { success = false, error = "Only an organization administrator can change the risk methodology." }));
+        return ForwardJsonWithCallerStampAsync(HttpMethod.Post, relativeUrl, "actorEmployeeId", ct,
+            guardBodyOrganization: true);
+    }
 
     // The session-only half of TryGuardOrganization. The record-scoped
     // reads (a candidate, an analysis, one risk) have no organizationId

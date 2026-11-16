@@ -166,6 +166,26 @@ public static class PermissionAreaMap
         // gateway, resolved to organization-setup inside the API
         // (PracticeRepositoryService.ExecuteAsync), which refuses any
         // write under this name. Organization Setup itself is unchanged.
+        // The Organization Management landing LIST (2026-11-02). Like
+        // practice-instances above, its menu_master row is Inactive, so
+        // "organizations:VIEW" is a grant no role can hold and the list's
+        // own query -- plus the navigation code its row click mints --
+        // would answer 403 for every real role while admin ("*:*") saw it
+        // work. Every row leads to Organization Setup, so that screen
+        // governs it.
+        //
+        // This MUST match PracticeController.ScreenPermissionArea, which
+        // maps the same key: that one permissions the PAGE, this one
+        // permissions the entity read behind it. Mapping only one of them
+        // renders a list that 403s on load.
+        ["organizations"] = "organization-setup",
+        // The read-only organization page the list's rows open. Same rule,
+        // same reason: no menu row of its own, reached from Organization
+        // Setup's own list and leading back to it through Actions > Edit.
+        // Needed here (not only in ScreenPermissionArea) because the
+        // gateway checks PermissionArea on the navigation code it mints and
+        // resolves, whose source/target areas are these screen keys.
+        ["organization-view"] = "organization-setup",
         ["organization-profile"] = "organization-administration",
         ["locations"] = "organization-administration",
         ["departments"] = "organization-administration",
@@ -181,6 +201,12 @@ public static class PermissionAreaMap
         // the same mapping PracticeController.ScreenPermissionArea applies
         // to the page itself.
         ["practice-view"] = "organization-requirements",
+        // Audit Configuration (migration 549): menu row Inactive, opened
+        // only from Audit Definition (3-dot / Actions -> gracSecureNav), so
+        // the navigation code's VIEW check follows Audit Definition -- the
+        // same mapping PracticeController.ScreenPermissionArea applies to
+        // the page itself.
+        ["org-audit-configuration"] = "org-audit-definition",
         // Role Master's Menu Permission card (2026-10-26). Migration 401
         // moved the standalone "Role Menu Permission" screen INTO Role
         // Master (hidden from the sidebar), and the matrix itself leaves

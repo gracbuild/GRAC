@@ -8,11 +8,16 @@
                  five screens it hosts)
 
     How the audit operates, once it is defined:
-        1. Evidence Configuration -> org-assurance-evidence-config
-        2. Workflow Configuration -> org-assurance-workflow-config
-        3. Scoring Configuration  -> org-assurance-scoring-config
-        4. Trigger                -> org-assurance-triggers
-        5. Scope Resolution       -> org-assurance-scope-resolution
+        543: Scope Builder -> org-assurance-scope-builder
+             Question Sets -> _audit-question-set-adoption
+             (moved here from Audit Definition, which keeps only details)
+        1. Workflow Configuration -> org-assurance-workflow-config
+        2. Scoring Configuration  -> org-assurance-scoring-config
+        (548: Trigger is no longer a step -- executions start from plan
+        slots; 545: Scope Resolution is the Scope Builder's Preview.)
+    (Evidence Configuration was step 1 until 536 removed it: the
+    evidence an audit collects is set per question -- Evidence Type and
+    Expected Evidence -- in its Question Sets.)
 
     ORDER, AND WHY
       All five are keyed on (org_assurance_definition_id,
@@ -25,6 +30,33 @@
       snapshots are immutable, which makes it the natural closing
       review step.
 
+    537 (2026-11-13, sir): THE PAGE IS A LIST NOW
+      The page opens on the list of audits to configure (Draft, scope and
+      question sets set), one Organization picker; 3-dot / row click ->
+      the audit's view -> Actions -> a step. The steps below are hosted by
+      the flow shell in hosted mode (no context bar, no URL ids) inside
+      Partials/_audit-configuration-workspace, which drives it.
+
+    545 (2026-11-13, sir): FIVE STEPS. Scope Resolution is no longer a
+      step: the scope is resolved when an execution is created
+      (sp_org_assurance_execution_materialize). Its screen stays as the
+      Preview under the Scope Builder (Partials/_audit-scope-step).
+      562 (2026-11-15): the Preview is replaced by Step 2, Discover Related
+      GRAC Intelligence; Step 1 picks the audit subjects (Operationalize
+      dependencies).
+
+    543 (2026-11-13, sir): SIX STEPS, ONE POPUP EACH
+      Scope Builder and Question Sets are the first two steps (Scope
+      Resolution resolves that scope, so it needs it). The view page's
+      step list is where an audit is configured: a step row opens that
+      step alone in a popup with its own Save; saving marks the step
+      Completed. The one-page sections and the single Save are gone.
+
+    564 (2026-11-15, sir): Control and Practice Mapping is a step between
+      the Scope Builder and Question Sets (Partials/_audit-mapping-step).
+      It is OPTIONAL (status Optional until something is mapped) and never
+      blocks Submit for Review.
+
     ASSURANCE PLANS IS DELIBERATELY NOT A STEP HERE
       org_assurance_plan is organization-scoped and its items each
       reference a definition, so one plan spans several audits. Nesting
@@ -36,11 +68,27 @@
     var flow = new AuditFlowShell(Model, "oaAuditConfigurationFlow",
     new AuditFlowStep[]
     {
+        // 543: keys and titles match fn_org_assurance_setup_steps
+        // (StepKey / StepName), which the step list is built from.
+        // 545: the Scope Builder with a Preview (the Scope Resolution
+        // screen) under it -- Scope Resolution is no longer a step.
         new AuditFlowStep(
-            "evidence",
-            "Evidence",
-            "What evidence the audit collects, how it is collected, and what is mandatory.",
-            "Partials/org-assurance-evidence-config"),
+            "scope",
+            "Scope Builder",
+            "Step 1: the audit subjects (Operationalize dependencies). Step 2: the related GRAC intelligence they lead to.",
+            "Partials/_audit-scope-step"),
+        // 564: Control and Practice Mapping (spec 4.2.2) -- optional;
+        // between the scope and the question sets, the spec's order.
+        new AuditFlowStep(
+            "mapping",
+            "Control and Practice Mapping",
+            "Optional: the controls, practices and practice instances this audit is about, and manual mappings. Context only.",
+            "Partials/_audit-mapping-step"),
+        new AuditFlowStep(
+            "questions",
+            "Question Sets",
+            "Which question sets this audit asks, in order. New sets are made in Audit > Question Sets.",
+            "Partials/_audit-question-set-adoption"),
         new AuditFlowStep(
             "workflow",
             "Workflow",
@@ -50,18 +98,10 @@
             "scoring",
             "Scoring",
             "How results are scored: model type, thresholds and outcome bands.",
-            "Partials/org-assurance-scoring-config"),
-        new AuditFlowStep(
-            "trigger",
-            "Trigger",
-            "What starts the audit -- a schedule, an event, a continuous source, or a person.",
-            "Partials/org-assurance-triggers"),
-        new AuditFlowStep(
-            "scope-resolution",
-            "Scope Resolution",
-            "Resolve the authored scope into an immutable snapshot of the entities the audit will cover.",
-            "Partials/org-assurance-scope-resolution")
-    });
+            "Partials/org-assurance-scoring-config")
+        // 548 (sir): the Trigger step is removed -- nothing runs an audit
+        // from a trigger; executions start from plan slots (546).
+    }, Hosted: true);
 }
 
-<partial name="Partials/_audit-flow-shell" model="flow" />
+<partial name="Partials/_audit-configuration-workspace" model="flow" />

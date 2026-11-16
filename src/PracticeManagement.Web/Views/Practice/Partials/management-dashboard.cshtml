@@ -13,6 +13,19 @@
     page's own filters (Shared/dashboard-drill.js on the receiving end).
     Only the sections whose child screen the caller may VIEW are shown
     (ViewBag.DashboardSections, PracticeController.CanViewScreen).
+
+    503 (Dashboard UI specification v2): Governance renders the v2 layout
+    -- executive KPIs, Needs attention, framework coverage, distributions,
+    watchlist -- with the shared components in
+    js/ManagementDashboard/dashboard-components.js. #mdContext is the
+    context strip (organisation, scope, last refreshed) it fills; the
+    other dashboards leave it empty until they move to v2.
+
+    509: every dashboard on this partial now uses the v2 layout --
+    Governance, Issues & Actions, Audit Assurance, Third-Party Risk (507),
+    Policies & Documents (508) and Asset & Contract (509). The 414
+    "KPIs per section -> ageing -> distributions -> lists" layout above is
+    gone (management-dashboard.js, practice-management.css).
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 @{
@@ -35,9 +48,12 @@
         <button class="pm-button icon" id="mdRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
             <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
         </button>
+        <div class="pm-dx-context" id="mdContext" aria-live="polite"></div>
     </div>
     <div id="mdMessage" class="pm-empty compact" hidden></div>
     <div id="mdBody"></div>
 </section>
 
+<script src="~/js/ManagementDashboard/dashboard-components.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
 <script src="~/js/ManagementDashboard/management-dashboard.js" asp-append-version="true"></script>

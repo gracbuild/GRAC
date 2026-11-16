@@ -11,6 +11,8 @@
 // Operationalize workspace share this one instead of adding two more.
 //
 //   window.gracPageActions.attach(buttonId, getItems)
+//   (537: buttonId may also be the button element itself -- a grid's
+//    per-row 3-dot trigger, which has no id.)
 //
 // getItems() is called every time the menu opens, so each item reflects
 // the record's state at that moment. It returns
@@ -25,7 +27,7 @@
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
 
   function attach(buttonId, getItems) {
-    const btn = document.getElementById(buttonId);
+    const btn = typeof buttonId === "string" ? document.getElementById(buttonId) : buttonId;
     if (!btn) return null;
     let menu = null;
 

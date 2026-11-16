@@ -11,6 +11,8 @@
 //   GET    /executions?organizationId=&definitionId=&statusCode=&originType=&search=&page=&pageSize=
 //   GET    /executions/{id}?organizationId=
 //   POST   /executions/materialize                Materialize an execution
+//                                                 (545: scopeResolutionId optional --
+//                                                  omitted, the scope is resolved now)
 //   DELETE /executions/{id}?organizationId=&actor=
 //   POST   /executions/{id}/start
 //   POST   /executions/{id}/submit
@@ -19,6 +21,57 @@
 //   POST   /executions/{id}/close
 //   POST   /executions/{id}/cancel
 //   GET    /executions/{id}/entities?organizationId=&dimensionCode=&statusCode=&search=&page=&pageSize=
+//
+//   555 -- My Audits, live scope, Freeze Scope. The caller is the
+//   session employee the Web tier stamps (X-PM-Caller-Employee-Id).
+//   POST   /my-audits/prepare                     start the caller's due
+//          engagements (From <= today) -> { data: [{ planItemId,
+//          engagementCode, started, message }] }
+//   GET    /my-audits                             the caller's audits ->
+//          { data: [{ ..., executionId, scopeFrozenAt, auditState }] }
+//          auditState: Upcoming / Ready / ScopeLive / InProgress / Done / Cancelled
+//   GET    /executions/{id}/live-scope?organizationId=   the scope Freeze
+//          would take now (branch-narrowed; nothing saved); a frozen
+//          execution returns its frozen entities
+//   GET    /executions/{id}/scope-exclusions?organizationId=
+//   GET    /executions/{id}/responses?organizationId=   558: { questions: [{
+//          setOrder, questionSetCode, questionSetName, questionId, questionCode,
+//          questionText, helpText, isMandatory, evidenceTypeName,
+//          expectedEvidence, resultCode, description, ownerEmployeeId,
+//          ownerDisplayName, answeredBy, answeredDt, observationId,
+//          observationCode, observationStatusName }], counts: [{ resultCode,
+//          questionCount }] }
+//   POST   /executions/{id}/responses   558: { organizationId, questionId,
+//          resultCode (Compliant / NotCompliant / NotApplicable), description,
+//          ownerEmployeeId, actor } -- assigned auditor, In Progress only;
+//          Not compliant raises / edits the finding, Compliant / Not
+//          applicable withdraws an Open one -> { questionId, resultCode,
+//          observationId, observationCode, observationStatusName }
+//   GET    /executions/{id}/continuous-assurance?organizationId=   556:
+//          { summary: [{ summaryKind, label, itemCount }], detail: [{
+//          dimensionCode, entityName, practiceInstanceId, instanceName, via,
+//          obligationId, obligationName, obligationType, frequency,
+//          obligationStatusName, lastTaskNumber, lastTaskStatusName,
+//          lastTaskDueDate, ... }] } -- over the frozen or live scope;
+//          each obligation counted once in the summary
+//   POST   /executions/{id}/freeze-scope          { organizationId,
+//          exclusions: [{ dimensionCode, entityId, reason }], actor,
+//          review: { categories: [{ code, isIncluded }], excluded: [{
+//          categoryCode, recordId, reason }], manual: [{ categoryCode,
+//          name, note }] } }   (563: Step 3 Review and Confirm)
+//          assigned auditor only; Planned -> In Progress; final. The
+//          review is kept as the approved scope snapshot (version 1) ->
+//          { ..., reviewId, reviewVersionNo }
+//   GET    /executions/{id}/scope-review?organizationId=   563: { header:
+//          { reviewId, versionNo, reviewStatus, approvedBy, approvedDt,
+//          isFrozen }, categories: [{ categoryCode, categoryName,
+//          displayOrder, itemCount, isIncluded }], items: [{ categoryCode,
+//          recordId, recordCode, recordName, status, reason, isKept,
+//          exclusionReason, isManual, manualNote }] } -- live: the
+//          discovery over the engagement's scope now; frozen: the snapshot
+//   GET    /executions/{id} also returns scopeFrozenAt (null = live),
+//          scopeFrozenBy, scopeExclusionCount. POST /executions/{id}/start
+//          refuses a live scope (54030).
 // =====================================================================
 using Microsoft.AspNetCore.Mvc;
 using PracticeManagement.Api.Models;
@@ -32,6 +85,16 @@ public sealed class OrgAssuranceExecutionController(
     IOrgAssuranceExecutionService service,
     ILogger<OrgAssuranceExecutionController> logger) : ControllerBase
 {
+    // 555: the signed-in employee, stamped by the Web tier from the session
+    // (CallerIdentityHandler) -- never taken from the browser.
+    private const string CallerEmployeeHeader = "X-PM-Caller-Employee-Id";
+
+    private long? CallerEmployeeId =>
+        long.TryParse(Request.Headers[CallerEmployeeHeader].ToString(), out var id) && id > 0 ? id : null;
+
+    private string CallerActor(string? actor) =>
+        !string.IsNullOrWhiteSpace(actor) ? actor : CallerEmployeeId is { } id ? $"employee:{id}" : "system";
+
     // ================================================================
     // Lookups
     // ================================================================
@@ -248,5 +311,179 @@ public sealed class OrgAssuranceExecutionController(
                   error      = result.Error,
                   reasonCode = result.ReasonCode
               });
+    }
+
+    // ================================================================
+    // 555 -- My Audits, live scope, Freeze Scope
+    // ================================================================
+    [HttpPost("my-audits/prepare")]
+    public async Task<IActionResult> PrepareMyAudits(CancellationToken cancellationToken)
+    {
+        if (CallerEmployeeId is not { } employeeId)
+            return BadRequest(new { error = "My Audits needs a sign-in with an employee record." });
+        try
+        {
+            var rows = await service.PrepareMyAuditsAsync(employeeId, CallerActor(null), cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.PrepareMyAudits failed for employee {Id}", employeeId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("my-audits")]
+    public async Task<IActionResult> ListMyAudits(CancellationToken cancellationToken)
+    {
+        if (CallerEmployeeId is not { } employeeId)
+            return BadRequest(new { error = "My Audits needs a sign-in with an employee record." });
+        try
+        {
+            var rows = await service.ListMyAuditsAsync(employeeId, cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.ListMyAudits failed for employee {Id}", employeeId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("executions/{id:long}/live-scope")]
+    public async Task<IActionResult> ListLiveScope(
+        long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var rows = await service.ListLiveScopeAsync(organizationId.Value, id, CallerActor(null), cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.ListLiveScope failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("executions/{id:long}/responses")]
+    public async Task<IActionResult> ListResponses(
+        long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var result = await service.ListResponsesAsync(organizationId.Value, id, cancellationToken);
+            return Ok(new { questions = result.Questions, counts = result.Counts });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.ListResponses failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("executions/{id:long}/responses")]
+    public async Task<IActionResult> SaveResponse(
+        long id, [FromBody] OrgAssuranceResponseSaveRequest? body, CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        if (CallerEmployeeId is not { } employeeId)
+            return BadRequest(new { error = "Sign in as the assigned auditor to answer.", reasonCode = "RESPONSE_EMPLOYEE_REQUIRED" });
+
+        var result = await service.SaveResponseAsync(id, employeeId, body, CallerActor(body.Actor), cancellationToken);
+        return result.Success
+            ? Ok(new
+              {
+                  questionId            = result.QuestionId,
+                  resultCode            = result.ResultCode,
+                  observationId         = result.ObservationId,
+                  observationCode       = result.ObservationCode,
+                  observationStatusCode = result.ObservationStatusCode,
+                  observationStatusName = result.ObservationStatusName
+              })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    [HttpGet("executions/{id:long}/continuous-assurance")]
+    public async Task<IActionResult> GetContinuousAssurance(
+        long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var result = await service.GetContinuousAssuranceAsync(organizationId.Value, id, CallerActor(null), cancellationToken);
+            return Ok(new { summary = result.Summary, detail = result.Detail });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.GetContinuousAssurance failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("executions/{id:long}/scope-exclusions")]
+    public async Task<IActionResult> ListScopeExclusions(
+        long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var rows = await service.ListScopeExclusionsAsync(organizationId.Value, id, cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.ListScopeExclusions failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // 563: Scope Builder Step 3 -- the review to confirm, or the snapshot.
+    [HttpGet("executions/{id:long}/scope-review")]
+    public async Task<IActionResult> GetScopeReview(
+        long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var result = await service.GetScopeReviewAsync(organizationId.Value, id, cancellationToken);
+            return Ok(new { header = result.Header, categories = result.Categories, items = result.Items });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceExecutionController.GetScopeReview failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("executions/{id:long}/freeze-scope")]
+    public async Task<IActionResult> FreezeScope(
+        long id, [FromBody] OrgAssuranceFreezeScopeRequest? body, CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        if (CallerEmployeeId is not { } employeeId)
+            return BadRequest(new { error = "Sign in as the assigned auditor to freeze the scope.", reasonCode = "EMPLOYEE_REQUIRED" });
+
+        var result = await service.FreezeScopeAsync(id, employeeId, body, CallerActor(body.Actor), cancellationToken);
+        return result.Success
+            ? Ok(new
+              {
+                  executionId      = result.ExecutionId,
+                  executionCode    = result.ExecutionCode,
+                  totalEntityCount = result.TotalEntityCount,
+                  excludedCount    = result.ExcludedCount,
+                  reviewId         = result.ReviewId,          // 563
+                  reviewVersionNo  = result.ReviewVersionNo    // 563
+              })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
     }
 }

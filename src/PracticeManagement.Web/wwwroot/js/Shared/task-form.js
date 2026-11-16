@@ -63,6 +63,8 @@
 //     employees:        [...],        // optional; fetched when omitted
 //     defaults:         { title, description, priority, assignedToEmployeeId,
 //                         startDate, targetDate, remarks },
+//     // 526: a Custom task (mode "task", taskTypeCode Custom or absent)
+//     // also offers an optional Reviewer and Approver.
 //     onSaved:          result => { ... }   // { taskId, isSubTask, parentTaskId }
 //   });
 // =====================================================================
@@ -133,6 +135,26 @@
     });
     if (keep) sel.value = String(keep);
   }
+
+  // 526: Reviewer / Approver -- the same employee list as Assigned To, with
+  // an empty first option meaning "no review" / "no approval".
+  function fillOptional(id, list, emptyLabel) {
+    const sel = $(id);
+    if (!sel) return;
+    sel.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = emptyLabel;
+    sel.appendChild(ph);
+    list.forEach(e => {
+      const o = document.createElement("option");
+      o.value = String(e.employeeId);
+      o.textContent = e.employeeName + (e.employeeCode ? ` (${e.employeeCode})` : "");
+      sel.appendChild(o);
+    });
+  }
+
+  const offersReview = o => o && o.mode !== "subtask" && (o.taskTypeCode || "Custom") === "Custom";
 
   function setDisabled(id, on, noteId, noteText) {
     const el = $(id);
@@ -227,6 +249,15 @@
     sel.disabled = false;
     fillAssignees(list, d.assignedToEmployeeId);
 
+    // 526: Reviewer / Approver rows, Custom task only.
+    const review = offersReview(opts);
+    ["gracTaskFormReviewerRow", "gracTaskFormApproverRow"].forEach(rid => {
+      const row = $(rid);
+      if (row) row.style.display = review ? "" : "none";
+    });
+    fillOptional("gracTaskFormReviewer", review ? list : [], "\u2014 no review \u2014");
+    fillOptional("gracTaskFormApprover", review ? list : [], "\u2014 no approval \u2014");
+
     if (pageMode) {
       dlg.classList.add("gtf--page");
       dlg.open = true;                 // inline, non-modal
@@ -266,6 +297,16 @@
     if (isSub && !parentId) { msg("Parent Task is required.", "error"); return; }
     if (!title)             { msg("Task Name is required.", "error"); return; }
     if (!assignee)          { msg("Assigned To is required — select an employee.", "error"); return; }
+
+    // 526: the same rules the server applies, said before the round trip.
+    const reviewer = offersReview(opts) ? ($("gracTaskFormReviewer")?.value || "") : "";
+    const approver = offersReview(opts) ? ($("gracTaskFormApprover")?.value || "") : "";
+    if (reviewer && reviewer === approver) {
+      msg("The reviewer and the approver must be two different people.", "error"); return;
+    }
+    if ((reviewer && reviewer === assignee) || (approver && approver === assignee)) {
+      msg("The reviewer and approver must be someone other than the person the task is assigned to.", "error"); return;
+    }
 
     const btn = $("gracTaskFormSubmit");
     btn.disabled = true;
@@ -315,6 +356,9 @@
         if (opts.sourceReference) payload.sourceReference = opts.sourceReference;
         if (opts.linkedPracticeId) payload.linkedPracticeId = opts.linkedPracticeId;
         if (opts.linkedControlId)  payload.linkedControlId  = opts.linkedControlId;
+        // 526: sp_task_review_settings_set, in the same transaction as the open.
+        if (reviewer) payload.reviewerEmployeeId = Number(reviewer);
+        if (approver) payload.approverEmployeeId = Number(approver);
       }
 
       const r = await fetch(url, {

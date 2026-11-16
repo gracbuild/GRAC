@@ -1,6 +1,18 @@
 @*
     Risk Acceptance Approval Authority -- migration 271.
 
+    SINCE 533 (2026-11-13) A SECTION, NOT A PAGE.
+    Sir: "athu risk settings nte page leku thanne mattikoode?" -- the
+    grid is now a section of Risk Management -> Settings -> Workflow
+    Settings, included by risk-settings.cshtml, which owns the heading,
+    the organisation picker and Reload. risk-settings.js tells this
+    section which organisation to show through
+    window.gracRiskAcceptanceAuthority.load(orgId). The key
+    `risk-acceptance-authority` is no longer a screen and its menu row is
+    Inactive. Its own Save and Discard stay: it saves to a different
+    endpoint from the workflow settings form above it.
+
+    Was (271 - 532):
     Screen key : `risk-acceptance-authority`
     Group      : Organization
     Menu       : nav-organization -> Risk Acceptance Approval Authority
@@ -34,32 +46,12 @@
         GET  /practice/api/risk-centre/acceptance-authority?organizationId=
         POST /practice/api/risk-centre/acceptance-authority
 *@
-@model PracticeManagement.Web.Models.PracticeScreen
-
-<div class="pm-page-heading compact">
-    <div>
-        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
-        <h1>@Model.Title</h1>
-        <p>
-            Who may approve accepting a risk, per rating level &mdash; separately for the
-            inherent score and the residual score after treatment.
-        </p>
-    </div>
-</div>
-
-<section class="pm-panel" id="raaRoot">
-    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
-        <label class="pm-field">
-            <span>Organization</span>
-            <select class="pm-input" id="raaPickOrg"
-                    style="min-width:260px;">
-                <option value="">Loading...</option>
-            </select>
-        </label>
-        <div style="display:flex; gap:6px;">
-            <button class="pm-button" id="raaReloadBtn" type="button">Reload</button>
-        </div>
-    </div>
+<div id="raaRoot" class="raa-section">
+    <h3 class="risk-subhead">Risk acceptance approval authority</h3>
+    <p class="pm-hint" style="margin-top:0;">
+        Who may approve accepting a risk, per rating level &mdash; separately for the
+        inherent score and the residual score after treatment.
+    </p>
 
     @* The 212 settings this page defers to. Shown because an
        unconfigured level is not "unapproved" -- it falls back here, and
@@ -104,12 +96,14 @@
             </button>
         </div>
     </div>
-</section>
+</div>
 
 <style>
     /* The fallback notice. Declared here rather than borrowed from Risk
        Centre's .risk-gate, which lives in that partial's own style block
        and is not loaded on this page. */
+    /* Separated from the workflow settings form above it. */
+    #raaRoot.raa-section { margin-top: 20px; padding-top: 4px; border-top: 1px solid var(--border); }
     #raaRoot .raa-note {
         padding: 10px 12px; border-radius: var(--radius-md); font-size: 12px;
         background: var(--primary-50); border: 1px solid var(--primary-100); color: var(--neutral-700);

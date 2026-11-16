@@ -2,7 +2,13 @@
 // Risk Acceptance Approval Authority -- migration 271.
 // Loaded by Views/Practice/Partials/risk-acceptance-authority.cshtml.
 //
-// Organization -> Risk Acceptance Approval Authority.
+// Since 533 (2026-11-13) a SECTION of Risk Management -> Settings ->
+// Workflow Settings, not a page: the host (risk-settings.js) owns the
+// organisation picker and Reload, and calls
+//     window.gracRiskAcceptanceAuthority.load(orgId)
+// whenever the organisation changes, on Reload, and after the workflow
+// settings are saved (the fallback note reads those settings). The org
+// list loading and picker that lived here went with the page.
 //
 // THE LEVELS COME FROM THE SERVER, NOT FROM HERE.
 // There is deliberately no rating vocabulary in this file. The rows are
@@ -25,7 +31,6 @@
 
   const U = p => String(window.appBasePath || window.pmPathBase || "").replace(/\/+$/, "") + p;
   const API      = "/practice/api/risk-centre/acceptance-authority";
-  const ORGS_API = "/practice/api/organizations/allowed";
 
   const state = {
     orgId    : null,
@@ -37,25 +42,21 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 
-  async function init() {
-    if (!document.getElementById("raaRoot")) return;
-    bindEvents();
-    await populateOrgs();
-
-    const sel = document.getElementById("raaPickOrg");
-    if (sel && sel.options.length > 1) {
-      window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
-      state.orgId = Number(sel.value) || null;
-      await load();
+  // The host's entry point. Exposed at once (not in init) so the host can
+  // call it whatever order the two scripts' DOMContentLoaded handlers run.
+  window.gracRiskAcceptanceAuthority = {
+    load(orgId) {
+      state.orgId = Number(orgId) || null;
+      return load();
+    },
+    // True while a row has an unsaved change (the .raa-dirty marker).
+    isDirty() {
+      return !!document.querySelector("#raaTableBody tr.raa-dirty");
     }
-  }
+  };
 
-  function bindEvents() {
-    document.getElementById("raaPickOrg").addEventListener("change", async ev => {
-      state.orgId = Number(ev.target.value) || null;
-      await load();
-    });
-    document.getElementById("raaReloadBtn").addEventListener("click", load);
+  function init() {
+    if (!document.getElementById("raaRoot")) return;
     document.getElementById("raaResetBtn").addEventListener("click", () => {
       render();                       // re-render from the loaded state
       msg("Changes discarded.", "info");
@@ -81,62 +82,9 @@
     });
   }
 
-  // The endpoint answers { data: [...] }, NOT a bare array, and the
-  // casing varies with the serializer -- hence the four-way read below.
-  // This is copied from org-sla-config.js's populateOrgs rather than
-  // re-derived: it is the same feed, and the first version of this
-  // function guessed a bare array, got nothing, and reported
-  // "Organizations could not be loaded" for a response that was fine.
-  async function populateOrgs() {
-    const sel = document.getElementById("raaPickOrg");
-    sel.innerHTML = `<option value="">Select organization</option>`;
-
-    let rows = [];
-    let failed = false;
-    try {
-      const r = await fetch(U(ORGS_API), { credentials: "same-origin" });
-      if (r.ok) {
-        const b = await r.json();
-        rows = (b && (b.data || b.Data)) || [];
-      } else {
-        failed = true;
-        // 401 is its own thing: the session has gone, and telling the
-        // user "organizations could not be loaded" would send them
-        // looking for a data problem instead of signing back in.
-        if (r.status === 401) {
-          sel.innerHTML = `<option value="">Session expired — sign in again</option>`;
-          msg("Your session has expired. Sign in again to load organizations.", "error");
-          return;
-        }
-      }
-    } catch (_) {
-      failed = true;
-    }
-
-    if (failed) {
-      sel.innerHTML = `<option value="">Organizations could not be loaded</option>`;
-      msg("Organizations could not be loaded. Check that the API is reachable.", "error");
-      return;
-    }
-
-    rows.forEach(row => {
-      const value = String(row.organizationId ?? row.OrganizationId ?? "");
-      const label = String(row.organizationName ?? row.OrganizationName ?? "");
-      if (!value) return;
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = label;
-      sel.appendChild(opt);
-    });
-
-    // An empty list is not a failure -- it means this user is mapped to
-    // no organization. Said plainly rather than left as an empty picker.
-    if (!rows.length)
-      msg("You are not mapped to any organization, so there is nothing to configure.", "info");
-  }
-
   async function load() {
     const body = document.getElementById("raaTableBody");
+    if (!body) return;
     if (!state.orgId) {
       body.innerHTML = `<tr><td colspan="4" class="pm-empty-row">Select an organization.</td></tr>`;
       document.getElementById("raaFallback").style.display = "none";
@@ -195,8 +143,8 @@
         fb.className = "raa-note is-blocked";
         fb.innerHTML =
             `<strong>Risk approval is switched off for this organisation.</strong> `
-          + `Authorities set here are saved, but nothing enforces them until approval `
-          + `is enabled in Settings &rarr; Risk Settings.`;
+          + `Authorities set here are saved, but nothing enforces them until `
+          + `<strong>Require formal approval before a risk is registered</strong> is ticked above.`;
       } else if (!f.fallbackRoleId) {
         fb.className = "raa-note";
         fb.innerHTML =

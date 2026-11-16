@@ -80,6 +80,14 @@ public interface ITaskService
     // same procedures rather than re-deciding anything.
     Task<TaskEditOptions?> GetEditOptionsAsync(long taskId, CancellationToken cancellationToken);
     Task<TaskUpdateResult> UpdateAsync(TaskUpdateRequest request, CancellationToken cancellationToken);
+
+    // ---- 526: review / approval cycle ----------------------------------
+    Task<TaskCommandResult> DecideReviewAsync(long taskId, TaskReviewDecisionRequest request, long? actorEmployeeId,
+                                              bool isAdmin, CancellationToken cancellationToken);
+    Task<ScheduleReviewSettings?> GetScheduleReviewAsync(long scheduleRuleId, long organizationId, CancellationToken cancellationToken);
+    Task<(ScheduleReviewSettings? Settings, TaskCommandResult Result)> SaveScheduleReviewAsync(
+        long scheduleRuleId, ScheduleReviewSaveRequest request, long? actorEmployeeId, bool isSystemAdmin,
+        CancellationToken cancellationToken);
 }
 
 public sealed class TaskService(IConfiguration configuration, ILogger<TaskService> logger) : ITaskService
@@ -121,6 +129,10 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
         }
         // 414: dashboard drill-down, sent only when declared.
         await Infrastructure.ListDrillParameters.AddAsync(connection, command, "sp_task_list", query.Drill, cancellationToken);
+        // 526: "Awaiting my review / approval", sent only when declared.
+        if (query.ReviewEmployeeId.HasValue
+            && await ProcHasParameterAsync(connection, "sp_task_list", "@review_employee_id", cancellationToken))
+            AddParam(command, "@review_employee_id", DbType.Int64, query.ReviewEmployeeId.Value);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -152,6 +164,10 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
         if (string.IsNullOrWhiteSpace(request.SubjectEntityType)) return Fail("SubjectEntityType is required.");
         if (string.IsNullOrWhiteSpace(request.SubjectTitle))      return Fail("SubjectTitle is required.");
 
+        // 526: a reviewer / approver is set in the same transaction as the
+        // open, so a refused choice (inactive employee, the assignee
+        // himself, the same person twice) creates no task at all.
+        var wantsReview = request.ReviewerEmployeeId.HasValue || request.ApproverEmployeeId.HasValue;
         try
         {
             await using var connection = await OpenAsync(cancellationToken);
@@ -196,12 +212,32 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             taskIdParam.Direction     = ParameterDirection.Output;
             command.Parameters.Add(taskIdParam);
 
+            // Begun only now: the parameter probes above run their own
+            // commands, which a pending transaction would refuse.
+            await using var transaction = wantsReview ? await connection.BeginTransactionAsync(cancellationToken) : null;
+            command.Transaction = transaction;
+
             await command.ExecuteNonQueryAsync(cancellationToken);
             var taskId = taskIdParam.Value is long l ? l : Convert.ToInt64(taskIdParam.Value);
+
+            if (transaction is not null)
+            {
+                await using var review = connection.CreateCommand();
+                review.Transaction = transaction;
+                review.CommandType = CommandType.StoredProcedure;
+                review.CommandText = "grac_practice.sp_task_review_settings_set";
+                AddParam(review, "@task_id",              DbType.Int64, taskId);
+                AddParam(review, "@reviewer_employee_id", DbType.Int64, (object?)request.ReviewerEmployeeId ?? DBNull.Value);
+                AddParam(review, "@approver_employee_id", DbType.Int64, (object?)request.ApproverEmployeeId ?? DBNull.Value);
+                AddParam(review, "@actor_employee_id",    DbType.Int64, (object?)request.ActorEmployeeId ?? DBNull.Value);
+                await review.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
             return new TaskCommandResult(true, taskId);
         }
         catch (SqlException ex)
         {
+            // An open transaction rolls back when it is disposed.
             return HandleSqlError(ex, nameof(OpenAsync));
         }
     }
@@ -508,8 +544,12 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
                     RejectedByName:     reader["RejectedByName"]    as string,
                     RejectionReason:    reader["RejectionReason"]   as string));
         }
+        await reader.CloseAsync();
 
-        return new TaskDetailResult(header, activity, attachments, children, requests);
+        // 526: the review / approval cycle, when the database has it.
+        var review = await ReadReviewAsync(connection, taskId, cancellationToken);
+
+        return new TaskDetailResult(header, activity, attachments, children, requests, review);
     }
 
     public async Task<TaskCommandResult> ChangePriorityAsync(TaskPriorityChangeRequest request, CancellationToken cancellationToken)
@@ -1294,6 +1334,125 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
         UpdatedBy:                  GetString(reader, c, "updated_by"),
         UpdatedDt:                  GetDate  (reader, c, "updated_dt"));
 
+    // =================================================================
+    // 526 -- task review / approval cycle
+    // =================================================================
+
+    // The cycle of one task, or null when the database has not run 526
+    // (sp_task_review_get absent), so Task View works on either.
+    private static async Task<TaskReviewInfo?> ReadReviewAsync(DbConnection connection, long taskId, CancellationToken cancellationToken)
+    {
+        if (!await ProcHasParameterAsync(connection, "sp_task_review_get", "@task_id", cancellationToken))
+            return null;
+        await using var command = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_task_review_get";
+        AddParam(command, "@task_id", DbType.Int64, taskId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        var c = ColumnSet(reader);
+        return new TaskReviewInfo(
+            TaskId:                taskId,
+            ReviewerEmployeeId:    GetLong  (reader, c, "ReviewerEmployeeId"),
+            ReviewerName:          GetString(reader, c, "ReviewerName"),
+            ApproverEmployeeId:    GetLong  (reader, c, "ApproverEmployeeId"),
+            ApproverName:          GetString(reader, c, "ApproverName"),
+            ReviewStage:           GetString(reader, c, "ReviewStage"),
+            SubmittedByEmployeeId: GetLong  (reader, c, "SubmittedByEmployeeId"),
+            SubmittedByName:       GetString(reader, c, "SubmittedByName"),
+            SubmittedDt:           GetDate  (reader, c, "SubmittedDt"),
+            SubmittedRemark:       GetString(reader, c, "SubmittedRemark"),
+            AwaitingEmployeeId:    GetLong  (reader, c, "AwaitingEmployeeId"),
+            AwaitingName:          GetString(reader, c, "AwaitingName"));
+    }
+
+    public async Task<TaskCommandResult> DecideReviewAsync(long taskId, TaskReviewDecisionRequest request, long? actorEmployeeId,
+                                                           bool isAdmin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_task_review_decide";
+            AddParam(command, "@task_id",           DbType.Int64,   taskId);
+            AddParam(command, "@decision",          DbType.String,  request.Decision ?? "", 20);
+            AddParam(command, "@remark",            DbType.String,  (object?)request.Remark ?? DBNull.Value, -1);
+            AddParam(command, "@actor_employee_id", DbType.Int64,   (object?)actorEmployeeId ?? DBNull.Value);
+            AddParam(command, "@is_admin",          DbType.Boolean, isAdmin);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            string? status = null;
+            // The final approval runs sp_task_complete inside; its own
+            // result is suppressed, so the decision's row is the only one.
+            do
+            {
+                if (await reader.ReadAsync(cancellationToken))
+                    status = GetString(reader, ColumnSet(reader), "StatusCode") ?? status;
+            } while (await reader.NextResultAsync(cancellationToken));
+            return new TaskCommandResult(true, taskId, StatusCode: status);
+        }
+        catch (SqlException ex)
+        {
+            return HandleSqlError(ex, nameof(DecideReviewAsync));
+        }
+    }
+
+    public async Task<ScheduleReviewSettings?> GetScheduleReviewAsync(long scheduleRuleId, long organizationId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_schedule_rule_review_get";
+        AddParam(command, "@schedule_rule_id", DbType.Int64, scheduleRuleId);
+        AddParam(command, "@organization_id",  DbType.Int64, organizationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? MapScheduleReview(reader) : null;
+    }
+
+    public async Task<(ScheduleReviewSettings? Settings, TaskCommandResult Result)> SaveScheduleReviewAsync(
+        long scheduleRuleId, ScheduleReviewSaveRequest request, long? actorEmployeeId, bool isSystemAdmin,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_schedule_rule_review_save";
+            AddParam(command, "@schedule_rule_id",     DbType.Int64,   scheduleRuleId);
+            AddParam(command, "@organization_id",      DbType.Int64,   request.OrganizationId);
+            AddParam(command, "@reviewer_employee_id", DbType.Int64,   (object?)request.ReviewerEmployeeId ?? DBNull.Value);
+            AddParam(command, "@approver_employee_id", DbType.Int64,   (object?)request.ApproverEmployeeId ?? DBNull.Value);
+            AddParam(command, "@actor_employee_id",    DbType.Int64,   (object?)actorEmployeeId ?? DBNull.Value);
+            AddParam(command, "@is_system_admin",      DbType.Boolean, isSystemAdmin);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var settings = await reader.ReadAsync(cancellationToken) ? MapScheduleReview(reader) : null;
+            return (settings, new TaskCommandResult(true));
+        }
+        catch (SqlException ex)
+        {
+            return (null, HandleSqlError(ex, nameof(SaveScheduleReviewAsync)));
+        }
+    }
+
+    private static ScheduleReviewSettings MapScheduleReview(DbDataReader reader)
+    {
+        var c = ColumnSet(reader);
+        return new ScheduleReviewSettings(
+            ScheduleRuleId:     GetLong(reader, c, "ScheduleRuleId") ?? 0,
+            OrganizationId:     GetLong(reader, c, "OrganizationId") ?? 0,
+            PracticeInstanceId: GetLong(reader, c, "PracticeInstanceId") ?? 0,
+            OwnerEmployeeId:    GetLong  (reader, c, "OwnerEmployeeId"),
+            OwnerName:          GetString(reader, c, "OwnerName"),
+            ReviewerEmployeeId: GetLong  (reader, c, "ReviewerEmployeeId"),
+            ReviewerName:       GetString(reader, c, "ReviewerName"),
+            ApproverEmployeeId: GetLong  (reader, c, "ApproverEmployeeId"),
+            ApproverName:       GetString(reader, c, "ApproverName"));
+    }
+
     private TaskCommandResult HandleSqlError(SqlException ex, string op)
     {
         // Map framework + Task Centre v2 error codes back to reason
@@ -1343,6 +1502,15 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             56711 => "REASON_REQUIRED",
             56712 => "ACTOR_REQUIRED",
 
+            // review / approval cycle (526)
+            55961 => "AWAITING_REVIEW",
+            55966 => "NOT_AWAITING_REVIEW",
+            55967 => "REVIEW_FORBIDDEN",
+            55968 => "REVIEW_FORBIDDEN",
+            55976 => "REVIEW_FORBIDDEN",
+            55965 => "TASK_NOT_FOUND",
+            55975 => "TASK_NOT_FOUND",
+
             // everything else in the Task Centre v2 ranges is a
             // validation failure rather than a server fault
             >= 55600 and <= 55799 => "VALIDATION_ERROR",
@@ -1351,6 +1519,8 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
             >= 52780 and <= 52869 => "VALIDATION_ERROR",
             // 482: recurring evidence on a task.
             >= 52920 and <= 52929 => "VALIDATION_ERROR",
+            // 526: the remaining review / approval sentences.
+            >= 55960 and <= 55979 => "VALIDATION_ERROR",
 
             _     => "SQL_ERROR"
         };
@@ -1358,6 +1528,8 @@ public sealed class TaskService(IConfiguration configuration, ILogger<TaskServic
         // A few validation THROWs are shown straight to the user, so give
         // them a plain sentence instead of the raw "sp_...: ... (BRD §N)"
         // procedure text. The rest keep the procedure message (dev-facing).
+        // 526: the review / approval cycle THROWs are written as sentences
+        // for the user, so they are shown as they are.
         var message = ex.Number switch
         {
             56710 => "To reduce a task's priority, add a reason. The change is sent to Exceptions & Waivers for approval and the priority stays the same until it is approved.",

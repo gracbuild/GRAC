@@ -1,0 +1,817 @@
+@*
+    Audit -> Question Repository (migration 516, 2026-11-05).
+
+    Screen key : `org-assurance-question-repository`
+    Group      : Audit Assurance
+    Menu       : nav-assurance -> Question Repository (516, display 445)
+    Feature    : screen.org-assurance-question-sets (same Question Builder
+                 feature as Question Sets -- no separate flag)
+    Backend    :
+        GET    /practice/api/org-assurance/question-repository?organizationId=&search=&categoryId=&subcategoryId=&status=&page=&pageSize=
+        GET    /practice/api/org-assurance/question-repository/{id}?organizationId=
+        POST   /practice/api/org-assurance/question-repository
+        DELETE /practice/api/org-assurance/question-repository/{id}?organizationId=
+        GET    /practice/api/org-assurance/question-categories?organizationId=
+        POST   /practice/api/org-assurance/question-categories
+        DELETE /practice/api/org-assurance/question-categories/{id}?organizationId=
+        POST   /practice/api/org-assurance/question-subcategories
+        DELETE /practice/api/org-assurance/question-subcategories/{id}?organizationId=
+        GET    /practice/api/org-assurance/admin-question-types   (Response Type)
+
+    The organization's library of audit questions. Question Sets pick
+    their questions from here (org-assurance-question-sets). Categories
+    and Subcategories are the organization's own: it starts with the
+    default set (516) and adds / renames / removes them in "Categories".
+
+    UX follows the other Audit lists: a row click opens the question's
+    View; Edit and Remove are on its buttons and on the row's 3-dot menu.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="qrUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-book-open pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="qrUnavailableTitle">The Question Repository is not available for this organization.</h2>
+        <p id="qrUnavailableBody">Ask a GRAC Admin to enable <code>screen.org-assurance-question-sets</code>.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="qrRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="qrFilterOrganization"><option value="">Loading organizations...</option></select>
+        <input id="qrSearch" type="text" placeholder="Search code / question..." />
+        <select id="qrFilterCategory"><option value="">All categories</option></select>
+        <select id="qrFilterSubcategory"><option value="">All subcategories</option></select>
+        <select id="qrFilterStatus">
+            <option value="">All statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+        </select>
+        <button class="pm-button icon" id="qrRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button" id="qrCategoriesBtn" type="button">
+            <i class="fa-solid fa-tags" aria-hidden="true"></i> Categories
+        </button>
+        <button class="pm-button primary" id="qrAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Question
+        </button>
+    </div>
+    <div class="pm-message" id="qrMessage" style="display:none;"></div>
+
+    <div class="pm-table-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Question</th>
+                    <th>Category</th>
+                    <th>Subcategory</th>
+                    <th>Response Type</th>
+                    <th style="text-align:center;">Mandatory</th>
+                    <th style="text-align:center;">Evidence</th>
+                    <th style="text-align:right;">Weight</th>
+                    <th>Status</th>
+                    <th style="text-align:right;">Version</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="qrBody">
+                <tr><td colspan="11" class="pm-empty">Select an organization to load questions.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="qr-list">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
+    </div>
+</section>
+
+@* ---------- View question (row click) ---------- *@
+<dialog id="qrViewDialog" style="max-width:760px; width:94%;">
+    <div class="pm-dialog-heading">
+        <h2 id="qrViewTitle">Question</h2>
+        <button class="pm-icon-button" type="button" id="qrViewClose" aria-label="Close">&times;</button>
+    </div>
+    <dl class="qr-facts" id="qrViewFacts"></dl>
+    <div class="pm-dialog-actions">
+        <button type="button" id="qrViewRemove" class="pm-button">
+            <i class="fa-solid fa-trash" aria-hidden="true"></i> Remove
+        </button>
+        <button type="button" id="qrViewEdit" class="pm-button primary">
+            <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+        </button>
+    </div>
+</dialog>
+
+@* ---------- Add / Edit question ---------- *@
+<dialog id="qrDialog" style="max-width:760px; width:94%;">
+    <form id="qrForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <h2 id="qrDialogTitle">Add Question</h2>
+            <button class="pm-icon-button" type="button" id="qrClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="pm-message" id="qrFormMessage" style="display:none;"></div>
+        <input type="hidden" id="qrEditId" />
+        <div style="display:grid; grid-template-columns:1fr 160px 120px; gap:10px; align-items:start;">
+            <label class="pm-field">
+                <span>Question Code <span class="required">*</span></span>
+                <input class="pm-input" id="qrCode" type="text" maxlength="80" required />
+            </label>
+            <label class="pm-field">
+                <span>Status <span class="required">*</span></span>
+                <select class="pm-input" id="qrStatus">
+                    <option value="Active" selected>Active</option>
+                    <option value="Inactive">Inactive</option>
+                </select>
+            </label>
+            <label class="pm-field">
+                <span>Version</span>
+                <input class="pm-input" id="qrVersion" type="text" disabled value="New" />
+            </label>
+        </div>
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Question <span class="required">*</span></span>
+            <textarea class="pm-input" id="qrText" rows="3" maxlength="4000" required></textarea>
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label class="pm-field">
+                <span>Category <span class="required">*</span></span>
+                <select class="pm-input" id="qrCategory" required></select>
+            </label>
+            <label class="pm-field">
+                <span>Subcategory</span>
+                <select class="pm-input" id="qrSubcategory"></select>
+            </label>
+            <label class="pm-field">
+                <span>Response Type <span class="required">*</span></span>
+                <select class="pm-input" id="qrType" required></select>
+            </label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
+            <label class="pm-field">
+                <span>Mandatory <span class="required">*</span></span>
+                <select class="pm-input" id="qrMandatory">
+                    <option value="true">Yes</option>
+                    <option value="false" selected>No</option>
+                </select>
+            </label>
+            <label class="pm-field">
+                <span>Evidence Required <span class="required">*</span></span>
+                <select class="pm-input" id="qrEvidenceRequired">
+                    <option value="true">Yes</option>
+                    <option value="false" selected>No</option>
+                </select>
+            </label>
+            <label class="pm-field">
+                <span>Weight</span>
+                <input class="pm-input" id="qrWeight" type="number" step="0.01" min="0" />
+            </label>
+        </div>
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Description / Guidance</span>
+            <textarea class="pm-input" id="qrGuidance" rows="2" maxlength="4000"></textarea>
+        </label>
+        <label class="pm-field" style="margin-top:10px;">
+            <span>Expected Evidence</span>
+            <textarea class="pm-input" id="qrExpectedEvidence" rows="2" maxlength="4000"></textarea>
+        </label>
+        <div class="pm-dialog-actions">
+            <button type="button" id="qrCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="qrSubmit" class="pm-button primary">Save</button>
+        </div>
+    </form>
+</dialog>
+
+@* ---------- Categories / Subcategories ---------- *@
+<dialog id="qrCatDialog" style="max-width:720px; width:94%;">
+    <div class="pm-dialog-heading">
+        <h2>Categories</h2>
+        <button class="pm-icon-button" type="button" id="qrCatClose" aria-label="Close">&times;</button>
+    </div>
+    <p class="pm-hint" style="margin:0 0 8px;">This organization's own categories and subcategories. A category or subcategory used by a question cannot be removed until its questions are moved.</p>
+    <div class="pm-message" id="qrCatMessage" style="display:none;"></div>
+    <div class="pm-toolbar" style="gap:8px;">
+        <input class="pm-input" id="qrNewCategory" type="text" maxlength="200" placeholder="New category name" style="flex:1;" />
+        <button class="pm-button primary" id="qrAddCategoryBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Category
+        </button>
+    </div>
+    <div class="pm-table-wrap" style="margin-top:8px; max-height:55vh; overflow:auto;">
+        <table>
+            <thead>
+                <tr><th>Category / Subcategory</th><th style="text-align:right;">Questions</th><th style="width:220px;"></th></tr>
+            </thead>
+            <tbody id="qrCatBody"></tbody>
+        </table>
+    </div>
+    <div class="pm-dialog-actions">
+        <button type="button" id="qrCatDone" class="pm-button primary">Done</button>
+    </div>
+</dialog>
+
+<style>
+    #qrViewDialog .qr-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 8px 20px; margin: 0 0 4px;
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md);
+    }
+    #qrViewDialog .qr-facts .qr-wide { grid-column: 1 / -1; }
+    #qrViewDialog .qr-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted);
+    }
+    #qrViewDialog .qr-facts dd {
+        margin: 0 0 6px; font-size: 13px; color: var(--neutral-700); overflow-wrap: anywhere; white-space: pre-wrap;
+    }
+    #qrViewDialog .qr-facts dd.qr-empty { color: var(--fg-subtle); font-style: italic; }
+    #qrCatBody tr.qr-sub td:first-child { padding-left: 28px; color: var(--neutral-700); }
+    #qrCatBody tr.qr-cat td:first-child { font-weight: 600; }
+    #qrCatBody td .pm-button { padding: 2px 8px; font-size: 12px; }
+</style>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-question-sets';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const pick    = (o, a, b) => o ? (o[a] != null ? o[a] : o[b]) : null;
+
+    const state = {
+        orgId: '', search: '', categoryId: '', subcategoryId: '', status: '',
+        page: 1, pageSize: 25, total: 0,
+        rowsById: {},
+        categories: [], subcategories: [],
+        questionTypes: [],
+        viewing: null
+    };
+    let openMenuEl = null, openMenuTrigger = null;
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    async function boot() {
+        wf.wirePager('qr-list', function (delta) {
+            const next    = state.page + delta;
+            const maxPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+            if (next < 1 || next > maxPage) return;
+            state.page = next; reload();
+        });
+
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('qrUnavailable', 'qrUnavailableTitle', 'qrUnavailableBody',
+                'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('qrFilterOrganization', orgs);
+        state.orgId = document.getElementById('qrFilterOrganization').value || '';
+
+        const enabled = await wf.checkFeature(FEATURE, state.orgId);
+        if (!enabled) {
+            wf.unavailable('qrUnavailable', 'qrUnavailableTitle', 'qrUnavailableBody',
+                'The Question Repository is not available for this organization.',
+                'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('qrRoot').hidden = false;
+
+        wireControls();
+        await Promise.all([loadCategories(), loadQuestionTypes()]);
+        reload();
+    }
+
+    // -----------------------------------------------------------------
+    // Wiring
+    // -----------------------------------------------------------------
+    function wireControls() {
+        document.getElementById('qrFilterOrganization').addEventListener('change', async function (e) {
+            state.orgId = e.target.value || '';
+            state.page = 1; state.categoryId = ''; state.subcategoryId = '';
+            await loadCategories();
+            reload();
+        });
+        document.getElementById('qrSearch').addEventListener('input', function (e) {
+            state.search = e.target.value || '';
+            state.page = 1;
+            clearTimeout(window.__qrSearchTimer);
+            window.__qrSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('qrFilterCategory').addEventListener('change', function (e) {
+            state.categoryId = e.target.value || '';
+            state.subcategoryId = '';
+            renderFilterSubcategories();
+            state.page = 1; reload();
+        });
+        document.getElementById('qrFilterSubcategory').addEventListener('change', function (e) {
+            state.subcategoryId = e.target.value || '';
+            state.page = 1; reload();
+        });
+        document.getElementById('qrFilterStatus').addEventListener('change', function (e) {
+            state.status = e.target.value || '';
+            state.page = 1; reload();
+        });
+        document.getElementById('qrRefreshBtn').addEventListener('click', reload);
+        document.getElementById('qrAddBtn').addEventListener('click', function () { openDialog(null); });
+        document.getElementById('qrCategoriesBtn').addEventListener('click', openCategories);
+
+        document.getElementById('qrClose').addEventListener('click', closeDialog);
+        document.getElementById('qrCancel').addEventListener('click', closeDialog);
+        document.getElementById('qrForm').addEventListener('submit', function (e) { e.preventDefault(); save(); });
+        document.getElementById('qrCategory').addEventListener('change', function () { renderFormSubcategories(''); });
+
+        document.getElementById('qrViewClose').addEventListener('click', function () { document.getElementById('qrViewDialog').close(); });
+        document.getElementById('qrViewEdit').addEventListener('click', function () {
+            const id = state.viewing; document.getElementById('qrViewDialog').close(); if (id) openDialog(id);
+        });
+        document.getElementById('qrViewRemove').addEventListener('click', function () {
+            const id = state.viewing; document.getElementById('qrViewDialog').close(); if (id) remove(id);
+        });
+
+        document.getElementById('qrCatClose').addEventListener('click', closeCategories);
+        document.getElementById('qrCatDone').addEventListener('click', closeCategories);
+        document.getElementById('qrAddCategoryBtn').addEventListener('click', addCategory);
+        document.getElementById('qrNewCategory').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); addCategory(); }
+        });
+        document.getElementById('qrCatBody').addEventListener('click', onCategoryAction);
+
+        // Row click = View; the 3-dot trigger and controls keep their own click.
+        const body = document.getElementById('qrBody');
+        body.addEventListener('click', function (e) {
+            const trg = e.target.closest('.pm-action-trigger');
+            if (trg && body.contains(trg)) {
+                e.preventDefault(); e.stopPropagation();
+                if (openMenuTrigger === trg) { closeRowMenu(); return; }
+                openRowMenu(trg, menuItems(trg.getAttribute('data-id')));
+                return;
+            }
+            if (e.target.closest('a, button, input, label, select')) return;
+            const tr = e.target.closest('tr.pm-row-clickable[data-id]');
+            if (tr && body.contains(tr)) openView(tr.getAttribute('data-id'));
+        });
+        document.addEventListener('click', function (e) {
+            if (!openMenuEl) return;
+            if (e.target.closest('.pm-action-menu') || e.target.closest('.pm-action-trigger')) return;
+            closeRowMenu();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRowMenu(); });
+        window.addEventListener('resize', closeRowMenu);
+        window.addEventListener('scroll', closeRowMenu, true);
+    }
+
+    // -----------------------------------------------------------------
+    // Lookups
+    // -----------------------------------------------------------------
+    async function loadCategories() {
+        state.categories = []; state.subcategories = [];
+        if (!state.orgId) { renderFilterCategories(); return; }
+        try {
+            const r = await fetch(U(API + '/question-categories?organizationId=' + encodeURIComponent(state.orgId)),
+                                  { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const b = await r.json();
+            state.categories    = b.categories    || b.Categories    || [];
+            state.subcategories = b.subcategories || b.Subcategories || [];
+        } catch (err) {
+            setMessage('Could not load categories: ' + (err.message || err));
+        }
+        renderFilterCategories();
+    }
+    function categoryOptions(sel, selected, placeholder) {
+        sel.innerHTML = '<option value="">' + wf.escape(placeholder) + '</option>'
+            + state.categories.map(function (c) {
+                const id = pick(c, 'categoryId', 'CategoryId');
+                return '<option value="' + id + '">' + wf.escape(pick(c, 'categoryName', 'CategoryName')) + '</option>';
+            }).join('');
+        sel.value = selected ? String(selected) : '';
+    }
+    function subcategoryOptions(sel, categoryId, selected, placeholder) {
+        const subs = state.subcategories.filter(function (s) {
+            return categoryId && String(pick(s, 'categoryId', 'CategoryId')) === String(categoryId);
+        });
+        sel.innerHTML = '<option value="">' + wf.escape(placeholder) + '</option>'
+            + subs.map(function (s) {
+                return '<option value="' + pick(s, 'subcategoryId', 'SubcategoryId') + '">'
+                     + wf.escape(pick(s, 'subcategoryName', 'SubcategoryName')) + '</option>';
+            }).join('');
+        sel.value = selected ? String(selected) : '';
+        sel.disabled = !categoryId;
+    }
+    function renderFilterCategories() {
+        categoryOptions(document.getElementById('qrFilterCategory'), state.categoryId, 'All categories');
+        renderFilterSubcategories();
+    }
+    function renderFilterSubcategories() {
+        subcategoryOptions(document.getElementById('qrFilterSubcategory'), state.categoryId, state.subcategoryId, 'All subcategories');
+    }
+    function renderFormSubcategories(selected) {
+        subcategoryOptions(document.getElementById('qrSubcategory'),
+            document.getElementById('qrCategory').value, selected, '-- none --');
+    }
+
+    async function loadQuestionTypes() {
+        try {
+            const r = await fetch(U(API + '/admin-question-types'), { credentials: 'same-origin' });
+            const b = r.ok ? await r.json() : null;
+            state.questionTypes = (b && (b.data || b.Data)) || [];
+        } catch (_) { state.questionTypes = []; }
+    }
+    function renderTypeOptions(selectedId) {
+        const sel = document.getElementById('qrType');
+        sel.innerHTML = '<option value="">' + (state.questionTypes.length
+            ? '-- select a response type --' : '(no response types published by Admin)') + '</option>'
+            + state.questionTypes.map(function (t) {
+                const id = pick(t, 'id', 'Id'), code = pick(t, 'code', 'Code') || '', name = pick(t, 'name', 'Name') || '';
+                return '<option value="' + wf.escape(id) + '" data-code="' + wf.escape(code) + '" data-name="' + wf.escape(name) + '">'
+                     + wf.escape(name) + (code ? ' (' + wf.escape(code) + ')' : '') + '</option>';
+            }).join('');
+        sel.value = selectedId != null ? String(selectedId) : '';
+    }
+
+    // -----------------------------------------------------------------
+    // List
+    // -----------------------------------------------------------------
+    async function reload() {
+        const body = document.getElementById('qrBody');
+        if (!state.orgId) { body.innerHTML = '<tr><td colspan="11" class="pm-empty">Select an organization.</td></tr>'; return; }
+        body.innerHTML = '<tr><td colspan="11" class="pm-empty">Loading...</td></tr>';
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            if (state.search)        qs.set('search', state.search);
+            if (state.categoryId)    qs.set('categoryId', state.categoryId);
+            if (state.subcategoryId) qs.set('subcategoryId', state.subcategoryId);
+            if (state.status)        qs.set('status', state.status);
+            qs.set('page', String(state.page));
+            qs.set('pageSize', String(state.pageSize));
+            const r = await fetch(U(API + '/question-repository?' + qs.toString()), { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const p = await r.json();
+            state.total = Number(p.totalCount || p.TotalCount || 0);
+            const rows = p.rows || p.Rows || [];
+            render(rows);
+            wf.updatePager('qr-list', { pageNumber: state.page, totalCount: state.total, pageSize: state.pageSize, rowCount: rows.length });
+        } catch (err) {
+            body.innerHTML = '<tr><td colspan="11" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+        }
+    }
+
+    function render(rows) {
+        const body = document.getElementById('qrBody');
+        state.rowsById = {};
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="11" class="pm-empty">No questions yet. Click "Add Question" to add one.</td></tr>';
+            return;
+        }
+        const tick = '<i class="fa-solid fa-check" style="color:var(--success-700);" aria-label="Yes"></i>';
+        body.innerHTML = rows.map(function (q) {
+            const id = pick(q, 'repositoryQuestionId', 'RepositoryQuestionId');
+            state.rowsById[String(id)] = q;
+            const wt = pick(q, 'weight', 'Weight');
+            return '<tr class="pm-row-clickable" data-id="' + id + '">'
+                 + '<td>' + wf.escape(pick(q, 'questionCode', 'QuestionCode')) + '</td>'
+                 + '<td class="pm-cell-text">' + wf.escape(pick(q, 'questionText', 'QuestionText')) + '</td>'
+                 + '<td>' + wf.escape(pick(q, 'categoryName', 'CategoryName')) + '</td>'
+                 + '<td>' + wf.escape(pick(q, 'subcategoryName', 'SubcategoryName') || '') + '</td>'
+                 + '<td>' + wf.escape(pick(q, 'questionTypeName', 'QuestionTypeName') || '') + '</td>'
+                 + '<td style="text-align:center;">' + (pick(q, 'isMandatory', 'IsMandatory') ? tick : '') + '</td>'
+                 + '<td style="text-align:center;">' + (pick(q, 'evidenceRequired', 'EvidenceRequired') ? tick : '') + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(wt == null ? '' : String(wt)) + '</td>'
+                 + '<td>' + wf.badge(pick(q, 'status', 'Status')) + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(String(pick(q, 'versionNumber', 'VersionNumber') || '')) + '</td>'
+                 + '<td><button type="button" class="pm-action-trigger" data-id="' + id + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
+                 + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="visually-hidden">Actions</span></button></td>'
+                 + '</tr>';
+        }).join('');
+    }
+
+    // -----------------------------------------------------------------
+    // Row menu (same pattern as Question Sets)
+    // -----------------------------------------------------------------
+    function menuItems(id) {
+        return [
+            { icon: 'fa-eye',   label: 'View',   action: function () { openView(id); } },
+            { icon: 'fa-pen',   label: 'Edit',   action: function () { openDialog(id); } },
+            { icon: 'fa-trash', label: 'Remove', action: function () { remove(id); } }
+        ];
+    }
+    function closeRowMenu() {
+        if (openMenuEl)      { openMenuEl.remove(); openMenuEl = null; }
+        if (openMenuTrigger) { openMenuTrigger.setAttribute('aria-expanded', 'false'); openMenuTrigger = null; }
+    }
+    function openRowMenu(trg, items) {
+        closeRowMenu();
+        openMenuTrigger = trg;
+        trg.setAttribute('aria-expanded', 'true');
+        openMenuEl = document.createElement('div');
+        openMenuEl.className = 'pm-action-menu';
+        openMenuEl.setAttribute('role', 'menu');
+        items.forEach(function (it) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.setAttribute('role', 'menuitem');
+            b.innerHTML = '<i class="fa-solid ' + wf.escape(it.icon) + '" aria-hidden="true"></i> ' + wf.escape(it.label);
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                closeRowMenu();
+                try { it.action(); } catch (err) { console.error('[question-repository] menu action failed', err); }
+            });
+            openMenuEl.appendChild(b);
+        });
+        document.body.appendChild(openMenuEl);
+        const r = trg.getBoundingClientRect(), mr = openMenuEl.getBoundingClientRect(), gap = 6;
+        let top = r.bottom + gap, left = r.right - mr.width;
+        if (top + mr.height > window.innerHeight - 8) top = Math.max(8, r.top - mr.height - gap);
+        if (left < 8) left = 8;
+        if (left + mr.width > window.innerWidth - 8) left = window.innerWidth - mr.width - 8;
+        openMenuEl.style.top = top + 'px'; openMenuEl.style.left = left + 'px';
+    }
+
+    // -----------------------------------------------------------------
+    // View
+    // -----------------------------------------------------------------
+    async function fetchQuestion(id) {
+        const r = await fetch(U(API + '/question-repository/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId)),
+                              { credentials: 'same-origin' });
+        const b = await safeJson(r);
+        if (!r.ok) throw new Error((b && (b.error || b.Error)) || ('HTTP ' + r.status));
+        return b && (b.data || b.Data);
+    }
+    function fmtDate(v) {
+        if (!v) return '';
+        if (typeof window.gracFormatDisplayDate === 'function') { const g = window.gracFormatDisplayDate(v); if (g !== v) return g; }
+        return String(v).slice(0, 10);
+    }
+    async function openView(id) {
+        let q;
+        try { q = await fetchQuestion(id); } catch (err) { setMessage('Could not open the question: ' + (err.message || err)); return; }
+        if (!q) return;
+        state.viewing = id;
+        const yes = function (v) { return v ? 'Yes' : 'No'; };
+        const wt = pick(q, 'weight', 'Weight');
+        const facts = [
+            ['Question Code', pick(q, 'questionCode', 'QuestionCode')],
+            ['Status', pick(q, 'status', 'Status')],
+            ['Version', String(pick(q, 'versionNumber', 'VersionNumber') || '')],
+            ['Question', pick(q, 'questionText', 'QuestionText'), true],
+            ['Category', pick(q, 'categoryName', 'CategoryName')],
+            ['Subcategory', pick(q, 'subcategoryName', 'SubcategoryName')],
+            ['Response Type', pick(q, 'questionTypeName', 'QuestionTypeName')],
+            ['Mandatory', yes(pick(q, 'isMandatory', 'IsMandatory'))],
+            ['Evidence Required', yes(pick(q, 'evidenceRequired', 'EvidenceRequired'))],
+            ['Weight', wt == null ? '' : String(wt)],
+            ['Description / Guidance', pick(q, 'guidance', 'Guidance'), true],
+            ['Expected Evidence', pick(q, 'expectedEvidence', 'ExpectedEvidence'), true],
+            ['Used in Question Sets', String(pick(q, 'usedInSets', 'UsedInSets') || 0)],
+            ['Created By', pick(q, 'enteredBy', 'EnteredBy')],
+            ['Created Date', fmtDate(pick(q, 'enteredDt', 'EnteredDt'))],
+            ['Modified By', pick(q, 'updatedBy', 'UpdatedBy')],
+            ['Modified Date', fmtDate(pick(q, 'updatedDt', 'UpdatedDt'))]
+        ];
+        document.getElementById('qrViewTitle').textContent = 'Question ' + (pick(q, 'questionCode', 'QuestionCode') || '');
+        document.getElementById('qrViewFacts').innerHTML = facts.map(function (f) {
+            return '<div' + (f[2] ? ' class="qr-wide"' : '') + '><dt>' + wf.escape(f[0]) + '</dt>'
+                 + (f[1] ? '<dd>' + wf.escape(f[1]) + '</dd>' : '<dd class="qr-empty">Not set</dd>') + '</div>';
+        }).join('');
+        document.getElementById('qrViewDialog').showModal();
+    }
+
+    // -----------------------------------------------------------------
+    // Add / Edit
+    // -----------------------------------------------------------------
+    async function openDialog(id) {
+        clearFormMessage();
+        const form = document.getElementById('qrForm');
+        form.reset();
+        categoryOptions(document.getElementById('qrCategory'), '', '-- select a category --');
+        renderTypeOptions('');
+        if (id) {
+            let q;
+            try { q = await fetchQuestion(id); } catch (err) { setMessage('Could not open the question: ' + (err.message || err)); return; }
+            if (!q) return;
+            document.getElementById('qrDialogTitle').textContent = 'Edit Question';
+            document.getElementById('qrEditId').value = String(id);
+            document.getElementById('qrCode').value = pick(q, 'questionCode', 'QuestionCode') || '';
+            document.getElementById('qrCode').disabled = true;             // fixed after create
+            document.getElementById('qrStatus').value = pick(q, 'status', 'Status') || 'Active';
+            document.getElementById('qrVersion').value = 'v' + (pick(q, 'versionNumber', 'VersionNumber') || 1);
+            document.getElementById('qrText').value = pick(q, 'questionText', 'QuestionText') || '';
+            document.getElementById('qrCategory').value = String(pick(q, 'categoryId', 'CategoryId') || '');
+            renderFormSubcategories(pick(q, 'subcategoryId', 'SubcategoryId') || '');
+            renderTypeOptions(pick(q, 'questionTypeId', 'QuestionTypeId'));
+            document.getElementById('qrMandatory').value = pick(q, 'isMandatory', 'IsMandatory') ? 'true' : 'false';
+            document.getElementById('qrEvidenceRequired').value = pick(q, 'evidenceRequired', 'EvidenceRequired') ? 'true' : 'false';
+            const wt = pick(q, 'weight', 'Weight');
+            document.getElementById('qrWeight').value = wt == null ? '' : String(wt);
+            document.getElementById('qrGuidance').value = pick(q, 'guidance', 'Guidance') || '';
+            document.getElementById('qrExpectedEvidence').value = pick(q, 'expectedEvidence', 'ExpectedEvidence') || '';
+        } else {
+            document.getElementById('qrDialogTitle').textContent = 'Add Question';
+            document.getElementById('qrEditId').value = '';
+            document.getElementById('qrCode').disabled = false;
+            document.getElementById('qrVersion').value = 'New';
+            if (state.categoryId) document.getElementById('qrCategory').value = state.categoryId;
+            renderFormSubcategories(state.subcategoryId);
+        }
+        document.getElementById('qrDialog').showModal();
+    }
+    function closeDialog() { document.getElementById('qrDialog').close(); }
+
+    let saving = false;
+    async function save() {
+        if (saving) return;
+        const idStr  = document.getElementById('qrEditId').value;
+        const catId  = document.getElementById('qrCategory').value;
+        const subId  = document.getElementById('qrSubcategory').value;
+        const tSel   = document.getElementById('qrType');
+        const tOpt   = tSel.options[tSel.selectedIndex] || null;
+        const wtRaw  = document.getElementById('qrWeight').value;
+        const wtVal  = wtRaw === '' ? null : Number(wtRaw);
+        if (!catId)       { showFormMessage('Category is required.'); return; }
+        if (!tSel.value)  { showFormMessage('Response Type is required.'); return; }
+        const body = {
+            organizationId       : Number(state.orgId),
+            repositoryQuestionId : idStr ? Number(idStr) : null,
+            questionCode         : document.getElementById('qrCode').value.trim(),
+            questionText         : document.getElementById('qrText').value.trim(),
+            categoryId           : Number(catId),
+            subcategoryId        : subId ? Number(subId) : null,
+            guidance             : document.getElementById('qrGuidance').value || null,
+            questionTypeId       : Number(tSel.value),
+            questionTypeCode     : tOpt ? (tOpt.getAttribute('data-code') || null) : null,
+            questionTypeName     : tOpt ? (tOpt.getAttribute('data-name') || null) : null,
+            isMandatory          : document.getElementById('qrMandatory').value === 'true',
+            evidenceRequired     : document.getElementById('qrEvidenceRequired').value === 'true',
+            expectedEvidence     : document.getElementById('qrExpectedEvidence').value || null,
+            weight               : (wtVal != null && isFinite(wtVal)) ? wtVal : null,
+            status               : document.getElementById('qrStatus').value,
+            actor                : null
+        };
+        saving = true;
+        const btn = document.getElementById('qrSubmit'); btn.disabled = true;
+        try {
+            const r = await fetch(U(API + '/question-repository'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { showFormMessage((j && (j.error || j.Error)) || ('HTTP ' + r.status)); return; }
+            closeDialog();
+            reload();
+            loadCategories();   // question counts
+        } catch (err) {
+            showFormMessage(err.message || String(err));
+        } finally {
+            saving = false; btn.disabled = false;
+        }
+    }
+
+    async function remove(id) {
+        const q = state.rowsById[String(id)];
+        const code = q ? pick(q, 'questionCode', 'QuestionCode') : '';
+        if (!await window.gracUi.confirm('Remove question ' + code + ' from the repository?',
+              { type: 'warning', title: 'Remove question', confirmText: 'Remove' })) return;
+        try {
+            const r = await fetch(U(API + '/question-repository/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId)),
+                                  { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { setMessage((j && (j.error || j.Error)) || ('HTTP ' + r.status)); return; }
+            setMessage('');
+            reload();
+            loadCategories();
+        } catch (err) { setMessage(err.message || String(err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Categories / Subcategories
+    // -----------------------------------------------------------------
+    async function openCategories() {
+        setCatMessage('');
+        await loadCategories();
+        renderCategoryTable();
+        document.getElementById('qrCatDialog').showModal();
+    }
+    function closeCategories() { document.getElementById('qrCatDialog').close(); reload(); }
+
+    function renderCategoryTable() {
+        const body = document.getElementById('qrCatBody');
+        if (!state.categories.length) {
+            body.innerHTML = '<tr><td colspan="3" class="pm-empty">No categories. Add one above.</td></tr>';
+            return;
+        }
+        body.innerHTML = state.categories.map(function (c) {
+            const cid = pick(c, 'categoryId', 'CategoryId');
+            const subs = state.subcategories.filter(function (s) { return String(pick(s, 'categoryId', 'CategoryId')) === String(cid); });
+            return '<tr class="qr-cat"><td>' + wf.escape(pick(c, 'categoryName', 'CategoryName')) + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(String(pick(c, 'questionCount', 'QuestionCount') || 0)) + '</td>'
+                 + '<td style="text-align:right; white-space:nowrap;">'
+                 + '<button type="button" class="pm-button" data-act="add-sub" data-id="' + cid + '">+ Subcategory</button> '
+                 + '<button type="button" class="pm-button" data-act="rename-cat" data-id="' + cid + '" title="Rename"><i class="fa-solid fa-pen" aria-hidden="true"></i></button> '
+                 + '<button type="button" class="pm-button" data-act="remove-cat" data-id="' + cid + '" title="Remove"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>'
+                 + '</td></tr>'
+                 + subs.map(function (s) {
+                       const sid = pick(s, 'subcategoryId', 'SubcategoryId');
+                       return '<tr class="qr-sub"><td>' + wf.escape(pick(s, 'subcategoryName', 'SubcategoryName')) + '</td>'
+                            + '<td style="text-align:right;">' + wf.escape(String(pick(s, 'questionCount', 'QuestionCount') || 0)) + '</td>'
+                            + '<td style="text-align:right; white-space:nowrap;">'
+                            + '<button type="button" class="pm-button" data-act="rename-sub" data-id="' + sid + '" data-cat="' + cid + '" title="Rename"><i class="fa-solid fa-pen" aria-hidden="true"></i></button> '
+                            + '<button type="button" class="pm-button" data-act="remove-sub" data-id="' + sid + '" title="Remove"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>'
+                            + '</td></tr>';
+                   }).join('');
+        }).join('');
+    }
+
+    async function postJson(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const j = await safeJson(r);
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function del(path) {
+        const r = await fetch(U(API + path + '?organizationId=' + encodeURIComponent(state.orgId)),
+                              { method: 'DELETE', credentials: 'same-origin' });
+        const j = await safeJson(r);
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+    }
+    async function afterCategoryChange() {
+        await loadCategories();
+        renderCategoryTable();
+    }
+
+    async function addCategory() {
+        const input = document.getElementById('qrNewCategory');
+        const name = input.value.trim();
+        if (!name) { setCatMessage('Enter a category name.'); return; }
+        try {
+            await postJson('/question-categories', { organizationId: Number(state.orgId), categoryId: null, categoryName: name, displayOrder: null, actor: null });
+            input.value = ''; setCatMessage('');
+            await afterCategoryChange();
+        } catch (err) { setCatMessage(err.message || String(err)); }
+    }
+
+    async function onCategoryAction(e) {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const act = btn.getAttribute('data-act'), id = btn.getAttribute('data-id');
+        const find = function (list, a, b) { return list.find(function (x) { return String(pick(x, a, b)) === String(id); }); };
+        try {
+            if (act === 'add-sub') {
+                const name = await window.gracUi.prompt('Subcategory name:', { title: 'Add Subcategory', inputLabel: 'Subcategory', confirmText: 'Add' });
+                if (!name || !name.trim()) return;
+                await postJson('/question-subcategories', { organizationId: Number(state.orgId), categoryId: Number(id), subcategoryId: null, subcategoryName: name.trim(), displayOrder: null, actor: null });
+            } else if (act === 'rename-cat') {
+                const c = find(state.categories, 'categoryId', 'CategoryId');
+                const name = await window.gracUi.prompt('Category name:', { title: 'Rename Category', inputLabel: 'Category', confirmText: 'Save', defaultValue: c ? pick(c, 'categoryName', 'CategoryName') : '' });
+                if (!name || !name.trim()) return;
+                await postJson('/question-categories', { organizationId: Number(state.orgId), categoryId: Number(id), categoryName: name.trim(), displayOrder: null, actor: null });
+            } else if (act === 'rename-sub') {
+                const s = find(state.subcategories, 'subcategoryId', 'SubcategoryId');
+                const name = await window.gracUi.prompt('Subcategory name:', { title: 'Rename Subcategory', inputLabel: 'Subcategory', confirmText: 'Save', defaultValue: s ? pick(s, 'subcategoryName', 'SubcategoryName') : '' });
+                if (!name || !name.trim()) return;
+                await postJson('/question-subcategories', { organizationId: Number(state.orgId), categoryId: Number(btn.getAttribute('data-cat')), subcategoryId: Number(id), subcategoryName: name.trim(), displayOrder: null, actor: null });
+            } else if (act === 'remove-cat') {
+                const c = find(state.categories, 'categoryId', 'CategoryId');
+                if (!await window.gracUi.confirm('Remove category "' + (c ? pick(c, 'categoryName', 'CategoryName') : '') + '" and its subcategories?',
+                      { type: 'warning', title: 'Remove category', confirmText: 'Remove' })) return;
+                await del('/question-categories/' + encodeURIComponent(id));
+            } else if (act === 'remove-sub') {
+                const s = find(state.subcategories, 'subcategoryId', 'SubcategoryId');
+                if (!await window.gracUi.confirm('Remove subcategory "' + (s ? pick(s, 'subcategoryName', 'SubcategoryName') : '') + '"?',
+                      { type: 'warning', title: 'Remove subcategory', confirmText: 'Remove' })) return;
+                await del('/question-subcategories/' + encodeURIComponent(id));
+            }
+            setCatMessage('');
+            await afterCategoryChange();
+        } catch (err) { setCatMessage(err.message || String(err)); }
+    }
+
+    // -----------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------
+    function setMessage(text)     { wf.setMessage('qrMessage', text, 'error'); }
+    function setCatMessage(text)  { wf.setMessage('qrCatMessage', text, 'error'); }
+    function showFormMessage(text){ wf.setMessage('qrFormMessage', text, 'error'); }
+    function clearFormMessage()   { wf.setMessage('qrFormMessage', ''); }
+    async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }
+})();
+</script>

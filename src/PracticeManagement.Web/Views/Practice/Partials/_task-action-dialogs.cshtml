@@ -167,6 +167,9 @@
         <h2 style="margin:0 0 10px; font-size:16px;">Complete task</h2>
         <p id="taskCompleteSubject" style="margin:0 0 10px; font-size:13px; color:var(--neutral-700);"></p>
         <div id="taskCompleteGate" style="display:none; font-size:12px; border-radius:var(--radius-md); padding:8px 10px; margin-bottom:10px;"></div>
+        @* 526: who the task goes to on Complete, when it has a reviewer / approver. *@
+        <div id="taskCompleteReviewNote" style="display:none; font-size:12px; border-radius:var(--radius-md); padding:8px 10px; margin-bottom:10px;
+                                               background:var(--primary-50); border:1px solid var(--primary-200); color:var(--primary-700);"></div>
 
         @* Evidence, as part of the completion workflow.
            Shown so the completer can see what is already attached, with
@@ -310,6 +313,38 @@
     (sp_task_reopen) authorizes admin OR the task owner; the menu item
     only appears on tasks whose current status is Closed.
 *@
+@*
+    Review / Approve (migration 526). The reviewer or approver of a
+    completed task approves it (on to the approver, or closed) or returns
+    it to the assignee with a reason. sp_task_review_decide decides who
+    may act; the dialog only shows whose turn it is.
+*@
+<dialog id="taskReviewDialog" style="max-width:560px; width:94%;">
+    <form id="taskReviewForm" method="dialog" style="margin:0; padding:18px 20px;">
+        <h2 id="taskReviewTitle" style="margin:0 0 10px; font-size:16px;">Review task</h2>
+        <p id="taskReviewSubject" style="margin:0 0 10px; font-size:13px; color:var(--neutral-700);"></p>
+        <dl id="taskReviewFacts" style="margin:0 0 10px; font-size:13px;"></dl>
+        <label style="display:block;">
+            <span style="display:block; font-size:12px; font-weight:600; color:var(--fg-secondary); margin-bottom:3px;">
+                Remark <span style="font-weight:400; color:var(--fg-muted);">(required to return)</span>
+            </span>
+            <textarea class="pm-input" id="taskReviewRemark" rows="3" maxlength="2000"
+                      style="width:100%; font-size:13px;"
+                      placeholder="Your review comments, or why the task is being returned."></textarea>
+        </label>
+        <p id="taskReviewMsg" style="margin:8px 0 0; font-size:12px; color:var(--danger-700);"></p>
+        <footer style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+            <button type="button" class="pm-button" data-close-task-review>Cancel</button>
+            <button type="button" class="pm-button" id="taskReviewReturn">
+                <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Return to assignee
+            </button>
+            <button type="submit" class="pm-button primary" id="taskReviewApprove">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Approve
+            </button>
+        </footer>
+    </form>
+</dialog>
+
 <dialog id="taskReopenDialog" style="max-width:520px; width:94%;">
     <form id="taskReopenForm" method="dialog" style="margin:0; padding:18px 20px;">
         <h2 style="margin:0 0 10px; font-size:16px;">Reopen task</h2>

@@ -1,0 +1,5 @@
+e9a6e44f4ce4a742b13fbaa50c9cb7f3  database/507_tprm_dashboard_watchlist.sql
+fb4b2a92431d4e80b1a452f2211cf0dc  database/507_tprm_dashboard_watchlist_rollback.sql
+4294d0d9b3cab9307fa80d2c17d0e5c9  database/525_tpm_dashboard_tasks_profile_review.sql
+9b2488942281173a8bf1766e1d5f826a  database/525_tpm_dashboard_tasks_profile_review_rollback.sql
+ab70487580b70f7e7c8c8f970433c570  docs/tprm.md

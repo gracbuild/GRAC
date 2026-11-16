@@ -40,7 +40,8 @@
   const SOURCE_LABEL = {
     Gap: "Gap", Exception: "Exception", Risk: "Risk", RiskRegister: "Risk",
     ContinuousAssurance: "Continuous Assurance", EventAssurance: "Event Assurance", Custom: "Source",
-    Schedule: "Scheduled obligation"   // 449: no full view of its own; plain text
+    Schedule: "Scheduled obligation",   // 449: no full view of its own; plain text
+    ThirdParty: "Third-party engagement"   // 525: TPRM information request; the reference is the engagement code
   };
 
   const state = { taskId: null, detail: null };
@@ -127,7 +128,7 @@
       (h.taskNumber || ("Task #" + h.taskId)) + " — " + (h.subjectTitle || "");
     document.getElementById("tvStatusChip").textContent = h.currentStatusName || h.currentStatusCode || "-";
 
-    document.getElementById("tvFacts").innerHTML = renderFacts(h);
+    document.getElementById("tvFacts").innerHTML = renderFacts(h, d.review);
     renderRelatedSource(h);
     renderDescription(h);
     renderCompletion(h);
@@ -171,7 +172,7 @@
     return `<span class="pm-badge">${escapeHtml(text)}</span>`;
   }
 
-  function renderFacts(h) {
+  function renderFacts(h, review) {
     const rows = [
       factRow("Task Reference", escapeHtml(h.taskNumber || ("#" + h.taskId))),
       factRow("Type", escapeHtml(h.taskTypeName || h.taskTypeCode)),
@@ -186,6 +187,14 @@
       factRow("Approved Extended Due", escapeHtml(fmtDate(h.approvedExtendedDueAt))),
       factRow("SLA Status", slaStatusValue(h))
     ];
+    // 526: the review / approval cycle, when the task has one.
+    if (review && (review.reviewerEmployeeId || review.approverEmployeeId)) {
+      rows.push(factRow("Reviewer", escapeHtml(review.reviewerName || "")));
+      rows.push(factRow("Approver", escapeHtml(review.approverName || "")));
+      if (review.reviewStage)
+        rows.push(factRow("Waiting For", escapeHtml(review.awaitingName || "")
+          + ` <span class="tv-hint">(${review.reviewStage === "Approval" ? "approval" : "review"})</span>`));
+    }
     return rows.join("");
   }
 
@@ -406,7 +415,9 @@
       isTerminal: !!h.currentStatusIsTerminal,
       isChild: !!h.isChild,
       isEligible: !!h.isEligibleForCompletion,
-      rawStatusCode: h.currentStatusCode || ""
+      rawStatusCode: h.currentStatusCode || "",
+      // 526: in the cycle even when the SLA sweep has escalated it.
+      awaitingReview: !!(state.detail.review && state.detail.review.reviewStage)
     };
 
     // No onView: this page already IS the read-only view Task Center's
@@ -423,7 +434,9 @@
       onAddEvidence: () => { closeActionsMenu(); window.gracTaskActions.openEvidenceUpload(h.taskId, taskNumber); },
       onAddUpdate:   () => { closeActionsMenu(); window.gracTaskActions.openAddUpdate(h.taskId); },
       onClose:       () => { closeActionsMenu(); window.gracTaskActions.openClose(h.taskId, taskNumber, taskTitle); },
-      onReopen:      () => { closeActionsMenu(); window.gracTaskActions.openReopen(h.taskId, taskNumber, taskTitle); }
+      onReopen:      () => { closeActionsMenu(); window.gracTaskActions.openReopen(h.taskId, taskNumber, taskTitle); },
+      // 526
+      onReviewDecision: () => { closeActionsMenu(); window.gracTaskActions.openReviewDecision(h.taskId, taskNumber, taskTitle); }
     });
     const shown = items.filter(it => it && it.applicable !== false);
 

@@ -1,79 +1,98 @@
 @*
-    The login split-card's dark brand panel.
+    The login screens' brand side.
 
     One copy, rendered by both Login/Index.cshtml and
-    Login/ChangePassword.cshtml -- the two screens are the same flow and
-    had identical panel markup, so the restyle (change request
-    2026-10-29) lives here rather than being pasted into both.
+    Login/ChangePassword.cshtml -- the two screens are the same flow.
 
-    The GRAC logo is the real asset, in the place the design marked
-    "Existing GRAC logo stays here". Everything below it is new.
+    2026-11-03 restyle (change request: "make the login page like the
+    picture"). The earlier navy card with the Requirement -> Evidence
+    flow diagram is replaced by the full-bleed scene from the reference
+    image: a glowing "Practice Core" hub with the frameworks and
+    capabilities it connects, the "Continuous Compliance Assured" line,
+    and the module strip. The GRAC logo sits in the top-left corner of
+    the screen (moved out of the sign-in card on request, same day).
 
-    Colours come from grac-tokens.css, not from the design's literal hex
-    values: --grac-navy-deep (#0C1129 vs the mock's #0E1326) and
-    --grac-gold (#E8A33D vs #E2A43F) are the same two brand colours to
-    the eye, and this panel is exactly the brand-only surface the token's
-    own comment reserves the gold for. The SVG keeps its literal values
-    where a token would be wrong: the node fills and strokes are panel
-    furniture, not design-system surfaces.
+    The hub's chips and their dashed connectors are drawn from ONE list
+    below, so a chip and its line can never drift apart. Positions are
+    percentages of the hub stage; the connector SVG uses a 700 x 420
+    viewBox and the stage has the same aspect ratio (login.css), so a
+    percentage maps to the same point in both.
 *@
+@{
+    // (label, isFramework, x %, y %, tilt deg, cycle)
+    //   isFramework = true  -> rectangular framework tile (ISO 27001 ...)
+    //   isFramework = false -> rounded capability pill with the gold dot
+    //   cycle = labels the chip rotates through, starting with Label
+    //           (js/login.js); null = a fixed label. To add or change a
+    //           standard, edit the list here -- nothing else.
+    var hubChips = new (string Label, bool IsFramework, double X, double Y, double Tilt, string[]? Cycle)[]
+    {
+        ("ISO 27001",           true,  30, 14, -8,
+            new[] { "ISO 27001", "ISO 9001", "ISO 42000", "ISO 33000" }),
+        ("RBI CSF",             true,  68,  9,  6, null),
+        ("Live Risk",           false, 13, 33, -6, null),
+        ("Continuous Evidence", false, 82, 31,  5, null),
+        ("SOC 2",               true,  15, 56, -4, null),
+        ("PCI DSS",             true,  84, 57,  4, null),
+        ("Audit Readiness",     false, 14, 84, -6, null),
+        ("Real-time Posture",   false, 83, 85,  5, null),
+    };
+
+    // The module strip under the tagline. Font Awesome 5 free icons
+    // (the version under lib/FrontEnd/plugins/fontawesome-free).
+    var modules = new (string Icon, string Label)[]
+    {
+        ("fas fa-landmark",    "Governance"),
+        ("fas fa-shield-alt",  "Risk Management"),
+        ("fas fa-search",      "Audit Assurance"),
+        ("fas fa-users",       "TPRM"),
+        ("far fa-file-alt",    "Policy Management"),
+        ("far fa-chart-bar",   "Practice Management"),
+    };
+
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+}
 <div class="brand-panel">
-    <div class="brand-inner">
-        <div class="brand-logo">
-            <img src="~/css/Images/Logo.png" alt="GRAC Logo" loading="lazy" />
-        </div>
-
-        <h1 class="brand-title">Compliance that runs<br />as <span>practice</span>, not paperwork.</h1>
-        <p class="brand-lead">Every requirement, owned, operated and evidenced.</p>
-
-        @* Decorative: the requirement -> practice -> obligations -> evidence
-           flow, with the gap loop back to Task / Exception / Risk. Hidden
-           from assistive technology -- the sentence above already says it. *@
-        <div class="brand-art" aria-hidden="true">
-            <svg viewBox="0 0 480 170" xmlns="http://www.w3.org/2000/svg" role="presentation">
-                <defs>
-                    <linearGradient id="gracGold" x1="0" x2="1">
-                        <stop offset="0" stop-color="#F0B54A" />
-                        <stop offset="1" stop-color="#C9822B" />
-                    </linearGradient>
-                    <marker id="gracAr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-                        <path d="M0 0L10 5L0 10z" fill="#4B5578" />
-                    </marker>
-                    <marker id="gracArG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-                        <path d="M0 0L10 5L0 10z" fill="#E8A33D" />
-                    </marker>
-                </defs>
-
-                <g stroke="#4B5578" stroke-width="1.5" fill="none" marker-end="url(#gracAr)">
-                    <line x1="96" y1="52" x2="128" y2="52" />
-                    <line x1="216" y1="52" x2="248" y2="52" />
-                    <line x1="336" y1="52" x2="368" y2="52" />
-                </g>
-
-                <g font-size="12" text-anchor="middle">
-                    <rect x="8" y="24" width="88" height="56" rx="10" fill="#161D36" stroke="#2A3354" />
-                    <text x="52" y="49" fill="#fff" font-weight="700">Requirement</text>
-                    <text x="52" y="66" fill="#7E88A6" font-size="10.5">Source statement</text>
-
-                    <rect x="128" y="24" width="88" height="56" rx="10" fill="#161D36" stroke="#2A3354" />
-                    <text x="172" y="49" fill="#fff" font-weight="700">Practice</text>
-                    <text x="172" y="66" fill="#7E88A6" font-size="10.5">Owned &amp; scoped</text>
-
-                    <rect x="248" y="24" width="88" height="56" rx="10" fill="#161D36" stroke="#2A3354" />
-                    <text x="292" y="49" fill="#fff" font-weight="700">Obligations</text>
-                    <text x="292" y="66" fill="#7E88A6" font-size="10.5">Operationalized</text>
-
-                    <rect x="368" y="24" width="104" height="56" rx="10" fill="url(#gracGold)" />
-                    <text x="420" y="49" fill="#0C1129" font-weight="900">Evidence</text>
-                    <text x="420" y="66" fill="#3A2A10" font-size="10.5">Audit-ready</text>
-                </g>
-
-                <path d="M292 80 V122 H232" stroke="#E8A33D" stroke-width="1.5" stroke-dasharray="4 4" fill="none" marker-end="url(#gracArG)" />
-                <rect x="132" y="106" width="98" height="32" rx="16" fill="rgba(232,163,61,.12)" stroke="#E8A33D" />
-                <text x="181" y="126" fill="#E8A33D" font-size="11.5" font-weight="700" text-anchor="middle">Gap detected</text>
-                <path d="M132 122 H60 V84" stroke="#E8A33D" stroke-width="1.5" stroke-dasharray="4 4" fill="none" marker-end="url(#gracArG)" />
-                <text x="64" y="152" fill="#7E88A6" font-size="10.5">Task &#183; Exception &#183; Risk</text>
-            </svg>
-        </div>
+    @* Top-left of the screen. Positioned against .login-wrapper, which
+       reserves the room for it (login.css), so it never sits over the
+       hub or the card. *@
+    <div class="brand-logo">
+        <img src="~/css/Images/Logo.png" alt="GRAC - Continuous Compliance Assured" />
     </div>
+
+    @* Decorative particle wave along the bottom of the screen, drawn by
+       js/login.js. Positioned against .login-wrapper, behind both columns. *@
+    <canvas class="login-wave" aria-hidden="true"></canvas>
+
+    @* Decorative: the hub says what the tagline below already says, so it
+       is hidden from assistive technology. *@
+    <div class="hub-stage" aria-hidden="true">
+        <svg class="hub-lines" viewBox="0 0 700 420" preserveAspectRatio="none" role="presentation">
+            @foreach (var chip in hubChips)
+            {
+                <line x1="@((chip.X * 7).ToString(inv))" y1="@((chip.Y * 4.2).ToString(inv))" x2="350" y2="210" />
+            }
+        </svg>
+
+        <div class="hub-core">
+            <span>Practice</span>
+            <span class="hub-core-accent">Core</span>
+        </div>
+
+        @foreach (var chip in hubChips)
+        {
+            <div class="hub-chip @(chip.IsFramework ? "is-framework" : "is-capability")"
+                 style="--x:@(chip.X.ToString(inv))%;--y:@(chip.Y.ToString(inv))%;--r:@(chip.Tilt.ToString(inv))deg"
+                 data-cycle="@(chip.Cycle is null ? null : string.Join("|", chip.Cycle))"><span class="hub-chip-text">@chip.Label</span></div>
+        }
+    </div>
+
+    <h2 class="brand-tagline">Continuous <span>Compliance</span> Assured</h2>
+
+    <ul class="brand-modules">
+        @foreach (var module in modules)
+        {
+            <li><i class="@module.Icon" aria-hidden="true"></i><span>@module.Label</span></li>
+        }
+    </ul>
 </div>

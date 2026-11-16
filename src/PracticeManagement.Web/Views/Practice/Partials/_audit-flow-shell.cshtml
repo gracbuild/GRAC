@@ -14,7 +14,7 @@
 
     WHY IT IS SAFE TO CO-HOST THEM
       * Element ids do not collide -- each partial uses its own prefix
-        (oaDef / oaScope / qs / oaEv / oaWf / oaSc / oaTg / oaRs).
+        (oaDef / oaScope / qs / oaWf / oaSc / oaTg / oaRs; oaEv retired by 536).
       * Partials/_workflow-common self-guards, so it attaches once.
       * Every hosted partial boots with the same DOMContentLoaded +
         readyState pair, which fires its boot exactly once.
@@ -42,11 +42,31 @@
 
     Deep link: ?step=<step key> opens that tab, ?definitionId=<id>
     preselects the audit (the same parameter the hosted screens accept).
+
+    537 -- HOSTED MODE (Model.Hosted)
+      Audit Configuration is now a list of audits; the audit is picked
+      there, not here. Hosted, the shell renders no page heading and no
+      context bar, does not read or write the URL (no record id in the
+      address bar), and exposes
+        window.__oaFlowShell.setContext(orgId, definitionId)
+        window.__oaFlowShell.show(stepKey)      scrolls to that section
+        window.__oaFlowShell.chipHtml(status)   the status chip markup
+      for the host (Partials/_audit-configuration-workspace).
+      2026-11-13 (sir): hosted, the steps are ONE PAGE OF SECTIONS, like
+      the Audit Definition page -- no tab strip, no caption line, no
+      Previous / Next. Each step is a card with its title, status chip
+      and caption, one under the other.
+      543 (sir): the host renders this shell inside its step popup and
+      shows one section at a time ([hidden] on the others); Scope Builder
+      and Question Sets are steps here now. Nothing in this file changed
+      for it: setContext / chipHtml are what the host uses.
 *@
 @model PracticeManagement.Web.Models.AuditFlowShell
 
 <partial name="Partials/_workflow-common" />
 
+@if (!Model.Hosted)
+{
 <div class="pm-page-heading compact">
     <div>
         <p class="pm-eyebrow">@Model.Screen.Group / @Model.Screen.Title</p>
@@ -54,10 +74,13 @@
         <p>@Model.Screen.Description</p>
     </div>
 </div>
+}
 
 <section class="pm-panel oa-flow-shell" id="@Model.ShellId" data-flow-shell="@Model.Screen.Key">
 
-    @* ---------- Shared audit context ---------- *@
+    @* ---------- Shared audit context (not when hosted, 537) ---------- *@
+    @if (!Model.Hosted)
+    {
     <div class="oa-flow-context" data-flow-context>
         <label>
             <span>Organization</span>
@@ -69,7 +92,10 @@
         </label>
         <span class="oa-flow-ctx-state" data-flow-ctx-state></span>
     </div>
+    }
 
+    @if (!Model.Hosted)
+    {
     <div class="pm-tabs oa-flow-steps" role="tablist" aria-label="@Model.Screen.Title steps">
         @for (var i = 0; i < Model.Steps.Length; i++)
         {
@@ -87,10 +113,29 @@
     </div>
 
     <p class="oa-flow-caption">@Model.Steps[0].Caption</p>
+    }
 
     @for (var i = 0; i < Model.Steps.Length; i++)
     {
         var step = Model.Steps[i];
+        if (Model.Hosted)
+        {
+        @* 537: hosted -- one section per step, all shown. *@
+        <div class="oa-flow-panel oa-cfg-section"
+             id="@(Model.ShellId)-panel-@step.Key"
+             data-flow-panel="@step.Key">
+            <div class="oa-ws-section-head">
+                <h2>@step.Title</h2><span class="oa-step-chip" data-step-chip="@step.Key" hidden></span>
+            </div>
+            <p class="oa-ws-section-hint">@step.Caption</p>
+            @if (!string.IsNullOrWhiteSpace(step.HeaderPartial))
+            {
+                <partial name="@step.HeaderPartial" model="Model.Screen" />
+            }
+            <partial name="@step.PartialName" model="Model.Screen" />
+        </div>
+            continue;
+        }
         <div class="pm-setup-tab-panel oa-flow-panel @(i == 0 ? "active" : "")"
              role="tabpanel"
              id="@(Model.ShellId)-panel-@step.Key"
@@ -104,6 +149,8 @@
         </div>
     }
 
+    @if (!Model.Hosted)
+    {
     <div class="oa-flow-nav">
         <button type="button" class="pm-button" data-flow-prev>
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Previous
@@ -113,6 +160,7 @@
             Next <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
         </button>
     </div>
+    }
 </section>
 
 <script>
@@ -129,12 +177,15 @@
     const captions = @Html.Raw(Json.Serialize(
         Model.Steps.ToDictionary(s => s.Key, s => s.Caption)));
     const order = @Html.Raw(Json.Serialize(Model.Steps.Select(s => s.Key).ToArray()));
+    const hosted = @(Model.Hosted ? "true" : "false");
 
     // Definition-scoped screens expose oa<Prefix>PickOrg / oa<Prefix>PickDef.
     // Question Sets is organization-scoped, so it takes the org only.
+    // 545: a step may host more than one screen -- the Scope Builder step
+    // carries the Scope Resolution screen as its Preview -- so a key maps
+    // to one prefix or a list of them.
     const SCOPED = {
-        'scope'            : 'oaScope',
-        'evidence'         : 'oaEv',
+        'scope'            : ['oaScope'],   // 562: Step 2 (Discover) replaced the hosted Scope Resolution preview
         'workflow'         : 'oaWf',
         'scoring'          : 'oaSc',
         'trigger'          : 'oaTg',
@@ -201,6 +252,7 @@
     });
 
     function writeUrl(patch) {
+        if (hosted) return;   // 537: the host owns the page; no ids in the URL
         try {
             const url = new URL(window.location.href);
             Object.keys(patch).forEach(function (k) {
@@ -236,10 +288,12 @@
     }
 
     function applyContextTo(stepKey) {
-        const prefix = SCOPED[stepKey];
-        if (prefix) {
-            if (state.orgId)        setSelect(prefix + 'PickOrg', state.orgId);
-            if (state.definitionId) setSelect(prefix + 'PickDef', state.definitionId);
+        const prefixes = SCOPED[stepKey];
+        if (prefixes) {
+            [].concat(prefixes).forEach(function (prefix) {
+                if (state.orgId)        setSelect(prefix + 'PickOrg', state.orgId);
+                if (state.definitionId) setSelect(prefix + 'PickDef', state.definitionId);
+            });
             return;
         }
         const orgOnly = ORG_ONLY[stepKey];
@@ -259,7 +313,8 @@
     const CHIP = {
         Completed     : { text: 'Completed',      cls: 'is-complete' },
         InProgress    : { text: 'In progress',    cls: 'is-partial'  },
-        NotConfigured : { text: 'Not configured', cls: 'is-empty'    }
+        NotConfigured : { text: 'Not configured', cls: 'is-empty'    },
+        Optional      : { text: 'Optional',       cls: 'is-empty'    }   // 564: an optional step with nothing set
     };
 
     function clearChips() {
@@ -348,7 +403,7 @@
             : 'Pick an audit to carry it across all steps.';
     }
 
-    orgSel.addEventListener('change', async function () {
+    if (orgSel) orgSel.addEventListener('change', async function () {
         state.orgId = orgSel.value;
         state.definitionId = '';
         writeUrl({ definitionId: '' });
@@ -358,13 +413,39 @@
         clearChips();
     });
 
-    defSel.addEventListener('change', function () {
+    if (defSel) defSel.addEventListener('change', function () {
         state.definitionId = defSel.value;
         writeUrl({ definitionId: state.definitionId });
         applyContextEverywhere();
         setCtxState();
         refreshStatus();
     });
+
+    // -----------------------------------------------------------------
+    // 537: the host page's handle (hosted mode only).
+    // -----------------------------------------------------------------
+    if (hosted) {
+        window.__oaFlowShell = {
+            setContext: function (orgId, definitionId) {
+                state.orgId = String(orgId || '');
+                state.definitionId = String(definitionId || '');
+                applyContextEverywhere();
+                refreshStatus();
+            },
+            // Sections, not tabs: scroll to the step (the first = page top).
+            show: function (key) {
+                refreshStatus();
+                const i = order.indexOf(key);
+                if (i <= 0) { window.scrollTo(0, 0); return; }
+                const panel = shell.querySelector('[data-flow-panel="' + key + '"]');
+                if (panel) setTimeout(function () { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+            },
+            chipHtml: function (status) {
+                const c = CHIP[status];
+                return c ? '<span class="oa-step-chip ' + c.cls + '">' + c.text + '</span>' : '';
+            }
+        };
+    }
 
     // -----------------------------------------------------------------
     // Boot
@@ -385,6 +466,7 @@
         show(initialStep, false);
         setCtxState();
 
+        if (hosted) return;   // 537: the host sets the audit (setContext)
         if (!wf) return;   // context bar needs the shared org loader
         const orgs = await wf.loadOrgs();
         orgSel.innerHTML = '<option value="">Select an organization...</option>';

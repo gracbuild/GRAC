@@ -6,6 +6,8 @@
 //   sp_org_assurance_definition_question_set_get
 //   sp_org_assurance_definition_question_set_save
 //   sp_org_assurance_setup_status
+// and, since 537, sp_org_assurance_configuration_list (the Audit
+// Configuration list).
 //
 // Follows OrgAssuranceQuestionService line for line: primary-constructor
 // injection, Infrastructure.SqlConnectionStringResolver for the
@@ -32,6 +34,9 @@ public interface IOrgAssuranceSetupService
 
     Task<OrgAssuranceSetupStatusResult> GetSetupStatusAsync(
         long organizationId, long definitionId, long? versionId, CancellationToken cancellationToken);
+
+    Task<OrgAssuranceConfigurationListResult> ListConfigurationAuditsAsync(
+        long organizationId, string? search, int page, int pageSize, CancellationToken cancellationToken);
 }
 
 public sealed class OrgAssuranceSetupService(
@@ -71,7 +76,9 @@ public sealed class OrgAssuranceSetupService(
                     ReadStringOrNull(reader, "SetName"),
                     ReadIntOrNull(reader,    "DisplayOrder"),
                     ReadBool(reader,         "IsMandatory"),
-                    ReadIntOrNull(reader,    "QuestionCount")));
+                    ReadIntOrNull(reader,    "QuestionCount"),
+                    HasColumn(reader, "SetVersionNumber") ? ReadIntOrNull(reader,    "SetVersionNumber") : null,   // 551
+                    HasColumn(reader, "SetVersionStatus") ? ReadStringOrNull(reader, "SetVersionStatus") : null));
             }
         }
 
@@ -85,7 +92,8 @@ public sealed class OrgAssuranceSetupService(
                     ReadLongOrNull(reader,   "QuestionSetId"),
                     ReadStringOrNull(reader, "SetCode"),
                     ReadStringOrNull(reader, "SetName"),
-                    ReadIntOrNull(reader,    "QuestionCount")));
+                    ReadIntOrNull(reader,    "QuestionCount"),
+                    HasColumn(reader, "SetVersionNumber") ? ReadIntOrNull(reader, "SetVersionNumber") : null));   // 551
             }
         }
 
@@ -169,6 +177,63 @@ public sealed class OrgAssuranceSetupService(
     }
 
     // -----------------------------------------------------------------
+    // Audit Configuration list (537) -- COUNT header, then the rows.
+    // -----------------------------------------------------------------
+    public async Task<OrgAssuranceConfigurationListResult> ListConfigurationAuditsAsync(
+        long organizationId, string? search, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_configuration_list";
+        AddParam(command, "@organization_id", DbType.Int64,  organizationId);
+        AddParam(command, "@search",          DbType.String, string.IsNullOrWhiteSpace(search) ? (object)DBNull.Value : search.Trim(), 200);
+        AddParam(command, "@page",            DbType.Int32,  page);
+        AddParam(command, "@page_size",       DbType.Int32,  pageSize);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        long total = 0; int pageNumber = page, size = pageSize;
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            total      = ReadLongOrNull(reader, "TotalCount") ?? 0;
+            pageNumber = ReadIntOrNull(reader,  "PageNumber") ?? page;
+            size       = ReadIntOrNull(reader,  "PageSize")   ?? pageSize;
+        }
+
+        var rows = new List<OrgAssuranceConfigurationListRow>();
+        if (await reader.NextResultAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new OrgAssuranceConfigurationListRow(
+                    ReadLongOrNull(reader,   "DefinitionId") ?? 0,
+                    ReadLongOrNull(reader,   "OrganizationId") ?? organizationId,
+                    ReadStringOrNull(reader, "DefinitionCode"),
+                    ReadStringOrNull(reader, "DefinitionName"),
+                    ReadStringOrNull(reader, "OwnerRoleName"),
+                    ReadStringOrNull(reader, "OwnerDisplayName"),
+                    ReadLongOrNull(reader,   "CurrentVersionId"),
+                    ReadStringOrNull(reader, "CurrentStatusCode"),
+                    ReadStringOrNull(reader, "CurrentStatusName"),
+                    ReadIntOrNull(reader,    "CurrentVersionNumber"),
+                    ReadStringOrNull(reader, "CurrentVersionLabel"),
+                    reader["CurrentEffectiveDate"] == DBNull.Value ? null : Convert.ToDateTime(reader["CurrentEffectiveDate"]),
+                    ReadStringOrNull(reader, "CurrentCategoryName"),
+                    ReadStringOrNull(reader, "ScopeStatus"),       // 543
+                    ReadStringOrNull(reader, "QuestionsStatus"),   // 543
+                    ReadStringOrNull(reader, "WorkflowStatus"),
+                    ReadStringOrNull(reader, "ScoringStatus"),
+                    ReadIntOrNull(reader,    "ConfiguredSteps") ?? 0,
+                    ReadIntOrNull(reader,    "ConfigurationSteps") ?? 4,   // 548
+                    ReadBool(reader,         "IsConfigured")));
+            }
+        }
+
+        return new OrgAssuranceConfigurationListResult(total, pageNumber, size, rows);
+    }
+
+    // -----------------------------------------------------------------
     // Helpers -- identical to OrgAssuranceQuestionService.
     // -----------------------------------------------------------------
     private async Task<DbConnection> OpenAsync(CancellationToken cancellationToken)
@@ -203,4 +268,12 @@ public sealed class OrgAssuranceSetupService(
     private static int?    ReadIntOrNull(DbDataReader r, string col)    => r[col] == DBNull.Value ? null : Convert.ToInt32(r[col]);
     private static string? ReadStringOrNull(DbDataReader r, string col) => r[col] == DBNull.Value ? null : r[col].ToString();
     private static bool    ReadBool(DbDataReader r, string col)         => r[col] != DBNull.Value && Convert.ToBoolean(r[col]);
+
+    // 551: a column the procedure returns only once its migration has run.
+    private static bool HasColumn(DbDataReader r, string col)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+            if (string.Equals(r.GetName(i), col, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 }

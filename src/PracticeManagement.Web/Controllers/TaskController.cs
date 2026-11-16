@@ -476,8 +476,16 @@ public sealed class TaskController(
     }
 
     // The JSON body's organizationId is REQUIRED and checked the same way.
-    private async Task<IActionResult> ForwardOrgScopedPostAsync(
+    private Task<IActionResult> ForwardOrgScopedPostAsync(
         long id, string route, string operation, CancellationToken cancellationToken)
+        => ForwardOrgScopedPostAsync($"api/practice/tasks/{id}/{route}", operation, id,
+                                     req => CallerIdentityHandler.StampAdminFlag(HttpContext, req), cancellationToken);
+
+    // 526: the same org-scoped POST for any upstream path, with the caller
+    // flag the route needs stamped by `stamp`.
+    private async Task<IActionResult> ForwardOrgScopedPostAsync(
+        string upstreamPath, string operation, long id, Action<HttpRequestMessage> stamp,
+        CancellationToken cancellationToken)
     {
         if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
             return Unauthorized(new { error = "Session expired. Please sign in again." });
@@ -501,11 +509,11 @@ public sealed class TaskController(
         var client = BuildClient();
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, $"api/practice/tasks/{id}/{route}")
+            using var req = new HttpRequestMessage(HttpMethod.Post, upstreamPath)
             {
                 Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
             };
-            CallerIdentityHandler.StampAdminFlag(HttpContext, req);
+            stamp(req);
             var resp = await client.SendAsync(req, cancellationToken);
             return await ForwardAsync(resp, cancellationToken);
         }
@@ -514,6 +522,60 @@ public sealed class TaskController(
             logger.LogError(ex, "TaskController.{Operation} proxy failed for task {TaskId}", operation, id);
             return StatusCode(StatusCodes.Status502BadGateway, new { error = "Upstream API unreachable." });
         }
+    }
+
+    // =================================================================
+    // 526 -- review / approval cycle
+    // =================================================================
+
+    /// <summary>The reviewer / approver acts on a task (Approve / Return).
+    /// The Api decides who may act (sp_task_review_decide); the admin flag
+    /// is stamped because an organisation admin may act when the designated
+    /// person is no longer an active employee.</summary>
+    [HttpPost("{id:long}/review-decision")]
+    public Task<IActionResult> ReviewDecision(long id, CancellationToken cancellationToken)
+        => ForwardBodyAsync(HttpMethod.Post, $"api/practice/tasks/{id}/review-decision", cancellationToken, stampAdmin: true);
+
+    // Task Calendar: a schedule's reviewer / approver. The screen grant is
+    // assurance-calendar's (VIEW to read, ADD or EDIT to save), the same one
+    // that shows Edit Schedule; who may save (Practice Instance Owner or a
+    // system admin) is the procedure's rule, so the system-admin flag is
+    // stamped from the session, never taken from the browser.
+    private const string CallerSystemAdminHeader = "X-PM-Caller-Is-System-Admin";
+
+    private bool ScheduleGrant(string action) =>
+        permissionPolicy.IsAllowed(Roles(), PermissionAreaMap.For("assurance-calendar"), action);
+
+    [HttpGet("schedule-rules/{ruleId:long}/review")]
+    public async Task<IActionResult> ScheduleReview(long ruleId, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
+            return Unauthorized(new { error = "Session expired. Please sign in again." });
+        if (!organizationId.HasValue || organizationId.Value <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        if (!HttpContext.IsOrganizationAllowed(organizationId.Value))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "Caller is not authorised for the requested organization." });
+        if (!ScheduleGrant("VIEW"))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "You do not have View permission for the Task Calendar." });
+        return await ForwardGetAsync($"api/practice/tasks/schedule-rules/{ruleId}/review?organizationId={organizationId.Value}", cancellationToken);
+    }
+
+    [HttpPost("schedule-rules/{ruleId:long}/review")]
+    public Task<IActionResult> SaveScheduleReview(long ruleId, CancellationToken cancellationToken)
+    {
+        if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is not null
+            && !ScheduleGrant("EDIT") && !ScheduleGrant("ADD"))
+            return Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "You do not have Edit permission for the Task Calendar." }));
+        var isSystemAdmin = Roles().Any(r => r.Equals("PM_ADMIN", StringComparison.OrdinalIgnoreCase));
+        return ForwardOrgScopedPostAsync($"api/practice/tasks/schedule-rules/{ruleId}/review", nameof(SaveScheduleReview), ruleId,
+            req =>
+            {
+                req.Headers.Remove(CallerSystemAdminHeader);
+                req.Headers.TryAddWithoutValidation(CallerSystemAdminHeader, isSystemAdmin ? "1" : "0");
+            }, cancellationToken);
     }
 
     /// <summary>Evidence download (BRD §16). Binary, so it cannot go

@@ -35,6 +35,13 @@
         the user owns or uploaded ("expiring within 30 days", "expired")
         through /practice/api/evidence-center/notices/me*, scoped the same
         way. Script: wwwroot/js/EvidenceCenter/evidence-my-notifications.js
+
+    EVIDENCE AUTOMATION (migration 530)
+        The fourth section lists the "automated evidence not received"
+        notices addressed to the user as the source owner or the obligation
+        owner, through /practice/api/evidence-automation/notices/me*, scoped
+        the same way. Script:
+        wwwroot/js/EvidenceAutomation/evidence-automation-notifications.js
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 
@@ -157,6 +164,35 @@
     <div id="evnPager"></div>
 </section>
 
+@* ---------------- Evidence Automation "not received" notices (530) ---------------- *@
+<section class="pm-panel" id="eanRoot" hidden>
+    <h2 class="amn-title">Automated evidence notices</h2>
+    <div class="pm-toolbar">
+        <select id="eanFilter" title="Show">
+            <option value="Unread">Unread</option>
+            <option value="Read">Read</option>
+            <option value="All">All</option>
+        </select>
+        <span class="amn-counts" id="eanCounts"></span>
+        <button class="pm-button icon" id="eanRefresh" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button" id="eanReadAll" type="button">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i> Mark all read
+        </button>
+    </div>
+    <p class="pm-message" id="eanMessage" role="status" aria-live="polite" hidden></p>
+    <div class="pm-table-wrap">
+        <table>
+            <thead>
+                <tr><th>Notice</th><th>Source</th><th>Why you</th><th>Missing for</th><th>Received</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="eanBody"><tr><td colspan="7" class="pm-empty">Loading...</td></tr></tbody>
+        </table>
+    </div>
+    <div id="eanPager"></div>
+</section>
+
 <style>
     .amn-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); margin: 0 0 8px; }
     .amn-counts { font-size: 12px; color: var(--fg-secondary); }
@@ -165,6 +201,7 @@
 <script src="~/js/pm-grid.js" asp-append-version="true"></script>
 <script src="~/js/AssetConfig/asset-my-notifications.js" asp-append-version="true"></script>
 <script src="~/js/EvidenceCenter/evidence-my-notifications.js" asp-append-version="true"></script>
+<script src="~/js/EvidenceAutomation/evidence-automation-notifications.js" asp-append-version="true"></script>
 
 <script>
 (function () {

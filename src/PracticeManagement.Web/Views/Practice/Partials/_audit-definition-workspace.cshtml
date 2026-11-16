@@ -10,7 +10,10 @@
 
         Tabs: 1 Definition Details   2 Scope Details   3 Question Set
 
-    TWO MODES, ONE PAGE
+    MODES, ONE PAGE  (2026-11-04: a third, read-only VIEW mode --
+      ?definitionId=<id> alone -- shows definition, scope and question
+      sets on one page; the 3 tabs below are now the EDIT page,
+      ?definitionId=<id>&mode=edit or a ?step= link)
       list   -- no ?definitionId= and no ?mode=new. Only the audit list is
                 shown; the tab strip and panels are hidden.
       detail -- ?definitionId=<id> (existing) or ?mode=new (create). The
@@ -29,8 +32,10 @@
                                               rendered inline as the tab.
         Tab 2  org-assurance-scope-builder -- its own picker is hidden and
                                               driven by the workspace.
-        Tab 3  _audit-question-set-adoption (the 277 link) over
-               org-assurance-question-sets (the shared library).
+        Tab 3  _audit-question-set-adoption (the 277 link) only.
+               2026-11-05: the Question Sets library is no longer hosted
+               here -- sets are made on Audit > Question Sets, reached by
+               the tab's "Add new question set" link.
 
     WHY THE FORM IS THE SAME <dialog>
       org-assurance-definitions owns one add/edit form, inside a <dialog>.
@@ -44,6 +49,34 @@
       now dispatches `audit-definition-saved` with the id from the
       response, so the workspace binds the new audit exactly rather than
       re-reading the list and guessing which row is new.
+
+    2026-11-13 (sir) -- ONE PAGE, ONE SAVE. The three tabs, the step
+    caption and Previous / Next are gone. The edit page shows three
+    sections one under the other -- Audit Details, Scope, Question Sets --
+    each a card with its status chip, and one Save at the bottom:
+      1. the definition form   window.__oaDefinitions.save() -> id | null
+      2. the scope             window.__oaScopeBuilder.save() -> bool
+      3. the question sets     window.__oaAdoption.save()     -> bool
+    Three API calls, in that order, not one transaction: if 1 fails
+    nothing else runs; if 2 or 3 fail the earlier parts stay saved. The
+    outcome -- including each failing section's own error text -- is one
+    message box (gracUi.alert), not inline text. The hosted screens' own
+    Save buttons are hidden on this page (practice-management.css).
+    A NEW audit has no id yet, so Scope and Question Sets say "save the
+    audit details first" ([data-new="1"]) until the first Save creates
+    it; they then load and the next Save writes them.
+    The Scope Builder is Simple only (no Advanced mode) -- see its header.
+
+    543 (2026-11-13, sir) -- DETAILS ONLY. Scope and Question Sets moved
+    to Audit Configuration, where each is a step with its own popup. The
+    edit page is the Audit Details section and its Save; nothing else is
+    saved here. Creating an audit offers "Configure now", which opens
+    Audit Configuration on it (the same item as Actions > Audit
+    Configuration, encrypted navigation code). The read-only view page
+    still shows the scope and question sets: Approved / Active audits are
+    not on the Audit Configuration list, and this is where they are seen.
+    Submit for Review and Approve moved to Audit Configuration too (542);
+    Activate and Retire stay on the Actions menu here.
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 
@@ -56,6 +89,14 @@
         <p id="oaWsSubtitle">@Model.Description</p>
     </div>
     <div class="pm-actions">
+        @* 2026-11-04: Actions -- the list row's 3-dot items for this audit.
+           On the view page: Edit and the rest, minus View. On the edit page:
+           View and the rest, minus Edit. Shared page-actions-menu.js, the
+           same button as Gap / Task / Practice View. *@
+        <button type="button" class="pm-button" id="oaWsActionsBtn" aria-haspopup="true" aria-expanded="false" hidden>
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
         <button type="button" class="pm-button" id="oaWsBackToList" hidden>
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to audit list
         </button>
@@ -64,59 +105,58 @@
 
 <section class="oa-ws" id="oaWsRoot" data-mode="list">
 
-    @* ---------------- Detail chrome (hidden in list mode) ---------------- *@
-    <div class="oa-ws-detail">
-        <div class="pm-tabs oa-flow-steps" role="tablist" aria-label="Audit sections">
-            @* Plain labels, no step numerals. The Previous / Next control and
-               the caption below already carry the sequence, so numbering the
-               tabs as well was redundant chrome. *@
-            <button type="button" role="tab" class="active" data-ws-tab="details"
-                    aria-selected="true" aria-controls="oaWsPanel-details">
-                Definition Details<span class="oa-step-chip" data-step-chip="details" hidden></span>
-            </button>
-            <button type="button" role="tab" data-ws-tab="scope"
-                    aria-selected="false" aria-controls="oaWsPanel-scope">
-                Scope Details<span class="oa-step-chip" data-step-chip="scope" hidden></span>
-            </button>
-            <button type="button" role="tab" data-ws-tab="questions"
-                    aria-selected="false" aria-controls="oaWsPanel-questions">
-                Question Set<span class="oa-step-chip" data-step-chip="questions" hidden></span>
+    @* ---------------- View mode (2026-11-04) ----------------
+       The audit's read-only view page: definition, scope and question
+       sets on one page, no tabs (the Gap / Task View pattern). Edit, and
+       the rest of the row's 3-dot items, are on the Actions button. *@
+    <section class="pm-panel oa-ws-view" id="oaWsView">
+        <div class="pm-toolbar" style="justify-content:space-between">
+            <div style="display:flex; gap:6px; align-items:center;">
+                <span class="pm-badge" id="oaWvStatus">-</span>
+                <span class="pm-badge" id="oaWvVersion" hidden></span>
+            </div>
+            <button class="pm-button icon" id="oaWvRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-arrows-rotate"></i>
             </button>
         </div>
-        <p class="oa-flow-caption" id="oaWsCaption"></p>
-        <div class="pm-message" id="oaWsGuard" style="display:none;"></div>
-    </div>
+        <div class="pm-message" id="oaWvMessage" style="display:none;"></div>
 
-    @* ---------------- Panels ---------------- *@
-    @*
+        @* 2026-11-13 (sir): the whole audit -- details, every setup step's
+           latest status, scope, question sets, workflow, scoring, trigger
+           and scope resolution -- drawn by js/Shared/audit-view.js, the same
+           page Audit Configuration's "View" shows. *@
+        <div id="oaWvBody"></div>
+    </section>
+
+
+    @* ---------------- Sections ----------------
         The definitions partial is rendered ONCE and serves both modes:
-        its list is the master list, its dialog form is tab 1. Panel
-        membership is decided by CSS, not by rendering it twice.
-    *@
-    <div class="oa-ws-panel" id="oaWsPanel-details" data-ws-panel="details" role="tabpanel">
+        its list is the master list (list mode), its dialog form is the
+        Audit Details section (detail mode). Visibility is CSS, by
+        [data-mode] / [data-new] on .oa-ws. Each section heading carries
+        the 278 status chip. *@
+    <div class="oa-ws-panel" id="oaWsPanel-details" data-ws-panel="details">
+        <div class="oa-ws-section-head oa-ws-detail">
+            <h2>Audit Details</h2><span class="oa-step-chip" data-step-chip="details" hidden></span>
+        </div>
         <partial name="Partials/org-assurance-definitions" model="Model" />
     </div>
 
-    <div class="oa-ws-panel" id="oaWsPanel-scope" data-ws-panel="scope" role="tabpanel">
-        <partial name="Partials/org-assurance-scope-builder" model="Model" />
-    </div>
+    @* 543: Scope and Question Sets are configured in Audit Configuration
+       (a popup per step); this page keeps the audit details only. *@
 
-    <div class="oa-ws-panel" id="oaWsPanel-questions" data-ws-panel="questions" role="tabpanel">
-        <partial name="Partials/_audit-question-set-adoption" model="Model" />
-        <partial name="Partials/org-assurance-question-sets" model="Model" />
-    </div>
-
-    <div class="oa-flow-nav oa-ws-detail">
-        <button type="button" class="pm-button" id="oaWsPrev">
-            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Previous
-        </button>
-        <span class="oa-flow-position" id="oaWsPosition"></span>
-        <button type="button" class="pm-button primary" id="oaWsNext">
-            Next <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+    @* The Save for the audit details (2026-11-13). Its outcome is a message
+       box (gracUi.alert), not an inline line. *@
+    <div class="oa-flow-nav oa-ws-detail oa-ws-savebar">
+        <button type="button" class="pm-button primary" id="oaWsSave">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save
         </button>
     </div>
 </section>
 
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Shared/audit-scope-summary.js" asp-append-version="true"></script>
+<script src="~/js/Shared/audit-view.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -129,27 +169,22 @@
     const API = '/practice/api/org-assurance';
     const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
-    const ORDER    = ['details', 'scope', 'questions'];
-    const CAPTIONS = {
-        details   : 'Create the audit, set its category and owner, then continue to Scope.',
-        scope     : 'Decide which entities this audit applies to. Editable while the version is Draft.',
-        questions : 'Choose which question sets this audit asks. The organization library is below.'
-    };
+    // The page's sections; ?step= deep links scroll to one. 543: details
+    // only -- an old ?step=scope / questions link opens the edit page at
+    // the top.
+    const ORDER = ['details'];
 
     const root = document.getElementById('oaWsRoot');
     if (!root) return;
 
-    const state = { mode: 'list', definitionId: '', orgId: '', tab: 'details' };
+    const state = { mode: 'list', definitionId: '', orgId: '' };
 
     const el = {
         heading  : document.getElementById('oaWsHeading'),
         subtitle : document.getElementById('oaWsSubtitle'),
         back     : document.getElementById('oaWsBackToList'),
-        caption  : document.getElementById('oaWsCaption'),
-        guard    : document.getElementById('oaWsGuard'),
-        position : document.getElementById('oaWsPosition'),
-        prev     : document.getElementById('oaWsPrev'),
-        next     : document.getElementById('oaWsNext')
+        actions  : document.getElementById('oaWsActionsBtn'),
+        save     : document.getElementById('oaWsSave')
     };
 
     // -----------------------------------------------------------------
@@ -159,10 +194,45 @@
         state.mode = mode;
         root.setAttribute('data-mode', mode);
         el.back.hidden = mode === 'list';
+        syncActions();
+        // 2026-11-04: the definition form is a non-modal <dialog> shown
+        // inline as tab 1. Left open outside the edit page it rendered as an
+        // Add/Edit card under the list, so close it in list and view mode.
+        if (mode !== 'detail') {
+            const dlg = document.getElementById('oaDefDialog');
+            if (dlg && dlg.open) dlg.close();
+        }
         if (mode === 'list') {
             el.heading.textContent  = 'Audit Definition';
-            el.subtitle.textContent = 'Every audit in the organization. Open one to edit its definition, scope and question sets.';
+            el.subtitle.textContent = 'Every audit in the organization. Open one to edit its details; configure it in Audit Configuration.';
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Actions (2026-11-04). Items come from the definitions screen's own
+    // row menu; only Scope is pointed at this page's Scope tab.
+    // -----------------------------------------------------------------
+    //
+    // View page: Edit opens the 3-tab edit page, Scope opens it on the Scope
+    // tab, View is left out (this is the view). Edit page: View returns to
+    // the view page, Edit is left out. Everything else runs unchanged.
+    function syncActions() {
+        if (el.actions) el.actions.hidden = !((state.mode === 'detail' || state.mode === 'view') && state.definitionId);
+    }
+    if (window.gracPageActions && el.actions) {
+        window.gracPageActions.attach('oaWsActionsBtn', function () {
+            const api = window.__oaDefinitions;
+            if (!api || !api.actionItems || !state.definitionId) return [];
+            const viewing = state.mode === 'view';
+            const src = viewing
+                ? api.actionItems(state.definitionId, (view.def && (view.def.currentStatusCode || view.def.CurrentStatusCode)) || '')
+                : api.actionItems();
+            return src
+                .filter(function (it) { return viewing ? it.key !== 'view' : it.key !== 'edit'; })
+                // Edit / View come back to this page
+                // through audit-definition-open (below), like the list's menu.
+                .map(function (it) { return { icon: it.icon, label: it.label, run: it.action }; });
+        });
     }
 
     function toList() {
@@ -175,50 +245,79 @@
     el.back.addEventListener('click', toList);
 
     // -----------------------------------------------------------------
-    // Tabs. Never disabled -- an existing audit must open straight into
-    // any section, and a completed step stays editable.
+    // Sections (2026-11-13: one page, no tabs; 543: Audit Details only).
     // -----------------------------------------------------------------
-    function showTab(key, push) {
-        if (ORDER.indexOf(key) < 0) return;
-        state.tab = key;
-
-        root.querySelectorAll('[data-ws-tab]').forEach(function (t) {
-            const on = t.getAttribute('data-ws-tab') === key;
-            t.classList.toggle('active', on);
-            t.setAttribute('aria-selected', on ? 'true' : 'false');
-        });
-        root.querySelectorAll('[data-ws-panel]').forEach(function (p) {
-            p.classList.toggle('active', p.getAttribute('data-ws-panel') === key);
-        });
-
-        const i = ORDER.indexOf(key);
-        el.caption.textContent  = CAPTIONS[key] || '';
-        el.position.textContent = 'Step ' + (i + 1) + ' of ' + ORDER.length;
-        el.prev.disabled = i === 0;
-        el.next.disabled = i === ORDER.length - 1;
-
-        // Scope and Question Set need a saved audit to attach to.
-        const needsId = key !== 'details';
-        el.guard.style.display = (needsId && !state.definitionId) ? 'block' : 'none';
-        if (needsId && !state.definitionId) {
-            el.guard.style.background = 'var(--warning-100)';
-            el.guard.style.color      = 'var(--warning-700)';
-            el.guard.textContent      = 'Save the definition details first -- scope and question sets attach to the saved audit.';
-        }
-
-        applyContext();
-        if (push) writeUrl({ step: key });
+    // ?step= deep links scroll to the section instead of switching a tab.
+    // (The Scope / Question Set menu items were removed, 2026-11-13.)
+    function showSection(key) {
+        if (ORDER.indexOf(key) < 0 || key === 'details') { window.scrollTo(0, 0); return; }
+        const panel = document.getElementById('oaWsPanel-' + key);
+        if (panel) setTimeout(function () { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
     }
 
-    root.querySelectorAll('[data-ws-tab]').forEach(function (t) {
-        t.addEventListener('click', function () { showTab(t.getAttribute('data-ws-tab'), true); refreshStatus(); });
-    });
-    el.prev.addEventListener('click', function () {
-        const i = ORDER.indexOf(state.tab); if (i > 0) showTab(ORDER[i - 1], true);
-    });
-    el.next.addEventListener('click', function () {
-        const i = ORDER.indexOf(state.tab); if (i < ORDER.length - 1) showTab(ORDER[i + 1], true);
-    });
+    // -----------------------------------------------------------------
+    // Save (2026-11-13; 543: the audit details only).
+    // -----------------------------------------------------------------
+    let saving = false;
+
+    // 2026-11-13 (sir): the Save outcome is a message box. The form reports
+    // into its own inline message area; its text is taken into the box and
+    // the inline area cleared, so its own later messages still show.
+    const SECTION_MESSAGES = [
+        { id: 'oaDefMessage',   byHidden: false }
+    ];
+    function takeMessage(id) {
+        const m = SECTION_MESSAGES.find(function (x) { return x.id === id; });
+        const node = document.getElementById(id);
+        if (!m || !node) return '';
+        const shown = m.byHidden ? !node.hidden : node.style.display !== 'none';
+        const text = shown ? String(node.textContent || '').trim() : '';
+        if (m.byHidden) node.hidden = true; else node.style.display = 'none';
+        node.textContent = '';
+        return text;
+    }
+    function clearSectionMessages() { SECTION_MESSAGES.forEach(function (m) { takeMessage(m.id); }); }
+    function box(message, type) {
+        if (window.gracUi) return window.gracUi.alert(message, { type: type });
+        window.alert(message);
+        return Promise.resolve();
+    }
+
+    async function saveAll() {
+        if (saving) return;
+        saving = true;
+        el.save.disabled = true;
+        clearSectionMessages();
+        const wasNew = !state.definitionId;
+        try {
+            const defs = window.__oaDefinitions;
+            const id = defs && defs.save ? await defs.save() : null;
+            if (!id) {
+                const why = takeMessage('oaDefMessage');
+                showSection('details');
+                await box('The audit details were not saved.'
+                    + (why ? ' ' + why : ' Fill in the required fields (Code and Name).'), 'error');
+                return;
+            }
+            takeMessage('oaDefMessage');
+            refreshStatus();
+            if (wasNew) {
+                // 543: scope, question sets and the rest are configured in
+                // Audit Configuration -- offer to go there now.
+                const go = window.gracUi
+                    ? await window.gracUi.confirm('Audit created. Configure it now? Scope, question sets, workflow, scoring, trigger and scope resolution are set in Audit Configuration.',
+                        { type: 'success', title: 'Audit created', confirmText: 'Configure now', cancelText: 'Later' })
+                    : false;
+                if (go) openConfiguration(id);
+                return;
+            }
+            await box('Audit details saved.', 'success');
+        } finally {
+            saving = false;
+            el.save.disabled = false;
+        }
+    }
+    el.save.addEventListener('click', saveAll);
 
     function writeUrl(patch) {
         try {
@@ -230,35 +329,14 @@
         } catch (_) { /* history is a convenience */ }
     }
 
-    // -----------------------------------------------------------------
-    // Bind the hosted screens to this audit.
-    //
-    // Scope Builder exposes oaScopePickOrg / oaScopePickDef and reloads on
-    // `change`; Question Sets is organization-scoped and takes the org.
-    // Their selects fill asynchronously during boot, so retry briefly.
-    // -----------------------------------------------------------------
-    function setSelect(id, value, attempts) {
-        const sel = document.getElementById(id);
-        if (!sel || !value) return;
-        if (String(sel.value) === String(value)) return;
-        const has = Array.prototype.some.call(sel.options, function (o) { return String(o.value) === String(value); });
-        if (has) {
-            sel.value = String(value);
-            sel.dispatchEvent(new Event('change', { bubbles: true }));
-            return;
-        }
-        const left = (attempts === undefined ? 20 : attempts) - 1;
-        if (left > 0) setTimeout(function () { setSelect(id, value, left); }, 150);
-    }
-
-    function applyContext() {
-        if (!state.definitionId) return;
-        if (state.orgId) setSelect('oaScopePickOrg', state.orgId);
-        setSelect('oaScopePickDef', state.definitionId);
-        if (state.orgId) setSelect('qsFilterOrganization', state.orgId);
-        document.dispatchEvent(new CustomEvent('audit-context-change', {
-            detail: { orgId: state.orgId, definitionId: state.definitionId }
-        }));
+    // 543: nothing to bind any more -- Scope and Question Sets left this
+    // page. Opens Audit Configuration on the audit through the definitions
+    // screen's own "Audit Configuration" item (encrypted navigation code).
+    function openConfiguration(id) {
+        const api = window.__oaDefinitions;
+        const items = api && api.actionItems ? api.actionItems(String(id), 'Draft') : [];
+        const item = items.find(function (it) { return it.key === 'configuration'; });
+        if (item) item.action();
     }
 
     // -----------------------------------------------------------------
@@ -298,6 +376,8 @@
     }
     window.addEventListener('focus', refreshStatus);
     document.addEventListener('audit-setup-changed', refreshStatus);
+    // A lifecycle action from the view page's Actions menu changes what it shows.
+    document.addEventListener('audit-setup-changed', function () { if (state.mode === 'view') loadView(); });
 
     // -----------------------------------------------------------------
     // Opening an audit
@@ -308,17 +388,72 @@
         setMode('detail');
         el.heading.textContent  = 'Audit Definition';
         el.subtitle.textContent = state.definitionId
-            ? 'Definition, scope and question sets for this audit.'
-            : 'New audit. Save the definition details to continue.';
-        writeUrl({ definitionId: state.definitionId, mode: state.definitionId ? '' : 'new' });
+            ? 'The audit details. Scope, question sets and the rest are set in Audit Configuration.'
+            : 'New audit. Save its details, then configure it in Audit Configuration.';
+        writeUrl({ definitionId: state.definitionId, mode: state.definitionId ? 'edit' : 'new', step: '' });
 
         if (window.__oaDefinitions && window.__oaDefinitions.open) {
             // Same form the list has always used, now rendered inline.
             window.__oaDefinitions.open(state.definitionId ? state.definitionId : null);
         }
-        showTab((opts && opts.step) || 'details', true);
+        showSection((opts && opts.step) || 'details');
         refreshStatus();
     }
+
+    // -----------------------------------------------------------------
+    // View page (2026-11-04). Read-only. 2026-11-13: drawn by
+    // js/Shared/audit-view.js (window.gracAuditView) -- the definition, the
+    // configuration status, scope, question sets, workflow, scoring,
+    // trigger and scope resolution -- the same page Audit Configuration's
+    // "View" shows. Nothing here writes.
+    // -----------------------------------------------------------------
+    const view = { def: null };
+    const pick = function (o, a, b) { return o ? (o[a] != null ? o[a] : o[b]) : null; };
+    function setViewMessage(text) {
+        const m = document.getElementById('oaWvMessage');
+        m.style.display = text ? 'block' : 'none';
+        m.style.background = 'var(--danger-100)'; m.style.color = 'var(--danger-700)';
+        m.textContent = text || '';
+    }
+
+    function openView(id) {
+        state.definitionId = String(id || '');
+        state.orgId = readOrgId();
+        view.def = null;
+        setMode('view');
+        el.heading.textContent  = 'Audit Definition';
+        el.subtitle.textContent = 'This audit, read-only: its details and its configuration.';
+        writeUrl({ definitionId: state.definitionId, mode: '', step: '' });
+        loadView();
+    }
+
+    async function loadView() {
+        if (!state.definitionId || !state.orgId) return;
+        setViewMessage('');
+        try {
+            // 2026-11-13 (sir): js/Shared/audit-view.js draws the whole audit
+            // (configuration included) -- shared with Audit Configuration.
+            const def = await window.gracAuditView.render(document.getElementById('oaWvBody'), {
+                orgId: state.orgId, definitionId: state.definitionId
+            });
+            if (!def) return;
+            view.def = def;
+            renderViewHeading(def);
+        } catch (err) {
+            setViewMessage('Could not load this audit: ' + (err.message || err));
+        }
+    }
+
+    // The page heading and badges; the sections are audit-view.js's.
+    function renderViewHeading(d) {
+        el.heading.textContent = (pick(d, 'definitionName', 'DefinitionName') || 'Audit Definition');
+        document.getElementById('oaWvStatus').textContent = pick(d, 'currentStatusName', 'CurrentStatusName') || '-';
+        const ver = window.gracAuditView.versionLabel(d);
+        const verEl = document.getElementById('oaWvVersion');
+        verEl.textContent = ver; verEl.hidden = !ver;
+    }
+    document.getElementById('oaWvRefreshBtn').addEventListener('click', loadView);
+
 
     function readOrgId() {
         if (window.__oaDefinitions && window.__oaDefinitions.orgId) {
@@ -331,25 +466,33 @@
 
     // The list's own 3-dot View. Cancelling the event tells the screen we
     // handled it, so it switches tabs here instead of navigating away.
+    // 2026-11-04: mode 'edit' (the row's Edit) opens the edit page;
+    // anything else (View, row click) the read-only view page.
     document.addEventListener('audit-definition-open', function (e) {
         e.preventDefault();
-        openAudit((e.detail && e.detail.definitionId) || '', { step: 'details' });
+        const d = e.detail || {};
+        if (d.mode !== 'edit') { openView(d.definitionId || ''); return; }
+        const step = ORDER.indexOf(d.step) >= 0 ? d.step : 'details';
+        // Already editing this audit: just scroll to the section (keeps
+        // unsaved input).
+        if (state.mode === 'detail' && state.definitionId === String(d.definitionId || '')) {
+            showSection(step);
+            refreshStatus();
+            return;
+        }
+        openAudit(d.definitionId || '', { step: step });
     });
 
-    // A save on tab 1 binds the audit -- including a brand-new one, whose
-    // id only exists in the POST response.
+    // Saving the details binds the audit -- including a brand-new one,
+    // whose id only exists in the POST response.
     document.addEventListener('audit-definition-saved', function (e) {
         const id = e.detail && e.detail.definitionId;
         if (!id) return;
         state.definitionId = String(id);
         state.orgId = readOrgId();
-        writeUrl({ definitionId: state.definitionId, mode: '' });
-        applyContext();
+        writeUrl({ definitionId: state.definitionId, mode: state.mode === 'detail' ? 'edit' : '' });
+        syncActions();   // a brand-new audit now has an id
         refreshStatus();
-        if (state.mode === 'detail') {
-            el.guard.style.display = 'none';
-            showTab('scope', true);   // Save -> Next, as the flow asks
-        }
     });
 
     // -----------------------------------------------------------------
@@ -375,7 +518,7 @@
         } catch (_) { /* ignore */ }
 
         // The list's "Add Definition" button becomes "New Definition":
-        // it opens the blank 3-tab page instead of a modal over the list.
+        // it opens the blank audit page instead of a modal over the list.
         const addBtn = document.getElementById('oaDefAddBtn');
         if (addBtn) {
             addBtn.textContent = ' New Definition';
@@ -387,8 +530,14 @@
             });
         }
 
-        if (wantedId || wantedMode === 'new') {
-            openAudit(wantedId, { step: ORDER.indexOf(wantedStep) >= 0 ? wantedStep : 'details' });
+        // ?definitionId= alone is the view page; ?mode=edit or a ?step=
+        // deep link is the edit page (scrolled to that section); ?mode=new
+        // a blank audit.
+        if (wantedMode === 'new' || (wantedId && (wantedMode === 'edit' || ORDER.indexOf(wantedStep) >= 0))) {
+            openAudit(wantedMode === 'new' ? '' : wantedId,
+                      { step: ORDER.indexOf(wantedStep) >= 0 ? wantedStep : 'details' });
+        } else if (wantedId) {
+            openView(wantedId);
         } else {
             setMode('list');
         }

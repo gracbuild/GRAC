@@ -42,37 +42,57 @@
 
     <div class="login-wrapper">
         <div class="split-card">
-            @* 2026-10-29: the brand panel moved to Login/_BrandPanel.cshtml.
-               Both login screens rendered identical markup, and the restyle
-               would otherwise have been pasted into each. *@
+            @* Brand side (logo top-left, hub, tagline, module strip, wave):
+               shared with ChangePassword.cshtml via Login/_BrandPanel.cshtml. *@
             <partial name="_BrandPanel" />
 
             <div class="form-panel">
                 <div class="form-card">
                     <div class="greeting">
-                        <h1>Welcome to GRAC</h1>
+                        <h1>Sign In to GRAC</h1>
+                        <p>Manage practices, risks, audits and compliance with confidence.</p>
                     </div>
+
+                    @if (ViewData["LoginNotice"] is string notice)
+                    {
+                        <p class="login-notice" role="status">@notice</p>
+                    }
 
                     <form action="@loginAction" method="post" id="LoginForm" novalidate>
                         @Html.AntiForgeryToken()
                         <input asp-for="ReturnUrl" type="hidden" />
                         <div asp-validation-summary="ModelOnly" class="validation-message" role="alert"></div>
 
-                        <div class="form-group mb-3">
-                            <label asp-for="LoginId" class="form-label">User ID / Email ID</label>
-                            <input asp-for="LoginId" id="txtUserName" type="text" class="form-control" placeholder="Enter User ID or Email ID" autocomplete="username" tabindex="1" autofocus />
+                        @* 2026-11-03: icon fields as in the reference design. The
+                           labels stay in the markup for screen readers (.sr-only);
+                           the placeholder carries the visible name. *@
+                        <div class="form-group">
+                            <label asp-for="LoginId" class="sr-only">User ID / Email ID</label>
+                            <div class="input-icon">
+                                <i class="far fa-user" aria-hidden="true"></i>
+                                <input asp-for="LoginId" id="txtUserName" type="text" class="form-control" placeholder="User ID / Email ID" autocomplete="username" tabindex="1" autofocus />
+                            </div>
                             <span asp-validation-for="LoginId" class="validation-message"></span>
                         </div>
 
-                        <div class="form-group mb-4">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <label asp-for="Password" class="form-label mb-0">Password</label>
+                        <div class="form-group">
+                            <label asp-for="Password" class="sr-only">Password</label>
+                            <div class="input-icon">
+                                <i class="fas fa-lock" aria-hidden="true"></i>
+                                <input asp-for="Password" id="txtPassword" type="password" class="form-control has-toggle" placeholder="Password" autocomplete="current-password" tabindex="2" />
+                                <button type="button" class="pw-toggle" data-pw-toggle="txtPassword" aria-label="Show password" aria-pressed="false" tabindex="3">
+                                    <i class="far fa-eye" aria-hidden="true"></i>
+                                </button>
                             </div>
-                            <input asp-for="Password" id="txtPassword" type="password" class="form-control" placeholder="Enter Password" autocomplete="current-password" tabindex="2" />
                             <span asp-validation-for="Password" class="validation-message"></span>
                         </div>
 
-                        <button type="submit" id="btnLogin" class="btn btn-primary btn-signin mt-4" tabindex="3">Sign In</button>
+                        @* Forgot password (529, 2026-11-10): emailed one-time reset link. *@
+                        <div class="forgot-row">
+                            <a class="forgot-link" href="@($"{loginAction}/ForgotPassword")" tabindex="4">Forgot password?</a>
+                        </div>
+
+                        <button type="submit" id="btnLogin" class="btn btn-signin mt-4" tabindex="5">Sign In</button>
                     </form>
 
                     @if (ssoProviders.Count > 0)

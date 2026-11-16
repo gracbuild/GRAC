@@ -22,6 +22,9 @@
 //   POST /api/practice/tasks/{id}/complete            -> governed completion (v2)
 //   POST /api/practice/tasks/{id}/activity            -> comment / update (v2)
 //   POST /api/practice/tasks/{id}/attachments         -> upload evidence (v2)
+//   POST /api/practice/tasks/{id}/review-decision     -> reviewer / approver acts (526)
+//   GET  /api/practice/tasks/schedule-rules/{ruleId}/review  -> schedule reviewer / approver (526)
+//   POST /api/practice/tasks/schedule-rules/{ruleId}/review  -> save them (526)
 //   POST /api/practice/tasks/requests/{rid}/approve-sla-extension       (v2)
 //   POST /api/practice/tasks/requests/{rid}/approve-priority-reduction  (v2)
 //
@@ -55,6 +58,13 @@ public sealed class TaskController(
 
     private bool CallerIsAdmin =>
         Request.Headers[CallerAdminHeader].ToString() is "1" or "true" or "True";
+
+    // 526: system admin (PM_ADMIN), stamped by the Web tier only on the
+    // schedule reviewer / approver save -- the Task Calendar's Edit
+    // Schedule rule is "Practice Instance Owner or system admin".
+    private const string CallerSystemAdminHeader = "X-PM-Caller-Is-System-Admin";
+    private bool CallerIsSystemAdmin =>
+        Request.Headers[CallerSystemAdminHeader].ToString() is "1" or "true" or "True";
 
     // GET /api/practice/tasks/counts?organizationId=
     // Returns the tab count badges for the Task Center UI.
@@ -121,6 +131,9 @@ public sealed class TaskController(
         // statusText=, severityText=, minAgeDays=, maxAgeDays=, noOwner=).
         // Every value absent = the list exactly as before.
         [FromQuery] ListDrillQuery? drill = null,
+        // 526: "Awaiting my review / approval" -- the caller the Web tier
+        // stamps, never an id from the query string.
+        [FromQuery] bool? awaitingMyReview = null,
         CancellationToken cancellationToken = default)
     {
         var query = new TaskListQuery(
@@ -138,7 +151,9 @@ public sealed class TaskController(
             SourceTypeCode:       sourceTypeCode,
             SourceRecordId:       sourceRecordId,
             Priority:             priority,
-            Drill:                drill?.ToFilter());
+            Drill:                drill?.ToFilter(),
+            // -1 matches nobody: a sign-in with no employee has nothing awaiting it.
+            ReviewEmployeeId:     awaitingMyReview == true ? (CallerEmployeeId ?? -1) : null);
 
         var result = await taskService.ListAsync(query, cancellationToken);
         return Ok(result);
@@ -217,6 +232,10 @@ public sealed class TaskController(
     public async Task<IActionResult> Open([FromBody] TaskOpenRequest body, CancellationToken cancellationToken)
     {
         if (body is null) return BadRequest(new { error = "Request body is required." });
+
+        // 526: the reviewer / approver choice is recorded against the caller.
+        if (body.ReviewerEmployeeId.HasValue || body.ApproverEmployeeId.HasValue)
+            body = body with { ActorEmployeeId = CallerEmployeeId ?? body.ActorEmployeeId };
 
         var result = await taskService.OpenAsync(body, cancellationToken);
         return result.Success
@@ -604,6 +623,44 @@ public sealed class TaskController(
     }
 
     // =================================================================
+    // 526 -- review / approval cycle
+    // =================================================================
+
+    /// <summary>The reviewer or approver acts: Decision "Approve" moves the
+    /// task to the next step (or closes it), "Return" sends it back to the
+    /// assignee. The actor is the stamped caller; the admin flag lets an
+    /// organisation admin act only when the designated person is no longer
+    /// an active employee (sp_task_review_decide).</summary>
+    [HttpPost("{id:long}/review-decision")]
+    public async Task<IActionResult> ReviewDecision(long id, [FromBody] TaskReviewDecisionRequest body, CancellationToken cancellationToken)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.Decision))
+            return BadRequest(new { error = "Decision is required (Approve or Return)." });
+        var result = await taskService.DecideReviewAsync(id, body, CallerEmployeeId, CallerIsAdmin, cancellationToken);
+        return Respond(result);
+    }
+
+    [HttpGet("schedule-rules/{ruleId:long}/review")]
+    public async Task<IActionResult> ScheduleReview(long ruleId, [FromQuery] long organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var settings = await taskService.GetScheduleReviewAsync(ruleId, organizationId, cancellationToken);
+        return settings is null
+            ? NotFound(new { error = "Schedule not found." })
+            : Ok(settings);
+    }
+
+    [HttpPost("schedule-rules/{ruleId:long}/review")]
+    public async Task<IActionResult> SaveScheduleReview(long ruleId, [FromBody] ScheduleReviewSaveRequest body, CancellationToken cancellationToken)
+    {
+        if (body is null || body.OrganizationId <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        var (settings, result) = await taskService.SaveScheduleReviewAsync(
+            ruleId, body, CallerEmployeeId, CallerIsSystemAdmin, cancellationToken);
+        return result.Success ? Ok(settings) : Respond(result);
+    }
+
+    // =================================================================
 
     private IActionResult Respond(TaskCommandResult result)
     {
@@ -631,6 +688,11 @@ public sealed class TaskController(
             "TASK_NOT_CLOSED"           => StatusCodes.Status409Conflict,
             "REOPEN_FORBIDDEN"          => StatusCodes.Status403Forbidden,
             "TASK_NOT_FOUND"            => StatusCodes.Status404NotFound,
+
+            // review / approval cycle (526)
+            "AWAITING_REVIEW"           => StatusCodes.Status409Conflict,
+            "NOT_AWAITING_REVIEW"       => StatusCodes.Status409Conflict,
+            "REVIEW_FORBIDDEN"          => StatusCodes.Status403Forbidden,
 
             "REASON_REQUIRED"           => StatusCodes.Status400BadRequest,
             "ACTOR_REQUIRED"            => StatusCodes.Status400BadRequest,

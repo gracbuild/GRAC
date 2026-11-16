@@ -859,7 +859,16 @@ public sealed class PracticeManagementGatewayController(
         && permissionPolicy.IsAllowed(roles, PermissionArea(request.TargetArea), "VIEW")
         && request switch
         {
-            { FilterType: "Organization", TargetArea: "organization-controls" or "control-applicability" or "organization-requirements" or "practices" or "practice-instances" or "repository-subscriptions" } => true,
+            // "organization-view" / "organization-setup" added 2026-11-02:
+            // the Organization Management landing list's row click carries
+            // the organization id inside the encrypted navigation code
+            // rather than as a readable ?organizationId= query string, so
+            // the read-only organization page it opens -- and the edit page
+            // that page's Actions > Edit goes on to -- both have to be legal
+            // targets for a FilterType=Organization context. Both areas
+            // still go through PermissionArea above, so this does not widen
+            // who may open either page.
+            { FilterType: "Organization", TargetArea: "organization-controls" or "control-applicability" or "organization-requirements" or "practices" or "practice-instances" or "repository-subscriptions" or "organization-view" or "organization-setup" } => true,
             { FilterType: "OrganizationControl", TargetArea: "organization-requirements" } => true,
             { FilterType: "FrameworkRelease", TargetArea: "organization-requirements" } => true,
             { FilterType: "FrameworkStatement", TargetArea: "organization-requirements" } => true,
@@ -873,6 +882,29 @@ public sealed class PracticeManagementGatewayController(
             // id, so practice-view is also reachable on the requirement id.
             { FilterType: "OrganizationRequirement", TargetArea: "practice-view" } => true,
             { FilterType: "PracticeInstance", TargetArea: "dependencies" or "evidence-configurations" or "assurance-attributes" or "vendor-attributes" or "risk-attributes" or "audit-attributes" or "task-attributes" or "resilience-attributes" } => true,
+            // Third-Party Management (migrations 524 / 525, 2026-11-09): every
+            // link onto one TPRM record -- register <-> engagement, Vendor
+            // Registry -> its engagements / a new engagement for the vendor,
+            // Reviews <-> engagement, the TPRM dashboard and Home rows -- carries
+            // the record in the code, never as ?engagementId= / ?registerId= /
+            // ?thirdPartyId= / ?reviewId=. Both areas still go through
+            // PermissionArea above.
+            { FilterType: "TprmEngagement", TargetArea: "tprm-engagements" or "tprm-reviews" } => true,
+            { FilterType: "TprmRegister", TargetArea: "tprm-risk-register" } => true,
+            { FilterType: "TprmThirdParty", TargetArea: "tprm-third-parties" or "tprm-engagements" } => true,
+            // Audit Definition -> Audit Configuration (537, 2026-11-13): the
+            // audit list's / audit page's "Audit Configuration" item opens the
+            // configuration page on that audit; the audit id travels in the
+            // code, never as ?definitionId=.
+            { FilterType: "AuditDefinition", TargetArea: "org-audit-configuration" } => true,
+            // Audit Definition -> Audit Plans (546, 2026-11-14): an Active
+            // audit's "Add to Plan" opens the plans page to add it to a
+            // plan; the audit id travels in the code.
+            { FilterType: "AuditDefinition", TargetArea: "org-assurance-plans" } => true,
+            // My Audits -> Workpapers (567, 2026-11-16): an audit's "Working
+            // Papers" opens the Workpapers page on its execution; the
+            // execution id travels in the code.
+            { FilterType: "AssuranceExecution", TargetArea: "org-workpapers" } => true,
             _ => false
         };
 

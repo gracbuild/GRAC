@@ -89,6 +89,12 @@ BEGIN PRINT 'ABORT (488): org_assurance_observation missing (101).'; SET @ok = 0
 IF COL_LENGTH('grac_practice.risk_register','risk_number') IS NULL
    OR COL_LENGTH('grac_practice.risk_register','linked_vendor_id') IS NULL
 BEGIN PRINT 'ABORT (488): risk_register.risk_number / linked_vendor_id missing (205, 378).'; SET @ok = 0; END
+-- 521 (Third-Party Management Phase 1) re-issued this file's procedures
+-- without the legacy vendor link and dropped tprm_third_party.vendor_id.
+-- Running 488 again would restore the old bodies, so it stops.
+IF OBJECT_ID('grac_practice.tprm_third_party','U') IS NOT NULL
+   AND COL_LENGTH('grac_practice.tprm_third_party','vendor_id') IS NULL
+BEGIN PRINT 'ABORT (488): superseded by 521_tpm_vendor_registry_foundation.sql -- do not re-run 488 after 521.'; SET @ok = 0; END
 IF @ok = 0
 BEGIN
     RAISERROR('488_tprm_third_parties_engagements: prerequisites missing -- see the messages above.', 16, 1);

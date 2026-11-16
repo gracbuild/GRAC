@@ -1488,7 +1488,18 @@ BEGIN
 
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        SET @sql = N'DBCC CHECKIDENT (''grac_practice.' + @tbl + N''', RESEED, 0) WITH NO_INFOMSGS;';
+        /* 550 (2026-11-14): RESEED 0 makes the NEXT row 1 only on a table
+           that has had rows. On a table that never had one since it was
+           created -- last_value NULL, or 0 left by an earlier reseed --
+           SQL Server gives the FIRST row the reseed value itself, i.e. 0
+           (an audit plan was stored with id 0 this way). Such a table is
+           reseeded to 1 instead. */
+        SET @sql = N'DBCC CHECKIDENT (''grac_practice.' + @tbl + N''', RESEED, '
+                 + CASE WHEN EXISTS (SELECT 1 FROM sys.identity_columns ic
+                                      WHERE ic.object_id = OBJECT_ID(N'grac_practice.' + @tbl)
+                                        AND ISNULL(CONVERT(BIGINT, ic.last_value), 0) = 0)
+                        THEN N'1' ELSE N'0' END
+                 + N') WITH NO_INFOMSGS;';
         EXEC sp_executesql @sql;
         FETCH NEXT FROM ident_cur INTO @tbl;
     END

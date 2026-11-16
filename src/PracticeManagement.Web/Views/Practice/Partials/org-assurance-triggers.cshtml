@@ -152,13 +152,19 @@
                     <input class="pm-input" id="oaTgSchedTo" type="date" />
                 </label>
             </div>
-            <div style="display:grid; grid-template-columns:120px 130px 130px 130px; gap:10px; align-items:start; margin-top:10px;">
+            @* 2026-11-13 (sir): one row, every label on one line, inputs level.
+               Each "on" field shows only for the frequency that uses it
+               (applyFrequencyVisibility): Weekly -> Day of Week; Monthly ->
+               Day of Month; Quarterly / Annual -> Day of Month and Month
+               (092: month_of_year is the ANNUAL / QUARTERLY month). Month
+               is a January-December list, stored as 1-12 as before. *@
+            <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; align-items:end; margin-top:10px;">
                 <label class="pm-field">
                     <span>Time of Day</span>
                     <input class="pm-input" id="oaTgSchedTime" type="time" />
                 </label>
-                <label class="pm-field">
-                    <span>Day of Week (WEEKLY)</span>
+                <label class="pm-field" id="oaTgSchedDowField" hidden>
+                    <span>Day of Week</span>
                     <select class="pm-input" id="oaTgSchedDow">
                         <option value="">-- any --</option>
                         <option value="1">Monday</option><option value="2">Tuesday</option>
@@ -167,13 +173,21 @@
                         <option value="7">Sunday</option>
                     </select>
                 </label>
-                <label class="pm-field">
-                    <span>Day of Month (MONTHLY)</span>
-                    <input class="pm-input" id="oaTgSchedDom" type="number" min="1" max="31" step="1" />
+                <label class="pm-field" id="oaTgSchedDomField" hidden>
+                    <span>Day of Month</span>
+                    <input class="pm-input" id="oaTgSchedDom" type="number" min="1" max="31" step="1" placeholder="1-31" />
                 </label>
-                <label class="pm-field">
-                    <span>Month of Year (ANNUAL)</span>
-                    <input class="pm-input" id="oaTgSchedMoy" type="number" min="1" max="12" step="1" />
+                <label class="pm-field" id="oaTgSchedMoyField" hidden>
+                    <span>Month</span>
+                    <select class="pm-input" id="oaTgSchedMoy">
+                        <option value="">-- select --</option>
+                        <option value="1">January</option><option value="2">February</option>
+                        <option value="3">March</option><option value="4">April</option>
+                        <option value="5">May</option><option value="6">June</option>
+                        <option value="7">July</option><option value="8">August</option>
+                        <option value="9">September</option><option value="10">October</option>
+                        <option value="11">November</option><option value="12">December</option>
+                    </select>
                 </label>
             </div>
         </div>
@@ -382,7 +396,9 @@
 
     async function selectDefinition(definitionId) {
         state.definitionId = definitionId;
-        try {
+        // 537: hosted on the Audit Configuration page, the host owns the
+        // address bar -- no record id is written there.
+        if (!window.__oaHostNoUrl) try {
             const u = new URL(window.location.href);
             u.searchParams.set('definitionId', String(definitionId));
             window.history.replaceState(null, '', u.toString());
@@ -695,6 +711,25 @@
         if (selected) sel.value = String(selected);
     }
 
+    // Which schedule fields a frequency uses (2026-11-13). Hidden fields
+    // are not sent (saveTrigger), so a value left from another frequency
+    // cannot be saved by accident.
+    const FREQ_FIELDS = {
+        WEEKLY    : ['Dow'],
+        MONTHLY   : ['Dom'],
+        QUARTERLY : ['Dom', 'Moy'],
+        ANNUAL    : ['Dom', 'Moy']
+    };
+    function freqUses(part) {
+        const f = document.getElementById('oaTgSchedFreq').value || '';
+        return (FREQ_FIELDS[f] || []).indexOf(part) >= 0;
+    }
+    function applyFrequencyVisibility() {
+        ['Dow', 'Dom', 'Moy'].forEach(function (part) {
+            document.getElementById('oaTgSched' + part + 'Field').hidden = !freqUses(part);
+        });
+    }
+
     function applyTypeVisibility() {
         const type = document.getElementById('oaTgType').value || 'MANUAL';
         document.getElementById('oaTgSchedFields').hidden = type !== 'SCHEDULED';
@@ -724,8 +759,8 @@
         document.getElementById('oaTgDescription').value = t.description || '';
 
         fillFreqs(t.scheduleFrequencyCode);
-        document.getElementById('oaTgSchedFrom').value = onlyDate(t.scheduleStartDate);
-        document.getElementById('oaTgSchedTo').value   = onlyDate(t.scheduleEndDate);
+        document.getElementById('oaTgSchedFrom').value = isoDate(t.scheduleStartDate);
+        document.getElementById('oaTgSchedTo').value   = isoDate(t.scheduleEndDate);
         document.getElementById('oaTgSchedTime').value = onlyTime(t.scheduleTime);
         document.getElementById('oaTgSchedDow').value  = t.dayOfWeek   != null ? String(t.dayOfWeek)   : '';
         document.getElementById('oaTgSchedDom').value  = t.dayOfMonth  != null ? String(t.dayOfMonth)  : '';
@@ -740,6 +775,7 @@
         document.getElementById('oaTgContRule').value     = t.continuousRuleCode  || '';
 
         applyTypeVisibility();
+        applyFrequencyVisibility();
         document.getElementById('oaTgDialog').showModal();
     }
     function blankTrigger() {
@@ -788,10 +824,10 @@
             scheduleFrequencyName : type === 'SCHEDULED' && freqOpt ? (freqOpt.textContent || null) : null,
             scheduleStartDate     : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedFrom').value || null) : null,
             scheduleEndDate       : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedTo').value   || null) : null,
-            scheduleTime          : type === 'SCHEDULED' ? (document.getElementById('oaTgSchedTime').value || null) : null,
-            dayOfWeek             : type === 'SCHEDULED' ? intOrNull(document.getElementById('oaTgSchedDow').value)  : null,
-            dayOfMonth            : type === 'SCHEDULED' ? intOrNull(document.getElementById('oaTgSchedDom').value)  : null,
-            monthOfYear           : type === 'SCHEDULED' ? intOrNull(document.getElementById('oaTgSchedMoy').value)  : null,
+            scheduleTime          : type === 'SCHEDULED' ? timeOrNull(document.getElementById('oaTgSchedTime').value) : null,
+            dayOfWeek             : type === 'SCHEDULED' && freqUses('Dow') ? intOrNull(document.getElementById('oaTgSchedDow').value) : null,
+            dayOfMonth            : type === 'SCHEDULED' && freqUses('Dom') ? intOrNull(document.getElementById('oaTgSchedDom').value) : null,
+            monthOfYear           : type === 'SCHEDULED' && freqUses('Moy') ? intOrNull(document.getElementById('oaTgSchedMoy').value) : null,
 
             // Event
             eventCode        : type === 'EVENT_DRIVEN' ? (document.getElementById('oaTgEventCode').value || null) : null,
@@ -814,7 +850,7 @@
                 body: JSON.stringify(body)
             });
             const j = await safeJson(r);
-            if (!r.ok) { showDialogMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
+            if (!r.ok) { showDialogMessage('error', apiError(j, r)); return; }
             closeDialog();
             await loadTriggers();
             renderTriggers();
@@ -848,6 +884,7 @@
         document.getElementById('oaTgCancel').addEventListener('click', closeDialog);
         document.getElementById('oaTgForm').addEventListener('submit', function (e) { e.preventDefault(); saveTrigger(); });
         document.getElementById('oaTgType').addEventListener('change', applyTypeVisibility);
+        document.getElementById('oaTgSchedFreq').addEventListener('change', applyFrequencyVisibility);
 
         document.getElementById('oaTgReloadBtn').addEventListener('click', async function () {
             if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick an organization and definition first.'); return; }
@@ -882,6 +919,31 @@
         el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
     }
     function intOrNull(v) { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
+    // 2026-11-13: <input type="time"> gives "HH:mm"; the Api binds
+    // ScheduleTime as a TimeSpan, which System.Text.Json reads as
+    // "hh:mm:ss" -- "09:00" failed model binding with a bare HTTP 400.
+    function timeOrNull(v) {
+        if (!v) return null;
+        return /^\d{2}:\d{2}$/.test(v) ? v + ':00' : v;
+    }
+    // 2026-11-13: <input type="date"> needs yyyy-MM-dd. onlyDate() formats
+    // for display (13-Nov-2026), which the input rejects, so an edited
+    // trigger opened with empty From / To dates -- the Effective Date bug.
+    function isoDate(v) { return v ? String(v).slice(0, 10) : ''; }
+    // An Api 400 can be the procedure's own message ({ error }) or ASP.NET's
+    // model-binding ProblemDetails ({ title, errors: { field: [msg] } });
+    // show whichever came back instead of a bare status.
+    function apiError(j, r) {
+        if (j && (j.error || j.Error)) return j.error || j.Error;
+        const errs = j && (j.errors || j.Errors);
+        if (errs && typeof errs === 'object') {
+            const lines = Object.keys(errs).map(function (k) {
+                return k.replace(/^\$\.?/, '') + ': ' + [].concat(errs[k]).join(' ');
+            });
+            if (lines.length) return lines.join('\n');
+        }
+        return (j && j.title) || ('HTTP ' + r.status);
+    }
     function onlyDate(v) {
         if (!v) return '';
         if (typeof window.gracFormatDisplayDate === "function") { var _g = window.gracFormatDisplayDate(v); if (_g !== v) return _g; }

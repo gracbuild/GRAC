@@ -66,6 +66,12 @@ IF OBJECT_ID('grac_practice.risk_source_master','U') IS NULL OR OBJECT_ID('grac_
 BEGIN PRINT 'ABORT (489): Risk Centre procedures missing (204-207, 378).'; SET @ok = 0; END
 IF OBJECT_ID('grac_practice.sp_custom_gap_save','P') IS NULL
 BEGIN PRINT 'ABORT (489): sp_custom_gap_save missing (112 / 324).'; SET @ok = 0; END
+-- 521 (Third-Party Management Phase 1) re-issued sp_tprm_monitoring_sweep
+-- without the legacy vendor and dropped tprm_third_party.vendor_id.
+-- Running 489 again would restore the old body, so it stops.
+IF OBJECT_ID('grac_practice.tprm_third_party','U') IS NOT NULL
+   AND COL_LENGTH('grac_practice.tprm_third_party','vendor_id') IS NULL
+BEGIN PRINT 'ABORT (489): superseded by 521_tpm_vendor_registry_foundation.sql -- do not re-run 489 after 521.'; SET @ok = 0; END
 IF @ok = 0
 BEGIN
     RAISERROR('489_tprm_due_diligence_decision_monitoring: prerequisites missing -- see the messages above.', 16, 1);

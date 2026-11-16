@@ -12,15 +12,70 @@ public sealed class PracticeController(
     IConfiguration configuration,
     ILogger<PracticeController> logger) : Controller
 {
-    private static readonly HashSet<string> OrganizationManagementAreas = new(StringComparer.OrdinalIgnoreCase)
-    {
+    // Every area REACHABLE in the Organization Management module. This is
+    // what ShowArea accepts. It is NOT what the sidebar shows -- see
+    // OrganizationManagementMenuAreas below.
+    //
+    // "organization-dependencies" was dropped on 2026-11-02 at sir's
+    // request. Its menu is gone from this module and nothing here links to
+    // it, so leaving it reachable would leave a page with no way in. The
+    // screen itself is untouched and still works under Practice Management.
+    private static readonly string[] OrganizationManagementAreas =
+    [
+        // The landing list -- the module root, and since 2026-11-02 a menu
+        // entry as well (migration 512 made its menu_master row Active) --
+        // and the read-only organization page its rows open, which has no
+        // menu row and is reached only from the list.
+        "organizations",
+        "organization-view",
+        // Reachable but NOT on the menu (2026-11-02). The organization view
+        // page's Actions > Edit and the list's "Add Organization" button are
+        // the two ways in, so the page must still open.
         "organization-setup",
-        "organization-dependencies"
-    };
+        // Migration 511: framework subscription requests from every
+        // organization, approved or rejected here (Control Management keeps
+        // its own screen over the same queue). The module's one menu.
+        "subscription-requests"
+    ];
+
+    // What the module's SIDEBAR shows, in order -- VisibleMenu() projects
+    // it straight from this sequence.
+    //
+    // 2026-11-02, sir: "organization setup and dependencies ee 2 menus ini
+    // organization module lu venda. Framework subscription request approval
+    // nte oru menu mathram mathi ee module lu." Then, once that screen was
+    // open with no way back: "organizations nte oru menu koodi ittolu." So:
+    // the list, then the approval queue.
+    //
+    // Kept separate from the reachable list above because the two answer
+    // different questions. Organization Setup and the organization view page
+    // must still OPEN without appearing here.
+    private static readonly string[] OrganizationManagementMenuAreas =
+    [
+        // The organization list. Added 2026-11-02: once you open the
+        // approval screen there was no way back to the list, which is the
+        // module's landing page and has no menu row of its own. First, so it
+        // reads as the module's home.
+        "organizations",
+        "subscription-requests"
+    ];
+
+    // The set this used to be, kept for the membership tests below. Array
+    // .Contains is case-SENSITIVE, and the routes feed areaKey straight
+    // from the URL ("/OrganizationManagement/Practice/Index/Organization-Setup"
+    // is a legal spelling), so dropping the comparer would 404 a request
+    // the HashSet accepted.
+    private static readonly HashSet<string> OrganizationManagementAreaSet =
+        new(OrganizationManagementAreas.Concat(OrganizationManagementMenuAreas),
+            StringComparer.OrdinalIgnoreCase);
 
     public Task<IActionResult> Index(string? areaKey = null, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(areaKey) && IsOrganizationManagementModule()) return OrganizationSetupIndex(cancellationToken);
+        // 2026-11-02: Organization Management opens on the list of
+        // organizations. Picking a row goes to the organization page,
+        // which is what this used to land on directly.
+        if (string.IsNullOrWhiteSpace(areaKey) && IsOrganizationManagementModule())
+            return ShowArea("organizations", cancellationToken: cancellationToken);
         if (string.IsNullOrWhiteSpace(areaKey)) return Dashboard(cancellationToken);
         return ShowArea(areaKey, cancellationToken: cancellationToken);
     }
@@ -28,6 +83,41 @@ public sealed class PracticeController(
     [HttpGet("OrganizationSetup")]
     [HttpGet("organization-setup")]
     public Task<IActionResult> OrganizationSetupIndex(CancellationToken cancellationToken) => OrganizationSetup("organization-setup", cancellationToken);
+
+    // The read-only organization page (2026-11-02), opened by a row on the
+    // Organization Management landing list.
+    //
+    // It needs an attribute route of its own for the same reason
+    // OrganizationSetup above has one. On a plain host /OrganizationManagement
+    // is a conventional route ("OrganizationManagement/{areaKey?}") and
+    // /OrganizationManagement/organization-view reaches Index(areaKey) by
+    // itself -- but under a hosted PathBase of /OrganizationManagement the
+    // path is just /organization-view, which matches no conventional route
+    // and would 404. Unlike every other workflow-screen page it cannot fall
+    // back on "Practice/Index/{areaKey}" either: that is four segments under
+    // the module's own route, which takes one.
+    // The organization list. It is the module's landing page -- Index() with
+    // no areaKey opens it -- but since 2026-11-02 it is also a menu entry,
+    // and a menu URL has to resolve on its own. Under a hosted PathBase of
+    // /OrganizationManagement the path is just /organizations, which matches
+    // no conventional route; without one the module route
+    // "OrganizationManagement/{areaKey?}" already reaches Index(areaKey).
+    [HttpGet("organizations")]
+    public Task<IActionResult> Organizations(CancellationToken cancellationToken) =>
+        ShowArea("organizations", cancellationToken: cancellationToken);
+
+    [HttpGet("OrganizationView")]
+    [HttpGet("organization-view")]
+    public Task<IActionResult> OrganizationView(CancellationToken cancellationToken) =>
+        ShowArea("organization-view", PracticeScreen.OrganizationGroup, cancellationToken);
+
+    // Migration 511. Same reason as OrganizationView above: under a hosted
+    // PathBase of /OrganizationManagement the path is just
+    // /subscription-requests, which no conventional route matches.
+    [HttpGet("SubscriptionRequests")]
+    [HttpGet("subscription-requests")]
+    public Task<IActionResult> SubscriptionRequests(CancellationToken cancellationToken) =>
+        ShowArea("subscription-requests", PracticeScreen.OrganizationOnboardingGroup, cancellationToken);
 
     [HttpGet("OrganizationSetup/{areaKey}")]
     [HttpGet("organization-setup/{areaKey}")]
@@ -65,8 +155,8 @@ public sealed class PracticeController(
         if (IsOrganizationManagementModule())
             diagnostics = diagnostics with
             {
-                VisibleRowCount = Math.Min(diagnostics.VisibleRowCount, OrganizationManagementAreas.Count),
-                Rows = diagnostics.Rows.Where(row => OrganizationManagementAreas.Contains(row.MenuKey)).ToArray()
+                VisibleRowCount = Math.Min(diagnostics.VisibleRowCount, OrganizationManagementAreaSet.Count),
+                Rows = diagnostics.Rows.Where(row => OrganizationManagementAreaSet.Contains(row.MenuKey)).ToArray()
             };
         return Json(new
         {
@@ -122,13 +212,28 @@ public sealed class PracticeController(
             // employee, so a sign-in without one has none.
             ["repositoryUpdates"] = hasEmployee && CanView("organization-controls")
         };
+        // 503 (Dashboard UI specification v2, Home): one snapshot card per
+        // module dashboard the caller may open -- CanViewScreen, the same
+        // rule the dashboard page and its data proxy apply -- carrying the
+        // sections the caller may see, so Home never shows a figure the
+        // module dashboard would hide.
+        ViewBag.HomeModules = ManagementDashboards.HomeSnapshots
+            .Where(m => CanViewScreen(m.ScreenKey))
+            .Select(m => new
+            {
+                module   = m.Module,
+                screen   = m.ScreenKey,
+                title    = m.Title,
+                sections = ManagementDashboards.AllowedSections(m.ScreenKey, CanViewScreen)
+            })
+            .ToArray();
         return View("Dashboard");
     }
 
     private async Task<IActionResult> ShowArea(string areaKey, string? requiredGroup = null, CancellationToken cancellationToken = default)
     {
         if (!IsSignedIn()) return RedirectToLogin();
-        if (IsOrganizationManagementModule() && !OrganizationManagementAreas.Contains(areaKey)) return NotFound();
+        if (IsOrganizationManagementModule() && !OrganizationManagementAreaSet.Contains(areaKey)) return NotFound();
         ViewBag.ApiBaseUrl = $"{ModuleRouteBase()}/practice-management-gateway";
         ViewBag.ModuleTitle = ModuleTitle();
         ViewBag.IsOrganizationManagementModule = IsOrganizationManagementModule();
@@ -247,7 +352,7 @@ public sealed class PracticeController(
     {
         var screens = await menuService.GetVisibleScreensAsync(Token(), Roles(), cancellationToken);
         return IsOrganizationManagementModule()
-            ? screens.Where(screen => OrganizationManagementAreas.Contains(screen.Key)).ToArray()
+            ? screens.Where(screen => OrganizationManagementAreaSet.Contains(screen.Key)).ToArray()
             : screens;
     }
 
@@ -258,7 +363,7 @@ public sealed class PracticeController(
 
         var screens = await VisibleScreens(cancellationToken);
         var byKey = screens.ToDictionary(screen => screen.Key, StringComparer.OrdinalIgnoreCase);
-        return OrganizationManagementAreas
+        return OrganizationManagementMenuAreas
             .Select((key, index) => byKey.TryGetValue(key, out var screen)
                 ? new PracticeMenuItem(
                     index + 1,
@@ -277,6 +382,7 @@ public sealed class PracticeController(
             .Where(item => CanViewScreen(item.MenuKey))
             .ToArray();
     }
+
 
     // Sidebar = only what the caller may open (2026-10-09). The menu
     // service returns every active menu_master row (it is role-agnostic and
@@ -351,6 +457,18 @@ public sealed class PracticeController(
         if (screenKey.Equals("resolve-workspace", StringComparison.OrdinalIgnoreCase))
             return "resolve";
 
+        // The Organization Management landing list and the read-only
+        // organization page its rows open (2026-11-02). Neither has an
+        // Active menu_master row, so like practice-instances below they
+        // would otherwise grant nobody anything. Both show the same
+        // organizations the Organization Setup page already opens, and the
+        // view page's Edit leads there, so that screen governs them --
+        // whoever may open Organization Setup may see the list of what they
+        // can open, and read one of them.
+        if (screenKey.Equals("organizations", StringComparison.OrdinalIgnoreCase)
+            || screenKey.Equals("organization-view", StringComparison.OrdinalIgnoreCase))
+            return "organization-setup";
+
         // practice-instances became exactly the case this map exists for
         // when migration 288 set its menu row Inactive. Only 'Active' rows
         // pass the permission filter (see 279's header), so the screen
@@ -372,6 +490,14 @@ public sealed class PracticeController(
         // navigation-code / navigation-context checks.
         if (screenKey.Equals("practice-view", StringComparison.OrdinalIgnoreCase))
             return "organization-requirements";
+
+        // Audit Configuration (migration 549, 2026-11-14): its menu row is
+        // Inactive -- it is opened only from Audit Definition (the list's
+        // 3-dot and the view page's Actions) -- so, like practice-instances
+        // above, Audit Definition governs it. Same mapping in
+        // PermissionAreaMap for the navigation-code checks.
+        if (screenKey.Equals("org-audit-configuration", StringComparison.OrdinalIgnoreCase))
+            return "org-audit-definition";
 
         // custom-source-statements has no menu_master row either (see the
         // comment on its PracticeScreen entry) -- it is reached only by a
@@ -490,7 +616,7 @@ public sealed class PracticeController(
     {
         var path = areaKey.Equals("organization-setup", StringComparison.OrdinalIgnoreCase)
             ? "OrganizationSetup"
-            : "OrganizationDependencies";
+            : areaKey;
         return Request.PathBase.Equals("/OrganizationManagement", StringComparison.OrdinalIgnoreCase)
             ? path
             : $"OrganizationManagement/{areaKey}";

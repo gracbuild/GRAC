@@ -54,6 +54,33 @@ public interface IOrgAssuranceExecutionService
     // 120 -- per-entity auditor assignment (role+employee hybrid).
     Task<OrgAssuranceExecutionAuditorAssignResult> AssignEntityAuditorAsync(
         OrgAssuranceExecutionAuditorAssignRequest request, CancellationToken cancellationToken);
+
+    // 555 -- My Audits, live scope, Freeze Scope.
+    Task<IReadOnlyList<OrgAssuranceMyAuditPrepareRow>> PrepareMyAuditsAsync(
+        long employeeId, string actor, CancellationToken cancellationToken);
+    Task<IReadOnlyList<OrgAssuranceMyAuditRow>> ListMyAuditsAsync(
+        long employeeId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<OrgAssuranceScopeItemRow>> ListLiveScopeAsync(
+        long organizationId, long executionId, string actor, CancellationToken cancellationToken);
+    Task<IReadOnlyList<OrgAssuranceScopeExclusionRow>> ListScopeExclusionsAsync(
+        long organizationId, long executionId, CancellationToken cancellationToken);
+    Task<OrgAssuranceFreezeScopeResult> FreezeScopeAsync(
+        long executionId, long employeeId, OrgAssuranceFreezeScopeRequest request, string actor,
+        CancellationToken cancellationToken);
+    // 563 -- Scope Builder Step 3: the review to confirm (live) or the approved snapshot (frozen).
+    Task<OrgAssuranceScopeReviewResult> GetScopeReviewAsync(
+        long organizationId, long executionId, CancellationToken cancellationToken);
+
+    // 558 -- question responses (one per question per execution) and findings.
+    Task<OrgAssuranceResponseListResult> ListResponsesAsync(
+        long organizationId, long executionId, CancellationToken cancellationToken);
+    Task<OrgAssuranceResponseSaveResult> SaveResponseAsync(
+        long executionId, long employeeId, OrgAssuranceResponseSaveRequest request, string actor,
+        CancellationToken cancellationToken);
+
+    // 556 -- Continuous Assurance view (same procedure as the live scope, ASSURANCE mode).
+    Task<OrgAssuranceContinuousAssuranceResult> GetContinuousAssuranceAsync(
+        long organizationId, long executionId, string actor, CancellationToken cancellationToken);
 }
 
 public sealed class OrgAssuranceExecutionService(
@@ -153,8 +180,10 @@ public sealed class OrgAssuranceExecutionService(
             return new OrgAssuranceExecutionMaterializeResult(false, Error: "OrganizationId is required.");
         if (request.DefinitionId <= 0)
             return new OrgAssuranceExecutionMaterializeResult(false, Error: "DefinitionId is required.");
-        if (request.ScopeResolutionId <= 0)
-            return new OrgAssuranceExecutionMaterializeResult(false, Error: "ScopeResolutionId is required.");
+        // 545: ScopeResolutionId is optional -- without it the procedure
+        // resolves the scope now, for this execution.
+        if (request.ScopeResolutionId is <= 0)
+            return new OrgAssuranceExecutionMaterializeResult(false, Error: "ScopeResolutionId must be positive when given.");
 
         try
         {
@@ -166,7 +195,7 @@ public sealed class OrgAssuranceExecutionService(
             AddParam(command, "@organization_id",     DbType.Int64,  request.OrganizationId);
             AddParam(command, "@definition_id",       DbType.Int64,  request.DefinitionId);
             AddParam(command, "@version_id",          DbType.Int64,  (object?)request.VersionId ?? DBNull.Value);
-            AddParam(command, "@scope_resolution_id", DbType.Int64,  request.ScopeResolutionId);
+            AddParam(command, "@scope_resolution_id", DbType.Int64,  (object?)request.ScopeResolutionId ?? DBNull.Value);
             AddParam(command, "@execution_code",      DbType.String, (object?)request.ExecutionCode ?? DBNull.Value, 120);
             AddParam(command, "@execution_name",      DbType.String, (object?)request.ExecutionName ?? DBNull.Value, 300);
             AddParam(command, "@origin_type",         DbType.String,
@@ -351,8 +380,363 @@ public sealed class OrgAssuranceExecutionService(
     }
 
     // -----------------------------------------------------------------
+    // 555 -- My Audits, live scope, Freeze Scope
+    // -----------------------------------------------------------------
+    public async Task<IReadOnlyList<OrgAssuranceMyAuditPrepareRow>> PrepareMyAuditsAsync(
+        long employeeId, string actor, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType    = CommandType.StoredProcedure;
+        command.CommandText    = "grac_practice.sp_org_assurance_my_audits_prepare";
+        command.CommandTimeout = 120;   // one resolver run per audit started
+        AddParam(command, "@employee_id", DbType.Int64,  employeeId);
+        AddParam(command, "@actor",       DbType.String, actor, 100);
+
+        var rows = new List<OrgAssuranceMyAuditPrepareRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            rows.Add(new OrgAssuranceMyAuditPrepareRow(
+                Convert.ToInt64(reader["PlanItemId"]),
+                ReadStringOrNull(reader, "EngagementCode"),
+                Convert.ToBoolean(reader["Started"]),
+                ReadStringOrNull(reader, "Message")));
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<OrgAssuranceMyAuditRow>> ListMyAuditsAsync(
+        long employeeId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_my_audit_list";
+        AddParam(command, "@employee_id", DbType.Int64, employeeId);
+
+        var rows = new List<OrgAssuranceMyAuditRow>();
+        await using var r = await command.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            rows.Add(new OrgAssuranceMyAuditRow(
+                Convert.ToInt64(r["OrganizationId"]),
+                ReadStringOrNull(r,   "OrganizationName"),
+                ReadLongOrNull(r,     "PlanId"),   // 566: independent engagements have none
+                ReadStringOrNull(r,   "PlanCode"),
+                ReadStringOrNull(r,   "PlanName"),
+                Convert.ToInt64(r["PlanItemId"]),
+                ReadStringOrNull(r,   "EngagementCode"),
+                ReadStringOrNull(r,   "EngagementName"),
+                ReadLongOrNull(r,     "BranchId"),
+                ReadStringOrNull(r,   "BranchName"),
+                ReadDateTimeOrNull(r, "ScheduledFrom"),
+                ReadDateTimeOrNull(r, "ScheduledTo"),
+                Convert.ToInt64(r["DefinitionId"]),
+                ReadStringOrNull(r,   "DefinitionCode"),
+                ReadStringOrNull(r,   "DefinitionName"),
+                ReadLongOrNull(r,     "ExecutionId"),
+                ReadStringOrNull(r,   "ExecutionCode"),
+                ReadStringOrNull(r,   "ExecutionStatusCode"),
+                ReadStringOrNull(r,   "ExecutionStatusName"),
+                ReadDateTimeOrNull(r, "ScopeFrozenAt"),
+                ReadLongOrNull(r,     "TotalEntityCount"),
+                ReadLongOrNull(r,     "CompletedEntityCount"),
+                r["AuditState"]?.ToString() ?? ""));
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<OrgAssuranceScopeItemRow>> ListLiveScopeAsync(
+        long organizationId, long executionId, string actor, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType    = CommandType.StoredProcedure;
+        command.CommandText    = "grac_practice.sp_org_assurance_execution_live_scope";
+        command.CommandTimeout = 120;   // one resolver run
+        AddParam(command, "@organization_id", DbType.Int64,  organizationId);
+        AddParam(command, "@execution_id",    DbType.Int64,  executionId);
+        AddParam(command, "@actor",           DbType.String, actor, 100);
+
+        var rows = new List<OrgAssuranceScopeItemRow>();
+        await using var r = await command.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            rows.Add(new OrgAssuranceScopeItemRow(
+                r["DimensionCode"]?.ToString() ?? "",
+                ReadStringOrNull(r, "DimensionName"),
+                ReadLongOrNull(r,   "EntityId"),
+                ReadStringOrNull(r, "EntityCode"),
+                ReadStringOrNull(r, "EntityName")));
+        return rows;
+    }
+
+    public async Task<OrgAssuranceResponseListResult> ListResponsesAsync(
+        long organizationId, long executionId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_execution_response_list";
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+        AddParam(command, "@execution_id",    DbType.Int64, executionId);
+
+        var questions = new List<OrgAssuranceResponseRow>();
+        var counts    = new List<OrgAssuranceResponseCountRow>();
+        await using var r = await command.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            questions.Add(new OrgAssuranceResponseRow(
+                ReadIntOrNull(r,      "SetOrder"),
+                ReadStringOrNull(r,   "QuestionSetCode"),
+                ReadStringOrNull(r,   "QuestionSetName"),
+                Convert.ToInt64(r["QuestionId"]),
+                ReadStringOrNull(r,   "QuestionCode"),
+                ReadStringOrNull(r,   "QuestionText"),
+                ReadStringOrNull(r,   "HelpText"),
+                r["IsMandatory"] != DBNull.Value && Convert.ToBoolean(r["IsMandatory"]),
+                ReadIntOrNull(r,      "DisplayOrder"),
+                ReadStringOrNull(r,   "EvidenceTypeName"),
+                ReadStringOrNull(r,   "ExpectedEvidence"),
+                ReadStringOrNull(r,   "ResultCode"),
+                ReadStringOrNull(r,   "Description"),
+                ReadLongOrNull(r,     "OwnerEmployeeId"),
+                ReadStringOrNull(r,   "OwnerDisplayName"),
+                ReadStringOrNull(r,   "AnsweredBy"),
+                ReadDateTimeOrNull(r, "AnsweredDt"),
+                ReadLongOrNull(r,     "ObservationId"),
+                ReadStringOrNull(r,   "ObservationCode"),
+                ReadStringOrNull(r,   "ObservationStatusCode"),
+                ReadStringOrNull(r,   "ObservationStatusName")));
+        if (await r.NextResultAsync(cancellationToken))
+            while (await r.ReadAsync(cancellationToken))
+                counts.Add(new OrgAssuranceResponseCountRow(
+                    r["ResultCode"]?.ToString() ?? "",
+                    Convert.ToInt32(r["QuestionCount"])));
+        return new OrgAssuranceResponseListResult(questions, counts);
+    }
+
+    public async Task<OrgAssuranceResponseSaveResult> SaveResponseAsync(
+        long executionId, long employeeId, OrgAssuranceResponseSaveRequest request, string actor,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_execution_response_save";
+            AddParam(command, "@organization_id",   DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@execution_id",      DbType.Int64,  executionId);
+            AddParam(command, "@question_id",       DbType.Int64,  request.QuestionId);
+            AddParam(command, "@result_code",       DbType.String, request.ResultCode, 20);
+            AddParam(command, "@description",       DbType.String, (object?)request.Description ?? DBNull.Value, -1);
+            AddParam(command, "@owner_employee_id", DbType.Int64,  request.OwnerEmployeeId is > 0 ? (object)request.OwnerEmployeeId.Value : DBNull.Value);
+            AddParam(command, "@employee_id",       DbType.Int64,  employeeId);
+            AddParam(command, "@actor",             DbType.String, actor, 100);
+
+            await using var r = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await r.ReadAsync(cancellationToken))
+                return new OrgAssuranceResponseSaveResult(true, request.QuestionId, request.ResultCode);
+            return new OrgAssuranceResponseSaveResult(true,
+                Convert.ToInt64(r["QuestionId"]),
+                ReadStringOrNull(r, "ResultCode"),
+                ReadLongOrNull(r,   "ObservationId"),
+                ReadStringOrNull(r, "ObservationCode"),
+                ReadStringOrNull(r, "ObservationStatusCode"),
+                ReadStringOrNull(r, "ObservationStatusName"));
+        }
+        catch (SqlException ex)
+        {
+            var reason = MapReason(ex.Number);
+            logger.LogWarning(ex, "OrgAssuranceExecutionService.SaveResponseAsync SQL error {Number}: {Message}",
+                ex.Number, ex.Message);
+            return new OrgAssuranceResponseSaveResult(false, Error: ex.Message, ReasonCode: reason);
+        }
+    }
+
+    public async Task<OrgAssuranceContinuousAssuranceResult> GetContinuousAssuranceAsync(
+        long organizationId, long executionId, string actor, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType    = CommandType.StoredProcedure;
+        command.CommandText    = "grac_practice.sp_org_assurance_execution_live_scope";
+        command.CommandTimeout = 120;   // a live scope runs the resolver
+        AddParam(command, "@organization_id", DbType.Int64,  organizationId);
+        AddParam(command, "@execution_id",    DbType.Int64,  executionId);
+        AddParam(command, "@actor",           DbType.String, actor, 100);
+        AddParam(command, "@mode",            DbType.String, "ASSURANCE", 20);
+
+        var summary = new List<OrgAssuranceCaSummaryRow>();
+        var detail  = new List<OrgAssuranceCaDetailRow>();
+        await using var r = await command.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            summary.Add(new OrgAssuranceCaSummaryRow(
+                r["SummaryKind"]?.ToString() ?? "",
+                r["Label"]?.ToString() ?? "",
+                Convert.ToInt32(r["ItemCount"])));
+        if (await r.NextResultAsync(cancellationToken))
+            while (await r.ReadAsync(cancellationToken))
+                detail.Add(new OrgAssuranceCaDetailRow(
+                    r["DimensionCode"]?.ToString() ?? "",
+                    ReadStringOrNull(r,   "DimensionName"),
+                    ReadLongOrNull(r,     "EntityId"),
+                    ReadStringOrNull(r,   "EntityCode"),
+                    ReadStringOrNull(r,   "EntityName"),
+                    ReadLongOrNull(r,     "PracticeInstanceId"),
+                    ReadStringOrNull(r,   "InstanceCode"),
+                    ReadStringOrNull(r,   "InstanceName"),
+                    ReadStringOrNull(r,   "Via"),
+                    ReadLongOrNull(r,     "ObligationId"),
+                    ReadStringOrNull(r,   "ObligationName"),
+                    ReadStringOrNull(r,   "ObligationType"),
+                    ReadStringOrNull(r,   "Frequency"),
+                    ReadStringOrNull(r,   "ObligationStatusCode"),
+                    ReadStringOrNull(r,   "ObligationStatusName"),
+                    ReadLongOrNull(r,     "LastTaskId"),
+                    ReadStringOrNull(r,   "LastTaskNumber"),
+                    ReadStringOrNull(r,   "LastTaskStatusCode"),
+                    ReadStringOrNull(r,   "LastTaskStatusName"),
+                    ReadDateTimeOrNull(r, "LastTaskDueDate")));
+        return new OrgAssuranceContinuousAssuranceResult(summary, detail);
+    }
+
+    public async Task<IReadOnlyList<OrgAssuranceScopeExclusionRow>> ListScopeExclusionsAsync(
+        long organizationId, long executionId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_execution_scope_exclusion_list";
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+        AddParam(command, "@execution_id",    DbType.Int64, executionId);
+
+        var rows = new List<OrgAssuranceScopeExclusionRow>();
+        await using var r = await command.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            rows.Add(new OrgAssuranceScopeExclusionRow(
+                r["DimensionCode"]?.ToString() ?? "",
+                ReadStringOrNull(r,   "DimensionName"),
+                Convert.ToInt64(r["EntityId"]),
+                ReadStringOrNull(r,   "EntityCode"),
+                ReadStringOrNull(r,   "EntityName"),
+                r["Reason"]?.ToString() ?? "",
+                ReadStringOrNull(r,   "EnteredBy"),
+                ReadDateTimeOrNull(r, "EnteredDt")));
+        return rows;
+    }
+
+    public async Task<OrgAssuranceFreezeScopeResult> FreezeScopeAsync(
+        long executionId, long employeeId, OrgAssuranceFreezeScopeRequest request, string actor,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType    = CommandType.StoredProcedure;
+            command.CommandText    = "grac_practice.sp_org_assurance_execution_freeze_scope";
+            command.CommandTimeout = 120;   // one resolver run
+            var excl = (request.Exclusions ?? [])
+                .Select(x => new { dimensionCode = x.DimensionCode, entityId = x.EntityId, reason = x.Reason })
+                .ToList();
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@execution_id",    DbType.Int64,  executionId);
+            AddParam(command, "@employee_id",     DbType.Int64,  employeeId);
+            AddParam(command, "@exclusions_json", DbType.String,
+                excl.Count == 0 ? DBNull.Value : (object)System.Text.Json.JsonSerializer.Serialize(excl), -1);
+            AddParam(command, "@actor",           DbType.String, actor, 100);
+            // 563: Step 3 Review and Confirm -- category ticks, unticked
+            // related records (with reasons) and manual items.
+            // Sent only with a review, so a freeze without one also runs
+            // against the 555 procedure.
+            if (request.Review is { } rv)
+                AddParam(command, "@review_json", DbType.String, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    categories = (rv.Categories ?? []).Select(c => new { code = c.Code, isIncluded = c.IsIncluded }),
+                    excluded   = (rv.Excluded   ?? []).Select(x => new { categoryCode = x.CategoryCode, recordId = x.RecordId, reason = x.Reason }),
+                    manual     = (rv.Manual     ?? []).Select(m => new { categoryCode = m.CategoryCode, name = m.Name, note = m.Note })
+                }), -1);
+
+            await using var r = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await r.ReadAsync(cancellationToken))
+                return new OrgAssuranceFreezeScopeResult(true, executionId);
+            return new OrgAssuranceFreezeScopeResult(true,
+                Convert.ToInt64(r["ExecutionId"]),
+                ReadStringOrNull(r, "ExecutionCode"),
+                ReadLongOrNull(r,   "TotalEntityCount"),
+                ReadIntOrNull(r,    "ExcludedCount"),
+                ReviewId:        HasColumn(r, "ReviewId")        ? ReadLongOrNull(r, "ReviewId")       : null,   // 563
+                ReviewVersionNo: HasColumn(r, "ReviewVersionNo") ? ReadIntOrNull(r,  "ReviewVersionNo") : null);
+        }
+        catch (SqlException ex)
+        {
+            var reason = MapReason(ex.Number);
+            logger.LogWarning(ex, "OrgAssuranceExecutionService.FreezeScopeAsync SQL error {Number}: {Message}",
+                ex.Number, ex.Message);
+            return new OrgAssuranceFreezeScopeResult(false, Error: ex.Message, ReasonCode: reason);
+        }
+    }
+
+    // 563 -- Scope Builder Step 3: header, categories, items.
+    public async Task<OrgAssuranceScopeReviewResult> GetScopeReviewAsync(
+        long organizationId, long executionId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType    = CommandType.StoredProcedure;
+        command.CommandText    = "grac_practice.sp_org_assurance_execution_scope_review_get";
+        command.CommandTimeout = 120;   // one resolver run and the discovery
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+        AddParam(command, "@execution_id",    DbType.Int64, executionId);
+
+        await using var r = await command.ExecuteReaderAsync(cancellationToken);
+        var header = new OrgAssuranceScopeReviewHeader(null, null, null, null, null, false);
+        if (await r.ReadAsync(cancellationToken))
+            header = new OrgAssuranceScopeReviewHeader(
+                ReadLongOrNull(r,     "ReviewId"),
+                ReadIntOrNull(r,      "VersionNo"),
+                ReadStringOrNull(r,   "ReviewStatus"),
+                ReadStringOrNull(r,   "ApprovedBy"),
+                ReadDateTimeOrNull(r, "ApprovedDt"),
+                r["IsFrozen"] != DBNull.Value && Convert.ToBoolean(r["IsFrozen"]));
+
+        var categories = new List<OrgAssuranceScopeReviewCategoryRow>();
+        if (await r.NextResultAsync(cancellationToken))
+            while (await r.ReadAsync(cancellationToken))
+                categories.Add(new OrgAssuranceScopeReviewCategoryRow(
+                    r["CategoryCode"]?.ToString() ?? "",
+                    ReadStringOrNull(r, "CategoryName"),
+                    ReadIntOrNull(r,    "DisplayOrder"),
+                    ReadLongOrNull(r,   "ItemCount") ?? 0,
+                    r["IsIncluded"] != DBNull.Value && Convert.ToBoolean(r["IsIncluded"])));
+
+        var items = new List<OrgAssuranceScopeReviewItemRow>();
+        if (await r.NextResultAsync(cancellationToken))
+            while (await r.ReadAsync(cancellationToken))
+                items.Add(new OrgAssuranceScopeReviewItemRow(
+                    r["CategoryCode"]?.ToString() ?? "",
+                    ReadLongOrNull(r,   "RecordId"),
+                    ReadStringOrNull(r, "RecordCode"),
+                    ReadStringOrNull(r, "RecordName"),
+                    ReadStringOrNull(r, "Status"),
+                    ReadStringOrNull(r, "Reason"),
+                    r["IsKept"]   != DBNull.Value && Convert.ToBoolean(r["IsKept"]),
+                    ReadStringOrNull(r, "ExclusionReason"),
+                    r["IsManual"] != DBNull.Value && Convert.ToBoolean(r["IsManual"]),
+                    ReadStringOrNull(r, "ManualNote")));
+
+        return new OrgAssuranceScopeReviewResult(header, categories, items);
+    }
+
+    // -----------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------
+    private static bool HasColumn(DbDataReader r, string col)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+            if (string.Equals(r.GetName(i), col, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     private async Task<DbConnection> OpenAsync(CancellationToken cancellationToken)
     {
         var connString = Infrastructure.SqlConnectionStringResolver.Resolve(configuration);
@@ -450,7 +834,11 @@ public sealed class OrgAssuranceExecutionService(
         ReadStringOrNull(r, "EnteredBy"),
         ReadDateTimeOrNull(r, "EnteredDt"),
         ReadStringOrNull(r, "UpdatedBy"),
-        ReadDateTimeOrNull(r, "UpdatedDt"));
+        ReadDateTimeOrNull(r, "UpdatedDt"),
+        // 555 -- tolerant: a database before 555 has no scope-freeze columns.
+        HasColumn(r, "ScopeFrozenAt")       ? ReadDateTimeOrNull(r, "ScopeFrozenAt") : ReadDateTimeOrNull(r, "EnteredDt"),
+        HasColumn(r, "ScopeFrozenBy")       ? ReadStringOrNull(r, "ScopeFrozenBy")   : null,
+        HasColumn(r, "ScopeExclusionCount") ? (ReadIntOrNull(r, "ScopeExclusionCount") ?? 0) : 0);
 
     private static OrgAssuranceExecutionEntityRow MapEntityRow(DbDataReader r) => new(
         Convert.ToInt64(r["ExecutionEntityId"]),
@@ -497,6 +885,32 @@ public sealed class OrgAssuranceExecutionService(
         54080 => "AUDITOR_ASSIGN_IDS_REQUIRED",
         54081 => "AUDITOR_ASSIGN_ENTITY_NOT_FOUND",
         54082 => "AUDITOR_ASSIGN_TERMINAL_EXECUTION",
+        // 555 -- live scope / Freeze Scope
+        54030 => "SCOPE_LIVE",
+        54031 => "SCOPE_ALREADY_FROZEN",
+        54032 => "NOT_ASSIGNED_AUDITOR",
+        54033 => "FREEZE_NOT_PLANNED",
+        54034 => "EXCLUSION_INVALID",
+        54035 => "SCOPE_EMPTY",
+        54036 => "EMPLOYEE_REQUIRED",
+        // 563 -- Step 3 Review and Confirm
+        54037 => "REVIEW_INVALID",
+        54038 => "REVIEW_MANUAL_NAME_REQUIRED",
+        54039 => "REVIEW_UNKNOWN_CATEGORY",
+        // 558 -- question responses
+        54040 => "RESPONSE_NOT_IN_PROGRESS",
+        54041 => "RESPONSE_NOT_ASSIGNED_AUDITOR",
+        54042 => "RESPONSE_QUESTION_NOT_IN_EXECUTION",
+        54043 => "RESPONSE_RESULT_INVALID",
+        54044 => "RESPONSE_DESCRIPTION_OWNER_REQUIRED",
+        54045 => "RESPONSE_FINDING_PAST_OPEN",
+        54046 => "RESPONSE_EMPLOYEE_REQUIRED",
+        // 567 -- Submit needs the working papers done
+        54064 => "WORKPAPERS_INCOMPLETE",
+        // observation procedures called by the response save
+        54109 => "OBSERVATION_CODE_EXISTS",
+        54112 => "OBSERVATION_NOT_EDITABLE",
+        54113 => "OBSERVATION_NOT_DELETABLE",
         _     => "SQL_ERROR"
     };
 }

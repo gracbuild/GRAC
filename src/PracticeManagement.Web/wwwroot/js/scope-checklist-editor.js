@@ -395,7 +395,7 @@
     }
 
     if (!rows.length) {
-      host.innerHTML = `<div class="pm-obligation-empty">No event-driven obligations reach this organization for this event. Check the obligation's trigger in GRAC-ADMIN, that the practice is Applicable, and that the release is subscribed.</div>`;
+      host.innerHTML = `<div class="pm-obligation-empty">No event-driven obligations reach this organization for this event. Check in GRAC-ADMIN that the obligation is an Event Response for this event, that the practice is Applicable, and that the release is subscribed.</div>`;
       return;
     }
 

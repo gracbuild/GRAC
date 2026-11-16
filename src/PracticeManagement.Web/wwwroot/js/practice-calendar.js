@@ -661,6 +661,11 @@
     if (canEdit && isScheduleOccurrence && statusLower !== "past" && statusLower !== "skipped" && !isDailyFrequency(freqForEdit) && isSchedulerOwner(occurrenceOwnerId)) {
       html += `<button class="pm-button small primary" id="calEditEvent" type="button"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit Schedule</button>`;
     }
+    // 526: the schedule's reviewer / approver -- a rule-level setting, so
+    // offered on any occurrence of the rule (daily and past included).
+    if (canEdit && isScheduleOccurrence && isSchedulerOwner(occurrenceOwnerId)) {
+      html += `<button class="pm-button small" id="calReviewEvent" type="button"><i class="fa-solid fa-user-check" aria-hidden="true"></i> Review / Approval</button>`;
+    }
     const deep = ev.DeepLink || ev.deepLink;
     if (deep && !isScheduleOccurrence) {
       html += `<a class="cal-side-deep-link" href="${escapeAttr(buildAppUrl(deep.replace(/^\//, "")))}" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>${escapeHtml(`Open ${srcLabel}`)}</a>`;
@@ -676,6 +681,10 @@
     const editBtn = document.getElementById("calEditEvent");
     if (editBtn) {
       editBtn.addEventListener("click", () => openEditDialog(ev));
+    }
+    const reviewBtn = document.getElementById("calReviewEvent");
+    if (reviewBtn) {
+      reviewBtn.addEventListener("click", () => openReviewDialog(ev.RuleId ?? ev.ruleId, ev.PracticeInstance || ev.practiceInstance || title));
     }
   }
 
@@ -1482,8 +1491,93 @@
         Criticality: row.criticality,
         AssuranceMode: row.assuranceMode
       })
+    }, {
+      // 526: the schedule's reviewer / approver (rule-level, any frequency).
+      icon: "fa-user-check",
+      label: "Review / Approval",
+      action: () => openReviewDialog(row.ruleId, row.practiceInstance || row.obligation)
     }];
     return items;
+  }
+
+  /* ── Review / Approval (migration 526) ── */
+  // A schedule's reviewer and approver: the tasks it raises from then on
+  // carry them (sp_schedule_obligation_tasks_generate), and their
+  // completion follows the review cycle. Same employee list New Task uses.
+  let reviewRuleId = null;
+
+  function reviewMessage(text, isError) {
+    const el = document.getElementById("calReviewMessage");
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.classList.toggle("error", !!isError);
+  }
+
+  async function reviewCall(url, options) {
+    const r = await fetch(url, { credentials: "same-origin", ...(options || {}) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || body.message || `Request failed (HTTP ${r.status}).`);
+    return body;
+  }
+
+  function fillReviewSelect(id, employees, emptyLabel, value) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`
+      + employees.map(e => `<option value="${escapeAttr(String(e.employeeId))}">${escapeHtml(e.employeeName + (e.employeeCode ? ` (${e.employeeCode})` : ""))}</option>`).join("");
+    sel.value = value ? String(value) : "";
+  }
+
+  async function openReviewDialog(ruleId, practiceInstanceLabel) {
+    const dialog = document.getElementById("calReviewDialog");
+    if (!dialog || !ruleId || !selectedOrgId) return;
+    reviewRuleId = ruleId;
+    reviewMessage("");
+    document.getElementById("reviewPracticeInstance").value = practiceInstanceLabel || "";
+    fillReviewSelect("reviewReviewer", [], "Loading...", "");
+    fillReviewSelect("reviewApprover", [], "Loading...", "");
+    document.getElementById("calReviewSubmit").disabled = true;
+    if (!dialog.open) dialog.showModal();
+    try {
+      const [employees, settings] = await Promise.all([
+        reviewCall(buildAppUrl(`practice/api/organizations/${encodeURIComponent(selectedOrgId)}/employees`)),
+        reviewCall(buildAppUrl(`practice/api/tasks/schedule-rules/${encodeURIComponent(ruleId)}/review?organizationId=${encodeURIComponent(selectedOrgId)}`))
+      ]);
+      const list = Array.isArray(employees) ? employees : [];
+      fillReviewSelect("reviewReviewer", list, "\u2014 no review \u2014", settings.reviewerEmployeeId);
+      fillReviewSelect("reviewApprover", list, "\u2014 no approval \u2014", settings.approverEmployeeId);
+      document.getElementById("calReviewSubmit").disabled = false;
+    } catch (error) {
+      reviewMessage(error.message, true);
+    }
+  }
+
+  async function submitReview() {
+    const reviewer = document.getElementById("reviewReviewer").value;
+    const approver = document.getElementById("reviewApprover").value;
+    if (reviewer && reviewer === approver) {
+      reviewMessage("The reviewer and the approver must be two different people.", true);
+      return;
+    }
+    const btn = document.getElementById("calReviewSubmit");
+    btn.disabled = true;
+    try {
+      await reviewCall(buildAppUrl(`practice/api/tasks/schedule-rules/${encodeURIComponent(reviewRuleId)}/review`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrfToken },
+        body: JSON.stringify({
+          organizationId: Number(selectedOrgId),
+          reviewerEmployeeId: reviewer ? Number(reviewer) : null,
+          approverEmployeeId: approver ? Number(approver) : null
+        })
+      });
+      document.getElementById("calReviewDialog").close();
+    } catch (error) {
+      reviewMessage(error.message, true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function wireSchedulerRowMenu() {
@@ -1661,6 +1755,10 @@
   document.getElementById("calEditClose")?.addEventListener("click", () => document.getElementById("calEditDialog").close());
   document.getElementById("calEditCancel")?.addEventListener("click", () => document.getElementById("calEditDialog").close());
   document.getElementById("calEditSubmit")?.addEventListener("click", submitEdit);
+  // 526
+  document.getElementById("calReviewClose")?.addEventListener("click", () => document.getElementById("calReviewDialog").close());
+  document.getElementById("calReviewCancel")?.addEventListener("click", () => document.getElementById("calReviewDialog").close());
+  document.getElementById("calReviewSubmit")?.addEventListener("click", submitReview);
 
   // Schedule List's 3-dot Edit action -- delegated, wired once (renderList()
   // rebuilds listView's innerHTML on every render, so per-row listeners

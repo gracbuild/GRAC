@@ -19,9 +19,97 @@
         GET    /practice/api/org-assurance/definitions?organizationId=&pageSize=200
         GET    /practice/api/organizations/{orgId}/employees
 
+        POST   /practice/api/org-assurance/plans/{planId}/items/{itemId}/start-execution   (546)
+
+    546 (2026-11-14, sir) -- BASIC PLAN FLOW
+      A plan is made first; audits are added to it as slots (an audit may
+      have many). Only Active audits are offered; slots change only while
+      the plan is Draft or Submitted, inside the plan period (the API says
+      why when not). Each slot shows its status -- Planned / In Progress /
+      Completed / Not executed (audit retired, or plan closed) -- with its
+      execution's code. Once the plan is Approved or Active, a Planned
+      slot's 3-dot has Start Execution: the execution is created from the
+      slot (origin PLAN, its dates, auditor as owner, team) and its scope
+      is resolved then (545).
+      Opened from Audit Definition's "Add to Plan" (encrypted navigation
+      code, FilterType AuditDefinition), the page asks which Draft /
+      Submitted plan to add the audit to -- or a new one -- and opens Add
+      Item with the audit chosen; further Add Item clicks keep it chosen
+      until the page is left.
+
+    2026-11-14 (sir) -- ONE LIST, SLOTS AS CHILD ROWS
+      The two panels (plans | items of the selected plan) are one full-
+      width list of plans: Code, Name, Type, Period, Owner, Slots, Status.
+      A plan's chevron -- or a click on its row -- opens its slots in a
+      child row right under it (the Task Board's sub-task chevron); several
+      plans can be open. The slots are read when the plan opens and again
+      after any change to them; more than 20 show the first 20 and "Show
+      all". "+ Add Item" sits under the slots while the plan is Draft or
+      Submitted; Add Item is also on the plan's 3-dot. The selected-plan
+      header, its Actions button and the Add Item button are gone (the
+      plan's 3-dot holds the same items).
+
+    552 (2026-11-14, sir) -- ENGAGEMENTS
+      A plan's items are ENGAGEMENTS: who audits (auditor, team,
+      department, branch), when (from / to) and WHICH audit definitions --
+      one or more, picked in a dual list (Available / Selected, > < and
+      up / down -- the Audit Configuration question set picker's layout,
+      .oa-adopt-grid). Name defaults to the first audit's. "View Scope"
+      (dialog link and the engagement's 3-dot) shows the selected audits'
+      scope resolved NOW -- nothing is saved or frozen; the execution
+      freezes it. The engagement rows show its code, name, audits and a
+      rolled-up status (n / m audits done). Start Execution starts one
+      execution per audit not yet started.
+
+    566 (2026-11-16) -- AUDIT ENGAGEMENTS AS A RECORD (spec 4.5)
+      The engagement form is shared with the Audit Engagements screen:
+      Partials/_audit-engagement-form + js/Shared/audit-engagement-form.js
+      (window.gracEngagementForm), in full view like the plan form. It adds
+      the audit subject, objective, scope, auditee, instructions and the
+      audit team (lead, members, reviewer, subject matter experts, external
+      auditors, remarks). The dialog, the dual list, the auditor / branch /
+      programme lists, View Scope and Start Execution moved there.
+
+    554 (2026-11-14, sir) -- BRANCH AUDIT
+      The engagement's Branch is a Location (GET scope-dimensions/BRANCH/
+      values). With one, View Scope (and, since 555, the auditor's live scope
+      and Freeze Scope in My Audits) keep only what is at that branch:
+      practice instances linked to it in Operationalize, assets at it
+      (departments and vendors as picked). Engagements saved before 554 keep
+      their branch text, shown as "text only" (no narrowing).
+
+    555 (2026-11-14, sir) -- MY AUDITS
+      Start Execution creates the executions with a LIVE scope; they also
+      start by themselves when the auditor opens My Audits on or after the
+      From date. The auditor reviews, excludes (with a reason) and freezes
+      the scope there.
+      Backend (552): POST plan-items (+ engagementName, definitionIds[]);
+      GET plans/{planId}/items/{itemId}/definitions;
+      POST engagements/scope-preview.
+
+    565 (2026-11-16, sir -- Audit Change spec 4.3, phase E) -- ANNUAL PLAN,
+    PROGRAMMES, PLANNING METHODOLOGY
+      Annual Audit Plan -> Audit Programmes -> Audit Engagements. The plan
+      dialog gains Financial Year, Objectives, Planned Coverage, Budget
+      (amount, currency), Planned Effort (days) and Resources. The plan
+      list shows its programmes and planned vs actual (engagements, in
+      progress, completed). A plan's child row lists its PROGRAMMES (code,
+      programme, planning methodology, owner, planned vs actual); a
+      programme row opens its ENGAGEMENTS under it (the engagement grid as
+      before). Programmes are added / edited INLINE in the child row (no
+      popups, sir): name, methodology (master, required), owner, order,
+      objective. Every engagement belongs to a programme (the engagement
+      dialog's Programme). An Approved / Active plan is REVISED (3-dot,
+      with a reason): back to Draft, version + 1, the old values in the
+      revision history shown in the child row; it is then re-submitted and
+      re-approved.
+      Backend: GET planning-methodologies; GET plans/{id}/programmes;
+      POST plan-programmes; DELETE plans/{planId}/programmes/{id};
+      POST plans/{id}/revise; GET plans/{id}/revisions.
+
     UX:
-      * Two-panel layout: LEFT = plans list; RIGHT = items in the
-        selected plan.
+      * One plans list; a plan's programmes open under it, a programme's
+        engagements under the programme.
       * 3-dots row menus (Edit / Delete / Submit / Approve / Activate /
         Close) driven by lifecycle status.
       * Dialog-based Add/Edit for both plans and items.
@@ -62,70 +150,43 @@
     @* Audit & Assurance dashboard drill-down (414). *@
     <div id="oaPlDrillBanner" hidden></div>
 
-    <div style="display:grid; grid-template-columns:minmax(400px, 480px) 1fr; gap:12px; margin-top:12px;">
-        <div>
-            <div class="pm-table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Code</th>
-                            <th>Name</th>
-                            <th>Type</th>
-                            <th>Period</th>
-                            <th style="text-align:right;">#Items</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="oaPlPlanBody">
-                        <tr><td colspan="7" class="pm-empty">Select an organization to load plans.</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="pm-pager" data-pager="oa-plans">
-                <button class="pm-button" data-pg="prev" type="button">Previous</button>
-                <span data-pg="label">Page 1</span>
-                <button class="pm-button" data-pg="next" type="button">Next</button>
-                <span data-pg="total" class="pm-pager-total">0 total</span>
-            </div>
-        </div>
-
-        <div>
-            <div class="pm-toolbar" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
-                <div>
-                    <span style="font-weight:600;" id="oaPlSelectedName">Select a plan to view its items.</span>
-                    <span class="pm-badge" id="oaPlSelectedCode" hidden></span>
-                </div>
-                <div>
-                    <button class="pm-button primary" id="oaPlAddItemBtn" type="button" disabled>
-                        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Item
-                    </button>
-                </div>
-            </div>
-
-            <div class="pm-table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width:70px;">Order</th>
-                            <th>Definition</th>
-                            <th>Scheduled</th>
-                            <th>Auditor</th>
-                            <th>Team / Department</th>
-                            <th style="width:70px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="oaPlItemBody">
-                        <tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    @* 2026-11-14 (sir): ONE full-width list of plans; a plan's slots open
+       as a child row under it (the chevron, or a click on the plan row),
+       instead of a plans panel beside an items panel. *@
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Period</th>
+                    <th>Owner</th>
+                    <th style="text-align:right;">Programmes</th>
+                    <th>Engagements</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="oaPlPlanBody">
+                <tr><td colspan="9" class="pm-empty">Select an organization to load plans.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="pm-pager" data-pager="oa-plans">
+        <button class="pm-button" data-pg="prev" type="button">Previous</button>
+        <span data-pg="label">Page 1</span>
+        <button class="pm-button" data-pg="next" type="button">Next</button>
+        <span data-pg="total" class="pm-pager-total">0 total</span>
     </div>
 </section>
 
-@* ---------- Plan dialog ---------- *@
-<dialog id="oaPlPlanDialog" style="max-width:720px; width:96%;">
+@* ---------- Plan dialog ----------
+   2026-11-16 (sir): full view, fitting the master page -- the shared
+   pm-dialog-fullpage (practice-management.css: beside the sidebar, below
+   the topbar, the app chrome usable), opened with show(), not showModal(),
+   as practice.js does for its full-page forms; the fields scroll inside. *@
+<dialog id="oaPlPlanDialog" class="pm-dialog-fullpage">
     <form id="oaPlPlanForm" method="dialog">
         <div class="pm-dialog-heading">
             <h2 id="oaPlPlanDialogTitle">Add Plan</h2>
@@ -133,36 +194,21 @@
         </div>
         <div class="pm-message" id="oaPlPlanMessage" style="display:none;"></div>
         <input type="hidden" id="oaPlPlanEditId" />
-
-        @* 121 -- Owner moved to its own 2-col picker row below.
-           minmax(0,1fr) so long option text can't force a horizontal scrollbar. *@
-        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start;">
-            <label class="pm-field" style="min-width:0;">
+        @* 2026-11-16 (sir): one 4-column grid, so the whole plan fits the
+           full view without a scrollbar -- identity and period, name and
+           owner, the annual figures, then the four texts side by side.
+           minmax(0,1fr) so long option text can't force a horizontal
+           scrollbar. The fields still scroll inside on a short window. *@
+        <div class="oa-pl-plan-fields">
+        <div class="oa-pl-plan-grid">
+            <label class="pm-field">
                 <span>Code <span class="required">*</span></span>
                 <input class="pm-input" id="oaPlPlanCode" type="text" maxlength="80" required />
             </label>
-            <label class="pm-field" style="min-width:0;">
+            <label class="pm-field">
                 <span>Type <span class="required">*</span></span>
                 <select class="pm-input" id="oaPlPlanType" required></select>
             </label>
-        </div>
-        @* 121 hybrid role+employee Owner picker. *@
-        <div class="pm-field" style="min-width:0; margin-top:10px;">
-            <span>Owner</span>
-            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                <select class="pm-input" id="oaPlPlanOwnerRole" style="min-width:0;" aria-label="Owner Role">
-                    <option value="">Loading roles...</option>
-                </select>
-                <select class="pm-input" id="oaPlPlanOwner" style="min-width:0;" aria-label="Owner Employee (current holder)">
-                    <option value="">-- pick a role first --</option>
-                </select>
-            </div>
-        </div>
-        <label class="pm-field" style="margin-top:10px;">
-            <span>Name <span class="required">*</span></span>
-            <input class="pm-input" id="oaPlPlanName" type="text" maxlength="240" required />
-        </label>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
             <label class="pm-field">
                 <span>Period From</span>
                 <input class="pm-input" id="oaPlPlanFrom" type="date" />
@@ -171,11 +217,63 @@
                 <span>Period To</span>
                 <input class="pm-input" id="oaPlPlanTo" type="date" />
             </label>
+
+            <label class="pm-field oa-pl-span-2">
+                <span>Name <span class="required">*</span></span>
+                <input class="pm-input" id="oaPlPlanName" type="text" maxlength="240" required />
+            </label>
+            @* 121 hybrid role+employee Owner picker. *@
+            <label class="pm-field">
+                <span>Owner Role</span>
+                <select class="pm-input" id="oaPlPlanOwnerRole" aria-label="Owner Role">
+                    <option value="">Loading roles...</option>
+                </select>
+            </label>
+            <label class="pm-field">
+                <span>Owner</span>
+                <select class="pm-input" id="oaPlPlanOwner" aria-label="Owner Employee (current holder)">
+                    <option value="">-- pick a role first --</option>
+                </select>
+            </label>
+
+            @* 565: the annual plan -- financial year, budget, effort (spec 4.3). *@
+            <label class="pm-field">
+                <span>Financial Year</span>
+                <input class="pm-input" id="oaPlPlanFy" type="text" maxlength="40" placeholder="e.g. FY 2026-27" />
+            </label>
+            <label class="pm-field">
+                <span>Planned Budget</span>
+                <input class="pm-input" id="oaPlPlanBudget" type="number" min="0" step="0.01" />
+            </label>
+            <label class="pm-field">
+                <span>Currency</span>
+                <input class="pm-input" id="oaPlPlanCurrency" type="text" maxlength="10" placeholder="INR" />
+            </label>
+            <label class="pm-field">
+                <span>Planned Effort (days)</span>
+                <input class="pm-input" id="oaPlPlanEffort" type="number" min="0" step="0.5" />
+            </label>
+
+            @* 565: objectives, coverage, resources -- with the description.
+               2026-11-16 (sir): each text on its own full-width row. *@
+            <label class="pm-field oa-pl-span-all">
+                <span>Objectives</span>
+                <textarea class="pm-input" id="oaPlPlanObjectives" rows="3" maxlength="8000"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all">
+                <span>Planned Coverage</span>
+                <textarea class="pm-input" id="oaPlPlanCoverage" rows="3" maxlength="8000" placeholder="Units, processes, locations the plan covers"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all">
+                <span>Resources</span>
+                <textarea class="pm-input" id="oaPlPlanResources" rows="3" maxlength="2000" placeholder="Auditors, co-sourced teams, tools"></textarea>
+            </label>
+            <label class="pm-field oa-pl-span-all">
+                <span>Description</span>
+                <textarea class="pm-input" id="oaPlPlanDescription" rows="3" maxlength="4000"></textarea>
+            </label>
         </div>
-        <label class="pm-field" style="margin-top:10px;">
-            <span>Description</span>
-            <textarea class="pm-input" id="oaPlPlanDescription" rows="3" maxlength="4000"></textarea>
-        </label>
+        </div>
         <div class="pm-dialog-actions">
             <button type="button" id="oaPlPlanCancel" class="pm-button">Cancel</button>
             <button type="submit" id="oaPlPlanSubmit" class="pm-button primary">Save</button>
@@ -183,78 +281,42 @@
     </form>
 </dialog>
 
-@* ---------- Item dialog ---------- *@
-<dialog id="oaPlItemDialog" style="max-width:820px; width:96%;">
-    <form id="oaPlItemForm" method="dialog">
-        <div class="pm-dialog-heading">
-            <h2 id="oaPlItemDialogTitle">Add Plan Item</h2>
-            <button class="pm-icon-button" type="button" id="oaPlItemClose" aria-label="Close">&times;</button>
-        </div>
-        <div class="pm-message" id="oaPlItemMessage" style="display:none;"></div>
-        <input type="hidden" id="oaPlItemEditId" />
+@* ---------- Engagement form + View Scope (566: shared with Audit
+   Engagements; was the 552 Engagement dialog) ---------- *@
+<partial name="Partials/_audit-engagement-form" />
 
-        <div style="display:grid; grid-template-columns:1fr 100px; gap:10px; align-items:start;">
-            <label class="pm-field">
-                <span>Audit <span class="required">*</span></span>
-                <select class="pm-input" id="oaPlItemDefinition" required></select>
-            </label>
-            <label class="pm-field">
-                <span>Order</span>
-                <input class="pm-input" id="oaPlItemOrder" type="number" min="1" step="1" />
-            </label>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label class="pm-field">
-                <span>Scheduled From</span>
-                <input class="pm-input" id="oaPlItemFrom" type="date" />
-            </label>
-            <label class="pm-field">
-                <span>Scheduled To</span>
-                <input class="pm-input" id="oaPlItemTo" type="date" />
-            </label>
-        </div>
-        @* 121 hybrid role+employee Auditor picker.
-           minmax(0,1fr) + min-width:0 so long role/holder names can't overflow. *@
-        <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:start; margin-top:10px;">
-            <div class="pm-field" style="min-width:0;">
-                <span>Assigned Auditor</span>
-                <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">
-                    <select class="pm-input" id="oaPlItemAuditorRole" style="min-width:0;" aria-label="Auditor Role">
-                        <option value="">Loading roles...</option>
-                    </select>
-                    <select class="pm-input" id="oaPlItemAuditor" style="min-width:0;" aria-label="Auditor Employee (current holder)">
-                        <option value="">-- pick a role first --</option>
-                    </select>
-                </div>
+@* ---------- Add to Plan: pick the plan (546) ----------
+   Opened from Audit Definition's "Add to Plan": the audit is known, the
+   plan is picked here (Draft / Submitted plans of the organization), or a
+   new plan is made first. *@
+<dialog id="oaPlPickDialog" style="max-width:560px; width:96%;">
+    <form id="oaPlPickForm" method="dialog">
+        <div class="pm-dialog-heading">
+            <div>
+                <h2>Add to Plan</h2>
+                <p id="oaPlPickAudit"></p>
             </div>
-            <label class="pm-field" style="min-width:0;">
-                <span>Assigned Team</span>
-                <input class="pm-input" id="oaPlItemTeam" type="text" maxlength="200" />
-            </label>
+            <button class="pm-icon-button" type="button" id="oaPlPickClose" aria-label="Close">&times;</button>
         </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; margin-top:10px;">
-            <label class="pm-field">
-                <span>Assigned Department</span>
-                <input class="pm-input" id="oaPlItemDept" type="text" maxlength="200" />
-            </label>
-            <label class="pm-field">
-                <span>Assigned Branch</span>
-                <input class="pm-input" id="oaPlItemBranch" type="text" maxlength="200" />
-            </label>
-        </div>
-        <label class="pm-field" style="margin-top:10px;">
-            <span>Notes</span>
-            <textarea class="pm-input" id="oaPlItemNotes" rows="2" maxlength="4000"></textarea>
+        <div class="pm-message" id="oaPlPickMessage" style="display:none;"></div>
+        <label class="pm-field">
+            <span>Plan <span class="required">*</span></span>
+            <select class="pm-input" id="oaPlPickPlan"></select>
         </label>
+        <p class="pm-hint" style="margin:6px 0 0;">Only plans that are still Draft or Submitted can take new audits.</p>
         <div class="pm-dialog-actions">
-            <button type="button" id="oaPlItemCancel" class="pm-button">Cancel</button>
-            <button type="submit" id="oaPlItemSubmit" class="pm-button primary">Save Item</button>
+            <button type="button" id="oaPlPickNew" class="pm-button">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> New Plan
+            </button>
+            <button type="button" id="oaPlPickCancel" class="pm-button">Cancel</button>
+            <button type="submit" id="oaPlPickSubmit" class="pm-button primary">Continue</button>
         </div>
     </form>
 </dialog>
 
 @* Management dashboard drill-down receiver (414) -- window.__pmDrill. *@
 <script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -279,12 +341,30 @@
         page        : 1,
         pageSize    : 25,
         total       : 0,
+        // The plan the item dialog and the slot actions work on (set from
+        // the plan / slot the action came from).
         selectedPlanId : null,
         selectedPlan   : null,
+        expanded    : new Set(),   // open plans (their programmes shown)
+        showAll     : new Set(),   // 'planId:programmeId' showing every engagement
+        itemsByPlan : {},          // planId -> engagement rows
+        // 565: programmes
+        methodologies     : [],          // the Planning Methodology master
+        programmesByPlan  : {},          // planId -> programme rows
+        openProgrammes    : new Set(),   // 'planId:programmeId' showing its engagements
+        progForm          : null,        // { planId, programmeId|null } -- the inline form open
+        revisionsOpen     : new Set(),   // plans showing their revision history
+        revisionsByPlan   : {},
+        presetProgrammeId : null,        // Add Engagement from a programme
         plansById   : {},
         statuses    : [],
         planTypes   : [],
-        definitions : []
+        definitions : [],
+        itemsById   : {},
+        // 546: the audit "Add to Plan" came from (Audit Definition); Add
+        // Item opens with it chosen while set.
+        presetDefinitionId   : null,
+        presetDefinitionName : ''
         // 121: employees[] removed -- picker maintains its own per-role holder cache.
     };
 
@@ -322,7 +402,7 @@
         }
         document.getElementById('oaPlRoot').hidden = false;
 
-        try { await Promise.all([loadStatuses(), loadPlanTypes()]); } catch (_) {}
+        try { await Promise.all([loadStatuses(), loadPlanTypes(), loadMethodologies()]); } catch (_) {}
         if (PL_DRILL) {
             if (PL_DRILL.status && window.__pmDrill.preselect('oaPlFilterStatus', PL_DRILL.status))
                 state.status = PL_DRILL.status;
@@ -337,6 +417,70 @@
         await loadDefinitions(state.orgId);
         wireControls();
         reloadPlans();
+        openFromAuditDefinition();
+    }
+
+    // -----------------------------------------------------------------
+    // 546: opened from Audit Definition's "Add to Plan". The audit and its
+    // organization are in the navigation code; ask which plan to add it to.
+    // -----------------------------------------------------------------
+    async function openFromAuditDefinition() {
+        const ctx = window.gracSecureNav ? await window.gracSecureNav.context('org-assurance-plans') : null;
+        if (!ctx) return;
+        if (ctx.error) { alert(ctx.error); return; }
+        if (ctx.filterType !== 'AuditDefinition' || !ctx.filterId) return;
+        const orgSel = document.getElementById('oaPlFilterOrg');
+        const org = ctx.organizationId ? String(ctx.organizationId) : '';
+        if (org && org !== state.orgId && Array.prototype.some.call(orgSel.options, function (o) { return o.value === org; })) {
+            orgSel.value = org;
+            orgSel.dispatchEvent(new Event('change'));
+            await loadDefinitions(org);
+        }
+        const def = state.definitions.find(function (d) { return String(d.definitionId || d.DefinitionId) === String(ctx.filterId); });
+        state.presetDefinitionId   = String(ctx.filterId);
+        state.presetDefinitionName = def ? ((def.definitionName || def.DefinitionName || '') + ' (' + (def.definitionCode || def.DefinitionCode || '') + ')')
+                                         : (ctx.displayCode || '');
+        openPickDialog();
+    }
+
+    async function openPickDialog() {
+        const msg = document.getElementById('oaPlPickMessage');
+        msg.style.display = 'none'; msg.textContent = '';
+        document.getElementById('oaPlPickAudit').textContent = 'Audit: ' + state.presetDefinitionName;
+        const sel = document.getElementById('oaPlPickPlan');
+        sel.innerHTML = '<option value="">Loading plans...</option>';
+        document.getElementById('oaPlPickDialog').showModal();
+        try {
+            const qs = new URLSearchParams();
+            qs.set('organizationId', state.orgId);
+            qs.set('page', '1'); qs.set('pageSize', '200');
+            const r = await fetch(U(API + '/plans?' + qs.toString()), { credentials: 'same-origin' });
+            const payload = r.ok ? await r.json() : null;
+            const rows = ((payload && (payload.rows || payload.Rows)) || []).filter(function (p) {
+                const st = p.statusCode || p.StatusCode || '';
+                return st === 'Draft' || st === 'Submitted';
+            });
+            rows.forEach(function (p) { state.plansById[String(p.planId || p.PlanId)] = p; });
+            sel.innerHTML = rows.length
+                ? '<option value="">-- pick a plan --</option>'
+                : '<option value="">No Draft or Submitted plan. Use New Plan.</option>';
+            rows.forEach(function (p) {
+                const opt = document.createElement('option');
+                opt.value = String(p.planId || p.PlanId);
+                opt.textContent = (p.planName || p.PlanName || '') + ' (' + (p.planCode || p.PlanCode || '') + ')'
+                    + '  --  ' + periodLabel(p.periodFrom || p.PeriodFrom, p.periodTo || p.PeriodTo);
+                sel.appendChild(opt);
+            });
+        } catch (err) {
+            sel.innerHTML = '<option value="">Failed to load plans</option>';
+        }
+    }
+    function closePickDialog() { document.getElementById('oaPlPickDialog').close(); }
+    // The plan is chosen: show it and open Add Item with the audit chosen.
+    function continueWithPlan(planId) {
+        closePickDialog();
+        selectPlan(Number(planId));
+        openItemDialog(null);
     }
 
     // -----------------------------------------------------------------
@@ -348,9 +492,9 @@
             state.page           = 1;
             state.selectedPlanId = null;
             state.selectedPlan   = null;
-            renderSelectedPlanHeader();
-            document.getElementById('oaPlAddItemBtn').disabled = true;
-            document.getElementById('oaPlItemBody').innerHTML  = '<tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>';
+            state.expanded.clear(); state.showAll.clear(); state.itemsByPlan = {};
+            state.programmesByPlan = {}; state.openProgrammes.clear(); state.progForm = null;   // 565
+            state.revisionsOpen.clear(); state.revisionsByPlan = {};
             // 121: employees no longer preloaded -- role-holder picker fetches
         // roles + holders lazily when the plan/item dialog opens. Also
         // invalidate any stale role/holder caches so a new org fetches fresh.
@@ -371,17 +515,33 @@
             clearTimeout(window.__oaPlSearchTimer);
             window.__oaPlSearchTimer = setTimeout(reloadPlans, 250);
         });
-        document.getElementById('oaPlRefreshBtn').addEventListener('click', function () { reloadPlans(); reloadItems(); });
+        document.getElementById('oaPlRefreshBtn').addEventListener('click', function () { reloadPlans(); });
         document.getElementById('oaPlAddBtn').addEventListener('click',    function () { openPlanDialog(null); });
-        document.getElementById('oaPlAddItemBtn').addEventListener('click',function () { openItemDialog(null); });
 
         document.getElementById('oaPlPlanClose').addEventListener('click', closePlanDialog);
         document.getElementById('oaPlPlanCancel').addEventListener('click', closePlanDialog);
         document.getElementById('oaPlPlanForm').addEventListener('submit', function (e) { e.preventDefault(); savePlan(); });
 
-        document.getElementById('oaPlItemClose').addEventListener('click', closeItemDialog);
-        document.getElementById('oaPlItemCancel').addEventListener('click', closeItemDialog);
-        document.getElementById('oaPlItemForm').addEventListener('submit', function (e) { e.preventDefault(); saveItem(); });
+        // 546: Add to Plan's plan picker.
+        document.getElementById('oaPlPickClose').addEventListener('click', closePickDialog);
+        document.getElementById('oaPlPickCancel').addEventListener('click', closePickDialog);
+        document.getElementById('oaPlPickNew').addEventListener('click', function () {
+            closePickDialog();
+            openPlanDialog(null);
+        });
+        document.getElementById('oaPlPickForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const v = document.getElementById('oaPlPickPlan').value;
+            if (!v) {
+                const msg = document.getElementById('oaPlPickMessage');
+                msg.style.display = 'block'; msg.textContent = 'Pick a plan, or use New Plan.';
+                return;
+            }
+            continueWithPlan(v);
+        });
+
+        // 566: the engagement form and View Scope wire themselves
+        // (js/Shared/audit-engagement-form.js).
 
         wireRowMenus();
     }
@@ -415,6 +575,13 @@
             filter.appendChild(opt);
         }
     }
+    // 565: the Planning Methodology master (a programme picks one).
+    async function loadMethodologies() {
+        const r = await fetch(U(API + '/planning-methodologies'), { credentials: 'same-origin' });
+        if (!r.ok) return;
+        const b = await r.json();
+        state.methodologies = (b && (b.data || b.Data)) || [];
+    }
     async function loadDefinitions(orgId) {
         if (!orgId) { state.definitions = []; return; }
         try {
@@ -437,11 +604,11 @@
     async function reloadPlans() {
         const body = document.getElementById('oaPlPlanBody');
         if (!state.orgId) {
-            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Select an organization to load plans.</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="pm-empty">Select an organization to load plans.</td></tr>';
             wf.updatePager('oa-plans', { pageNumber: 1, totalCount: 0, pageSize: 1 });
             return;
         }
-        body.innerHTML = '<tr><td colspan="7" class="pm-empty">Loading...</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" class="pm-empty">Loading...</td></tr>';
         try {
             const qs = new URLSearchParams();
             qs.set('organizationId', state.orgId);
@@ -451,7 +618,7 @@
             qs.set('page',     String(state.page));
             qs.set('pageSize', String(state.pageSize));
             const r = await fetch(U(API + '/plans?' + qs.toString()), { credentials: 'same-origin' });
-            if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
+            if (!r.ok) { body.innerHTML = '<tr><td colspan="9" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
             const payload = await r.json();
             state.total = Number(payload.totalCount || payload.TotalCount || 0);
             const rows  = payload.rows || payload.Rows || [];
@@ -462,7 +629,7 @@
                 pageSize   : state.pageSize
             });
         } catch (err) {
-            body.innerHTML = '<tr><td colspan="7" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
         }
     }
 
@@ -470,7 +637,7 @@
         const body = document.getElementById('oaPlPlanBody');
         state.plansById = {};
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="7" class="pm-empty">No plans yet. Click "Add Plan" to create one.</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="pm-empty">No plans yet. Click "Add Plan" to create one.</td></tr>';
             return;
         }
         body.innerHTML = rows.map(function (row) {
@@ -479,104 +646,482 @@
             const name   = row.planName|| row.PlanName || '';
             const type   = planTypeName(row.planType || row.PlanType || '');
             const period = periodLabel(row.periodFrom || row.PeriodFrom, row.periodTo || row.PeriodTo);
+            const owner  = wf.personWithRole(row.ownerDisplayName || row.OwnerDisplayName, row.ownerRoleName || row.OwnerRoleName);
             const items  = row.itemCount || row.ItemCount || 0;
+            // 565: programmes, and planned vs actual.
+            const progs  = row.programmeCount ?? row.ProgrammeCount ?? 0;
+            const inProg = row.engagementInProgressCount ?? row.EngagementInProgressCount ?? 0;
+            const done   = row.engagementCompletedCount  ?? row.EngagementCompletedCount  ?? 0;
             const stCode = row.statusCode || row.StatusCode || '';
             const stName = row.statusName || row.StatusName || '';
             if (id != null) state.plansById[String(id)] = row;
-            const isSelected = state.selectedPlanId != null && String(state.selectedPlanId) === String(id);
-            return '<tr data-id="' + id + '" data-status="' + wf.escape(stCode) + '"'
-                 + (isSelected ? ' style="background:var(--primary-50);"' : '')
-                 + '><td>' + wf.escape(code) + '</td>'
+            const open = state.expanded.has(String(id));
+            // The Task Board's sub-task chevron (.task-tree-toggle); a row
+            // click does the same.
+            return '<tr class="pm-row-clickable oa-pl-plan' + (open ? ' oa-pl-open is-selected' : '') + '" data-id="' + id + '" data-status="' + wf.escape(stCode) + '">'
+                 + '<td><span class="task-tree-cell">'
+                 + '<button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '" data-plan-toggle="' + id + '"'
+                 + ' aria-expanded="' + (open ? 'true' : 'false') + '" title="Show the programmes">'
+                 + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i>'
+                 + '<span class="visually-hidden">Show the programmes</span></button>'
+                 + '<span>' + wf.escape(code) + '</span></span></td>'
                  + '<td>' + wf.escape(name) + '</td>'
                  + '<td>' + wf.escape(type) + '</td>'
                  + '<td>' + wf.escape(period) + '</td>'
-                 + '<td style="text-align:right;">' + wf.escape(String(items)) + '</td>'
+                 + '<td>' + wf.escape(owner) + '</td>'
+                 + '<td style="text-align:right;">' + wf.escape(String(progs)) + '</td>'
+                 + '<td>' + wf.escape(plannedVsActual(items, inProg, done)) + '</td>'
                  + '<td>' + wf.badge(stName) + '</td>'
                  + '<td>' + trigger(id, 'plan') + '</td>'
                  + '</tr>';
         }).join('');
 
-        body.querySelectorAll('tr[data-id]').forEach(function (tr) {
-            tr.addEventListener('click', function (e) {
-                if (e.target.closest('.pm-action-trigger')) return;
-                if (e.target.closest('.pm-action-menu'))    return;
-                const id = tr.getAttribute('data-id');
-                if (!id) return;
-                selectPlan(Number(id));
-            });
+        // Plans that were open stay open, with their slots read again.
+        state.expanded.forEach(function (pid) {
+            if (state.plansById[pid]) loadItems(pid); else state.expanded.delete(pid);
         });
     }
 
+    // Chevron or row click: open / close the plan's slots.
+    document.getElementById('oaPlPlanBody').addEventListener('click', function (e) {
+        if (e.target.closest('.pm-action-trigger, .pm-action-menu, .oa-pl-items, a')) return;
+        const tr = e.target.closest('tr.oa-pl-plan[data-id]');
+        if (tr) togglePlan(tr.getAttribute('data-id'));
+    });
+
+    function planRow(planId) {
+        return document.querySelector('#oaPlPlanBody tr.oa-pl-plan[data-id="' + String(planId) + '"]');
+    }
+    function setToggle(planId, open) {
+        const btn = document.querySelector('#oaPlPlanBody [data-plan-toggle="' + String(planId) + '"]');
+        const row = planRow(planId);
+        if (row) { row.classList.toggle('oa-pl-open', open); row.classList.toggle('is-selected', open); }
+        if (!btn) return;
+        btn.classList.toggle('is-open', open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    function togglePlan(planId) {
+        const pid = String(planId);
+        if (state.expanded.has(pid)) {
+            state.expanded.delete(pid);
+            Array.from(state.showAll).forEach(function (k) { if (k.split(':')[0] === pid) state.showAll.delete(k); });   // 565
+            const child = document.querySelector('#oaPlPlanBody tr.oa-pl-items-row[data-plan="' + pid + '"]');
+            if (child) child.remove();
+            setToggle(pid, false);
+            return;
+        }
+        state.expanded.add(pid);
+        setToggle(pid, true);
+        loadItems(pid);
+    }
+
+    // Opens the plan (if it is not open) and makes it the target of the
+    // item dialog -- Add to Plan, and the plan's own Add Item.
     function selectPlan(planId) {
-        state.selectedPlanId = planId;
+        state.selectedPlanId = Number(planId);
         state.selectedPlan   = state.plansById[String(planId)] || null;
-        document.querySelectorAll('#oaPlPlanBody tr').forEach(function (tr) {
-            tr.style.background = (tr.getAttribute('data-id') === String(planId)) ? 'var(--primary-50)' : '';
-        });
-        renderSelectedPlanHeader();
-        document.getElementById('oaPlAddItemBtn').disabled = false;
-        reloadItems();
+        if (!state.expanded.has(String(planId)) && planRow(planId)) togglePlan(planId);
     }
 
-    function renderSelectedPlanHeader() {
-        const name = document.getElementById('oaPlSelectedName');
-        const code = document.getElementById('oaPlSelectedCode');
-        if (!state.selectedPlan) {
-            name.textContent = 'Select a plan to view its items.';
-            code.hidden = true;
-            return;
-        }
-        name.textContent = state.selectedPlan.planName || state.selectedPlan.PlanName || '';
-        code.textContent = state.selectedPlan.planCode || state.selectedPlan.PlanCode || '';
-        code.hidden = false;
+    // 546: slots change only while the plan is Draft or Submitted.
+    function planStatus(planId) {
+        const row = state.plansById[String(planId)]
+                 || (state.selectedPlan && String(state.selectedPlan.planId || state.selectedPlan.PlanId) === String(planId) ? state.selectedPlan : {})
+                 || {};
+        return row.statusCode || row.StatusCode || '';
+    }
+    function selectedPlanStatus() { return planStatus(state.selectedPlanId); }
+    function planEditable(planId) {
+        const st = planStatus(planId != null ? planId : state.selectedPlanId);
+        return st === 'Draft' || st === 'Submitted';
     }
 
-    async function reloadItems() {
-        const body = document.getElementById('oaPlItemBody');
-        if (!state.selectedPlanId || !state.orgId) {
-            body.innerHTML = '<tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>';
-            return;
+    // The child row under a plan: its slots in their own small table.
+    function itemsRow(planId) {
+        const pid = String(planId);
+        let child = document.querySelector('#oaPlPlanBody tr.oa-pl-items-row[data-plan="' + pid + '"]');
+        if (!child) {
+            const parent = planRow(pid);
+            if (!parent) return null;
+            child = document.createElement('tr');
+            child.className = 'oa-pl-items-row is-selected';
+            child.setAttribute('data-plan', pid);
+            child.innerHTML = '<td colspan="9"><div class="oa-pl-items"></div></td>';
+            parent.insertAdjacentElement('afterend', child);
         }
-        body.innerHTML = '<tr><td colspan="6" class="pm-empty">Loading...</td></tr>';
+        return child.querySelector('.oa-pl-items');
+    }
+
+    const SLOT_CAP = 20;
+    async function loadItems(planId) {
+        const pid  = String(planId);
+        const host = itemsRow(pid);
+        if (!host || !state.orgId) return;
+        if (!state.itemsByPlan[pid]) host.innerHTML = '<p class="pm-hint" style="margin:0;">Loading programmes...</p>';
         try {
-            const url = U(API + '/plans/' + state.selectedPlanId + '/items?organizationId=' + encodeURIComponent(state.orgId));
-            const r = await fetch(url, { credentials: 'same-origin' });
-            if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="pm-empty">HTTP ' + r.status + '</td></tr>'; return; }
-            const b = await r.json();
+            // 565: the plan's programmes and its engagements.
+            const q = '?organizationId=' + encodeURIComponent(state.orgId);
+            const both = await Promise.all([
+                fetch(U(API + '/plans/' + pid + '/items' + q), { credentials: 'same-origin' }),
+                fetch(U(API + '/plans/' + pid + '/programmes' + q), { credentials: 'same-origin' })
+            ]);
+            if (!both[0].ok) throw new Error('HTTP ' + both[0].status);
+            if (!both[1].ok) throw new Error('HTTP ' + both[1].status);
+            const b = await both[0].json();
             const rows = (b && (b.data || b.Data)) || [];
-            if (!rows.length) {
-                body.innerHTML = '<tr><td colspan="6" class="pm-empty">No items yet. Click "Add Item" to add one.</td></tr>';
-                return;
-            }
-            body.innerHTML = rows.map(function (row) {
+            const pb = await both[1].json();
+            state.programmesByPlan[pid] = (pb && (pb.data || pb.Data)) || [];
+            state.itemsByPlan[pid] = rows;
+            rows.forEach(function (row) { state.itemsById[String(row.planItemId || row.PlanItemId)] = row; });
+            if (state.revisionsOpen.has(pid)) await loadRevisions(pid);
+            renderItems(pid);
+        } catch (err) {
+            host.innerHTML = '<p class="pm-hint" style="margin:0;">Programmes could not be loaded: ' + wf.escape(err.message || err) + '</p>';
+        }
+    }
+    // Re-reads one plan's slots (after a change) and the list's counts.
+    function reloadItems(planId) {
+        const pid = String(planId != null ? planId : state.selectedPlanId);
+        if (!state.expanded.has(pid)) { state.expanded.add(pid); setToggle(pid, true); }
+        return loadItems(pid);
+    }
+
+    // 565: the child row under a plan -- a facts line, its PROGRAMMES (each
+    // opens its engagements in a row under it), the inline programme form,
+    // and the revision history.
+    function renderItems(planId) {
+        const pid  = String(planId);
+        const host = itemsRow(pid);
+        if (!host) return;
+        const plan  = state.plansById[pid] || {};
+        const progs = state.programmesByPlan[pid] || [];
+        const all   = state.itemsByPlan[pid] || [];
+        const editable = planEditable(pid);
+        const facts = [
+            'Version ' + (plan.version ?? plan.Version ?? 1),
+            plan.financialYear || plan.FinancialYear || '',
+            (plan.methodologies || plan.Methodologies) ? 'Methodologies: ' + (plan.methodologies || plan.Methodologies) : '',
+            'Planned vs actual: ' + plannedVsActual(plan.itemCount ?? plan.ItemCount ?? all.length,
+                plan.engagementInProgressCount ?? plan.EngagementInProgressCount ?? 0,
+                plan.engagementCompletedCount  ?? plan.EngagementCompletedCount  ?? 0)
+        ].filter(Boolean).join(' · ');
+        const version = Number(plan.version ?? plan.Version ?? 1);
+        const revLink = version > 1
+            ? '<a href="#" class="oa-pl-more" data-revisions="' + pid + '">'
+              + (state.revisionsOpen.has(pid) ? 'Hide' : 'Show') + ' revision history</a>' : '';
+        const addProg = editable && !(state.progForm && String(state.progForm.planId) === pid && state.progForm.programmeId == null)
+            ? '<a href="#" class="oa-pl-add" data-add-programme="' + pid + '"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Programme</a>' : '';
+        const newForm = state.progForm && String(state.progForm.planId) === pid && state.progForm.programmeId == null
+            ? programmeFormRow(pid, null) : '';
+
+        let html = '<p class="oa-pl-plan-facts">' + wf.escape(facts) + '</p>';
+        if (!progs.length && !newForm) {
+            html += '<p class="pm-hint" style="margin:0 0 6px;">No programmes yet. A plan groups its engagements into programmes; add one first.'
+                  + (editable ? '' : ' Programmes can be added only while the plan is Draft or Submitted.') + '</p>';
+        } else {
+            html += '<div class="pm-table-wrap"><table><thead><tr>'
+                  + '<th>Code</th><th>Programme</th><th>Planning Methodology</th><th>Owner</th><th>Engagements</th><th style="width:70px;"></th>'
+                  + '</tr></thead><tbody>'
+                  + progs.map(function (g) {
+                        const gid  = String(g.programmeId ?? g.ProgrammeId);
+                        const key  = pid + ':' + gid;
+                        const open = state.openProgrammes.has(key);
+                        if (state.progForm && String(state.progForm.planId) === pid && String(state.progForm.programmeId) === gid)
+                            return programmeFormRow(pid, g);
+                        const owner = wf.personWithRole(g.ownerDisplayName || g.OwnerDisplayName, g.ownerRoleName || g.OwnerRoleName);
+                        return '<tr class="pm-row-clickable' + (open ? ' oa-pl-prog-open' : '') + '" data-programme="' + gid + '" data-plan="' + pid + '">'
+                             + '<td><span class="task-tree-cell">'
+                             + '<button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '" aria-expanded="' + (open ? 'true' : 'false') + '" title="Show the engagements">'
+                             + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span class="visually-hidden">Show the engagements</span></button>'
+                             + '<span>' + wf.escape(g.programmeCode || g.ProgrammeCode || '') + '</span></span></td>'
+                             + '<td>' + wf.escape(g.programmeName || g.ProgrammeName || '') + '</td>'
+                             + '<td>' + wf.escape(g.methodologyName || g.MethodologyName || 'Not set') + '</td>'
+                             + '<td>' + wf.escape(owner) + '</td>'
+                             + '<td>' + wf.escape(plannedVsActual(g.engagementCount ?? g.EngagementCount ?? 0,
+                                    g.engagementInProgressCount ?? g.EngagementInProgressCount ?? 0,
+                                    g.engagementCompletedCount ?? g.EngagementCompletedCount ?? 0)) + '</td>'
+                             + '<td>' + trigger(gid, 'programme') + '</td>'
+                             + '</tr>'
+                             + (open ? '<tr class="oa-pl-prog-items"><td colspan="6">' + engagementsHtml(pid, gid) + '</td></tr>' : '');
+                    }).join('')
+                  + newForm
+                  + '</tbody></table></div>';
+        }
+        // Engagements without a programme (only before 565's backfill ran).
+        const loose = all.filter(function (r) { return (r.programmeId ?? r.ProgrammeId) == null; });
+        if (loose.length && progs.length) html += '<p class="pm-hint" style="margin:8px 0 4px;">Not in a programme yet (edit to pick one):</p>' + engagementsHtml(pid, null);
+        else if (loose.length) html += engagementsHtml(pid, null);
+        html += '<div class="oa-pl-items-foot">' + addProg + revLink + '</div>';
+        if (state.revisionsOpen.has(pid)) html += revisionsHtml(pid);
+        host.innerHTML = html;
+        if (state.progForm && String(state.progForm.planId) === pid) attachProgrammeOwner();
+    }
+
+    // "5 planned, 1 in progress, 2 completed" -- planned vs actual.
+    function plannedVsActual(total, inProg, done) {
+        const t = Number(total) || 0, p = Number(inProg) || 0, d = Number(done) || 0;
+        return t + ' planned' + (p ? ', ' + p + ' in progress' : '') + (d ? ', ' + d + ' completed' : '');
+    }
+
+    // A programme's engagements (programmeId null: those without one) --
+    // the engagement grid of 552, unchanged.
+    function engagementsHtml(planId, programmeId) {
+        const pid  = String(planId);
+        const key  = pid + ':' + (programmeId == null ? '' : String(programmeId));
+        const all  = (state.itemsByPlan[pid] || []).filter(function (r) {
+            const g = r.programmeId ?? r.ProgrammeId;
+            return programmeId == null ? g == null : String(g) === String(programmeId);
+        });
+        const shown = state.showAll.has(key) ? all : all.slice(0, SLOT_CAP);
+        const addLink = planEditable(pid) && programmeId != null
+            ? '<a href="#" class="oa-pl-add" data-add-item="' + pid + '" data-add-programme-item="' + wf.escape(String(programmeId)) + '"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Engagement</a>'
+            : '';
+        if (!all.length) {
+            return '<p class="pm-hint" style="margin:0 0 6px;">No engagements in this programme yet.'
+                + (planEditable(pid) ? '' : ' Engagements can be added only while the plan is Draft or Submitted.') + '</p>' + addLink;
+        }
+        return '<div class="pm-table-wrap"><table><thead><tr>'
+            + '<th style="width:70px;">Order</th><th>Engagement</th><th>Audits</th><th>Scheduled</th><th>Auditor</th>'
+            + '<th>Team / Department</th><th>Status</th><th style="width:70px;"></th>'
+            + '</tr></thead><tbody>'
+            + shown.map(function (row) {
                 const id       = row.planItemId  || row.PlanItemId;
                 const order    = row.itemOrder ?? row.ItemOrder ?? '';
-                const defName  = row.definitionName || row.DefinitionName || '';
-                const defCode  = row.definitionCode || row.DefinitionCode || '';
+                // 552: the engagement and its audits.
+                const engName  = row.engagementName || row.EngagementName || row.definitionName || row.DefinitionName || '';
+                const engCode  = row.engagementCode || row.EngagementCode || '';
+                const audits   = row.definitionCodes || row.DefinitionCodes || row.definitionCode || row.DefinitionCode || '';
                 const from     = onlyDate(row.scheduledFrom || row.ScheduledFrom);
                 const to       = onlyDate(row.scheduledTo   || row.ScheduledTo);
-                const sched    = from || to ? (from + (to ? ' — ' + to : '')) : '';
+                const sched    = from || to ? (from + (to ? ' - ' + to : '')) : '';
                 // 121 hybrid role+employee auditor -- composite label with graceful fallback.
                 const auRole   = row.assignedAuditorRoleName || row.AssignedAuditorRoleName || '';
                 const auEmp    = row.assignedAuditorName     || row.AssignedAuditorName     || '';
-                const auditor  = (auRole && auEmp) ? (auRole + ' (' + auEmp + ')')
-                               : (auRole || auEmp);
+                const auditor  = (auRole && auEmp) ? (auRole + ' (' + auEmp + ')') : (auRole || auEmp);
                 const team     = row.assignedTeamName       || row.AssignedTeamName       || '';
                 const dept     = row.assignedDepartmentName || row.AssignedDepartmentName || '';
                 const teamDept = [team, dept].filter(Boolean).join(' / ');
-                return '<tr data-id="' + id + '">'
+                return '<tr data-id="' + id + '" data-plan="' + pid + '">'
                      + '<td>' + wf.escape(String(order)) + '</td>'
-                     + '<td>' + wf.escape(defName) + (defCode ? ' <span style="color:var(--fg-subtle);">(' + wf.escape(defCode) + ')</span>' : '') + '</td>'
+                     + '<td>' + wf.escape(engName) + (engCode ? ' <span style="color:var(--fg-subtle);">(' + wf.escape(engCode) + ')</span>' : '') + '</td>'
+                     + '<td>' + wf.escape(audits) + '</td>'
                      + '<td>' + wf.escape(sched) + '</td>'
                      + '<td>' + wf.escape(auditor) + '</td>'
                      + '<td>' + wf.escape(teamDept) + '</td>'
+                     + '<td>' + slotStatusHtml(row) + '</td>'
                      + '<td>' + trigger(id, 'item') + '</td>'
                      + '</tr>';
-            }).join('');
-        } catch (err) {
-            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Failed to load: ' + wf.escape(err.message || err) + '</td></tr>';
-        }
+            }).join('')
+            + '</tbody></table></div>'
+            + '<div class="oa-pl-items-foot">' + addLink
+            + (all.length > shown.length
+                ? '<a href="#" class="oa-pl-more" data-show-all="' + wf.escape(key) + '">Show all ' + all.length + ' engagements</a>' : '')
+            + '</div>';
     }
+
+    // The inline programme form (565, no popups): a row of the programme
+    // table -- for a new programme at the bottom, for an edit in place.
+    function programmeFormRow(planId, g) {
+        const v = function (a, b) { return g ? (g[a] ?? g[b] ?? '') : ''; };
+        const mid = String(v('planningMethodologyId', 'PlanningMethodologyId'));
+        const opts = '<option value="">-- select --</option>' + state.methodologies.map(function (m) {
+            const id = String(m.id ?? m.Id);
+            return '<option value="' + wf.escape(id) + '"' + (id === mid ? ' selected' : '') + '>' + wf.escape(m.name || m.Name || '') + '</option>';
+        }).join('');
+        return '<tr class="oa-pl-prog-form" data-prog-form="' + wf.escape(String(planId)) + '"><td colspan="6">'
+             + '<div class="pm-message" id="oaPlPgMessage" style="display:none; margin-bottom:8px;"></div>'
+             + '<div style="display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) 90px; gap:10px; align-items:start;">'
+             +   '<label class="pm-field" style="min-width:0;"><span>Programme <span class="required">*</span></span>'
+             +     '<input class="pm-input" id="oaPlPgName" type="text" maxlength="240" value="' + wf.escape(v('programmeName', 'ProgrammeName'))
+             +     '" placeholder="e.g. Information Systems Audit Programme" /></label>'
+             +   '<label class="pm-field" style="min-width:0;"><span>Planning Methodology <span class="required">*</span></span>'
+             +     '<select class="pm-input" id="oaPlPgMethod">' + opts + '</select></label>'
+             +   '<label class="pm-field" style="min-width:0;"><span>Order</span>'
+             +     '<input class="pm-input" id="oaPlPgOrder" type="number" min="1" step="1" value="' + wf.escape(String(v('displayOrder', 'DisplayOrder'))) + '" /></label>'
+             + '</div>'
+             + '<div class="pm-field" style="min-width:0; margin-top:10px;"><span>Owner</span>'
+             +   '<div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; margin-top:2px;">'
+             +     '<select class="pm-input" id="oaPlPgOwnerRole" style="min-width:0;" aria-label="Owner Role"><option value="">Loading roles...</option></select>'
+             +     '<select class="pm-input" id="oaPlPgOwner" style="min-width:0;" aria-label="Owner Employee"><option value="">-- pick a role first --</option></select>'
+             +   '</div></div>'
+             + '<label class="pm-field" style="margin-top:10px;"><span>Objective</span>'
+             +   '<textarea class="pm-input" id="oaPlPgObjective" rows="2" maxlength="4000">' + wf.escape(v('objective', 'Objective')) + '</textarea></label>'
+             + '<div class="pm-dialog-actions">'
+             +   '<button type="button" class="pm-button" data-prog-cancel>Cancel</button>'
+             +   '<button type="button" class="pm-button primary" data-prog-save>Save Programme</button>'
+             + '</div>'
+             + '</td></tr>';
+    }
+    // The form's owner pickers (121 role + current holder).
+    function attachProgrammeOwner() {
+        if (!state.orgId || !window.__roleHolderPicker || !document.getElementById('oaPlPgOwnerRole')) return;
+        const pid = String(state.progForm.planId);
+        const g = (state.programmesByPlan[pid] || []).find(function (x) {
+            return String(x.programmeId ?? x.ProgrammeId) === String(state.progForm.programmeId);
+        }) || {};
+        window.__roleHolderPicker.attach({
+            organizationId     : Number(state.orgId),
+            roleSelectId       : 'oaPlPgOwnerRole',
+            employeeSelectId   : 'oaPlPgOwner',
+            initialRoleId      : g.ownerRoleId      ?? g.OwnerRoleId,
+            initialRoleName    : g.ownerRoleName    || g.OwnerRoleName,
+            initialEmployeeId  : g.ownerEmployeeId  ?? g.OwnerEmployeeId,
+            initialEmployeeName: g.ownerDisplayName || g.OwnerDisplayName,
+            allowEmpty         : true
+        }).catch(function () { /* soft-fail, as the plan owner */ });
+    }
+    function openProgrammeForm(planId, programmeId) {
+        state.progForm = { planId: String(planId), programmeId: programmeId == null ? null : String(programmeId) };
+        if (!state.expanded.has(String(planId))) { state.expanded.add(String(planId)); setToggle(planId, true); loadItems(planId); return; }
+        renderItems(planId);
+    }
+    async function saveProgramme() {
+        const f = state.progForm;
+        if (!f) return;
+        const msg = function (t) {
+            const el = document.getElementById('oaPlPgMessage');
+            if (!el) return;
+            el.style.display = t ? 'block' : 'none';
+            el.style.background = 'var(--danger-100)'; el.style.color = 'var(--danger-700)';
+            el.textContent = t || '';
+        };
+        const name = document.getElementById('oaPlPgName').value.trim();
+        const method = document.getElementById('oaPlPgMethod').value;
+        if (!name) { msg('The programme needs a name.'); return; }
+        if (!method) { msg('Pick the planning methodology.'); return; }
+        const owner = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
+            ? window.__roleHolderPicker.readState('oaPlPgOwnerRole', 'oaPlPgOwner')
+            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
+        const order = document.getElementById('oaPlPgOrder').value;
+        try {
+            const r = await fetch(U(API + '/plan-programmes'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    organizationId        : Number(state.orgId),
+                    planId                : Number(f.planId),
+                    programmeId           : f.programmeId != null ? Number(f.programmeId) : null,
+                    programmeName         : name,
+                    objective             : document.getElementById('oaPlPgObjective').value.trim() || null,
+                    planningMethodologyId : Number(method),
+                    ownerRoleId           : owner.roleId       || null,
+                    ownerRoleName         : owner.roleName     || null,
+                    ownerEmployeeId       : owner.employeeId   || null,
+                    ownerDisplayName      : owner.employeeName || null,
+                    displayOrder          : order ? Number(order) : null,
+                    actor                 : null
+                })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { msg((j && (j.error || j.Error)) || ('HTTP ' + r.status)); return; }
+            state.progForm = null;
+            reloadPlans();   // counts and methodologies; the open plan re-reads its programmes
+        } catch (err) { msg(err.message || String(err)); }
+    }
+    async function deleteProgramme(planId, programmeId) {
+        if (!await window.gracUi.confirm('Remove this programme from the plan? It must have no engagements.',
+              { type: 'warning', title: 'Remove programme', confirmText: 'Remove' })) return;
+        try {
+            const r = await fetch(U(API + '/plans/' + encodeURIComponent(planId) + '/programmes/' + encodeURIComponent(programmeId)
+                                    + '?organizationId=' + encodeURIComponent(state.orgId)), { method: 'DELETE', credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) { await window.gracUi.alert((j && (j.error || j.Error)) || ('HTTP ' + r.status), { type: 'error' }); return; }
+            state.openProgrammes.delete(String(planId) + ':' + String(programmeId));
+            reloadPlans();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // 565: plan revision -- reason, back to Draft, version + 1.
+    async function revisePlan(planId) {
+        // gracUi.promptRequired: a blank reason asks again; Cancel is null.
+        const reason = await window.gracUi.promptRequired('Why is the plan being revised? It goes back to Draft (version + 1) and must be submitted and approved again. Running audits continue.',
+            { title: 'Revise plan', confirmText: 'Revise', multiline: true });
+        if (reason === null) return;
+        try {
+            const r = await fetch(U(API + '/plans/' + encodeURIComponent(planId) + '/revise'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organizationId: Number(state.orgId), planId: Number(planId), reason: String(reason).trim(), actor: null })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) { await window.gracUi.alert((j && (j.error || j.Error)) || ('HTTP ' + r.status), { type: 'error' }); return; }
+            state.revisionsByPlan[String(planId)] = null;
+            state.expanded.add(String(planId));
+            reloadPlans();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    async function loadRevisions(planId) {
+        const pid = String(planId);
+        try {
+            const r = await fetch(U(API + '/plans/' + pid + '/revisions?organizationId=' + encodeURIComponent(state.orgId)), { credentials: 'same-origin' });
+            const b = r.ok ? await r.json() : null;
+            state.revisionsByPlan[pid] = (b && (b.data || b.Data)) || [];
+        } catch (_) { state.revisionsByPlan[pid] = []; }
+    }
+    function revisionsHtml(planId) {
+        const rows = state.revisionsByPlan[String(planId)] || [];
+        if (!rows.length) return '<p class="pm-hint" style="margin:8px 0 0;">No revisions recorded.</p>';
+        return '<div class="pm-table-wrap" style="margin-top:8px;"><table><thead><tr>'
+             + '<th>Version</th><th>Was</th><th>Reason</th><th>Revised by</th><th>On</th></tr></thead><tbody>'
+             + rows.map(function (x) {
+                   return '<tr><td>' + wf.escape(String(x.fromVersion ?? x.FromVersion) + ' → ' + String(x.toVersion ?? x.ToVersion)) + '</td>'
+                        + '<td>' + wf.escape(x.fromStatusCode || x.FromStatusCode || '') + '</td>'
+                        + '<td>' + wf.escape(x.reason || x.Reason || '') + '</td>'
+                        + '<td>' + wf.escape(x.revisedBy || x.RevisedBy || '') + '</td>'
+                        + '<td>' + wf.escape(onlyDate(x.revisedDt || x.RevisedDt)) + '</td></tr>';
+               }).join('')
+             + '</tbody></table></div>';
+    }
+
+    // 565: programme rows open / close their engagements; the inline form,
+    // Add Programme and the revision history.
+    document.getElementById('oaPlPlanBody').addEventListener('click', async function (e) {
+        if (e.target.closest('[data-prog-save]'))   { e.preventDefault(); saveProgramme(); return; }
+        if (e.target.closest('[data-prog-cancel]')) {
+            e.preventDefault();
+            const pid = state.progForm && state.progForm.planId;
+            state.progForm = null;
+            if (pid) renderItems(pid);
+            return;
+        }
+        const addProg = e.target.closest('[data-add-programme]');
+        if (addProg) { e.preventDefault(); openProgrammeForm(addProg.getAttribute('data-add-programme'), null); return; }
+        const rev = e.target.closest('[data-revisions]');
+        if (rev) {
+            e.preventDefault();
+            const pid = rev.getAttribute('data-revisions');
+            if (state.revisionsOpen.has(pid)) state.revisionsOpen.delete(pid);
+            else { state.revisionsOpen.add(pid); await loadRevisions(pid); }
+            renderItems(pid);
+            return;
+        }
+        if (e.target.closest('.pm-action-trigger, .pm-action-menu, a, input, select, textarea, button:not(.task-tree-toggle)')) return;
+        const tr = e.target.closest('tr[data-programme]');
+        if (!tr) return;
+        const key = tr.getAttribute('data-plan') + ':' + tr.getAttribute('data-programme');
+        if (state.openProgrammes.has(key)) state.openProgrammes.delete(key); else state.openProgrammes.add(key);
+        renderItems(tr.getAttribute('data-plan'));
+    });
+
+    // Add Item / Show all inside a plan's child row.
+    document.getElementById('oaPlPlanBody').addEventListener('click', function (e) {
+        const add = e.target.closest('[data-add-item]');
+        if (add) {
+            e.preventDefault();
+            state.selectedPlanId = Number(add.getAttribute('data-add-item'));
+            state.selectedPlan   = state.plansById[String(state.selectedPlanId)] || null;
+            state.presetProgrammeId = add.getAttribute('data-add-programme-item');   // 565
+            openItemDialog(null);
+            return;
+        }
+        const more = e.target.closest('[data-show-all]');
+        if (more) {
+            e.preventDefault();
+            const key = more.getAttribute('data-show-all');   // 565: 'planId:programmeId'
+            state.showAll.add(key);
+            renderItems(key.split(':')[0]);
+        }
+    });
 
     // -----------------------------------------------------------------
     // Plan dialog
@@ -613,6 +1158,14 @@
                 document.getElementById('oaPlPlanFrom').value        = onlyDate(d.periodFrom || d.PeriodFrom);
                 document.getElementById('oaPlPlanTo').value          = onlyDate(d.periodTo   || d.PeriodTo);
                 document.getElementById('oaPlPlanDescription').value = d.description || d.Description || '';
+                // 565: the annual plan fields.
+                document.getElementById('oaPlPlanFy').value         = d.financialYear   || d.FinancialYear   || '';
+                document.getElementById('oaPlPlanBudget').value     = (d.plannedBudget ?? d.PlannedBudget) != null ? String(d.plannedBudget ?? d.PlannedBudget) : '';
+                document.getElementById('oaPlPlanCurrency').value   = d.budgetCurrency  || d.BudgetCurrency  || '';
+                document.getElementById('oaPlPlanEffort').value     = (d.plannedEffortDays ?? d.PlannedEffortDays) != null ? String(d.plannedEffortDays ?? d.PlannedEffortDays) : '';
+                document.getElementById('oaPlPlanObjectives').value = d.objectives      || d.Objectives      || '';
+                document.getElementById('oaPlPlanCoverage').value   = d.plannedCoverage || d.PlannedCoverage || '';
+                document.getElementById('oaPlPlanResources').value  = d.resourcesNote   || d.ResourcesNote   || '';
                 // 121 hybrid Owner -- seed picker with plan's current snapshot.
                 if (state.orgId && window.__roleHolderPicker) {
                     try {
@@ -646,7 +1199,17 @@
                 } catch (_) { /* soft-fail */ }
             }
         }
-        document.getElementById('oaPlPlanDialog').showModal();
+        // Full view (2026-11-16): show(), so the master page stays usable;
+        // Escape closes it by hand (showModal() did that natively).
+        const dlg = document.getElementById('oaPlPlanDialog');
+        if (!dlg.__escBound) {
+            dlg.__escBound = true;
+            dlg.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { e.preventDefault(); dlg.close(); }
+            });
+        }
+        if (!dlg.open) dlg.show();
+        dlg.scrollTop = 0;
     }
     function closePlanDialog() { document.getElementById('oaPlPlanDialog').close(); }
 
@@ -670,6 +1233,14 @@
             ownerEmployeeId   : ownerState.employeeId   || null,
             ownerDisplayName  : ownerState.employeeName || null,
             description       : document.getElementById('oaPlPlanDescription').value || null,
+            // 565: the annual plan fields.
+            financialYear     : document.getElementById('oaPlPlanFy').value.trim() || null,
+            plannedBudget     : document.getElementById('oaPlPlanBudget').value !== '' ? Number(document.getElementById('oaPlPlanBudget').value) : null,
+            budgetCurrency    : document.getElementById('oaPlPlanCurrency').value.trim() || null,
+            plannedEffortDays : document.getElementById('oaPlPlanEffort').value !== '' ? Number(document.getElementById('oaPlPlanEffort').value) : null,
+            objectives        : document.getElementById('oaPlPlanObjectives').value.trim() || null,
+            plannedCoverage   : document.getElementById('oaPlPlanCoverage').value.trim() || null,
+            resourcesNote     : document.getElementById('oaPlPlanResources').value.trim() || null,
             actor             : null
         };
         try {
@@ -681,24 +1252,25 @@
             const j = await safeJson(r);
             if (!r.ok) { showPlanMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
             closePlanDialog();
-            reloadPlans();
+            await reloadPlans();
+            // 546: a new plan made from Add to Plan takes the audit next.
+            const newId = j && (j.planId || j.PlanId);
+            if (!idStr && state.presetDefinitionId && newId) continueWithPlan(newId);
         } catch (err) { showPlanMessage('error', err.message || String(err)); }
     }
 
     async function deletePlan(id) {
-        if (!await window.gracUi.confirm('Delete this plan (and its items)?',
+        if (!await window.gracUi.confirm('Delete this plan (and its engagements)?',
               { type: 'warning', title: 'Delete plan', confirmText: 'Delete' })) return;
         try {
             const url = U(API + '/plans/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
             const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
             const j = await safeJson(r);
             if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
-            if (String(state.selectedPlanId) === String(id)) {
-                state.selectedPlanId = null; state.selectedPlan = null;
-                renderSelectedPlanHeader();
-                document.getElementById('oaPlAddItemBtn').disabled = true;
-                document.getElementById('oaPlItemBody').innerHTML  = '<tr><td colspan="6" class="pm-empty">No plan selected.</td></tr>';
-            }
+            if (String(state.selectedPlanId) === String(id)) { state.selectedPlanId = null; state.selectedPlan = null; }
+            state.expanded.delete(String(id));
+            Array.from(state.showAll).forEach(function (k) { if (k.split(':')[0] === String(id)) state.showAll.delete(k); });   // 565
+            delete state.itemsByPlan[String(id)];
             reloadPlans();
         } catch (err) { alert('Delete failed: ' + (err.message || err)); }
     }
@@ -713,152 +1285,73 @@
             });
             const j = await safeJson(r);
             if (!r.ok) { alert('Failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
-            reloadPlans();
+            // 546: the plan's status decides Add Item and the slot menus;
+            // the list re-renders and an open plan's slots are read again.
+            await reloadPlans();
         } catch (err) { alert('Failed: ' + (err.message || err)); }
     }
 
     // -----------------------------------------------------------------
-    // Item dialog
+    // 546: slot status and Start Execution
     // -----------------------------------------------------------------
-    function fillDefinitionSelect(selectedId) {
-        const sel = document.getElementById('oaPlItemDefinition');
-        sel.innerHTML = '';
-        const ph = document.createElement('option'); ph.value = '';
-        ph.textContent = state.definitions.length ? '-- select a definition --' : '(no definitions in this organization)';
-        sel.appendChild(ph);
-        state.definitions.forEach(function (d) {
-            const id   = d.definitionId  || d.DefinitionId;
-            const code = d.definitionCode|| d.DefinitionCode || '';
-            const name = d.definitionName|| d.DefinitionName || '';
-            const opt = document.createElement('option');
-            opt.value = String(id);
-            opt.textContent = name + (code ? ' (' + code + ')' : '');
-            opt.setAttribute('data-code', code);
-            opt.setAttribute('data-name', name);
-            sel.appendChild(opt);
+    const SLOT_LABEL = { Planned: 'Planned', InProgress: 'In Progress', Completed: 'Completed', NotExecuted: 'Not executed' };
+    function slotStatusHtml(row) {
+        const st   = row.slotStatus || row.SlotStatus || 'Planned';
+        const code = row.executionCode || row.ExecutionCode || '';
+        const retired = (row.definitionStatusCode || row.DefinitionStatusCode) === 'Retired';
+        // 552: an engagement of several audits shows "done / audits".
+        const n    = Number(row.definitionCount ?? row.DefinitionCount ?? 1) || 1;
+        const done = Number(row.executionDoneCount ?? row.ExecutionDoneCount ?? 0);
+        const live = Number(row.executionCount ?? row.ExecutionCount ?? 0);
+        return wf.badge(SLOT_LABEL[st] || st)
+             + (n > 1 ? ' <span style="color:var(--fg-subtle);">' + done + ' / ' + n + ' done' + (live > done ? ', ' + (live - done) + ' running' : '') + '</span>'
+                      : (code ? ' <span style="color:var(--fg-subtle);">' + wf.escape(code) + '</span>' : ''))
+             + (retired && n === 1 ? ' <span style="color:var(--fg-subtle);">(audit retired)</span>' : '');
+    }
+    // 566: Start Execution -- the shared engagement module.
+    async function startExecution(itemId) {
+        const row = state.itemsById[String(itemId)] || {};
+        const name = row.engagementName || row.EngagementName || row.definitionName || row.DefinitionName || 'this engagement';
+        if (await window.gracEngagementForm.startExecution(state.orgId, state.selectedPlanId, itemId, name))
+            reloadItems(state.selectedPlanId);
+    }
+
+    // -----------------------------------------------------------------
+    // Engagement form -- 566: the shared full-view form
+    // (Partials/_audit-engagement-form, js/Shared/audit-engagement-form.js):
+    // the audits, programme, subject, scope, auditee and the audit team.
+    // -----------------------------------------------------------------
+    function openItemDialog(id) {
+        if (!state.selectedPlanId) { window.gracUi.alert('Pick a plan first.'); return; }
+        const plan = state.selectedPlan || state.plansById[String(state.selectedPlanId)] || {};
+        const presetProgrammeId = state.presetProgrammeId;   // 565: Add Engagement from a programme
+        state.presetProgrammeId = null;
+        window.gracEngagementForm.open({
+            orgId              : state.orgId,
+            origin             : 'PLANNED',
+            engagementId       : id || null,
+            planId             : Number(state.selectedPlanId),
+            planLabel          : (plan.planCode || plan.PlanCode || '') + ' - ' + (plan.planName || plan.PlanName || ''),
+            presetProgrammeId  : id ? null : presetProgrammeId,
+            presetDefinitionId : id ? null : state.presetDefinitionId,   // 546: from Add to Plan
+            itemCount          : (state.itemsByPlan[String(state.selectedPlanId)] || []).length,
+            definitions        : state.definitions,
+            onSaved            : function () {
+                // The plan the engagement went into stays open, read again.
+                if (state.selectedPlanId) state.expanded.add(String(state.selectedPlanId));
+                reloadPlans();
+            }
         });
-        if (selectedId != null && selectedId !== '') sel.value = String(selectedId);
-    }
-    // 121 -- fillAuditorSelect retired.
-    // Plan-item Auditor now uses window.__roleHolderPicker (see attachAuditorPicker).
-
-    async function openItemDialog(id) {
-        if (!state.selectedPlanId) { alert('Select a plan first.'); return; }
-        clearItemMessage();
-        fillDefinitionSelect();
-        // 121: fillAuditorSelect retired -- picker attached below (see attachAuditorPicker).
-        if (id) {
-            // Look up row from currently rendered items table via reloadItems-cached fetch.
-            try {
-                const url = U(API + '/plans/' + state.selectedPlanId + '/items?organizationId=' + encodeURIComponent(state.orgId));
-                const r = await fetch(url, { credentials: 'same-origin' });
-                const b = await r.json();
-                const arr = (b && (b.data || b.Data)) || [];
-                const row = arr.find(function (x) { return String(x.planItemId || x.PlanItemId) === String(id); });
-                if (!row) { alert('Item not found.'); return; }
-                document.getElementById('oaPlItemDialogTitle').textContent = 'Edit Plan Item';
-                document.getElementById('oaPlItemEditId').value = String(row.planItemId || row.PlanItemId || '');
-                fillDefinitionSelect(row.definitionId || row.DefinitionId);
-                document.getElementById('oaPlItemOrder').value  = String(row.itemOrder ?? row.ItemOrder ?? 0);
-                document.getElementById('oaPlItemFrom').value   = onlyDate(row.scheduledFrom || row.ScheduledFrom);
-                document.getElementById('oaPlItemTo').value     = onlyDate(row.scheduledTo   || row.ScheduledTo);
-                // 121 hybrid Auditor -- seed picker with item's current snapshot.
-                await attachAuditorPicker(
-                    row.assignedAuditorRoleId       || row.AssignedAuditorRoleId,
-                    row.assignedAuditorRoleName     || row.AssignedAuditorRoleName,
-                    row.assignedAuditorEmployeeId   || row.AssignedAuditorEmployeeId,
-                    row.assignedAuditorName         || row.AssignedAuditorName);
-                document.getElementById('oaPlItemTeam').value   = row.assignedTeamName       || row.AssignedTeamName       || '';
-                document.getElementById('oaPlItemDept').value   = row.assignedDepartmentName || row.AssignedDepartmentName || '';
-                document.getElementById('oaPlItemBranch').value = row.assignedBranchName     || row.AssignedBranchName     || '';
-                document.getElementById('oaPlItemNotes').value  = row.notes                  || row.Notes                  || '';
-            } catch (err) { alert('Failed: ' + (err.message || err)); return; }
-        } else {
-            document.getElementById('oaPlItemDialogTitle').textContent = 'Add Plan Item';
-            document.getElementById('oaPlItemForm').reset();
-            document.getElementById('oaPlItemEditId').value = '';
-            document.getElementById('oaPlItemOrder').value  = '1';
-            // 121 hybrid Auditor -- fresh dialog, no initial snapshot.
-            await attachAuditorPicker(null, null, null, null);
-        }
-        document.getElementById('oaPlItemDialog').showModal();
-    }
-
-    // 121 -- shared attach helper for the item Auditor picker so open/reset
-    // paths stay identical.
-    async function attachAuditorPicker(roleId, roleName, empId, empName) {
-        if (!state.orgId || !window.__roleHolderPicker) return;
-        try {
-            await window.__roleHolderPicker.attach({
-                organizationId    : Number(state.orgId),
-                roleSelectId      : 'oaPlItemAuditorRole',
-                employeeSelectId  : 'oaPlItemAuditor',
-                initialRoleId     : roleId,
-                initialRoleName   : roleName,
-                initialEmployeeId : empId,
-                initialEmployeeName: empName,
-                allowEmpty        : true
-            });
-        } catch (_) { /* soft-fail */ }
-    }
-    function closeItemDialog() { document.getElementById('oaPlItemDialog').close(); }
-
-    async function saveItem() {
-        const idStr = document.getElementById('oaPlItemEditId').value;
-        const defSel = document.getElementById('oaPlItemDefinition');
-        const defOpt = defSel.options[defSel.selectedIndex] || null;
-        if (!defSel.value) { showItemMessage('error', 'Pick an audit.'); return; }
-
-        // 121 hybrid Auditor -- read picker state; SP auto-resolves the missing side.
-        const audState = (window.__roleHolderPicker && typeof window.__roleHolderPicker.readState === 'function')
-            ? window.__roleHolderPicker.readState('oaPlItemAuditorRole', 'oaPlItemAuditor')
-            : { roleId: null, roleName: null, employeeId: null, employeeName: null };
-
-        const body = {
-            organizationId              : Number(state.orgId),
-            planId                      : Number(state.selectedPlanId),
-            planItemId                  : idStr ? Number(idStr) : null,
-            definitionId                : Number(defSel.value),
-            definitionCode              : defOpt ? (defOpt.getAttribute('data-code') || null) : null,
-            definitionName              : defOpt ? (defOpt.getAttribute('data-name') || null) : null,
-            itemOrder                   : Number(document.getElementById('oaPlItemOrder').value || 1),
-            scheduledFrom               : document.getElementById('oaPlItemFrom').value || null,
-            scheduledTo                 : document.getElementById('oaPlItemTo').value || null,
-            assignedAuditorRoleId       : audState.roleId       || null,
-            assignedAuditorRoleName     : audState.roleName     || null,
-            assignedAuditorEmployeeId   : audState.employeeId   || null,
-            assignedAuditorName         : audState.employeeName || null,
-            assignedTeamName            : document.getElementById('oaPlItemTeam').value.trim()   || null,
-            assignedDepartmentId        : null,
-            assignedDepartmentName      : document.getElementById('oaPlItemDept').value.trim()   || null,
-            assignedBranchId            : null,
-            assignedBranchName          : document.getElementById('oaPlItemBranch').value.trim() || null,
-            notes                       : document.getElementById('oaPlItemNotes').value || null,
-            actor                       : null
-        };
-        try {
-            const r = await fetch(U(API + '/plan-items'), {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            const j = await safeJson(r);
-            if (!r.ok) { showItemMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
-            closeItemDialog();
-            reloadItems();
-            reloadPlans();   // #Items count
-        } catch (err) { showItemMessage('error', err.message || String(err)); }
     }
 
     async function deleteItem(id) {
-        if (!await window.gracUi.confirm('Remove this item from the plan?',
-              { type: 'warning', title: 'Remove plan item', confirmText: 'Remove' })) return;
+        if (!await window.gracUi.confirm('Remove this engagement from the plan?',
+              { type: 'warning', title: 'Remove engagement', confirmText: 'Remove' })) return;
         try {
             const url = U(API + '/plans/' + state.selectedPlanId + '/items/' + id + '?organizationId=' + encodeURIComponent(state.orgId));
             const r = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
             const j = await safeJson(r);
             if (!r.ok) { alert('Delete failed: ' + ((j && (j.error || j.Error)) || 'HTTP ' + r.status)); return; }
-            reloadItems();
             reloadPlans();
         } catch (err) { alert('Delete failed: ' + (err.message || err)); }
     }
@@ -874,24 +1367,87 @@
              + '<span class="visually-hidden">Actions</span>'
              + '</button>';
     }
-    function buildMenu(id, kind, tr) {
+    // 2026-11-04: status is passed in (was read from the row) so the
+    // selected plan's Actions menu can build the same plan items.
+    function buildMenu(id, kind, statusCode) {
         if (kind === 'plan') {
-            const statusCode = tr.getAttribute('data-status') || '';
             const items = [
                 { icon: 'fa-pen',   label: 'Edit',             action: function () { openPlanDialog(id); } },
-                { icon: 'fa-list-check', label: 'View Items',  action: function () { selectPlan(Number(id)); } }
             ];
+            // 2026-11-14: Add Item on the plan's own menu (the separate
+            // button went with the items panel); same Draft / Submitted rule.
+            // 565: a plan gets programmes first; engagements go into a programme.
+            if (statusCode === 'Draft' || statusCode === 'Submitted')
+                items.push({ icon: 'fa-layer-group', label: 'Add Programme', action: function () { openProgrammeForm(id, null); } });
+            if (statusCode === 'Draft' || statusCode === 'Submitted')
+                items.push({ icon: 'fa-plus', label: 'Add Engagement', action: function () {
+                    state.selectedPlanId = Number(id);
+                    state.selectedPlan   = state.plansById[String(id)] || null;
+                    selectPlan(Number(id));
+                    openItemDialog(null);
+                } });
             if (statusCode === 'Draft')     items.push({ icon: 'fa-paper-plane', label: 'Submit',   action: function () { transition(id, 'submit');   } });
-            if (statusCode === 'Submitted') items.push({ icon: 'fa-check',       label: 'Approve',  action: function () { transition(id, 'approve');  } });
+            // 547 (sir): approving makes the plan Active at once (the approve
+            // procedure runs Approved and then Active). Activate stays only
+            // for a plan left Approved before 547.
+            if (statusCode === 'Submitted') items.push({ icon: 'fa-check',       label: 'Approve',  action: async function () {
+                if (!await window.gracUi.confirm('Approve this plan? Approving makes it Active, and its engagements can then be started as executions.',
+                      { type: 'confirm', title: 'Approve and activate', confirmText: 'Approve' })) return;
+                transition(id, 'approve');
+            } });
             if (statusCode === 'Approved')  items.push({ icon: 'fa-play',       label: 'Activate', action: function () { transition(id, 'activate'); } });
             if (statusCode === 'Active')    items.push({ icon: 'fa-flag-checkered', label: 'Close', action: function () { transition(id, 'close');    } });
+            // 565: an Approved / Active plan is revised (back to Draft, version + 1).
+            if (statusCode === 'Approved' || statusCode === 'Active')
+                items.push({ icon: 'fa-code-branch', label: 'Revise', action: function () { revisePlan(id); } });
             items.push({ icon: 'fa-trash', label: 'Delete', action: function () { deletePlan(id); } });
             return items;
         }
-        return [
-            { icon: 'fa-pen',   label: 'Edit',   action: function () { openItemDialog(id); } },
-            { icon: 'fa-trash', label: 'Remove', action: function () { deleteItem(id); } }
-        ];
+        // 565: a programme -- Edit / Add Engagement / Remove while the plan
+        // is Draft or Submitted.
+        if (kind === 'programme') {
+            const pid = String(state.selectedPlanId);
+            const progMenu = [];
+            if (planEditable(pid)) {
+                progMenu.push({ icon: 'fa-pen', label: 'Edit', action: function () { openProgrammeForm(pid, id); } });
+                progMenu.push({ icon: 'fa-plus', label: 'Add Engagement', action: function () {
+                    state.presetProgrammeId = String(id);
+                    openItemDialog(null);
+                } });
+                progMenu.push({ icon: 'fa-trash', label: 'Remove', action: function () { deleteProgramme(pid, id); } });
+            }
+            return progMenu;
+        }
+        // 546: Edit / Remove while the plan is Draft or Submitted and the
+        // slot has no execution; Start Execution once the plan is Approved
+        // or Active, for a Planned slot of an Active audit.
+        const row     = state.itemsById[String(id)] || {};
+        const slot    = row.slotStatus || row.SlotStatus || 'Planned';
+        const planSt  = selectedPlanStatus();
+        const defSt   = row.definitionStatusCode || row.DefinitionStatusCode || '';
+        const itemMenu = [];
+        if (planEditable(state.selectedPlanId) && slot === 'Planned') {
+            itemMenu.push({ icon: 'fa-pen',   label: 'Edit',   action: function () { openItemDialog(id); } });
+            itemMenu.push({ icon: 'fa-trash', label: 'Remove', action: function () { deleteItem(id); } });
+        }
+        // 551: the audit has an Active version (a revision may be in Draft).
+        const plannable = (row.definitionIsPlannable != null || row.DefinitionIsPlannable != null)
+            ? !!(row.definitionIsPlannable != null ? row.definitionIsPlannable : row.DefinitionIsPlannable)
+            : defSt === 'Active';
+        // 552: View Scope always; Start Execution while an audit of the
+        // engagement is left to start (CanStart), once the plan is Approved / Active.
+        itemMenu.push({ icon: 'fa-eye', label: 'View Scope', action: function () {
+            // 554: a saved engagement is narrowed to its own branch (server side).
+            const bId = row.assignedBranchId || row.AssignedBranchId;
+            window.gracEngagementForm.openScope(state.orgId, { planItemId: Number(id) }, (row.engagementCode || row.EngagementCode || '') + '  ' + (row.engagementName || row.EngagementName || '')
+                      + (bId ? '  at ' + (row.assignedBranchName || row.AssignedBranchName || '') : ''));
+        } });
+        const canStart = (row.canStart != null || row.CanStart != null)
+            ? !!(row.canStart != null ? row.canStart : row.CanStart)
+            : (slot === 'Planned' && plannable);
+        if ((planSt === 'Approved' || planSt === 'Active') && canStart)
+            itemMenu.push({ icon: 'fa-play', label: 'Start Execution', action: function () { startExecution(id); } });
+        return itemMenu;
     }
     function closeRowMenu() {
         if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
@@ -916,6 +1472,14 @@
         openMenuEl = document.createElement('div');
         openMenuEl.className = 'pm-action-menu';
         openMenuEl.setAttribute('role', 'menu');
+        // 546: a slot can have nothing to do (e.g. In Progress) -- say so,
+        // the shared page-actions menu's wording.
+        if (!items.length) {
+            const p = document.createElement('div');
+            p.style.cssText = 'padding:8px 12px; font-size:12px; color:var(--fg-subtle); white-space:nowrap;';
+            p.textContent = 'No actions available';
+            openMenuEl.appendChild(p);
+        }
         for (const it of items) {
             const b = document.createElement('button');
             b.type = 'button'; b.setAttribute('role', 'menuitem');
@@ -942,11 +1506,15 @@
                 const id   = trg.getAttribute('data-id');
                 const kind = trg.getAttribute('data-kind') || '';
                 const tr   = trg.closest('tr');
-                openRowMenu(trg, buildMenu(id, kind, tr));
+                // A slot's menu acts on its own plan.
+                if ((kind === 'item' || kind === 'programme') && tr && tr.getAttribute('data-plan')) {   // 565: programmes too
+                    state.selectedPlanId = Number(tr.getAttribute('data-plan'));
+                    state.selectedPlan   = state.plansById[tr.getAttribute('data-plan')] || null;
+                }
+                openRowMenu(trg, buildMenu(id, kind, (tr && tr.getAttribute('data-status')) || ''));
             });
         }
-        attach('oaPlPlanBody');
-        attach('oaPlItemBody');
+        attach('oaPlPlanBody');   // plan rows and, inside them, slot rows
         document.addEventListener('click', function (e) {
             if (!openMenuEl) return;
             if (e.target.closest('.pm-action-menu'))    return;
@@ -970,17 +1538,6 @@
     }
     function clearPlanMessage() {
         const el = document.getElementById('oaPlPlanMessage');
-        el.style.display = 'none'; el.textContent = '';
-    }
-    function showItemMessage(kind, text) {
-        const el = document.getElementById('oaPlItemMessage');
-        el.style.display    = 'block';
-        el.style.background = kind === 'error' ? 'var(--danger-100)' : 'var(--success-100)';
-        el.style.color      = kind === 'error' ? 'var(--danger-700)' : 'var(--success-700)';
-        el.textContent      = text;
-    }
-    function clearItemMessage() {
-        const el = document.getElementById('oaPlItemMessage');
         el.style.display = 'none'; el.textContent = '';
     }
     function planTypeName(code) {

@@ -14,6 +14,19 @@
 //   POST   /questions                       Create / update
 //   GET    /questions/{id}?organizationId=
 //   DELETE /questions/{id}?organizationId=&actor=
+//   POST   /question-sets/{id}/questions/grid   520: save the set page's
+//                                               whole questions grid
+//   551 versions and approval (only a Draft version is changed):
+//   GET    /question-sets/{id}/versions?organizationId=   every version, newest first
+//   GET    /question-sets/{id}/impact?organizationId=     audit definitions affected
+//                                                          by approving this version
+//   POST   /question-sets/{id}/new-version     Active -> new Draft copy
+//   POST   /question-sets/{id}/submit          Recommend: Draft -> UnderReview (note)
+//   POST   /question-sets/{id}/return          UnderReview -> Draft (note = reason)
+//   POST   /question-sets/{id}/approve         UnderReview -> Active; definitions
+//                                              using older versions move to it
+//   DELETE /question-sets/{id}                 a Draft v2+ is discarded; a whole
+//                                              set only when no audit uses it
 //
 // Shares the base route with OrgAssuranceDefinitionController.
 // ASP.NET Core routes by the specific action template, so the split
@@ -131,6 +144,81 @@ public sealed class OrgAssuranceQuestionController(
     }
 
     // ================================================================
+    // 551: Question set versions and approval
+    // ================================================================
+    [HttpGet("question-sets/{id:long}/versions")]
+    public async Task<IActionResult> ListVersions(long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0) return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var rows = await service.ListVersionsAsync(organizationId.Value, id, cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceQuestionController.ListVersions failed for set {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("question-sets/{id:long}/impact")]
+    public async Task<IActionResult> GetImpact(long id, [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0) return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var rows = await service.GetImpactAsync(organizationId.Value, id, cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceQuestionController.GetImpact failed for set {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("question-sets/{id:long}/new-version")]
+    public async Task<IActionResult> NewVersion(long id, [FromBody] OrgAssuranceQuestionSetActionRequest? body, CancellationToken cancellationToken)
+    {
+        if (body is null || body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await service.NewVersionAsync(id, body, cancellationToken);
+        return result.Success
+            ? Ok(new { questionSetId = result.Id })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    [HttpPost("question-sets/{id:long}/submit")]
+    public async Task<IActionResult> Submit(long id, [FromBody] OrgAssuranceQuestionSetActionRequest? body, CancellationToken cancellationToken)
+    {
+        if (body is null || body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await service.SubmitAsync(id, body, cancellationToken);
+        return result.Success
+            ? Ok(new { questionSetId = id })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    [HttpPost("question-sets/{id:long}/return")]
+    public async Task<IActionResult> Return(long id, [FromBody] OrgAssuranceQuestionSetActionRequest? body, CancellationToken cancellationToken)
+    {
+        if (body is null || body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await service.ReturnAsync(id, body, cancellationToken);
+        return result.Success
+            ? Ok(new { questionSetId = id })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    [HttpPost("question-sets/{id:long}/approve")]
+    public async Task<IActionResult> Approve(long id, [FromBody] OrgAssuranceQuestionSetActionRequest? body, CancellationToken cancellationToken)
+    {
+        if (body is null || body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await service.ApproveAsync(id, body, cancellationToken);
+        return result.Success
+            ? Ok(new { questionSetId = id, definitions = result.Definitions })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    // ================================================================
     // Questions
     // ================================================================
     [HttpGet("question-sets/{id:long}/questions")]
@@ -189,6 +277,22 @@ public sealed class OrgAssuranceQuestionController(
         var result = await service.SaveQuestionAsync(body, cancellationToken);
         return result.Success
             ? Ok(new { questionId = result.QuestionId })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    // 520: the set page's questions grid in one call (all or nothing).
+    [HttpPost("question-sets/{id:long}/questions/grid")]
+    public async Task<IActionResult> SaveQuestionGrid(
+        long id,
+        [FromBody] OrgAssuranceQuestionGridSaveRequest body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+
+        var result = await service.SaveQuestionGridAsync(id, body, cancellationToken);
+        return result.Success
+            ? Ok(new { questionSetId = id, savedCount = result.Id })
             : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
     }
 

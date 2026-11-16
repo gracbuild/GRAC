@@ -35,9 +35,20 @@ public sealed class CallerIdentityHandler(IHttpContextAccessor httpContextAccess
     public static void StampAdminFlag(HttpContext httpContext, HttpRequestMessage request)
     {
         request.Headers.Remove(CallerAdminHeader);
-        var dataScope = (httpContext.Session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION")
+        request.Headers.TryAddWithoutValidation(CallerAdminHeader, IsAdmin(httpContext.Session) ? "1" : "0");
+    }
+
+    /// <summary>
+    /// The organisation-admin rule StampAdminFlag sends: session data scope
+    /// GLOBAL or ORGANIZATION. Also read by a screen that offers an action
+    /// only the API's admin rule allows (Engagement Management's admission
+    /// Withdraw, 523), so the screen and the API apply the same rule.
+    /// </summary>
+    public static bool IsAdmin(ISession session)
+    {
+        var dataScope = (session.GetString(PracticeSessionIdentity.DataScopeKey) ?? "ORGANIZATION")
             .Trim().ToUpperInvariant();
-        request.Headers.TryAddWithoutValidation(CallerAdminHeader, dataScope is "GLOBAL" or "ORGANIZATION" ? "1" : "0");
+        return dataScope is "GLOBAL" or "ORGANIZATION";
     }
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

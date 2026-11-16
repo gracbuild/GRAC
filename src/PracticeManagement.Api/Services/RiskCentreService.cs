@@ -17,6 +17,7 @@
 // =====================================================================
 using System.Data;
 using System.Data.Common;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using PracticeManagement.Api.Models;
 
@@ -138,10 +139,20 @@ public interface IRiskCentreService
     Task<RiskBulkAcceptResult>                BulkAcceptAsync(RiskBulkAcceptRequest req, CancellationToken ct);
 
     // Risk acceptance approval authority (271). Org-scoped configuration,
-    // reached from Organization -> Risk Acceptance Approval Authority.
+    // reached from Risk Management -> Settings -> Workflow Settings (533).
     Task<RiskAcceptanceAuthorityResult>       GetAcceptanceAuthorityAsync(long organizationId, CancellationToken ct);
     Task<RiskAcceptanceAuthorityResult>       SaveAcceptanceAuthorityAsync(RiskAcceptanceAuthoritySaveRequest req, CancellationToken ct);
     Task<RiskAcceptanceAuthorityResolved?>    ResolveAcceptanceAuthorityAsync(long riskRegisterId, string? scopeCode, CancellationToken ct);
+
+    // Risk methodology (532). Settings -> Risk Methodology, and the values
+    // the inherent / residual / review pages and the register show.
+    Task<RiskMethodologyReadResult>   GetMethodologyAsync(long organizationId, CancellationToken ct);
+    Task<RiskMethodologyActionResult> CreateMethodologyDraftAsync(RiskMethodologyDraftCreateRequest req, CancellationToken ct);
+    Task<RiskMethodologyActionResult> SaveMethodologyDraftAsync(RiskMethodologyDraftSaveRequest req, CancellationToken ct);
+    Task<RiskMethodologyActionResult> PublishMethodologyAsync(RiskMethodologyOrganizationRequest req, CancellationToken ct);
+    Task<RiskMethodologyActionResult> DiscardMethodologyDraftAsync(RiskMethodologyOrganizationRequest req, CancellationToken ct);
+    Task<RiskMethodologyReadResult>   GetRiskMethodologyAsync(long riskRegisterId, CancellationToken ct);
+    Task<RiskMethodologyReadResult>   GetMethodologySummaryAsync(long organizationId, CancellationToken ct);
 }
 
 public sealed class RiskCentreService(IConfiguration configuration, ILogger<RiskCentreService> logger) : IRiskCentreService
@@ -1123,7 +1134,16 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         try
         {
             await using var conn = await OpenAsync(ct);
+            // Probed BEFORE the 532 transaction starts: the probe's own
+            // command carries no transaction and would be refused inside one.
+            var sendTreatmentOption = !string.IsNullOrWhiteSpace(req.TreatmentOptionCode)
+                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
+                       conn, "sp_risk_residual_analysis_save", "@treatment_option_code", ct);
+            // 532: methodology values in the same transaction (see AssessRegisteredRiskAsync).
+            await using var tx = req.Methodology is null ? null : await conn.BeginTransactionAsync(ct);
+            if (tx is not null) await SetMethodologyContextAsync(conn, tx, req.Methodology!, ct);
             await using var cmd  = Proc(conn, "grac_practice.sp_risk_residual_analysis_save");
+            cmd.Transaction = tx;
             AddParam(cmd, "@risk_register_id",         DbType.Int64,  riskRegisterId);
             AddParam(cmd, "@residual_likelihood_code", DbType.String, req.ResidualLikelihoodCode, 60);
             AddParam(cmd, "@residual_impact_code",     DbType.String, req.ResidualImpactCode, 60);
@@ -1138,27 +1158,35 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             // its own additions: a database still on 258 does not declare
             // it, and sending an undeclared parameter fails the whole
             // save with "too many arguments" rather than degrading.
-            if (!string.IsNullOrWhiteSpace(req.TreatmentOptionCode)
-                && await Infrastructure.ProcParameterProbe.HasParameterAsync(
-                       conn, "sp_risk_residual_analysis_save", "@treatment_option_code", ct))
+            if (sendTreatmentOption)
             {
                 AddParam(cmd, "@treatment_option_code", DbType.String, req.TreatmentOptionCode, 30);
             }
 
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct))
-                return new RiskResidualSaveResult(true, riskRegisterId,
-                    r["RiskResidualAnalysisId"] as long?,
-                    r["ResidualVersion"] as int?,
-                    r["ResidualRatingCode"] as string,
-                    r["ResidualRatingName"] as string,
-                    r["ResidualRatingScore"] as int?,
-                    r["InherentRatingCode"] as string,
-                    r["InherentRatingScore"] as int?,
-                    null,
-                    HasColumn(r, "TreatmentOptionCode") ? r["TreatmentOptionCode"] as string : null,
-                    HasColumn(r, "TreatmentOptionName") ? r["TreatmentOptionName"] as string : null);
-            return new RiskResidualSaveResult(true, riskRegisterId, null, null, null, null, null, null, null, null);
+            RiskResidualSaveResult result;
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                result = await r.ReadAsync(ct)
+                    ? new RiskResidualSaveResult(true, riskRegisterId,
+                        r["RiskResidualAnalysisId"] as long?,
+                        r["ResidualVersion"] as int?,
+                        r["ResidualRatingCode"] as string,
+                        r["ResidualRatingName"] as string,
+                        r["ResidualRatingScore"] as int?,
+                        r["InherentRatingCode"] as string,
+                        r["InherentRatingScore"] as int?,
+                        null,
+                        HasColumn(r, "TreatmentOptionCode") ? r["TreatmentOptionCode"] as string : null,
+                        HasColumn(r, "TreatmentOptionName") ? r["TreatmentOptionName"] as string : null)
+                    : new RiskResidualSaveResult(true, riskRegisterId, null, null, null, null, null, null, null, null);
+            }
+            if (tx is not null)
+            {
+                await SaveAssessmentMethodologyAsync(conn, tx, riskRegisterId, "Residual", null, result.RiskResidualAnalysisId,
+                    req.Methodology!, req.AssessedByEmployeeId, req.CallerDisplayName, ct);
+                await tx.CommitAsync(ct);
+            }
+            return result;
         }
         catch (SqlException ex)
         {
@@ -1167,7 +1195,7 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             // Active, risk closed). Surfaced verbatim, like every other
             // 560xx in this service.
             logger.LogWarning(ex, "RiskCentreService.SaveResidualAnalysis failed {Id}: {Msg}", riskRegisterId, ex.Message);
-            return new RiskResidualSaveResult(false, riskRegisterId, null, null, null, null, null, null, null, ex.Message);
+            return new RiskResidualSaveResult(false, riskRegisterId, null, null, null, null, null, null, null, FirstSqlMessage(ex));
         }
     }
 
@@ -1650,6 +1678,10 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
 
         var top = new List<RiskTopRisk>();
         if (await r.NextResultAsync(ct))
+        {
+            // 505: WorkflowStageCode / NextReviewDate appended to set 16.
+            var hasStage  = HasColumn(r, "WorkflowStageCode");
+            var hasReview = HasColumn(r, "NextReviewDate");
             while (await r.ReadAsync(ct))
                 top.Add(new RiskTopRisk(
                     Convert.ToInt64(r["RiskRegisterId"]), r["RiskNumber"]?.ToString() ?? "",
@@ -1657,11 +1689,20 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
                     r["RiskOwnerEmployeeId"] as long?, r["RiskOwnerName"] as string,
                     r["InherentRatingCode"] as string, r["InherentRatingName"] as string, r["InherentRatingScore"] as int?,
                     r["ResidualRatingCode"] as string, r["ResidualRatingName"] as string, r["ResidualRatingScore"] as int?,
-                    r["StatusCode"]?.ToString() ?? ""));
+                    r["StatusCode"]?.ToString() ?? "",
+                    hasStage ? r["WorkflowStageCode"] as string : null,
+                    hasReview && r["NextReviewDate"] != DBNull.Value ? Convert.ToDateTime(r["NextReviewDate"]) : null));
+        }
+
+        // ---- 505: sets 17-19 (empty lists on a database without 505) ----
+        var stageCounts      = await ReadGroupsAsync(r, "StageCode", "StageName", ct);
+        var treatmentOptions = await ReadGroupsAsync(r, "TreatmentOptionCode", "TreatmentOptionName", ct);
+        var residualRatings  = await ReadGroupsAsync(r, "RatingCode", "RatingName", ct);
 
         return new RiskDashboard(candidates, candBySource, register, byCategory, bySource,
                                  byRating, byUnit, byOwner, ageing, trend, overdue,
-                                 levels, inherentMap, residualMap, coverage, reviewAgeing, top);
+                                 levels, inherentMap, residualMap, coverage, reviewAgeing, top,
+                                 stageCounts, treatmentOptions, residualRatings);
     }
 
     // 413: sets 12 and 13 share one shape -- one reader, so the two maps
@@ -2130,7 +2171,13 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         try
         {
             await using var conn = await OpenAsync(ct);
+            // 532: with methodology values the assessment and its values are
+            // saved in ONE transaction (and the values reach the rating
+            // resolver through SESSION_CONTEXT for 3D scoring).
+            await using var tx = req.Methodology is null ? null : await conn.BeginTransactionAsync(ct);
+            if (tx is not null) await SetMethodologyContextAsync(conn, tx, req.Methodology!, ct);
             await using var cmd  = Proc(conn, "grac_practice.sp_risk_register_assess");
+            cmd.Transaction = tx;
             AddParam(cmd, "@risk_register_id",       DbType.Int64,  riskRegisterId);
             AddParam(cmd, "@risk_category_code",     DbType.String, req.RiskCategoryCode, 60);
             AddParam(cmd, "@likelihood_code",        DbType.String, req.LikelihoodCode, 60);
@@ -2144,20 +2191,30 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             AddParam(cmd, "@analysed_by_employee_id", DbType.Int64, (object?)req.AnalysedByEmployeeId ?? DBNull.Value);
             AddParam(cmd, "@caller_display_name",    DbType.String, req.CallerDisplayName ?? "system", 100);
 
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct))
-                return new RiskRegisterAssessResult(true, riskRegisterId,
-                    r["RiskAnalysisId"] as long?,
-                    r["AnalysisVersion"] as int?,
-                    Convert.ToBoolean(r["ApprovalRequired"]),
-                    r["ApprovalReason"] as string,
-                    r["InherentRatingCode"] as string, null);
-            return new RiskRegisterAssessResult(true, riskRegisterId, null, null, false, null, null, null);
+            RiskRegisterAssessResult result;
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                result = await r.ReadAsync(ct)
+                    ? new RiskRegisterAssessResult(true, riskRegisterId,
+                        r["RiskAnalysisId"] as long?,
+                        r["AnalysisVersion"] as int?,
+                        Convert.ToBoolean(r["ApprovalRequired"]),
+                        r["ApprovalReason"] as string,
+                        r["InherentRatingCode"] as string, null)
+                    : new RiskRegisterAssessResult(true, riskRegisterId, null, null, false, null, null, null);
+            }
+            if (tx is not null)
+            {
+                await SaveAssessmentMethodologyAsync(conn, tx, riskRegisterId, "Assess", result.RiskAnalysisId, null,
+                    req.Methodology!, req.AnalysedByEmployeeId, req.CallerDisplayName, ct);
+                await tx.CommitAsync(ct);
+            }
+            return result;
         }
         catch (SqlException ex)
         {
             logger.LogWarning(ex, "RiskCentreService.AssessRegisteredRisk failed {Id}: {Msg}", riskRegisterId, ex.Message);
-            return new RiskRegisterAssessResult(false, riskRegisterId, null, null, false, null, null, ex.Message);
+            return new RiskRegisterAssessResult(false, riskRegisterId, null, null, false, null, null, FirstSqlMessage(ex));
         }
     }
 
@@ -3043,7 +3100,11 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         try
         {
             await using var conn = await OpenAsync(ct);
+            // 532: methodology values in the same transaction (see AssessRegisteredRiskAsync).
+            await using var tx = req.Methodology is null ? null : await conn.BeginTransactionAsync(ct);
+            if (tx is not null) await SetMethodologyContextAsync(conn, tx, req.Methodology!, ct);
             await using var cmd  = Proc(conn, "grac_practice.sp_risk_review_perform");
+            cmd.Transaction = tx;
             AddParam(cmd, "@risk_register_id",        DbType.Int64,  riskRegisterId);
             AddParam(cmd, "@risk_category_code",      DbType.String, req.RiskCategoryCode, 60);
             AddParam(cmd, "@likelihood_code",         DbType.String, req.LikelihoodCode, 60);
@@ -3066,28 +3127,43 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
             // FIRST (it EXECs it without suppressing output), then its
             // own. Skipping to the last result set is what gets the
             // review's answer rather than the analysis's.
-            await using var r = await cmd.ExecuteReaderAsync(ct);
             RiskReviewPerformResult? result = null;
-            do
+            long? reviewAnalysisId = null;
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
             {
-                while (await r.ReadAsync(ct))
+                do
                 {
-                    if (!HasColumn(r, "RiskNumber")) continue;   // the assess result set
-                    result = new RiskReviewPerformResult(true, riskRegisterId,
-                        r["RiskNumber"] as string,
-                        r["StatusCode"] as string,
-                        r["NextReviewDate"] as DateTime?,
-                        r["TreatmentOptionCode"] as string,
-                        null);
-                }
-            } while (await r.NextResultAsync(ct));
+                    while (await r.ReadAsync(ct))
+                    {
+                        if (!HasColumn(r, "RiskNumber"))
+                        {
+                            // the assess result set -- 532 attaches the
+                            // methodology values to the analysis it made
+                            if (HasColumn(r, "RiskAnalysisId")) reviewAnalysisId = r["RiskAnalysisId"] as long?;
+                            continue;
+                        }
+                        result = new RiskReviewPerformResult(true, riskRegisterId,
+                            r["RiskNumber"] as string,
+                            r["StatusCode"] as string,
+                            r["NextReviewDate"] as DateTime?,
+                            r["TreatmentOptionCode"] as string,
+                            null);
+                    }
+                } while (await r.NextResultAsync(ct));
+            }
+            if (tx is not null)
+            {
+                await SaveAssessmentMethodologyAsync(conn, tx, riskRegisterId, "Review", reviewAnalysisId, null,
+                    req.Methodology!, req.ReviewedByEmployeeId, req.CallerDisplayName, ct);
+                await tx.CommitAsync(ct);
+            }
 
             return result ?? new RiskReviewPerformResult(true, riskRegisterId, null, null, req.NextReviewDate, req.TreatmentOptionCode, null);
         }
         catch (SqlException ex)
         {
             logger.LogWarning(ex, "RiskCentreService.PerformReview failed {Id}: {Msg}", riskRegisterId, ex.Message);
-            return new RiskReviewPerformResult(false, riskRegisterId, null, null, null, null, ex.Message);
+            return new RiskReviewPerformResult(false, riskRegisterId, null, null, null, null, FirstSqlMessage(ex));
         }
     }
 
@@ -3479,6 +3555,174 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         }
 
         return new RiskScopePracticeContextResult(practices, tasks);
+    }
+
+    // =================================================================
+    // Risk methodology (migration 532). docs/risk-methodology.md.
+    // =================================================================
+
+    private static readonly JsonSerializerOptions MethodologyJson =
+        new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    // The page's dimension values, for sp_risk_rating_resolve's 3D block.
+    // Set inside the save's transaction and cleared again before the
+    // methodology row is written.
+    private static async Task SetMethodologyContextAsync(DbConnection conn, DbTransaction tx,
+        RiskMethodologyInput m, CancellationToken ct)
+    {
+        var ctx = JsonSerializer.Serialize(new
+        {
+            values = (m.Values ?? []).Select(v => new { dimensionCode = v.DimensionCode, levelValue = v.LevelValue })
+        });
+        await using var cmd = Proc(conn, "sys.sp_set_session_context");
+        cmd.Transaction = tx;
+        AddParam(cmd, "@key",   DbType.String, "grac.risk.methodology", 128);
+        AddParam(cmd, "@value", DbType.String, ctx, 4000);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task SaveAssessmentMethodologyAsync(DbConnection conn, DbTransaction tx,
+        long riskRegisterId, string sourceCode, long? riskAnalysisId, long? residualAnalysisId,
+        RiskMethodologyInput m, long? actorEmployeeId, string? callerDisplayName, CancellationToken ct)
+    {
+        await using (var clear = Proc(conn, "sys.sp_set_session_context"))
+        {
+            clear.Transaction = tx;
+            AddParam(clear, "@key",   DbType.String, "grac.risk.methodology", 128);
+            AddParam(clear, "@value", DbType.String, DBNull.Value, 4000);
+            await clear.ExecuteNonQueryAsync(ct);
+        }
+        await using var cmd = Proc(conn, "grac_practice.sp_risk_methodology_assessment_save");
+        cmd.Transaction = tx;
+        AddParam(cmd, "@risk_register_id",          DbType.Int64,  riskRegisterId);
+        AddParam(cmd, "@source_code",               DbType.String, sourceCode, 20);
+        AddParam(cmd, "@payload",                   DbType.String, JsonSerializer.Serialize(m, MethodologyJson), -1);
+        AddParam(cmd, "@risk_analysis_id",          DbType.Int64,  (object?)riskAnalysisId ?? DBNull.Value);
+        AddParam(cmd, "@risk_residual_analysis_id", DbType.Int64,  (object?)residualAnalysisId ?? DBNull.Value);
+        AddParam(cmd, "@actor_employee_id",         DbType.Int64,  (object?)actorEmployeeId ?? DBNull.Value);
+        AddParam(cmd, "@caller_display_name",       DbType.String, callerDisplayName ?? "system", 100);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public Task<RiskMethodologyReadResult> GetMethodologyAsync(long organizationId, CancellationToken ct) =>
+        ReadMethodologySetsAsync("grac_practice.sp_risk_methodology_get",
+            cmd => AddParam(cmd, "@organization_id", DbType.Int64, organizationId),
+            ["versions", "dimensions", "levels", "bands", "appetite", "ratings", "impactAreas", "categories", "history", "scale"], ct);
+
+    public Task<RiskMethodologyReadResult> GetRiskMethodologyAsync(long riskRegisterId, CancellationToken ct) =>
+        ReadMethodologySetsAsync("grac_practice.sp_risk_methodology_assessment_get",
+            cmd => AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId),
+            ["assessments", "values"], ct);
+
+    public Task<RiskMethodologyReadResult> GetMethodologySummaryAsync(long organizationId, CancellationToken ct) =>
+        ReadMethodologySetsAsync("grac_practice.sp_risk_methodology_register_summary",
+            cmd => AddParam(cmd, "@organization_id", DbType.Int64, organizationId),
+            ["risks", "values"], ct);
+
+    public Task<RiskMethodologyActionResult> CreateMethodologyDraftAsync(RiskMethodologyDraftCreateRequest req, CancellationToken ct) =>
+        MethodologyActionAsync("grac_practice.sp_risk_methodology_draft_create", cmd =>
+        {
+            AddParam(cmd, "@organization_id",     DbType.Int64,  req.OrganizationId);
+            AddParam(cmd, "@template_code",       DbType.String, (object?)NullIfBlank(req.TemplateCode) ?? DBNull.Value, 40);
+            AddParam(cmd, "@replace",             DbType.Boolean, req.Replace);
+            AddParam(cmd, "@caller_display_name", DbType.String, req.CallerDisplayName ?? "system", 100);
+        }, ct);
+
+    public Task<RiskMethodologyActionResult> SaveMethodologyDraftAsync(RiskMethodologyDraftSaveRequest req, CancellationToken ct) =>
+        MethodologyActionAsync("grac_practice.sp_risk_methodology_draft_save", cmd =>
+        {
+            AddParam(cmd, "@organization_id",     DbType.Int64,  req.OrganizationId);
+            AddParam(cmd, "@payload",             DbType.String, req.Draft.GetRawText(), -1);
+            AddParam(cmd, "@caller_display_name", DbType.String, req.CallerDisplayName ?? "system", 100);
+        }, ct);
+
+    public Task<RiskMethodologyActionResult> PublishMethodologyAsync(RiskMethodologyOrganizationRequest req, CancellationToken ct) =>
+        MethodologyActionAsync("grac_practice.sp_risk_methodology_publish", cmd =>
+        {
+            AddParam(cmd, "@organization_id",     DbType.Int64,  req.OrganizationId);
+            AddParam(cmd, "@actor_employee_id",   DbType.Int64,  (object?)req.ActorEmployeeId ?? DBNull.Value);
+            AddParam(cmd, "@caller_display_name", DbType.String, req.CallerDisplayName ?? "system", 100);
+        }, ct);
+
+    public Task<RiskMethodologyActionResult> DiscardMethodologyDraftAsync(RiskMethodologyOrganizationRequest req, CancellationToken ct) =>
+        MethodologyActionAsync("grac_practice.sp_risk_methodology_draft_discard",
+            cmd => AddParam(cmd, "@organization_id", DbType.Int64, req.OrganizationId), ct);
+
+    // 532: inside the methodology transaction a procedure's own ROLLBACK
+    // also ends the outer transaction, and SQL Server then appends error 266
+    // ("Transaction count after EXECUTE ...") to the real refusal. The
+    // first real error (severity > 10) is the one that names the rule.
+    private static string FirstSqlMessage(SqlException ex) =>
+        ex.Errors.Cast<SqlError>().FirstOrDefault(e => e.Class > 10)?.Message ?? ex.Message;
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // Several result sets, each row a camelCase dictionary. A database
+    // without 532 (SQL 2812, procedure not found) answers Success = false
+    // with a plain message, so the risk pages carry on without methodology.
+    private async Task<RiskMethodologyReadResult> ReadMethodologySetsAsync(string procedure,
+        Action<DbCommand> parameters, string[] names, CancellationToken ct)
+    {
+        var sets = names.ToDictionary(n => n, _ => new List<Dictionary<string, object?>>());
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, procedure);
+            parameters(cmd);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var index = 0;
+            do
+            {
+                if (index >= names.Length) break;
+                var rows = sets[names[index]];
+                while (await r.ReadAsync(ct))
+                {
+                    var row = new Dictionary<string, object?>(r.FieldCount);
+                    for (var i = 0; i < r.FieldCount; i++)
+                    {
+                        var name = r.GetName(i);
+                        var key  = name.Length > 0 ? char.ToLowerInvariant(name[0]) + name[1..] : name;
+                        row[key] = r.IsDBNull(i) ? null : r.GetValue(i);
+                    }
+                    rows.Add(row);
+                }
+                index++;
+            } while (await r.NextResultAsync(ct));
+            return new RiskMethodologyReadResult(true, sets, null);
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            return new RiskMethodologyReadResult(false, sets, "Risk methodology is not installed in this database (migration 532).");
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.{Procedure} failed: {Msg}", procedure, ex.Message);
+            return new RiskMethodologyReadResult(false, sets, ex.Message);
+        }
+    }
+
+    // One action; the procedures answer with MethodologyVersionId (and
+    // VersionNo on publish). 583xx refusals are surfaced verbatim.
+    private async Task<RiskMethodologyActionResult> MethodologyActionAsync(string procedure,
+        Action<DbCommand> parameters, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenAsync(ct);
+            await using var cmd  = Proc(conn, procedure);
+            parameters(cmd);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct)) return new RiskMethodologyActionResult(true, null, null, null);
+            return new RiskMethodologyActionResult(true,
+                HasColumn(r, "MethodologyVersionId") ? r["MethodologyVersionId"] as long? : null,
+                HasColumn(r, "VersionNo") ? r["VersionNo"] as int? : null,
+                null);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "RiskCentreService.{Procedure} failed: {Msg}", procedure, ex.Message);
+            return new RiskMethodologyActionResult(false, null, null, ex.Message);
+        }
     }
 
     private async Task<DbConnection> OpenAsync(CancellationToken ct)

@@ -28,6 +28,36 @@ public sealed record OrgAssuranceAdminCategoryRow(
     string? Name,
     string? Description);
 
+/// <summary>560: a row of an Audit Definition master dropdown -- Assurance Approach
+/// (org_assurance_approach_master, how the audit is conducted) and Audit Mandate
+/// (org_assurance_mandate_master, the basis of the audit).</summary>
+public sealed record OrgAssuranceMasterRow(
+    long?   Id,
+    string? Code,
+    string? Name,
+    string? Description);
+
+/// <summary>560: one Applicable Framework of a definition version. ReleaseId is the
+/// subscribed framework (grac_new.release); null for a framework typed by hand.</summary>
+public sealed record OrgAssuranceDefinitionFrameworkRow(
+    long?  DefinitionFrameworkId,
+    long?  ReleaseId,
+    string FrameworkName,
+    int    DisplayOrder);
+
+/// <summary>560: one Audit Mandate of a definition version (code / name as saved).</summary>
+public sealed record OrgAssuranceDefinitionMandateRow(
+    long?  DefinitionMandateId,
+    long   AuditMandateId,
+    string MandateCode,
+    string MandateName,
+    int    DisplayOrder);
+
+/// <summary>560: an Applicable Framework sent on save.</summary>
+public sealed record OrgAssuranceDefinitionFrameworkInput(
+    long?   ReleaseId,
+    string? Name);
+
 /// <summary>List / grid query parameters.</summary>
 public sealed record OrgAssuranceDefinitionListQuery(
     long    OrganizationId,
@@ -90,6 +120,10 @@ public sealed record OrgAssuranceDefinitionDetail(
     long?     AssuranceCategoryId,
     string?   AssuranceCategoryCode,
     string?   AssuranceCategoryName,
+    // 560: Assurance Approach (id + code / name as saved).
+    long?     AssuranceApproachId,
+    string?   AssuranceApproachCode,
+    string?   AssuranceApproachName,
     string?   SubmittedBy,
     DateTime? SubmittedDt,
     string?   ApprovedBy,
@@ -101,7 +135,11 @@ public sealed record OrgAssuranceDefinitionDetail(
     string?   EnteredBy,
     DateTime? EnteredDt,
     string?   UpdatedBy,
-    DateTime? UpdatedDt);
+    DateTime? UpdatedDt,
+    // 560: the current version's Applicable Frameworks (second result set).
+    IReadOnlyList<OrgAssuranceDefinitionFrameworkRow>? ApplicableFrameworks = null,
+    // 560: the current version's Audit Mandates (third result set).
+    IReadOnlyList<OrgAssuranceDefinitionMandateRow>? AuditMandates = null);
 
 /// <summary>Save request (create or update). Actor / OrganizationId are trusted --
 /// the Web tier resolves them from the session per the project's isolation model.</summary>
@@ -121,7 +159,12 @@ public sealed record OrgAssuranceDefinitionSaveRequest(
     long?   AssuranceCategoryId,
     string? AssuranceCategoryCode,
     string? AssuranceCategoryName,
-    string? Actor);
+    string? Actor,
+    // 560: Assurance Approach, Audit Mandates, Applicable Frameworks
+    // (a list left null = leave the saved list as it is; empty = clear it).
+    long?   AssuranceApproachId = null,
+    IReadOnlyList<long>? AuditMandateIds = null,
+    IReadOnlyList<OrgAssuranceDefinitionFrameworkInput>? ApplicableFrameworks = null);
 
 public sealed record OrgAssuranceDefinitionSaveResult(
     bool    Success,
@@ -170,13 +213,32 @@ public sealed record OrgAssuranceScopeDimensionRow(
     string DimensionName,
     string Category,
     bool   IsPickable,
-    int    DisplayOrder);
+    int    DisplayOrder,
+    // 562: the Operationalize dependency type behind a DEP_<CODE> subject dimension.
+    long?  DependencyTypeId = null);
 
 /// <summary>Dimension-value picker row (id / code / name).</summary>
 public sealed record OrgAssuranceScopeDimensionValueRow(
     long?   Id,
     string? Code,
     string? Name);
+
+/// <summary>One source statement in the Scope Builder's tree picker
+/// (migration 534): Framework -> Release -> Source Structure -> Source
+/// Statement. StatementId is organization_framework_statements
+/// .org_statement_id -- the value stored for the SOURCE_STATEMENT
+/// dimension. The keys are opaque strings, unique per level.</summary>
+public sealed record OrgAssuranceScopeStatementTreeRow(
+    string  FrameworkKey,
+    string  FrameworkName,
+    string  ReleaseKey,
+    string  ReleaseName,
+    string  StructureKey,
+    string  StructureName,
+    long    StatementId,
+    string? StatementCode,
+    string? StatementName,
+    int     InstanceCount);
 
 /// <summary>Header row returned by sp_org_assurance_scope_get so the
 /// UI can render read-only mode when the version isn't Draft.</summary>
@@ -244,6 +306,39 @@ public sealed record OrgAssuranceScopeSaveValue(
     string? EntityCode,
     string? EntityName);
 
+/// <summary>562: Scope Builder Step 2 -- one discovered category (sp_org_assurance_scope_discover, result 1).</summary>
+public sealed record OrgAssuranceScopeDiscoveryCategory(
+    string CategoryCode,
+    string CategoryName,
+    int    DisplayOrder,
+    long   ItemCount,
+    bool   IsIncluded);
+
+/// <summary>562: one discovered record and why it is related (result 2).</summary>
+public sealed record OrgAssuranceScopeDiscoveryRow(
+    string  CategoryCode,
+    long    RecordId,
+    string? RecordCode,
+    string? RecordName,
+    string? Status,
+    string? Reason);
+
+/// <summary>562: GET definitions/{id}/scope-discovery.</summary>
+public sealed record OrgAssuranceScopeDiscovery(
+    IReadOnlyList<OrgAssuranceScopeDiscoveryCategory> Categories,
+    IReadOnlyList<OrgAssuranceScopeDiscoveryRow>      Rows);
+
+/// <summary>562: POST definitions/{id}/scope-categories -- which categories the audit brings in.</summary>
+public sealed record OrgAssuranceScopeCategorySaveRequest(
+    long    OrganizationId,
+    long    DefinitionId,
+    IReadOnlyList<OrgAssuranceScopeCategoryInput>? Categories,
+    string? Actor);
+
+public sealed record OrgAssuranceScopeCategoryInput(
+    string Code,
+    bool   IsIncluded);
+
 public sealed record OrgAssuranceScopeSaveResult(
     bool    Success,
     long?   DefinitionId = null,
@@ -251,100 +346,81 @@ public sealed record OrgAssuranceScopeSaveResult(
     string? ReasonCode   = null);
 
 // =====================================================================
-// Evidence Configuration (Stage 2 -- BRD Part 2 Sec 5)
+// 564: Audit Configuration -- Control and Practice Mapping (spec 4.2.2).
+// MappingType: CONTROL_STATEMENT / PRACTICE / PRACTICE_INSTANCE / MANUAL.
+// =====================================================================
+/// <summary>An organization practice or practice instance the mapping can pick.</summary>
+public sealed record OrgAssuranceMappingOptionRow(
+    long    Id,
+    string? Code,
+    string? Name,
+    long?   PracticeId,       // instances: their practice
+    string? PracticeCode,     // instances
+    int?    InstanceCount);   // practices
+
+public sealed record OrgAssuranceMappingOptions(
+    IReadOnlyList<OrgAssuranceMappingOptionRow> Practices,
+    IReadOnlyList<OrgAssuranceMappingOptionRow> Instances);
+
+public sealed record OrgAssuranceMappingHeader(
+    long    DefinitionId,
+    long?   VersionId,
+    string? StatusCode,
+    bool    IsEditable);
+
+/// <summary>One mapped row. IsAvailable: the GRAC record is still active
+/// (always true for MANUAL).</summary>
+public sealed record OrgAssuranceMappingRow(
+    long    MappingId,
+    string  MappingType,
+    long?   RecordId,
+    string? RecordCode,
+    string? RecordName,
+    string? ManualKind,
+    string? ManualReference,
+    string? Note,
+    int     DisplayOrder,
+    long?   PracticeId,
+    bool    IsAvailable);
+
+public sealed record OrgAssuranceMappingResult(
+    OrgAssuranceMappingHeader            Header,
+    IReadOnlyList<OrgAssuranceMappingRow> Items);
+
+/// <summary>POST definitions/{id}/mapping -- replaces the Draft version's mapping.</summary>
+public sealed record OrgAssuranceMappingSaveRequest(
+    long    OrganizationId,
+    long    DefinitionId,
+    IReadOnlyList<OrgAssuranceMappingInput>? Items,
+    string? Actor);
+
+/// <summary>A GRAC record (MappingType + RecordId), or MANUAL (ManualKind:
+/// CONTROL / PRACTICE / PRACTICE_INSTANCE / OTHER, Reference, Name).</summary>
+public sealed record OrgAssuranceMappingInput(
+    string  MappingType,
+    long?   RecordId,
+    string? ManualKind,
+    string? Reference,
+    string? Name,
+    string? Note);
+
+public sealed record OrgAssuranceMappingSaveResult(
+    bool    Success,
+    int?    MappingCount = null,
+    string? Error        = null,
+    string? ReasonCode   = null);
+
+// =====================================================================
+// Evidence Types (question Evidence Type lookup). The Evidence
+// Configuration models were removed by 536 -- evidence is set per
+// question in the question sets.
 // =====================================================================
 
-/// <summary>Simple lookup row used for evidence type and collection
-/// method dropdowns.</summary>
+/// <summary>Simple lookup row used for the evidence type dropdown.</summary>
 public sealed record OrgAssuranceEvidenceLookupRow(
     int?    Id,
     string? Code,
     string? Name);
-
-/// <summary>Header returned by sp_org_assurance_evidence_config_get --
-/// mirrors the scope header so the UI can decide read-only vs edit.</summary>
-public sealed record OrgAssuranceEvidenceConfigHeader(
-    long   DefinitionId,
-    long   VersionId,
-    long?  CurrentVersionId,
-    string CurrentStatusCode,
-    bool   IsEditable);
-
-/// <summary>One evidence config row (what evidence is expected + how
-/// it's collected + validity / expiry + auto-engine details).</summary>
-public sealed record OrgAssuranceEvidenceConfigRow(
-    long    EvidenceConfigId,
-    int?    EvidenceTypeId,
-    string? EvidenceTypeCode,
-    string? EvidenceTypeName,
-    int?    CollectionMethodId,
-    string? CollectionMethodCode,
-    string? CollectionMethodName,
-    int?    CollectionFrequencyId,
-    string? CollectionFrequencyCode,
-    string? CollectionFrequencyName,
-    string? EvidenceOwner,
-    string? RetentionPeriod,
-    string? EvidenceLocation,
-    string? EvidenceLocator,
-    string  EvidenceLabel,
-    string? Description,
-    bool    IsMandatory,
-    int?    ValidityDays,
-    int?    ExpiryWarningDays,
-    int     DisplayOrder,
-    // 118 hybrid role+employee Owner (nullable defaults for legacy rows)
-    long?   OwnerRoleId       = null,
-    string? OwnerRoleName     = null,
-    long?   OwnerEmployeeId   = null,
-    string? OwnerDisplayName  = null);
-
-/// <summary>Full evidence config for a definition version (header + rows).</summary>
-public sealed record OrgAssuranceEvidenceConfigResult(
-    OrgAssuranceEvidenceConfigHeader Header,
-    IReadOnlyList<OrgAssuranceEvidenceConfigRow> Items);
-
-/// <summary>Save request -- full replacement of the version's config.
-/// Only accepted while the definition version is Draft.</summary>
-public sealed record OrgAssuranceEvidenceConfigSaveRequest(
-    long   OrganizationId,
-    long   DefinitionId,
-    IReadOnlyList<OrgAssuranceEvidenceConfigSaveItem>? Items,
-    string? Actor);
-
-public sealed record OrgAssuranceEvidenceConfigSaveItem(
-    int?    EvidenceTypeId,
-    string? EvidenceTypeCode,
-    string? EvidenceTypeName,
-    int?    CollectionMethodId,
-    string? CollectionMethodCode,
-    string? CollectionMethodName,
-    int?    CollectionFrequencyId,
-    string? CollectionFrequencyCode,
-    string? CollectionFrequencyName,
-    string? EvidenceOwner,
-    string? RetentionPeriod,
-    string? EvidenceLocation,
-    string? EvidenceLocator,
-    string  EvidenceLabel,
-    string? Description,
-    bool?   IsMandatory,
-    int?    ValidityDays,
-    int?    ExpiryWarningDays,
-    int?    DisplayOrder,
-    // 118 hybrid role+employee Owner (nullable defaults so legacy
-    // callers keep compiling; DB auto-resolver fills whichever side
-    // was omitted).
-    long?   OwnerRoleId       = null,
-    string? OwnerRoleName     = null,
-    long?   OwnerEmployeeId   = null,
-    string? OwnerDisplayName  = null);
-
-public sealed record OrgAssuranceEvidenceConfigSaveResult(
-    bool    Success,
-    long?   DefinitionId = null,
-    string? Error        = null,
-    string? ReasonCode   = null);
 
 // =====================================================================
 // Workflow Configuration (Stage 2 -- BRD Part 2 Sec 6)
@@ -357,6 +433,30 @@ public sealed record OrgAssuranceAdminWorkflowTemplateRow(
     string? Code,
     string? Name,
     string? Description);
+
+/// <summary>538: one Admin template stage, already shaped as an organization
+/// workflow stage (type mapped to AUDITOR / REVIEWER / APPROVER / CUSTOM, SLA
+/// in days, the template's rules in Instructions). Roles / employees are the
+/// organization's to pick, so they are not here.</summary>
+public sealed record OrgAssuranceAdminWorkflowTemplateStageRow(
+    int?    StageOrder,
+    string? StageCode,
+    string? StageName,
+    string? StageType,
+    int?    SlaDays,
+    string? Instructions,
+    string? AdminStageType,
+    int?    SlaHours);
+
+/// <summary>538: an Admin workflow template with its stages
+/// (sp_org_assurance_admin_workflow_template_stage_list).</summary>
+public sealed record OrgAssuranceAdminWorkflowTemplateDetail(
+    long?   Id,
+    string? Code,
+    string? Name,
+    string? Description,
+    int?    TotalSlaDays,
+    IReadOnlyList<OrgAssuranceAdminWorkflowTemplateStageRow> Stages);
 
 /// <summary>Stage-type vocabulary (AUDITOR / REVIEWER / APPROVER / CUSTOM).</summary>
 public sealed record OrgAssuranceWorkflowStageTypeRow(

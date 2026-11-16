@@ -1,5 +1,5 @@
 """Generates the TPRM API tier (models, service, controller) from the
-procedure signatures in database/486-489 and the endpoint table below.
+procedure signatures in database/486-489 and 521-525 and the endpoint table below.
 
 Why generated: the module has ~70 procedures. Hand-binding each parameter
 is where mistakes hide (a renamed parameter, a size that truncates). The
@@ -21,8 +21,12 @@ API = os.path.join(ROOT, 'src', 'PracticeManagement.Api')
 # Procedure signatures
 # ---------------------------------------------------------------------------
 SIGS = {}
+# 521 (Third-Party Management Phase 1) and 522 (CR 2 Round A) re-issue
+# procedures of 486 / 488 / 489 / 521; read in order, the latest wins.
 for f in ['486_tprm_configuration.sql', '488_tprm_third_parties_engagements.sql',
-          '489_tprm_due_diligence_decision_monitoring.sql']:
+          '489_tprm_due_diligence_decision_monitoring.sql', '521_tpm_vendor_registry_foundation.sql',
+          '522_tpm_cr2_registration_exposure.sql', '523_tpm_cr2_screening_admission.sql',
+          '524_tpm_cr2_risk_register.sql', '525_tpm_dashboard_tasks_profile_review.sql']:
     t = open(os.path.join(DB, f)).read()
     for m in re.finditer(r'CREATE OR ALTER PROCEDURE grac_practice\.(\w+)\s*(.*?)\nAS\n', t, re.S):
         ps = []
@@ -39,6 +43,8 @@ INJECTED = {
     'caller_is_admin': 'caller.IsAdmin',
     'is_platform_admin': 'caller.IsPlatformAdmin',
     'caller_role_names': None,      # derived in SQL from the employee's GRAC role
+    'suppress_result': None,        # 523: only procedure-to-procedure calls suppress the result
+    'raise_impact_review': None,    # 524: only migration 524 links without an impact review
 }
 
 
@@ -67,7 +73,7 @@ DB_TYPE = {'BIGINT': 'DbType.Int64', 'INT': 'DbType.Int32', 'BIT': 'DbType.Boole
 E = [
     # ---- lookups / configuration (486) --------------------------------
     ('Lookups', 'GET', 'lookups', 'sp_tprm_lookups', 'sets',
-     ['values', 'employees', 'businessFunctions', 'processes', 'applications', 'vendors', 'contracts', 'library',
+     ['values', 'employees', 'businessFunctions', 'processes', 'applications', 'thirdParties', 'contracts', 'library',
       'customFields', 'riskModel', 'dimensions', 'bands', 'evidenceTypes', 'roles']),
     ('ConfigReference', 'GET', 'config/reference', 'sp_tprm_config_reference_get', 'sets', ['lists', 'values']),
     ('SaveReferenceValue', 'POST', 'config/reference/values', 'sp_tprm_reference_value_save', 'command', None),
@@ -93,20 +99,44 @@ E = [
     ('SaveQuestionnaireItem', 'POST', 'config/templates/versions/{versionId}/questionnaire-items', 'sp_tprm_q_item_save', 'command', None),
     ('RemoveTemplateItem', 'POST', 'config/templates/versions/{versionId}/items/remove', 'sp_tprm_template_item_remove', 'command', None),
     ('ActivateTemplateVersion', 'POST', 'config/templates/versions/{versionId}/activate', 'sp_tprm_template_version_activate', 'command', None),
-    # ---- third parties (488) -------------------------------------------
+    # ---- Vendor Registry (488, restructured by 521) ----------------------
     ('ThirdParties', 'GET', 'third-parties', 'sp_tprm_third_party_list', 'rows', None),
     ('ThirdParty', 'GET', 'third-parties/{thirdPartyId}', 'sp_tprm_third_party_get', 'sets',
-     ['header', 'categories', 'contacts', 'engagements', 'history', 'customValues', 'duplicates']),
+     ['header', 'categories', 'contacts', 'engagements', 'history', 'customValues', 'duplicates', 'transitions',
+      'matchReviews']),
     ('SaveThirdParty', 'POST', 'third-parties', 'sp_tprm_third_party_save', 'command', None),
     ('SetThirdPartyStatus', 'POST', 'third-parties/{thirdPartyId}/status', 'sp_tprm_third_party_status', 'command', None),
-    ('Vendors', 'GET', 'vendors', 'sp_tprm_vendor_discovery', 'rows', None),
-    ('ImportVendor', 'POST', 'vendors/{vendorId}/import', 'sp_tprm_vendor_import', 'command', None),
+    ('ReviewVendorMatch', 'POST', 'third-parties/{thirdPartyId}/match-reviews', 'sp_tprm_vendor_match_review_save',
+     'command', None),
     ('LoadSamples', 'POST', 'samples/load', 'sp_tprm_sample_load', 'command', None),
     # ---- engagements, discovery, inherent risk (488) --------------------
     ('Engagements', 'GET', 'engagements', 'sp_tprm_engagement_list', 'rows', None),
     ('Engagement', 'GET', 'engagements/{engagementId}', 'sp_tprm_engagement_get', 'sets',
      ['header', 'scope', 'links', 'snapshots', 'history', 'customValues', 'dimensions']),
     ('SaveEngagement', 'POST', 'engagements', 'sp_tprm_engagement_save', 'command', None),
+    # 522 (CR 2 5.2): Scope & Exposure -- gating answers, exposure fields and
+    # the proposed scope items as one set.
+    ('SaveEngagementExposure', 'POST', 'engagements/{engagementId}/exposure', 'sp_tprm_engagement_exposure_save',
+     'command', None),
+    # 523 (CR 2 6-7): screening, applicability decision, admission approval
+    ('Applicability', 'GET', 'engagements/{engagementId}/applicability', 'sp_tprm_applicability_get', 'sets',
+     ['reports', 'report', 'observations', 'decisions', 'admissions', 'approvals']),
+    ('RunScreening', 'POST', 'engagements/{engagementId}/screening', 'sp_tprm_screening_run', 'command', None),
+    ('DecideApplicability', 'POST', 'engagements/{engagementId}/applicability', 'sp_tprm_applicability_decide', 'command', None),
+    ('ActOnAdmission', 'POST', 'admissions/{admissionId}/act', 'sp_tprm_admission_act', 'command', None),
+    ('WithdrawAdmission', 'POST', 'admissions/{admissionId}/withdraw', 'sp_tprm_admission_withdraw', 'command', None),
+    # 524 (CR 2 8): TP Risk Register -- vendor-level records of admitted vendors
+    ('RiskRegister', 'GET', 'risk-register', 'sp_tprm_register_list', 'rows', None),
+    ('RiskRegisterRecord', 'GET', 'risk-register/{registerId}', 'sp_tprm_register_get', 'sets',
+     ['header', 'areas', 'ratingHistory', 'dimensions', 'engagements', 'findings', 'decisions', 'admissions',
+      'impactReviews', 'reviews', 'history', 'profileReviews']),
+    ('RateProfileArea', 'POST', 'risk-register/{registerId}/ratings', 'sp_tprm_register_rating_save', 'command', None),
+    ('DecideImpactReview', 'POST', 'risk-register/impact-reviews/{impactReviewId}/decide',
+     'sp_tprm_register_impact_review_decide', 'command', None),
+    ('CloseRegisterRecord', 'POST', 'risk-register/{registerId}/close', 'sp_tprm_register_close', 'command', None),
+    # 525: periodic review of the vendor profile
+    ('RecordProfileReview', 'POST', 'risk-register/{registerId}/profile-reviews', 'sp_tprm_register_profile_review_save',
+     'command', None),
     ('SaveScopeItem', 'POST', 'engagements/{engagementId}/scope', 'sp_tprm_scope_item_save', 'command', None),
     ('RemoveScopeItem', 'POST', 'engagements/scope/{scopeItemId}/remove', 'sp_tprm_scope_item_remove', 'command', None),
     ('Discovery', 'GET', 'engagements/{engagementId}/discovery', 'sp_tprm_engagement_discover', 'sets',
@@ -159,7 +189,8 @@ E = [
 ]
 
 # GET discovery is a preview; POST persists (fixed values, not request fields).
-FIXED = {('Discovery', 'persist'): 'false', ('PersistDiscovery', 'persist'): 'true'}
+FIXED = {('Discovery', 'persist'): 'false', ('PersistDiscovery', 'persist'): 'true',
+         ('RunScreening', 'trigger_code'): '"REFRESH"'}
 
 for name, method, route, proc, kind, extra in E:
     assert proc in SIGS, proc
@@ -371,7 +402,7 @@ service = f'''// ===============================================================
 // session (TprmCaller); @caller_role_names is left to SQL, which derives
 // it from organization_employee.role_id.
 //
-// Errors: a THROW in 57500-57999 (TPRM), 55000-56299 (Gap Register / Risk
+// Errors: a THROW in 57500-58149 (TPRM; 521-523 use 58000-58149), 55000-56299 (Gap Register / Risk
 // Centre procedures TPRM calls) or 50000 is a sentence for the user and is
 // returned as is; a missing procedure (2812) says which migrations to
 // run; anything else is logged and replaced by a generic sentence.
@@ -425,7 +456,7 @@ public sealed class TprmService(
     {{
         if (ex is SqlException sql)
         {{
-            if (sql.Number is (>= 57500 and <= 57999) or (>= 55000 and <= 56299) or 50000)
+            if (sql.Number is (>= 57500 and <= 58149) or (>= 55000 and <= 56299) or 50000)
                 return sql.Message;
             if (sql.Number == 2812)
             {{
@@ -624,15 +655,16 @@ public sealed class TprmController(ITprmService tprmService) : ControllerBase
     {{
         if (!result.Success) return BadRequest(new {{ error = result.Error }});
         var outcome = result.Row is not null && result.Row.TryGetValue("Result", out var r) ? r?.ToString() : null;
-        // 409: nothing saved -- possible duplicates; the screen shows them and
-        // offers "Register anyway" (confirmDuplicates).
+        // 409: nothing saved -- possible duplicates that still need a review
+        // (521); the screen shows them and asks, for each, why it is a
+        // different vendor, then saves again with matchReviewsJson.
         return string.Equals(outcome, "DUPLICATES", StringComparison.OrdinalIgnoreCase)
             ? Conflict(new
               {{
                   duplicate = true,
                   result = result.Row,
                   duplicates = result.Duplicates,
-                  error = "This looks like a third party that is already registered. Check the matches below."
+                  error = "Possible duplicates found. Nothing was saved: review each match below."
               }})
             : Ok(new {{ success = true, result = result.Row }});
     }}

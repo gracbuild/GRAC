@@ -1,16 +1,22 @@
 // =====================================================================
-// Engagements (migrations 486-490). Loaded by tprm-engagements.cshtml.
-// The list, and the workspace of one engagement (BRD steps 2-5 + lifecycle).
+// Engagement Management (migrations 486-490; 522 -- CR 2 section 5).
+// Loaded by tprm-engagements.cshtml. The list, the engagement page (initial
+// form / edit), the Scope & Exposure page, and the workspace of one
+// engagement (BRD steps 2-5 + lifecycle).
 // Backend: practice/api/tprm (TprmController -> sp_tprm_*); docs/tprm.md
 // section 9 lists every endpoint. Rows are the procedures' columns.
 //
 //   list        GET engagements
+//   pages       POST engagements (enEditor: the CR 2 5.1 initial form, edit)
+//               POST engagements/{id}/exposure (enExposure: gating questions,
+//               the dimensions that apply, the proposed scope as one set)
 //   workspace   GET engagements/{id} (header, scope, links, snapshots,
 //               history, customValues, dimensions); each step loads its own
 //               data when opened:
 //     Scope     GET engagements/{id}/discovery (preview), POST ... (record)
-//               POST engagements, engagements/{id}/scope, engagements/scope/{id}/remove,
-//               engagements/{id}/links, engagements/links/{id}/action
+//               POST engagements/{id}/scope, engagements/scope/{id}/remove
+//               (ACTUAL items only), engagements/{id}/links,
+//               engagements/links/{id}/action
 //     Risk      POST engagements/{id}/risk-assessments; GET risk-assessments/{id};
 //               POST risk-assessments/{id}/answers | /complete
 //     DD        POST/GET engagements/{id}/due-diligence; POST due-diligence/responses/{id}
@@ -54,7 +60,12 @@
     state.pager = window.__pmGrid ? window.__pmGrid.attach({ hostId: "enPager", onChange: refreshList }) : null;
     state.drill = window.__pmDrill ? window.__pmDrill.read() : null;
     bind();
-    state.org = await T.orgs("enOrg");
+    // 524 / 525: a link onto one engagement (TP Risk Register, Vendor
+    // Registry, Reviews, dashboards) carries it in the encrypted navigation
+    // code (?code=), never as ?engagementId=; Vendor Registry -> New
+    // engagement carries the vendor the same way (TprmThirdParty).
+    const ctx = await T.navigationContext("tprm-engagements");
+    state.org = await T.orgs("enOrg", ctx?.organizationId);
     await loadOrg();
     const q = new URLSearchParams(window.location.search);
     // Dashboard drill (490): stage / band / criticality / attention.
@@ -62,12 +73,14 @@
     if (q.get("band")) preselect("enBandFilter", q.get("band"));
     if (q.get("criticality")) preselect("enCriticalityFilter", q.get("criticality"));
     if (q.get("attention")) preselect("enAttentionFilter", q.get("attention"));
-    if (state.drill?.active || q.get("stage") || q.get("band") || q.get("criticality") || q.get("attention"))
+    if (q.get("applicability")) preselect("enApplicabilityFilter", q.get("applicability"));   // 525 dashboard drill
+    if (state.drill?.active || q.get("stage") || q.get("band") || q.get("criticality") || q.get("attention") || q.get("applicability"))
       window.__pmDrill?.banner(ensureBanner(), { ...(state.drill || {}), active: true, label: q.get("drillLabel") || "a dashboard selection" });
     await refreshList();
-    const id = Number(q.get("engagementId"));
+    if (ctx?.error) show("enMessage", ctx.error);
+    const id = ctx?.filterType === "TprmEngagement" ? ctx.filterId : null;
     if (id > 0 && state.org) openWorkspace(id);
-    const tp = Number(q.get("newForThirdParty"));
+    const tp = ctx?.filterType === "TprmThirdParty" ? ctx.filterId : null;
     if (tp > 0 && state.org && CAN_ADD) editEngagement(null, tp);
   }
   function ensureBanner() {
@@ -86,7 +99,7 @@
     document.getElementById("enRefresh").addEventListener("click", () => refreshList());
     let t = null;
     document.getElementById("enSearch").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { state.pager?.reset(true); refreshList(); }, 300); });
-    ["enStageFilter", "enBandFilter", "enCriticalityFilter", "enAttentionFilter"].forEach(id =>
+    ["enStageFilter", "enBandFilter", "enCriticalityFilter", "enAttentionFilter", "enApplicabilityFilter"].forEach(id =>
       document.getElementById(id).addEventListener("change", () => { state.pager?.reset(true); refreshList(); }));
     document.getElementById("enNew")?.addEventListener("click", () => editEngagement(null));
     document.getElementById("enListBody").addEventListener("click", ev => {
@@ -130,13 +143,13 @@
 
   async function refreshList() {
     const body = document.getElementById("enListBody");
-    if (!state.org) { body.innerHTML = empty(8, "Select an organization."); state.pager?.clear(); return; }
-    body.innerHTML = empty(8, "Loading...");
+    if (!state.org) { body.innerHTML = empty(9, "Select an organization."); state.pager?.clear(); return; }
+    body.innerHTML = empty(9, "Loading...");
     const res = await api("GET", `/engagements?${qs({
       organizationId: state.org, search: val("enSearch"), stageCode: val("enStageFilter"), bandCode: val("enBandFilter"),
-      criticalityCode: val("enCriticalityFilter"), attention: val("enAttentionFilter"),
+      criticalityCode: val("enCriticalityFilter"), attention: val("enAttentionFilter"), applicabilityStatus: val("enApplicabilityFilter"),
       pageNumber: state.pager ? state.pager.page() : 1, pageSize: state.pager ? state.pager.size() : 25 })}`);
-    if (!res.ok) { body.innerHTML = empty(8, res.error); state.pager?.clear(); return; }
+    if (!res.ok) { body.innerHTML = empty(9, res.error); state.pager?.clear(); return; }
     const rows = res.data.data || [];
     state.pager?.setTotal(res.data.totalRows, rows.length);
     body.innerHTML = rows.map(r => `<tr data-en-row="${esc(F(r, "engagementId"))}">
@@ -145,98 +158,284 @@
             ${yes(F(r, "reassessmentRequired")) ? '<div class="tprm-alert">Reassessment required</div>' : ""}</td>
         <td>${esc(F(r, "thirdPartyCode"))} ${esc(F(r, "thirdPartyName"))}</td>
         <td>${esc(T.stageLabel(F(r, "stageCode")))}</td>
+        <td>${esc(applicabilityLabel(F(r, "applicabilityStatus")))}${F(r, "screeningClassification") ? `<div>${classBadge(F(r, "screeningClassification"))}</div>` : ""}</td>
         <td>${T.badge(F(r, "criticality"), F(r, "criticalityColor")) || "--"}</td>
         <td>${F(r, "residualBandCode")
               ? `${T.band(F(r, "residualBand"), F(r, "residualBandColor"), F(r, "residualScore"))}<div class="tprm-muted">residual</div>`
               : `${T.band(F(r, "inherentBand"), F(r, "inherentBandColor"), F(r, "inherentScore"))}${F(r, "inherentBandCode") ? '<div class="tprm-muted">inherent</div>' : ""}`}</td>
         <td>${esc(date(F(r, "nextReviewDt")) || "--")}</td>
         <td>${esc(F(r, "businessOwnerName") || "--")}</td>
-      </tr>`).join("") || empty(8, "No engagements match.");
+      </tr>`).join("") || empty(9, "No engagements match.");
   }
 
   // ================================================================== create / edit
+  // Engagement page (enEditor), POST engagements -- CR 2 5.1: the initial
+  // information (all of it mandatory except the proposed end date). The
+  // service category and relationship owner default from the vendor and stay
+  // editable. Editing adds the administrative fields. A new engagement then
+  // goes straight to Scope & Exposure.
   async function editEngagement(eng, forThirdPartyId) {
     const lk = state.lk;
     const h = eng || {};
-    let thirdParties = [];
+    let vendors = [];
     if (!eng) {
+      // 522: an engagement is opened for an Active vendor only.
       const r = await api("GET", `/third-parties?${qs({ organizationId: state.org, pageNumber: 1, pageSize: 200 })}`);
-      thirdParties = r.ok ? (r.data.data || []).map(x => ({ value: F(x, "thirdPartyId"), label: `${F(x, "thirdPartyCode")} - ${F(x, "legalName")}` })) : [];
-      if (!thirdParties.length) { show("enMessage", "Register the third party first (Third Parties screen)."); return; }
+      vendors = r.ok ? (r.data.data || []).filter(x => F(x, "statusMeaning") === "ACTIVE") : [];
+      if (!vendors.length) { show("enMessage", "Register the vendor first (Vendor Registry). Engagements are opened for active vendors."); return; }
     }
-    const contracts = lk.contracts.filter(c => F(c, "contractId") != null)
-      .map(c => ({ value: F(c, "contractId"), label: `${F(c, "contractNumber")} - ${F(c, "contractName")}` }));
+    const vendorOf = id => vendors.find(x => String(F(x, "thirdPartyId")) === String(id));
+    const first = forThirdPartyId ? vendorOf(forThirdPartyId) : null;
     const emp = lk.employeeOptions();
     const fields = [
-      ...(eng ? [] : [{ name: "thirdPartyId", label: "Third party", type: "select", options: thirdParties, value: forThirdPartyId || "", required: true }]),
-      { name: "engagementTitle", label: "Engagement title", required: true, maxLength: 250, value: F(h, "engagementTitle"), full: true },
-      { type: "section", label: "Service and scope", name: "_s" },
-      { name: "serviceCategoryCode", label: "Service category", type: "select", options: lk.options("SERVICE_CATEGORY"), value: F(h, "serviceCategoryCode") },
-      { name: "engagementTypeCode", label: "Engagement type", type: "select", options: lk.options("ENGAGEMENT_TYPE"), value: F(h, "engagementTypeCode") },
-      { name: "serviceModelCode", label: "Service / delivery model", type: "select", options: lk.options("SERVICE_MODEL"), value: F(h, "serviceModelCode") },
-      { name: "serviceCriticalityCode", label: "Service criticality", type: "select", options: lk.options("CRITICALITY"), value: F(h, "criticalityCode"), required: true },
-      { name: "dataExposureCode", label: "Most sensitive data exposure", type: "select", options: lk.options("DATA_EXPOSURE"), value: F(h, "dataExposureCode"),
-        help: "Recorded as a proposed data-category scope item too. Needed before the inherent risk assessment." },
-      { name: "isExisting", label: "Existing relationship (already in place)", type: "checkbox", value: F(h, "isExisting") },
-      { name: "serviceDescription", label: "Service description", type: "textarea", maxLength: 2000, value: F(h, "serviceDescription") },
-      { name: "scopeDescription", label: "Scope description", type: "textarea", maxLength: 2000, value: F(h, "scopeDescription") },
-      { name: "businessPurpose", label: "Business purpose", type: "textarea", rows: 2, maxLength: 1000, value: F(h, "businessPurpose") },
-      { name: "deliveryLocations", label: "Delivery locations (countries / sites)", maxLength: 1000, value: F(h, "deliveryLocations"), full: true },
-      { type: "section", label: "People", name: "_p" },
-      { name: "businessOwnerEmployeeId", label: "Business owner", type: "select", options: emp, value: F(h, "businessOwnerEmployeeId") },
-      { name: "relationshipOwnerEmployeeId", label: "Relationship owner", type: "select", options: emp, value: F(h, "relationshipOwnerEmployeeId") },
-      { name: "assessorEmployeeId", label: "Due-diligence assessor", type: "select", options: emp, value: F(h, "assessorEmployeeId") },
-      { type: "section", label: "Contract and dates", name: "_c" },
-      { name: "contractId", label: "Contract (Asset & Contract)", type: "select", options: contracts, value: F(h, "contractId") },
-      { name: "contractReference", label: "Contract reference", maxLength: 200, value: F(h, "contractReference") },
-      { name: "contractValue", label: "Contract value", type: "number", step: "0.01", value: F(h, "contractValue") },
-      { name: "currencyCode", label: "Currency", maxLength: 10, value: F(h, "currencyCode") },
-      { name: "proposedStartDt", label: "Proposed start", type: "date", value: F(h, "proposedStartDt") },
-      { name: "proposedEndDt", label: "Proposed end", type: "date", value: F(h, "proposedEndDt") },
-      { name: "renewalDt", label: "Renewal date", type: "date", value: F(h, "renewalDt") },
-      { name: "rtoHours", label: "RTO (hours)", type: "number", min: 0, value: F(h, "rtoHours") },
-      { name: "rpoHours", label: "RPO (hours)", type: "number", min: 0, value: F(h, "rpoHours") },
-      { name: "slaSummary", label: "SLA summary", type: "textarea", rows: 2, maxLength: 2000, value: F(h, "slaSummary") },
-      { name: "notes", label: "Notes", type: "textarea", rows: 2, value: F(h, "notes") },
+      ...(eng ? [] : [{ name: "thirdPartyId", label: "Vendor", type: "select", required: true, value: first ? F(first, "thirdPartyId") : "",
+                        options: vendors.map(x => ({ value: F(x, "thirdPartyId"), label: `${F(x, "thirdPartyCode")} - ${F(x, "legalName")}` })) }]),
+      { name: "engagementTitle", label: "Engagement name", required: true, maxLength: 250, value: F(h, "engagementTitle"), full: !!eng },
+      { name: "serviceCategoryCode", label: "Service category", type: "select", options: lk.options("SERVICE_CATEGORY"), required: true,
+        value: eng ? F(h, "serviceCategoryCode") : (first ? F(first, "serviceCategoryCode") : ""), help: "Defaults from the vendor; change it for this engagement if needed." },
+      { name: "engagementTypeCode", label: "Engagement type", type: "select", options: lk.options("ENGAGEMENT_TYPE"), value: F(h, "engagementTypeCode"), required: true },
+      { name: "serviceModelCode", label: "Service model", type: "select", options: lk.options("SERVICE_MODEL"), value: F(h, "serviceModelCode"), required: true },
+      { name: "serviceRecipient", label: "Service recipient", maxLength: 250, value: F(h, "serviceRecipient"), required: true,
+        help: "The business unit or entity that receives the service." },
+      { name: "deliveryLocations", label: "Delivery location", maxLength: 1000, value: F(h, "deliveryLocations"), required: true,
+        help: "Countries / sites from which the service is delivered." },
+      { name: "relationshipOwnerEmployeeId", label: "Relationship owner", type: "select", options: emp, required: true,
+        value: eng ? F(h, "relationshipOwnerEmployeeId") : (first ? F(first, "relationshipOwnerEmployeeId") : "") },
+      { name: "proposedStartDt", label: "Proposed start date", type: "date", value: F(h, "proposedStartDt"), required: true },
+      { name: "proposedEndDt", label: "Proposed end date", type: "date", value: F(h, "proposedEndDt") },
+      { name: "serviceDescription", label: "Service description", type: "textarea", maxLength: 2000, value: F(h, "serviceDescription"), required: true },
+      { name: "businessPurpose", label: "Business purpose", type: "textarea", rows: 2, maxLength: 1000, value: F(h, "businessPurpose"), required: true },
+      ...(eng ? [
+        { type: "section", label: "Administration", name: "_adm" },
+        { name: "businessOwnerEmployeeId", label: "Business owner", type: "select", options: emp, value: F(h, "businessOwnerEmployeeId") },
+        { name: "assessorEmployeeId", label: "Due-diligence assessor", type: "select", options: emp, value: F(h, "assessorEmployeeId") },
+        { name: "isExisting", label: "Existing relationship (already in place)", type: "checkbox", value: F(h, "isExisting") },
+        { name: "actualStartDt", label: "Actual start", type: "date", value: F(h, "actualStartDt") },
+        { name: "actualEndDt", label: "Actual end", type: "date", value: F(h, "actualEndDt") },
+        { name: "scopeDescription", label: "Scope description", type: "textarea", maxLength: 2000, value: F(h, "scopeDescription") },
+        { name: "notes", label: "Notes", type: "textarea", rows: 2, value: F(h, "notes") }
+      ] : []),
       ...T.customFields(lk, "ENGAGEMENT", eng ? (state.eng.customValues || []) : [])
     ];
     const res = await T.form({
-      title: eng ? `Edit ${F(h, "engagementCode")}` : "New engagement", wide: true, submitText: eng ? "Save" : "Create",
-      intro: eng && ["APPROVED", "ONBOARDING", "ACTIVE", "SUSPENDED"].includes(F(h, "stageCode"))
-        ? "A change of criticality, data exposure, service model or delivery locations on an approved or live engagement is a material change: it is recorded and the engagement is flagged for reassessment." : "",
+      page: "enEditor", onOpen: () => {
+        swapPage(true);
+        // The vendor's primary category and owner fill the empty fields when
+        // the vendor is chosen.
+        const sel = document.querySelector('#enEditor [data-tf="thirdPartyId"]');
+        sel?.addEventListener("change", () => {
+          const v = vendorOf(sel.value);
+          if (!v) return;
+          const cat = document.querySelector('#enEditor [data-tf="serviceCategoryCode"]');
+          const owner = document.querySelector('#enEditor [data-tf="relationshipOwnerEmployeeId"]');
+          if (cat && !cat.value) cat.value = F(v, "serviceCategoryCode") || "";
+          if (owner && !owner.value && F(v, "relationshipOwnerEmployeeId") != null) owner.value = String(F(v, "relationshipOwnerEmployeeId"));
+        });
+      }, onClose: () => swapPage(false),
+      title: eng ? `Edit ${F(h, "engagementCode")} - ${F(h, "engagementTitle")}` : "New engagement", submitText: eng ? "Save" : "Create",
+      intro: eng
+        ? (["APPROVED", "ONBOARDING", "ACTIVE", "SUSPENDED"].includes(F(h, "stageCode"))
+          ? "A change of service model or delivery location on an approved or live engagement is a material change: it is recorded and the engagement is flagged for reassessment." : "")
+        : "The initial information of the engagement. Its scope and exposure are asked next, on the Scope & Exposure page -- only the parts that apply to this service.",
       fields,
+      validate: v => v.proposedEndDt && v.proposedStartDt && v.proposedEndDt < v.proposedStartDt ? "The proposed end date is before the start date." : null,
       onSubmit: async v => {
         const r = await api("POST", "/engagements", {
           organizationId: state.org, engagementId: eng ? F(h, "engagementId") : null,
           thirdPartyId: eng ? F(h, "thirdPartyId") : Number(v.thirdPartyId),
-          engagementTitle: v.engagementTitle, serviceDescription: v.serviceDescription, scopeDescription: v.scopeDescription,
-          businessPurpose: v.businessPurpose, serviceCategoryCode: v.serviceCategoryCode, engagementTypeCode: v.engagementTypeCode,
-          serviceModelCode: v.serviceModelCode, deliveryLocations: v.deliveryLocations, isExisting: !!v.isExisting,
-          contractId: v.contractId ? Number(v.contractId) : null, contractReference: v.contractReference,
-          contractValue: v.contractValue, currencyCode: v.currencyCode, proposedStartDt: v.proposedStartDt, proposedEndDt: v.proposedEndDt,
-          renewalDt: v.renewalDt, businessOwnerEmployeeId: num(v.businessOwnerEmployeeId), relationshipOwnerEmployeeId: num(v.relationshipOwnerEmployeeId),
-          assessorEmployeeId: num(v.assessorEmployeeId), serviceCriticalityCode: v.serviceCriticalityCode, dataExposureCode: v.dataExposureCode,
-          rtoHours: v.rtoHours, rpoHours: v.rpoHours, slaSummary: v.slaSummary, notes: v.notes, customJson: T.customJson(v),
-          expectedRecordVersion: eng ? F(h, "recordVersion") : null
+          engagementTitle: v.engagementTitle, serviceCategoryCode: v.serviceCategoryCode, serviceDescription: v.serviceDescription,
+          businessPurpose: v.businessPurpose, serviceRecipient: v.serviceRecipient, engagementTypeCode: v.engagementTypeCode,
+          serviceModelCode: v.serviceModelCode, deliveryLocations: v.deliveryLocations, proposedStartDt: v.proposedStartDt,
+          proposedEndDt: v.proposedEndDt, relationshipOwnerEmployeeId: num(v.relationshipOwnerEmployeeId),
+          ...(eng ? {
+            scopeDescription: v.scopeDescription, isExisting: !!v.isExisting, businessOwnerEmployeeId: num(v.businessOwnerEmployeeId),
+            assessorEmployeeId: num(v.assessorEmployeeId), actualStartDt: v.actualStartDt, actualEndDt: v.actualEndDt, notes: v.notes,
+            expectedRecordVersion: F(h, "recordVersion")
+          } : {}),
+          customJson: T.customJson(v)
         });
         return r.ok ? { ok: true, id: F(r.data.result, "engagementId"), outcome: F(r.data.result, "result") } : r;
       }
     });
     if (!res) return;
-    if (res.result.outcome === "MATERIAL_CHANGE") show("enWsMessage", "Saved. This is a material change: the engagement is flagged for reassessment.", "info");
-    if (eng) await reloadWorkspace(); else { await refreshList(); openWorkspace(res.result.id); }
+    if (eng) {
+      await reloadWorkspace();
+      show("enWsMessage", res.result.outcome === "MATERIAL_CHANGE"
+        ? "Saved. This is a material change: the engagement is flagged for reassessment." : "Engagement saved.",
+        res.result.outcome === "MATERIAL_CHANGE" ? "info" : "success");
+      return;
+    }
+    await refreshList();
+    if (await openWorkspace(res.result.id)) await editExposure(true);
+  }
+
+  // The list or workspace steps aside while a page (enEditor / enExposure)
+  // is open, with the screen heading; it comes back when the page closes.
+  function swapPage(open) {
+    document.getElementById("enHeading").hidden = open;
+    document.getElementById(state.eng && state.id ? "enWs" : "enList").hidden = open;
+  }
+
+  // ================================================================== scope & exposure
+  // Scope & Exposure page (enExposure), POST engagements/{id}/exposure --
+  // CR 2 5.2 / 5.3. Gating questions open only the dimensions that apply;
+  // the details of a dimension answered No (or Not sure) are cleared on
+  // save. The proposed scope items are saved as one set (scopeJson).
+  const ANSWERS = [{ value: "YES", label: "Yes" }, { value: "NO", label: "No" }, { value: "UNKNOWN", label: "Not sure" }];
+  const GATES = [
+    { name: "appAccessAnswer", key: "appAccessAnswer", label: "Will the vendor access or support our applications or systems?" },
+    { name: "premisesAccessAnswer", key: "premisesAccessAnswer", label: "Will the vendor have physical access to our premises?" },
+    { name: "dataProcessingAnswer", key: "dataProcessingAnswer", label: "Will the vendor access, process, store or transmit organization or customer data?" },
+    { name: "subcontractingAnswer", key: "subcontractingAnswer", label: "Will the vendor use subcontractors or other third parties for this service?" },
+    { name: "importantProcessAnswer", key: "importantProcessAnswer", label: "Does the service support an important business process or function?" },
+    { name: "disruptionImpactAnswer", key: "disruptionImpactAnswer", label: "Could a disruption of the service affect business operations?" },
+    { name: "serviceCommitmentAnswer", key: "serviceCommitmentAnswer", label: "Are service commitments (SLA, recovery objectives) part of the service?" },
+    { name: "contractAnswer", key: "contractAnswer", label: "Is there a contract for this engagement?" }
+  ];
+  const yesTo = (...names) => names.map(field => ({ field, values: ["YES"] }));
+  // GRAC records of a kind as multi options ("r:<id>"), plus the proposed
+  // items of that kind the lookups do not offer -- named outside GRAC
+  // ("n:<name>") or a GRAC record no longer active -- so a save keeps them.
+  function recordOptions(list, kind, proposed) {
+    const own = list.map(x => ({ value: `r:${F(x, "id")}`, label: F(x, "name") }));
+    const known = new Set(own.map(o => o.value));
+    const stored = proposed.filter(s => F(s, "itemKind") === kind).map(s => F(s, "refId") != null
+      ? { value: `r:${F(s, "refId")}`, label: `${F(s, "itemName")} (no longer active)` }
+      : { value: `n:${F(s, "itemName")}`, label: `${F(s, "itemName")} (not in GRAC)` });
+    return own.concat(stored.filter(o => !known.has(o.value)));
+  }
+  // A list's options plus the codes already recorded that are no longer in
+  // force (retired / hidden), so a save keeps them.
+  function codeOptions(listCode, codes, storedLabel) {
+    const own = state.lk.options(listCode);
+    const known = new Set(own.map(o => String(o.value)));
+    return own.concat(codes.filter(c => c != null && !known.has(String(c)))
+      .map(c => ({ value: c, label: `${storedLabel(c) || c} (no longer in use)` })));
+  }
+  function refValues(kind, proposed) {
+    return proposed.filter(s => F(s, "itemKind") === kind).map(s => F(s, "refId") != null ? `r:${F(s, "refId")}` : `n:${F(s, "itemName")}`);
+  }
+  function refItems(kind, values, otherText) {
+    const items = (values || []).map(v => v.startsWith("r:") ? { kind, refId: Number(v.substring(2)) } : { kind, itemName: v.substring(2) });
+    String(otherText || "").split("\n").map(x => x.trim()).filter(Boolean).forEach(itemName => items.push({ kind, itemName }));
+    return items;
+  }
+
+  async function editExposure(afterCreate) {
+    const lk = state.lk;
+    const h = state.eng.header[0];
+    const proposed = (state.eng.scope || []).filter(s => F(s, "exposureMode") === "PROPOSED");
+    const codes = kind => proposed.filter(s => F(s, "itemKind") === kind).map(s => F(s, "itemCode"));
+    const storedName = kind => code => F(proposed.find(s => F(s, "itemKind") === kind && F(s, "itemCode") === code), "itemName");
+    const contracts = lk.contracts.filter(c => F(c, "contractId") != null)
+      .map(c => ({ value: F(c, "contractId"), label: `${F(c, "contractNumber")} - ${F(c, "contractName")}` }));
+    const fields = [
+      { type: "section", label: "Exposure questions", name: "_q" },
+      ...GATES.map(g => ({ name: g.name, label: g.label, type: "select", options: ANSWERS, blank: "Not answered", value: F(h, g.key) })),
+      { type: "section", label: "Business continuity", name: "_crit" },
+      { name: "serviceCriticalityCode", label: "Service criticality", type: "select", options: lk.options("CRITICALITY"), value: F(h, "criticalityCode"), required: true },
+      { name: "customerImpactCode", label: "Customer impact", type: "select", options: lk.options("CUSTOMER_IMPACT"), value: F(h, "customerImpactCode"), showWhen: yesTo("disruptionImpactAnswer") },
+      { name: "substitutabilityCode", label: "Substitutability", type: "select", options: lk.options("SUBSTITUTABILITY"), value: F(h, "substitutabilityCode"), showWhen: yesTo("disruptionImpactAnswer") },
+      { name: "exitDependencies", label: "Exit dependencies", type: "textarea", rows: 2, maxLength: 2000, value: F(h, "exitDependencies"), showWhen: yesTo("disruptionImpactAnswer"),
+        help: "What the organization depends on to leave this engagement: data, knowledge, assets, transition support, lock-in." },
+      { type: "section", label: "Business processes", name: "_proc", showWhen: yesTo("importantProcessAnswer") },
+      { name: "businessFunctions", label: "Business functions", type: "multi", options: recordOptions(lk.businessFunctions, "BUSINESS_FUNCTION", proposed),
+        value: refValues("BUSINESS_FUNCTION", proposed), showWhen: yesTo("importantProcessAnswer") },
+      { name: "processes", label: "Processes supported or performed", type: "multi", options: recordOptions(lk.processes, "PROCESS", proposed),
+        value: refValues("PROCESS", proposed), showWhen: yesTo("importantProcessAnswer") },
+      { name: "processesOther", label: "Other processes (not in GRAC) -- one per line", type: "textarea", rows: 2, showWhen: yesTo("importantProcessAnswer") },
+      { type: "section", label: "Applications and systems", name: "_app", showWhen: yesTo("appAccessAnswer") },
+      { name: "applications", label: "Applications, infrastructure and systems", type: "multi", options: recordOptions(lk.applications, "APPLICATION", proposed),
+        value: refValues("APPLICATION", proposed), showWhen: yesTo("appAccessAnswer") },
+      { name: "applicationsOther", label: "Other applications / systems (not in GRAC) -- one per line", type: "textarea", rows: 2, showWhen: yesTo("appAccessAnswer") },
+      { type: "section", label: "Access privileges", name: "_acc", showWhen: yesTo("appAccessAnswer", "premisesAccessAnswer") },
+      { name: "accessCodes", label: "Physical, logical, privileged and administrative access", type: "multi", options: codeOptions("ACCESS_CATEGORY", codes("ACCESS"), storedName("ACCESS")),
+        value: codes("ACCESS"), showWhen: yesTo("appAccessAnswer", "premisesAccessAnswer") },
+      { type: "section", label: "Data exposure", name: "_data", showWhen: yesTo("dataProcessingAnswer") },
+      { name: "dataCodes", label: "Data categories accessed, processed, stored or transmitted", type: "multi", options: codeOptions("DATA_EXPOSURE", codes("DATA_CATEGORY"), storedName("DATA_CATEGORY")),
+        value: codes("DATA_CATEGORY"), showWhen: yesTo("dataProcessingAnswer"), help: "The most sensitive category becomes the engagement's data exposure." },
+      { name: "dataProcessingDetails", label: "Processing details", type: "textarea", rows: 2, maxLength: 2000, value: F(h, "dataProcessingDetails"), showWhen: yesTo("dataProcessingAnswer"),
+        help: "How the data is handled: purpose, volume, where it is stored, retention, transfers." },
+      { type: "section", label: "Fourth parties", name: "_fp", showWhen: yesTo("subcontractingAnswer") },
+      { name: "fourthParties", label: "Subcontractors and other third-party dependencies", type: "rows", addText: "Add fourth party", showWhen: yesTo("subcontractingAnswer"),
+        columns: [{ name: "itemName", label: "Name", maxLength: 300, required: true },
+                  { name: "itemCode", label: "Category", type: "select", options: codeOptions("FOURTH_PARTY_CATEGORY", codes("FOURTH_PARTY"), c => lk.label("FOURTH_PARTY_CATEGORY", c)) },
+                  { name: "country", label: "Country", maxLength: 120 }],
+        value: proposed.filter(s => F(s, "itemKind") === "FOURTH_PARTY").map(s => ({ itemName: F(s, "itemName"), itemCode: F(s, "itemCode"), country: F(s, "country") })) },
+      { type: "section", label: "Delivery and processing locations", name: "_loc" },
+      { name: "locations", label: "Locations from which services are delivered or data is processed", type: "rows", addText: "Add location",
+        columns: [{ name: "itemName", label: "Site / location", maxLength: 300, required: true }, { name: "country", label: "Country", maxLength: 120 }],
+        value: proposed.filter(s => F(s, "itemKind") === "LOCATION").map(s => ({ itemName: F(s, "itemName"), country: F(s, "country") })) },
+      { type: "section", label: "Service commitments", name: "_sla", showWhen: yesTo("serviceCommitmentAnswer") },
+      { name: "slaSummary", label: "SLA", type: "textarea", rows: 2, maxLength: 2000, value: F(h, "slaSummary"), showWhen: yesTo("serviceCommitmentAnswer") },
+      { name: "rtoHours", label: "RTO (hours)", type: "number", min: 0, step: "1", value: F(h, "rtoHours"), showWhen: yesTo("serviceCommitmentAnswer") },
+      { name: "rpoHours", label: "RPO (hours)", type: "number", min: 0, step: "1", value: F(h, "rpoHours"), showWhen: yesTo("serviceCommitmentAnswer") },
+      { type: "section", label: "Contractual information", name: "_con", showWhen: yesTo("contractAnswer") },
+      { name: "contractId", label: "Contract (Asset & Contract)", type: "select", options: contracts, value: F(h, "contractId"), showWhen: yesTo("contractAnswer") },
+      { name: "contractReference", label: "Contract reference", maxLength: 200, value: F(h, "contractReference"), showWhen: yesTo("contractAnswer") },
+      { name: "contractValue", label: "Contract value", type: "number", step: "0.01", value: F(h, "contractValue"), showWhen: yesTo("contractAnswer") },
+      { name: "currencyCode", label: "Currency", maxLength: 10, value: F(h, "currencyCode"), showWhen: yesTo("contractAnswer") },
+      { name: "contractStartDt", label: "Valid from", type: "date", value: F(h, "contractStartDt"), showWhen: yesTo("contractAnswer") },
+      { name: "contractEndDt", label: "Valid until", type: "date", value: F(h, "contractEndDt"), showWhen: yesTo("contractAnswer") },
+      { name: "renewalDt", label: "Renewal date", type: "date", value: F(h, "renewalDt"), showWhen: yesTo("contractAnswer") },
+      { name: "contractDocuments", label: "Related documents", type: "textarea", rows: 2, maxLength: 1000, value: F(h, "contractDocuments"), showWhen: yesTo("contractAnswer"),
+        help: "References to the contract, schedules, DPA and other documents." }
+    ];
+    const live = ["APPROVED", "ONBOARDING", "ACTIVE", "SUSPENDED"].includes(F(h, "stageCode"));
+    const res = await T.form({
+      page: "enExposure", onOpen: () => swapPage(true), onClose: () => swapPage(false),
+      title: `Scope & Exposure - ${F(h, "engagementCode")} ${F(h, "engagementTitle")}`, submitText: "Save scope & exposure",
+      intro: (afterCreate ? "Engagement created. " : "")
+        + "Answer the questions; only the parts that apply to this service are asked. Answering No or Not sure clears the details recorded under that question when you save."
+        + (live ? " A change of criticality, data exposure, customer impact or substitutability on an approved or live engagement is a material change and flags the engagement for reassessment." : ""),
+      fields,
+      validate: v => v.contractEndDt && v.contractStartDt && v.contractEndDt < v.contractStartDt ? "The contract end date is before its start date."
+        : [v.rtoHours, v.rpoHours].some(x => x != null && (!Number.isInteger(x) || x < 0)) ? "RTO and RPO are whole numbers of hours, 0 or more." : null,
+      onSubmit: async v => {
+        const scope = [
+          ...refItems("BUSINESS_FUNCTION", v.businessFunctions),
+          ...refItems("PROCESS", v.processes, v.processesOther),
+          ...refItems("APPLICATION", v.applications, v.applicationsOther),
+          ...(v.accessCodes || []).map(itemCode => ({ kind: "ACCESS", itemCode })),
+          ...(v.dataCodes || []).map(itemCode => ({ kind: "DATA_CATEGORY", itemCode })),
+          ...(v.fourthParties || []).map(x => ({ kind: "FOURTH_PARTY", itemName: x.itemName, itemCode: x.itemCode, country: x.country })),
+          ...(v.locations || []).map(x => ({ kind: "LOCATION", itemName: x.itemName, country: x.country }))
+        ];
+        const r = await api("POST", `/engagements/${state.id}/exposure`, {
+          organizationId: state.org,
+          ...Object.fromEntries(GATES.map(g => [g.name, v[g.name]])),
+          serviceCriticalityCode: v.serviceCriticalityCode, customerImpactCode: v.customerImpactCode,
+          substitutabilityCode: v.substitutabilityCode, exitDependencies: v.exitDependencies,
+          dataProcessingDetails: v.dataProcessingDetails, slaSummary: v.slaSummary, rtoHours: v.rtoHours, rpoHours: v.rpoHours,
+          contractId: num(v.contractId), contractReference: v.contractReference, contractValue: v.contractValue,
+          currencyCode: v.currencyCode, contractStartDt: v.contractStartDt, contractEndDt: v.contractEndDt,
+          renewalDt: v.renewalDt, contractDocuments: v.contractDocuments,
+          scopeJson: JSON.stringify(scope), expectedRecordVersion: F(h, "recordVersion")
+        });
+        return r.ok ? { ok: true, outcome: F(r.data.result, "result") } : r;
+      }
+    });
+    if (!res) return;
+    await reloadWorkspace();
+    // 523: the save generated a new screening report -- show it.
+    selectTab("SCREEN");
+    const screened = `Screening report v${H("screeningVersionNo") ?? ""} generated: ${(CLASSIFICATION[H("screeningClassification")] || {}).label || ""}.`;
+    show("enWsMessage", res.result.outcome === "MATERIAL_CHANGE"
+      ? `Scope & exposure saved. This is a material change: the engagement is flagged for reassessment. ${screened}` : `Scope & exposure saved. ${screened}`,
+      res.result.outcome === "MATERIAL_CHANGE" ? "info" : "success");
   }
 
   // ================================================================== workspace
   async function openWorkspace(id) {
     state.id = id;
     const ok = await reloadWorkspace();
-    if (!ok) return;
+    if (!ok) return false;
     document.getElementById("enList").hidden = true;
     document.getElementById("enWs").hidden = false;
     hide("enWsMessage");
-    selectTab(STEP_OF_STAGE[H("stageCode")] || "SCOPE");
+    selectTab(H("applicabilityStatus") !== "ADMITTED" ? (H("exposureSavedDt") ? "SCREEN" : "SCOPE") : (STEP_OF_STAGE[H("stageCode")] || "SCOPE"));
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return true;
   }
   function closeWorkspace() {
     state.id = null; state.eng = null;
@@ -262,7 +461,11 @@
       + (yes(H("isSample")) ? ' <span class="pm-badge tprm-sample">Sample record</span>' : "");
     document.getElementById("enWsSummary").innerHTML = info([
       ["Stage", `<strong>${esc(T.stageLabel(stage))}</strong> <span class="tprm-muted">since ${esc(date(H("stageDt")))}</span>`, true],
-      ["Criticality", T.badge(H("criticality"), H("criticalityColor")), true],
+      ["TPRM applicability", `${esc(applicabilityLabel(H("applicabilityStatus")))}${H("screeningClassification") ? `<div>${classBadge(H("screeningClassification"))}</div>` : ""}`, true],
+      // 524: the vendor's TP Risk Register record (CR 2 8.1)
+      H("registerId") ? ["TP Risk Register", `${btn("open-register", "fa-shield-halved", H("registerCode"))}${H("registerStatus") && H("registerStatus") !== "OPEN"
+        ? ` <span class="tprm-muted">${esc(REGISTER_STATUS[H("registerStatus")] || H("registerStatus"))}</span>` : ""}`, true] : null,
+      ["Criticality", T.badge(H("criticality"), H("criticalityColor")) || '<span class="tprm-muted">Not set -- Scope &amp; exposure</span>', true],
       ["Data exposure", H("dataExposure")],
       ["Inherent risk", T.band(H("inherentBand"), H("inherentBandColor"), H("inherentScore")), true],
       ["Due-diligence tier", H("ddTier")],
@@ -275,13 +478,18 @@
     banner.innerHTML = yes(H("reassessmentRequired"))
       ? `<p class="pm-message">Reassessment required: ${esc(H("reassessmentReason") || "")}. Start a new inherent risk assessment.</p>` : "";
     const b = [];
-    if (canEdit()) b.push(btn("edit-engagement", "fa-pen", "Edit"));
+    if (canEdit()) b.push(btn("edit-engagement", "fa-pen", "Edit"), btn("edit-exposure", "fa-list-check", "Scope & exposure", {}, null, H("exposureSavedDt") ? "" : "primary"));
     document.getElementById("enWsActions").innerHTML = b.join("");
     // Step chips: done / current.
     // Closed engagements: every step reached is done (EXITED) or none is current.
-    const order = ["SCOPE", "RISK", "DD", "DECISION", "ONBOARD"];
-    const current = STEP_OF_STAGE[stage] || null;
-    const reached = stage === "EXITED" ? order.length : current ? order.indexOf(current) : 0;
+    // 523: screening and the applicability decision come before the risk
+    // steps; until admission the current step is Scope or Screening.
+    const order = ["SCOPE", "SCREEN", "RISK", "DD", "DECISION", "ONBOARD"];
+    const current = isClosed() && stage !== "EXITED" ? null
+      : !admitted() ? (H("exposureSavedDt") ? "SCREEN" : "SCOPE")
+      : stage === "SCOPING" ? "RISK" : (STEP_OF_STAGE[stage] || null);
+    const reached = stage === "EXITED" ? order.length : current ? order.indexOf(current)
+      : H("applicabilityStatus") === "EXCLUDED" ? order.indexOf("RISK") : 0;
     order.forEach((s, i) => {
       const chip = document.querySelector(`[data-en-chip="${s}"]`);
       chip.classList.toggle("done", i < reached);
@@ -298,6 +506,7 @@
   async function renderTab(name) {
     if (!state.eng) return;
     if (name === "SCOPE") renderScope();
+    else if (name === "SCREEN") await renderScreening();
     else if (name === "RISK") await renderRisk();
     else if (name === "DD") await renderDd();
     else if (name === "DECISION") await renderDecision();
@@ -310,11 +519,14 @@
     const e = state.eng;
     const scope = e.scope || [];
     const links = e.links || [];
+    // 522: proposed items are changed on the Scope & Exposure page; only the
+    // actual (onboarding) items are removed one by one.
     const row = s => `<tr>
         <td>${esc(kindLabel(F(s, "itemKind")))}</td>
         <td>${esc(F(s, "itemName"))}${F(s, "country") ? ` <span class="tprm-muted">${esc(F(s, "country"))}</span>` : ""}${F(s, "notes") ? `<div class="tprm-muted">${esc(F(s, "notes"))}</div>` : ""}</td>
         <td>${state.lk.badge("CRITICALITY", F(s, "criticalityCode"))}${yes(F(s, "isCritical")) ? ' <span class="pm-badge">Critical</span>' : ""}</td>
-        <td>${canEdit() ? btn("scope-remove", "fa-trash", "", { id: F(s, "scopeItemId") }, "Remove") : ""}</td></tr>`;
+        <td>${canEdit() && F(s, "exposureMode") === "ACTUAL" ? btn("scope-remove", "fa-trash", "", { id: F(s, "scopeItemId") }, "Remove") : ""}</td></tr>`;
+    const answer = k => ({ YES: "Yes", NO: "No", UNKNOWN: "Not sure" })[H(k)] || '<span class="tprm-muted">Not answered</span>';
     const proposed = scope.filter(s => F(s, "exposureMode") === "PROPOSED");
     const actual = scope.filter(s => F(s, "exposureMode") === "ACTUAL");
     const linkRow = l => `<tr>
@@ -326,18 +538,31 @@
       <div class="tprm-subhead">Engagement</div>
       <div class="tprm-info">${info([
         ["Service category", H("serviceCategory")], ["Engagement type", H("engagementType")], ["Service model", H("serviceModel")],
-        ["Existing relationship", yes(H("isExisting")) ? "Yes" : "No"], ["Delivery locations", H("deliveryLocations")],
-        ["Contract", H("contractReference") || (H("contractId") ? `#${H("contractId")}` : "")],
+        ["Service recipient", H("serviceRecipient")], ["Delivery location", H("deliveryLocations")],
         ["Proposed term", [date(H("proposedStartDt")), date(H("proposedEndDt"))].filter(Boolean).join(" to ")],
         ["Actual term", [date(H("actualStartDt")), date(H("actualEndDt"))].filter(Boolean).join(" to ")],
-        ["RTO / RPO (hours)", [H("rtoHours"), H("rpoHours")].map(x => x ?? "--").join(" / ")],
         ["Relationship owner", H("relationshipOwnerName")], ["Assessor", H("assessorName")],
-        ["Service description", H("serviceDescription")], ["Scope", H("scopeDescription")], ["Business purpose", H("businessPurpose")],
-        ["SLA", H("slaSummary")],
+        ["Existing relationship", yes(H("isExisting")) ? "Yes" : "No"],
+        ["Service description", H("serviceDescription")], ["Business purpose", H("businessPurpose")], ["Scope", H("scopeDescription")],
         ...(e.customValues || []).map(c => [F(c, "label"), F(c, "value")])
       ])}</div>
-      <div class="tprm-subhead">Proposed exposure <span>${canEdit() ? btn("scope-add", "fa-plus", "Add scope item", { mode: "PROPOSED" }) : ""}</span></div>
-      <p class="tprm-note">What the third party will access, store, support or depend on, as proposed. It drives the risk-model prefill and which questionnaires and questions apply.</p>
+      <div class="tprm-subhead">Scope &amp; exposure <span>${canEdit() ? btn("edit-exposure", "fa-list-check", H("exposureSavedDt") ? "Edit scope & exposure" : "Capture scope & exposure", {}, null, H("exposureSavedDt") ? "" : "primary") : ""}</span></div>
+      <p class="tprm-note">${H("exposureSavedDt")
+        ? `Saved ${esc(T.dateTime(H("exposureSavedDt")))}${H("exposureSavedBy") ? ` by ${esc(H("exposureSavedBy"))}` : ""}. What the vendor will access, store, support or depend on, as proposed: it drives the risk-model prefill and which questionnaires and questions apply.`
+        : "Not captured yet. The questions ask only for the parts of the exposure that apply to this service."}</p>
+      <div class="pm-table-wrap"><table><thead><tr><th>Question</th><th>Answer</th></tr></thead><tbody>${GATES.map(g =>
+        `<tr><td>${esc(g.label)}</td><td>${answer(g.key)}</td></tr>`).join("")}</tbody></table></div>
+      <div class="tprm-info" style="margin-top:12px">${info([
+        ["Criticality", T.badge(H("criticality"), H("criticalityColor")), true], ["Data exposure", H("dataExposure")],
+        ["Processing details", H("dataProcessingDetails")],
+        ["Customer impact", H("customerImpact")], ["Substitutability", H("substitutability")], ["Exit dependencies", H("exitDependencies")],
+        ["SLA", H("slaSummary")], ["RTO / RPO (hours)", H("rtoHours") != null || H("rpoHours") != null ? [H("rtoHours"), H("rpoHours")].map(x => x ?? "--").join(" / ") : ""],
+        ["Contract", H("contractReference") || (H("contractId") ? `#${H("contractId")}` : "")],
+        ["Contract value", H("contractValue") != null ? [H("contractValue"), H("currencyCode")].filter(x => x != null).join(" ") : ""],
+        ["Contract validity", [date(H("contractStartDt")), date(H("contractEndDt"))].filter(Boolean).join(" to ")],
+        ["Renewal date", date(H("renewalDt"))], ["Related documents", H("contractDocuments")]
+      ])}</div>
+      <div class="tprm-subhead">Proposed exposure</div>
       <div class="pm-table-wrap"><table><thead><tr><th>Type</th><th>Item</th><th>Criticality</th><th></th></tr></thead>
         <tbody>${proposed.map(row).join("") || empty(4, "No proposed scope yet.")}</tbody></table></div>
       ${actual.length || ["ONBOARDING", "ACTIVE", "SUSPENDED"].includes(H("stageCode")) ? `
@@ -346,7 +571,7 @@
         <tbody>${actual.map(row).join("") || empty(4, "No actual exposure recorded.")}</tbody></table></div>` : ""}
       <div class="tprm-subhead">Discovered from GRAC
         <span>${btn("discover", "fa-magnifying-glass", "Discover")}${canEdit() ? btn("discover-record", "fa-floppy-disk", "Record discovery") : ""}</span></div>
-      <p class="tprm-note">Practice instances, obligations, dependencies, assurance findings, gaps, enterprise risks and contracts that already involve this third party's GRAC vendor or the applications in scope. Discovery only reads; "Record discovery" saves what was found as links to validate.</p>
+      <p class="tprm-note">Practice instances, obligations, dependencies, assurance findings, gaps, enterprise risks and the contract that already involve the applications in this engagement's scope (record them under Applications and systems on Scope &amp; exposure first). Discovery only reads; "Record discovery" saves what was found as links to validate.</p>
       <div id="enDiscovery">${state.discovery ? discoveryHtml(state.discovery) : ""}</div>
       <div class="tprm-subhead">Linked GRAC records <span>${canEdit() ? btn("link-add", "fa-link", "Link a record") : ""}</span></div>
       <div class="pm-table-wrap"><table><thead><tr><th>Type</th><th>Record</th><th>Source</th><th>Validation</th><th></th></tr></thead>
@@ -379,10 +604,12 @@
           r => [esc(F(r, "contractNumber")), esc(F(r, "contractName") || ""), esc(F(r, "contractStatus") || "")], "CONTRACT", "contractId");
   }
 
+  // ACTUAL exposure (onboarding) only, one item at a time; the PROPOSED
+  // exposure is saved on the Scope & Exposure page (522).
   async function addScopeItem(mode) {
     const lk = state.lk;
     const pick = await T.form({
-      title: mode === "ACTUAL" ? "Add actual exposure" : "Add proposed scope item", submitText: "Next",
+      title: "Add actual exposure", submitText: "Next",
       fields: [{ name: "kind", label: "Type", type: "select", options: SCOPE_KINDS, required: true, blank: "Choose" }]
     });
     if (!pick) return;
@@ -400,7 +627,7 @@
       { name: "isCritical", label: "Critical to the service", type: "checkbox" },
       { name: "notes", label: "Notes", type: "textarea", rows: 2, maxLength: 1000 });
     await T.form({
-      title: `${mode === "ACTUAL" ? "Actual" : "Proposed"}: ${kindLabel(kind)}`, submitText: "Add", fields,
+      title: `Actual: ${kindLabel(kind)}`, submitText: "Add", fields,
       onSubmit: async v => {
         const label = (listCode && v.itemCode) ? lk.label(listCode, v.itemCode) : null;
         const refName = refOptions && v.refId ? F(refOptions.find(x => String(F(x, "id")) === String(v.refId)), "name") : null;
@@ -415,13 +642,13 @@
 
   async function addLink() {
     const lk = state.lk;
-    const kinds = [{ value: "VENDOR", label: "GRAC vendor" }, { value: "APPLICATION", label: "Application" }, { value: "CONTRACT", label: "Contract" }];
+    // 521: no legacy GRAC vendor link -- the vendor is the Vendor Registry record.
+    const kinds = [{ value: "APPLICATION", label: "Application" }, { value: "CONTRACT", label: "Contract" }];
     const pick = await T.form({ title: "Link a GRAC record", submitText: "Next",
       intro: "Practice instances, dependencies and enterprise risks are linked from the discovery results.",
       fields: [{ name: "kind", label: "Record type", type: "select", options: kinds, required: true, blank: "Choose" }] });
     if (!pick) return;
-    const options = pick.kind === "VENDOR" ? lk.vendors.map(x => ({ value: F(x, "vendorId"), label: F(x, "vendorName") }))
-      : pick.kind === "APPLICATION" ? lk.applications.map(x => ({ value: F(x, "id"), label: F(x, "name") }))
+    const options = pick.kind === "APPLICATION" ? lk.applications.map(x => ({ value: F(x, "id"), label: F(x, "name") }))
       : lk.contracts.filter(c => F(c, "contractId") != null).map(x => ({ value: F(x, "contractId"), label: `${F(x, "contractNumber")} - ${F(x, "contractName")}` }));
     await T.form({ title: "Link a GRAC record", submitText: "Link",
       fields: [{ name: "targetId", label: kinds.find(k => k.value === pick.kind).label, type: "select", options, required: true },
@@ -442,12 +669,15 @@
       ra = r.data;
     }
     state.risk = ra;
-    const startBtn = canEdit() && !draft && H("stageCode") !== "PENDING_DECISION" && H("stageCode") !== "EXITING"
+    // 522: the assessment needs Scope & Exposure saved (criticality, data, access).
+    const startBtn = !admitted() ? '<p class="pm-message info">The inherent risk assessment starts after the engagement is admitted to formal TPRM (Screening &amp; decision).</p>'
+      : !H("exposureSavedDt") ? (canEdit() ? '<p class="pm-message info">Save Scope &amp; exposure first: the risk model is prefilled from it.</p>' : "")
+      : canEdit() && !draft && H("stageCode") !== "PENDING_DECISION" && H("stageCode") !== "EXITING"
       ? btn("risk-start", "fa-play", current ? "Reassess" : "Start inherent risk assessment", {}, null, "primary") : "";
     if (!ra) {
       host.innerHTML = `<p class="tprm-note">The inherent risk is scored on the organization's risk model in force (pinned to the assessment). Factors are prefilled from the scope; every answer is confirmed by the assessor. The band sets the due-diligence tier.</p>
         <div class="tprm-actions">${startBtn}</div>
-        ${state.lk.riskModel ? `<p class="tprm-muted">Risk model in force: ${esc(F(state.lk.riskModel, "templateName"))} v${esc(F(state.lk.riskModel, "versionNo"))} (${esc(F(state.lk.riskModel, "origin"))})</p>` : '<p class="pm-message">No risk model is in force. Activate one in TPRM Configuration.</p>'}`;
+        ${state.lk.riskModel ? `<p class="tprm-muted">Risk model in force: ${esc(F(state.lk.riskModel, "templateName"))} v${esc(F(state.lk.riskModel, "versionNo"))} (${esc(F(state.lk.riskModel, "origin"))})</p>` : '<p class="pm-message">No risk model is in force. Activate one in Third-Party Settings.</p>'}`;
       return;
     }
     const a = ra.header[0];
@@ -537,7 +767,7 @@
           ${F(q, "sourceAuthority") ? `<div class="tprm-muted">Source: ${esc(F(q, "sourceAuthority"))}${F(q, "sourceReference") ? ", " + esc(F(q, "sourceReference")) : ""}${yes(F(q, "isRegulatory")) ? "" : " (not a regulatory requirement)"}</div>` : ""}</td>
         <td><div class="en-answer">${answer}${comment}</div>
           ${editable ? `<div class="tprm-actions" style="margin:6px 0 0">
-            <select data-ans-respondent title="Answered by"><option value="THIRD_PARTY"${F(q, "respondentType") !== "INTERNAL" ? " selected" : ""}>Third party</option><option value="INTERNAL"${F(q, "respondentType") === "INTERNAL" ? " selected" : ""}>Internal</option></select>
+            <select data-ans-respondent title="Answered by"><option value="THIRD_PARTY"${F(q, "respondentType") !== "INTERNAL" ? " selected" : ""}>Vendor</option><option value="INTERNAL"${F(q, "respondentType") === "INTERNAL" ? " selected" : ""}>Internal</option></select>
             ${btn("answer-save", "fa-floppy-disk", "Save", { id: rid })}</div>` : ""}
           ${F(q, "answeredBy") ? `<div class="tprm-muted">${esc(F(q, "answeredBy"))}, ${esc(T.dateTime(F(q, "answeredDt")))}</div>` : ""}</td>
         <td>${rating}${F(q, "assessorComment") ? `<div class="tprm-muted">${esc(F(q, "assessorComment"))}</div>` : ""}${F(q, "reviewerComment") ? `<div class="tprm-muted">Reviewer: ${esc(F(q, "reviewerComment"))}</div>` : ""}
@@ -704,7 +934,7 @@
       <p class="tprm-note">${esc(F(rule, "approvalLevels"))} level(s): ${esc([F(rule, "level1RoleName"), F(rule, "level2RoleName"), F(rule, "level3RoleName")].filter(Boolean).slice(0, F(rule, "approvalLevels")).join(" -> ") || "any approver")}.
         ${yes(F(rule, "sodRequired")) ? "Segregation of duties applies: the requester and the assessors cannot approve, and each level needs a different person." : ""}
         ${F(rule, "maxAcceptanceMonths") ? ` Risk can be accepted for at most ${esc(F(rule, "maxAcceptanceMonths"))} months.` : ""}
-        ${yes(F(rule, "escalateToRiskCentre")) ? " Escalation to the GRAC Risk Centre is recommended for this risk level." : ""}</p>` : '<p class="pm-message">No approval rule applies. Add one in TPRM Configuration.</p>'}
+        ${yes(F(rule, "escalateToRiskCentre")) ? " Escalation to the GRAC Risk Centre is recommended for this risk level." : ""}</p>` : '<p class="pm-message">No approval rule applies. Add one in Third-Party Settings.</p>'}
       <div class="tprm-actions">
         ${canSubmit ? btn("decision-submit", "fa-paper-plane", "Request decision", {}, null, "primary") : ""}
         ${pending && CAN_APPROVE && HAS_EMPLOYEE ? btn("decision-act", "fa-stamp", "Decide", { id: F(pending, "decisionId") }, null, "primary") : ""}
@@ -788,7 +1018,7 @@
             + btn("deviation-action", "fa-rotate", "Reassess", { id: F(d, "deviationId"), action: "REASSESS" }) : ""}</td></tr>`).join("");
     const revRows = (r.data.reviews || []).map(v => `<tr><td>${esc(F(v, "reviewNumber"))}</td><td>${esc(F(v, "reviewType"))}<div class="tprm-muted">${esc(state.lk.label("REVIEW_TRIGGER", F(v, "triggerCode")))}</div></td>
         <td>${esc(date(F(v, "dueDt")))}</td><td>${esc(F(v, "status"))}${F(v, "outcomeCode") ? ` - ${esc(F(v, "outcomeCode"))}` : ""}</td><td>${esc(F(v, "ownerName") || "--")}</td>
-        <td><a class="pm-button small" href="${esc(T.U("/Practice/Index/tprm-reviews") + "?" + qs({ organizationId: state.org, engagementId: state.id, reviewId: F(v, "reviewId") }))}">Open</a></td></tr>`).join("");
+        <td><a class="pm-button small" href="${esc(T.U("/Practice/Index/tprm-reviews"))}"${T.navAttrs("tprm-engagements", "tprm-reviews", "TprmEngagement", state.id, state.org, F(v, "reviewNumber"))}>Open</a></td></tr>`).join("");
     const lifecycle = [];
     if (CAN_EDIT) {
       if (["ACTIVE", "SUSPENDED"].includes(stage)) lifecycle.push(btn("lifecycle", "fa-arrows-rotate", "Renew", { action: "RENEW" }));
@@ -831,6 +1061,190 @@
       <div class="pm-table-wrap"><table><thead><tr><th>Review</th><th>Type</th><th>Due</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${revRows || empty(6, "No reviews yet.")}</tbody></table></div>`;
   }
 
+  // ------------------------------------------------------------------ step: screening & decision (523)
+  // CR 2 6-7. GET engagements/{id}/applicability (reports, report,
+  // observations, decisions, admissions, approvals); POST
+  // engagements/{id}/screening (refresh), engagements/{id}/applicability
+  // (the client's decision), admissions/{id}/act | /withdraw. GRAC's
+  // classification is information only; the decision is the client's.
+  const APPLICABILITY = {
+    NOT_SCREENED: "Not screened", SCREENED: "Awaiting decision", EXCLUDED: "Excluded from formal TPRM", DEFERRED: "Decision deferred",
+    ADMISSION_PENDING: "Admission approval pending", ADMITTED: "Admitted to formal TPRM", ADMISSION_REJECTED: "Admission rejected"
+  };
+  const CLASSIFICATION = {
+    POTENTIAL_TPRM_CASE: { label: "Potential TPRM case", color: "#dc2626" },
+    NO_SIGNIFICANT_INDICATORS: { label: "No significant TPRM indicators identified", color: "#16a34a" },
+    FURTHER_INFORMATION_REQUIRED: { label: "Further information required", color: "#ca8a04" }
+  };
+  const SIGNIFICANCE = { HIGH: "#dc2626", MEDIUM: "#ca8a04", LOW: "#16a34a", INFO: "#64748b" };
+  const SECTIONS = [
+    ["BUSINESS_OPERATIONAL", "Business and operational exposure"], ["DATA_TECHNOLOGY", "Data and technology exposure"],
+    ["REGULATORY_OUTSOURCING", "Regulatory and outsourcing"], ["FOURTH_PARTY", "Fourth-party dependencies"],
+    ["RELATED_RECORDS", "Related practice instances, risks, gaps and assurance findings (GRAC discovery)"],
+    ["INFORMATION_GAP", "Information gaps and inconsistencies"]];
+  const DECISIONS = { INCLUDE: "Include in formal TPRM", EXCLUDE: "Exclude from formal TPRM", DEFER: "Defer -- further information required" };
+  const VERIFICATION = { DECLARED: "Declared", DISCOVERED_UNVALIDATED: "Not validated", VALIDATED: "Validated" };
+  const classBadge = c => c ? T.badge((CLASSIFICATION[c] || { label: c }).label, (CLASSIFICATION[c] || {}).color) : "";
+  const applicabilityLabel = s => APPLICABILITY[s] || s || "";
+  const admitted = () => H("applicabilityStatus") === "ADMITTED";
+  const REGISTER_STATUS = { OPEN: "Open", EXIT_IN_PROGRESS: "Exit in progress", CLOSED: "Closed" };
+
+  async function renderScreening(reportId) {
+    const host = document.getElementById("enPanelScreen");
+    if (!H("exposureSavedDt")) {
+      host.innerHTML = `<p class="tprm-note">The Initial Exposure Screening Report is generated when Scope &amp; exposure is saved.</p>
+        <div class="tprm-actions">${canEdit() ? btn("edit-exposure", "fa-list-check", "Capture scope & exposure", {}, null, "primary") : ""}</div>`;
+      return;
+    }
+    const r = await api("GET", `/engagements/${state.id}/applicability?${qs({ organizationId: state.org, reportId })}`);
+    if (!r.ok) { host.innerHTML = `<p class="pm-message">${esc(r.error)}</p>`; return; }
+    const d = state.screen = r.data;
+    const rep = (d.report || [])[0];
+    const status = H("applicabilityStatus");
+    const pending = (d.admissions || []).find(a => F(a, "status") === "PENDING");
+    const current = (d.decisions || []).find(x => F(x, "status") === "CURRENT");
+    const canDecide = CAN_APPROVE && !isClosed() && rep && !["ADMISSION_PENDING", "ADMITTED"].includes(status);
+
+    // ---- applicability and admission
+    const actions = [
+      canDecide ? btn("applicability-decide", "fa-gavel", current ? "Record a revised decision" : "Record decision", {}, null, "primary") : "",
+      canEdit() ? btn("screening-refresh", "fa-rotate", "Refresh screening") : ""].join("");
+    let admissionHtml = "";
+    if (pending) {
+      // Withdraw: the decision-maker who included it, or an organization
+      // administrator (sp_tprm_admission_withdraw applies the same rule).
+      const canWithdraw = canEdit() && (root.dataset.isAdmin === "1"
+        || (root.dataset.employeeId && String(F(pending, "submittedByEmployeeId")) === root.dataset.employeeId));
+      const levels = (d.approvals || []).filter(p => String(F(p, "admissionId")) === String(F(pending, "admissionId")));
+      admissionHtml = `
+        <div class="tprm-subhead">Admission ${esc(F(pending, "admissionNo"))} -- approval
+          <span>${CAN_APPROVE && !isClosed() ? btn("admission-act", "fa-check", "Approve", { id: F(pending, "admissionId"), action: "APPROVE" }, null, "primary")
+                 + btn("admission-act", "fa-xmark", "Reject", { id: F(pending, "admissionId"), action: "REJECT" })
+                 + btn("admission-act", "fa-rotate-left", "Return", { id: F(pending, "admissionId"), action: "RETURN" }) : ""}${
+                 canWithdraw ? btn("admission-withdraw", "fa-ban", "Withdraw", { id: F(pending, "admissionId") }) : ""}</span></div>
+        <p class="tprm-note">Approval rule ${esc(F(pending, "approvalRuleName") || F(pending, "approvalRuleCode"))}: ${esc(F(pending, "requiredLevels"))} level(s)${
+          yes(F(pending, "sodRequired")) ? "; the decision-maker cannot approve and each level needs a different person" : ""}. Requested by ${esc(F(pending, "submittedBy") || "")} on ${esc(T.dateTime(F(pending, "submittedDt")))}.</p>
+        <div class="pm-table-wrap"><table><thead><tr><th>Level</th><th>Role</th><th>Status</th><th>By</th><th>Comment</th></tr></thead><tbody>${
+          levels.map(p => `<tr><td>${esc(F(p, "levelNo"))}</td><td>${esc(F(p, "requiredRoleName") || "Any approver")}</td><td>${esc(F(p, "status"))}</td>
+            <td>${esc(F(p, "approverName") || "")}${F(p, "onBehalfOfName") ? `<div class="tprm-muted">for ${esc(F(p, "onBehalfOfName"))}</div>` : ""}</td>
+            <td>${esc(F(p, "comment") || "")}</td></tr>`).join("")}</tbody></table></div>`;
+    }
+    const currentHtml = current ? `<div class="tprm-info">${info([
+        ["Decision", DECISIONS[F(current, "decision")] || F(current, "decision")], ["Decision date", date(F(current, "decisionDt"))],
+        ["Decision-maker", F(current, "decidedBy")], ["On report", `v${F(current, "reportVersionNo")}`],
+        ["Rationale", F(current, "rationale")], ["Evidence / references", F(current, "evidenceReferences")],
+        ["Approval reference", F(current, "approvalReference")],
+        F(current, "informationRequest") ? ["Information requested", `${F(current, "informationRequest")}${F(current, "informationFromName") ? ` (from ${F(current, "informationFromName")})` : ""}`] : null,
+        F(current, "informationTaskId") ? ["Task Board task", `${F(current, "informationTaskNumber") || ""} (${F(current, "informationTaskStatus") || ""})`] : null
+      ])}</div>` : "";
+
+    // ---- the report
+    let reportHtml = '<p class="tprm-note">No screening report yet. Refresh the screening.</p>';
+    if (rep) {
+      let s = {};
+      try { s = JSON.parse(F(rep, "summaryJson") || "{}") || {}; } catch (_) { s = {}; }
+      const obs = d.observations || [];
+      const versions = (d.reports || []).length > 1
+        ? `<select data-change="screening-version" aria-label="Report version">${(d.reports || []).map(x =>
+            `<option value="${esc(F(x, "reportId"))}"${String(F(x, "reportId")) === String(F(rep, "reportId")) ? " selected" : ""}>v${esc(F(x, "versionNo"))} -- ${esc((CLASSIFICATION[F(x, "classification")] || {}).label || F(x, "classification"))}${yes(F(x, "isCurrent")) ? " (current)" : ""}</option>`).join("")}</select>` : "";
+      const row = o => `<tr>
+          <td>${esc(F(o, "observationText"))}${F(o, "indicatorLabel") ? `<div class="tprm-muted">Indicator: ${esc(F(o, "indicatorLabel"))}</div>` : ""}</td>
+          <td>${F(o, "origin") === "DISCOVERED" ? "GRAC discovery" : "Proposed"}</td>
+          <td>${T.badge(F(o, "significance"), SIGNIFICANCE[F(o, "significance")])}</td>
+          <td>${esc(F(o, "sourceLabel") || "")}</td>
+          <td>${esc(VERIFICATION[F(o, "verificationStatus")] || F(o, "verificationStatus"))}${F(o, "evidenceReference") ? `<div class="tprm-muted">${esc(F(o, "evidenceReference"))}</div>` : ""}</td></tr>`;
+      reportHtml = `
+        <div class="tprm-subhead">Initial Exposure Screening Report v${esc(F(rep, "versionNo"))} <span>${versions}</span></div>
+        <div class="tprm-info">${info([
+          ["Classification", classBadge(F(rep, "classification")), true],
+          ["Generated", `${T.dateTime(F(rep, "generatedDt"))} by ${F(rep, "generatedBy") || ""}`],
+          ["High indicators", F(rep, "highCount")], ["Information gaps", F(rep, "gapCount")],
+          ["Vendor", [s.vendorCode, s.vendorName].filter(Boolean).join(" ")], ["Service category", s.serviceCategory],
+          ["Engagement type", s.engagementType], ["Service model", s.serviceModel], ["Service recipient", s.serviceRecipient],
+          ["Delivery location", s.deliveryLocation], ["Criticality", s.criticality], ["Data exposure", s.dataExposure]
+        ])}</div>
+        <p class="tprm-note">The classification is GRAC's view from the information available; it does not decide TPRM applicability. "Proposed" is what the business declared for this engagement; "GRAC discovery" is what GRAC already holds -- review it before relying on it.</p>
+        ${SECTIONS.map(([code, title]) => {
+          const rows = obs.filter(o => F(o, "sectionCode") === code);
+          return rows.length ? `<h4 class="pm-dash-subhead">${esc(title)}</h4>
+            <div class="pm-table-wrap"><table><thead><tr><th style="width:45%">Observation</th><th>Origin</th><th>Significance</th><th>Source</th><th>Verification</th></tr></thead>
+            <tbody>${rows.map(row).join("")}</tbody></table></div>` : "";
+        }).join("") || '<p class="tprm-note">No observations.</p>'}`;
+    }
+
+    const historyHtml = (d.decisions || []).length ? `
+      <div class="tprm-subhead">Decision history</div>
+      <div class="pm-table-wrap"><table><thead><tr><th>Date</th><th>Decision</th><th>Rationale</th><th>Report</th><th>Decision-maker</th><th>Status</th></tr></thead><tbody>${
+        (d.decisions || []).map(x => `<tr><td>${esc(date(F(x, "decisionDt")))}</td><td>${esc(DECISIONS[F(x, "decision")] || F(x, "decision"))}</td>
+          <td>${esc(F(x, "rationale") || "")}${F(x, "approvalReference") ? `<div class="tprm-muted">Approval reference: ${esc(F(x, "approvalReference"))}</div>` : ""}</td>
+          <td>v${esc(F(x, "reportVersionNo"))}</td><td>${esc(F(x, "decidedBy") || "")}</td>
+          <td>${F(x, "status") === "CURRENT" ? "Current" : "Superseded"}</td></tr>`).join("")}</tbody></table></div>
+      ${(d.admissions || []).filter(a => F(a, "status") !== "PENDING").length ? `
+      <div class="pm-table-wrap" style="margin-top:8px"><table><thead><tr><th>Admission</th><th>Rule</th><th>Outcome</th><th>Rationale</th><th>Decided</th></tr></thead><tbody>${
+        (d.admissions || []).filter(a => F(a, "status") !== "PENDING").map(a => `<tr><td>${esc(F(a, "admissionNo"))}</td>
+          <td>${esc(F(a, "approvalRuleName") || F(a, "approvalRuleCode"))}</td><td>${esc(F(a, "status"))}</td>
+          <td>${esc(F(a, "outcomeRationale") || "")}</td><td>${esc(T.dateTime(F(a, "decidedDt")))} ${esc(F(a, "decidedBy") || "")}</td></tr>`).join("")}</tbody></table></div>` : ""}` : "";
+
+    host.innerHTML = `
+      <div class="tprm-subhead">TPRM applicability <span>${actions}</span></div>
+      <div class="tprm-info">${info([["Status", `<strong>${esc(applicabilityLabel(status))}</strong>`, true],
+        status === "ADMITTED" ? ["Admitted", T.dateTime(H("admittedDt"))] : null])}</div>
+      ${currentHtml}${admissionHtml}${reportHtml}${historyHtml}`;
+  }
+
+  // The client's decision on the current report (CR 2 7).
+  async function decideApplicability() {
+    const rep = ((state.screen || {}).report || [])[0];
+    const currentId = H("currentScreeningReportId");
+    const res = await T.form({
+      title: "TPRM applicability decision", submitText: "Record decision", wide: true,
+      intro: `On screening report v${H("screeningVersionNo")} (${(CLASSIFICATION[H("screeningClassification")] || {}).label || ""}). GRAC's classification is information only -- the decision is yours. Include starts the admission approval.`
+        + (rep && String(F(rep, "reportId")) !== String(currentId) ? " You are viewing an older report; the decision is recorded on the current one." : ""),
+      fields: [
+        { name: "decision", label: "Decision", type: "select", required: true, blank: "Choose",
+          options: Object.entries(DECISIONS).map(([value, label]) => ({ value, label })) },
+        { name: "decisionDt", label: "Decision date", type: "date", required: true, value: new Date().toISOString().substring(0, 10) },
+        { name: "rationale", label: "Decision rationale", type: "textarea", required: true, maxLength: 2000 },
+        { name: "evidenceReferences", label: "Supporting evidence or references", type: "textarea", rows: 2, maxLength: 2000 },
+        { name: "approvalReference", label: "Approval reference (where applicable)", maxLength: 200 },
+        { name: "informationRequest", label: "Information requested", type: "textarea", rows: 2, maxLength: 2000,
+          showWhen: { field: "decision", values: ["DEFER"] } },
+        { name: "informationFromEmployeeId", label: "Requested from", type: "select", options: state.lk.employeeOptions(),
+          help: "525: a Task Board task is created for this person.",
+          showWhen: { field: "decision", values: ["DEFER"] } }
+      ],
+      onSubmit: v => api("POST", `/engagements/${state.id}/applicability`, {
+        organizationId: state.org, decision: v.decision, rationale: v.rationale, decisionDt: v.decisionDt,
+        evidenceReferences: v.evidenceReferences, approvalReference: v.approvalReference, informationRequest: v.informationRequest,
+        informationFromEmployeeId: num(v.informationFromEmployeeId), expectedReportId: num(currentId) })
+    });
+    if (!res) return;
+    await reloadWorkspace();
+    const outcome = F(res.result.data?.result, "result");
+    show("enWsMessage", outcome === "ADMISSION_PENDING" ? "Decision recorded. The admission approval has started."
+      : outcome === "EXCLUDED" ? "Decision recorded: excluded from formal TPRM." : "Decision recorded: deferred.", "success");
+  }
+
+  async function actOnAdmission(id, action) {
+    const label = { APPROVE: "Approve admission", REJECT: "Reject admission", RETURN: "Return for a new decision" }[action];
+    const res = await T.form({
+      title: label, submitText: label,
+      intro: action === "APPROVE" ? "At the last approval level the engagement is admitted to formal TPRM." : "",
+      fields: [
+        { name: "rationale", label: "Rationale", type: "textarea", required: true, maxLength: 2000 },
+        { name: "onBehalfOfEmployeeId", label: "Acting for (delegation)", type: "select", options: state.lk.employeeOptions(), blank: "Myself",
+          help: "Only with an active approval delegation from that person." }
+      ],
+      onSubmit: v => api("POST", `/admissions/${id}/act`, { organizationId: state.org, action, rationale: v.rationale,
+        onBehalfOfEmployeeId: num(v.onBehalfOfEmployeeId) })
+    });
+    if (!res) return;
+    await reloadWorkspace();
+    const outcome = F(res.result.data?.result, "result");
+    show("enWsMessage", outcome === "ADMITTED" ? "Admission approved: the engagement is admitted to formal TPRM."
+      : outcome === "LEVEL_APPROVED" ? "Approval level recorded." : "Admission decision recorded.", "success");
+  }
+
   // ------------------------------------------------------------------ history
   function renderHistory() {
     const e = state.eng;
@@ -859,6 +1273,26 @@
     };
     switch (name) {
       case "edit-engagement": return editEngagement(H("engagementId") ? state.eng.header[0] : null);
+      case "edit-exposure": return editExposure(false);
+      // 524: open the vendor's TP Risk Register record (id in the navigation code)
+      case "open-register": {
+        const err = await T.navigate("tprm-engagements", "tprm-risk-register", "TprmRegister", H("registerId"), state.org);
+        if (err) show("enWsMessage", err);
+        return;
+      }
+      // ---- screening & decision (523)
+      case "screening-refresh":
+        if (await post(`/engagements/${state.id}/screening`, {}, "Screening report regenerated.")) { await reloadWorkspace(); selectTab("SCREEN"); }
+        return;
+      case "applicability-decide": return decideApplicability();
+      case "screening-version": return renderScreening(el.value);
+      case "admission-act": return actOnAdmission(id, data.action);
+      case "admission-withdraw": {
+        const note = await T.note("Why is the admission withdrawn? The engagement goes back to awaiting a decision.", "Withdraw admission", "Withdraw");
+        if (note === null) return;
+        if (await post(`/admissions/${id}/withdraw`, { note }, "Admission withdrawn.")) await reloadWorkspace();
+        return;
+      }
       // ---- scope
       case "scope-add": return addScopeItem(data.mode);
       case "scope-remove":
@@ -1048,7 +1482,7 @@
       case "risk-link": {
         let risks = (state.discovery?.risks || []).map(x => ({ value: F(x, "riskRegisterId"), label: `${F(x, "riskNumber")} ${F(x, "riskTitle")}` }));
         const v = await T.form({ title: "Link an enterprise risk", submitText: "Link",
-          intro: risks.length ? "" : "Run Discover on Scope & exposure to list the risks already related to this third party, or give the risk register id.",
+          intro: risks.length ? "" : "Run Discover on Scope & exposure to list the risks already related to this engagement, or give the risk register id.",
           fields: [risks.length ? { name: "riskRegisterId", label: "Enterprise risk", type: "select", options: risks, required: true }
                                 : { name: "riskRegisterId", label: "Risk register id", type: "number", min: 1, required: true },
                    { name: "summary", label: "Note", type: "textarea", rows: 2 }] });

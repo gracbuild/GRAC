@@ -1,14 +1,25 @@
 @*
-    Engagements -- Third-Party Risk Management (migrations 486-490).
+    Engagement Management -- Third-Party Management (migrations 486-490;
+    521; 522 -- CR 2 section 5).
     Rendered from Manage.cshtml when Model.Key == "tprm-engagements".
 
     Screen key : `tprm-engagements`
-    Group      : Third-Party Risk
-    Menu       : nav-tprm (Third-Party Risk) -> Engagements
+    Group      : Third-Party Management
+    Menu       : nav-tprm (Third-Party Management) -> Engagement Management
 
-    The list of engagements and, for one engagement, the workspace of the
-    BRD's five steps (step 1, registration, is the Third Parties screen):
-      Scope & exposure   engagement details, proposed / actual scope,
+    The list of engagements; two full pages that take the list's place:
+      enEditor     New engagement -- the CR 2 5.1 initial information (and,
+                   when editing, the administrative fields)
+      enExposure   Scope & Exposure -- gating questions; only the exposure
+                   dimensions answered Yes are asked (CR 2 5.2 / 5.3)
+    and, for one engagement, the workspace of the BRD's five steps (step 1,
+    registration, is the Vendor Registry screen):
+      Screening &        523 (CR 2 6-7): the Initial Exposure Screening Report
+      decision           (versions, classification, observations -- proposed
+                         and GRAC-discovered), the client's applicability
+                         decision (include / exclude / defer) and the
+                         admission approval under the approval rules
+      Scope & exposure   engagement details, the exposure answers, proposed / actual scope,
                          discovery of the GRAC practice instances,
                          obligations, dependencies, assurance findings,
                          gaps, risks and contracts (read-only until
@@ -31,9 +42,11 @@
     A step's chip shows done / current. Every rule is the procedures'
     (sp_tprm_*); buttons only mirror the screen permissions.
 
-    Opened with ?engagementId= (dashboard, Third Parties, Reviews) or
-    ?newForThirdParty= (Third Parties -> New engagement); a dashboard drill
-    passes stage / band / criticality / attention (Shared/dashboard-drill.js
+    Opened on one engagement (dashboard, Vendor Registry, Reviews, TP Risk
+    Register) or on New engagement for a vendor (Vendor Registry) through the
+    encrypted navigation code (?code=, Shared/secure-nav.js; 525 -- never
+    ?engagementId= / ?newForThirdParty=); a dashboard drill passes stage /
+    band / criticality / attention / applicability (Shared/dashboard-drill.js
     paints the banner).
 
     Backend: practice/api/tprm/... (TprmController)
@@ -51,9 +64,10 @@
     var enCanEdit = enHas("EDIT");
     var enCanApprove = enHas("APPROVE");
     var enHasEmployee = long.TryParse(Context.Session.GetString(PracticeSessionIdentity.EmployeeIdKey), out var enEmployeeId) && enEmployeeId > 0;
+    var enIsAdmin = CallerIdentityHandler.IsAdmin(Context.Session);   // 523: who may withdraw an admission
 }
 
-<div class="pm-page-heading compact">
+<div class="pm-page-heading compact" id="enHeading">
     <div>
         <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
         <h1>@Model.Title</h1>
@@ -63,7 +77,7 @@
 
 <div id="enRoot" data-can-add="@(enCanAdd ? "1" : "0")" data-can-edit="@(enCanEdit ? "1" : "0")"
      data-can-approve="@(enCanApprove ? "1" : "0")" data-has-employee="@(enHasEmployee ? "1" : "0")"
-     data-employee-id="@(enHasEmployee ? enEmployeeId.ToString() : "")">
+     data-employee-id="@(enHasEmployee ? enEmployeeId.ToString() : "")" data-is-admin="@(enIsAdmin ? "1" : "0")">
 
     @* ======================= List ======================= *@
     <section class="pm-panel" id="enList">
@@ -72,7 +86,7 @@
         </div>
         <p class="pm-message" id="enMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-toolbar">
-            <input type="search" id="enSearch" placeholder="Search engagement, code or third party" maxlength="200" />
+            <input type="search" id="enSearch" placeholder="Search engagement, code or vendor" maxlength="200" />
             <select id="enStageFilter" title="Stage">
                 <option value="OPEN">Open engagements</option>
                 <option value="IN_ASSESSMENT">In assessment</option>
@@ -81,6 +95,14 @@
             </select>
             <select id="enBandFilter" title="Risk band"><option value="">Any risk band</option></select>
             <select id="enCriticalityFilter" title="Service criticality"><option value="">Any criticality</option></select>
+            <select id="enApplicabilityFilter" title="TPRM applicability">
+                <option value="">Any applicability</option>
+                <option value="UNDECIDED">Awaiting decision</option>
+                <option value="ADMISSION_PENDING">Admission pending</option>
+                <option value="ADMITTED">Admitted to formal TPRM</option>
+                <option value="EXCLUDED">Excluded from formal TPRM</option>
+                <option value="DEFERRED">Decision deferred</option>
+            </select>
             <select id="enAttentionFilter" title="Needs attention">
                 <option value="">All</option>
                 <option value="MINE">Mine (owner or assessor)</option>
@@ -95,7 +117,7 @@
         </div>
         <div class="pm-table-wrap">
             <table>
-                <thead><tr><th>Code</th><th>Engagement</th><th>Third party</th><th>Stage</th><th>Criticality</th><th>Risk band</th><th>Next review</th><th>Business owner</th></tr></thead>
+                <thead><tr><th>Code</th><th>Engagement</th><th>Vendor</th><th>Stage</th><th>TPRM applicability</th><th>Criticality</th><th>Risk band</th><th>Next review</th><th>Business owner</th></tr></thead>
                 <tbody id="enListBody"></tbody>
             </table>
         </div>
@@ -117,19 +139,48 @@
         <div class="tprm-info" id="enWsSummary"></div>
         <div class="pm-tabs" role="tablist" aria-label="Engagement steps">
             <button role="tab" class="active" data-en-tab="SCOPE" aria-selected="true">Scope &amp; exposure<span class="tprm-step-chip" data-en-chip="SCOPE"></span></button>
+            <button role="tab" data-en-tab="SCREEN" aria-selected="false">Screening &amp; decision<span class="tprm-step-chip" data-en-chip="SCREEN"></span></button>
             <button role="tab" data-en-tab="RISK" aria-selected="false">Inherent risk<span class="tprm-step-chip" data-en-chip="RISK"></span></button>
             <button role="tab" data-en-tab="DD" aria-selected="false">Due diligence<span class="tprm-step-chip" data-en-chip="DD"></span></button>
-            <button role="tab" data-en-tab="DECISION" aria-selected="false">Decision<span class="tprm-step-chip" data-en-chip="DECISION"></span></button>
+            <button role="tab" data-en-tab="DECISION" aria-selected="false">Risk decision<span class="tprm-step-chip" data-en-chip="DECISION"></span></button>
             <button role="tab" data-en-tab="ONBOARD" aria-selected="false">Onboarding &amp; monitoring<span class="tprm-step-chip" data-en-chip="ONBOARD"></span></button>
             <button role="tab" data-en-tab="HISTORY" aria-selected="false">History</button>
         </div>
         <div data-en-panel="SCOPE" id="enPanelScope"></div>
+        <div data-en-panel="SCREEN" id="enPanelScreen" hidden></div>
         <div data-en-panel="RISK" id="enPanelRisk" hidden></div>
         <div data-en-panel="DD" id="enPanelDd" hidden></div>
         <div data-en-panel="DECISION" id="enPanelDecision" hidden></div>
         <div data-en-panel="ONBOARD" id="enPanelOnboard" hidden></div>
         <div data-en-panel="HISTORY" id="enPanelHistory" hidden></div>
     </section>
+
+    @* New / edit engagement and Scope & Exposure -- full pages in place of the
+       list or workspace (522), like the Vendor Registry's register / edit page:
+       gracTprm.form({ page }) renders into their data-tf-part elements. *@
+    @foreach (var enPage in new[] { ("enEditor", "New engagement", "Create"), ("enExposure", "Scope & Exposure", "Save scope & exposure") })
+    {
+        <section id="@enPage.Item1" hidden>
+            <div class="pm-page-heading compact">
+                <div>
+                    <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+                    <h1 data-tf-part="title">@enPage.Item2</h1>
+                    <p data-tf-part="intro" hidden></p>
+                </div>
+            </div>
+            <section class="pm-panel tprm-page-form">
+                <form class="pm-form-grid" data-tf-part="form" novalidate>
+                    <div class="full tprm-form-fields" data-tf-part="fields"></div>
+                    <p class="pm-message full" data-tf-part="message" role="status" aria-live="polite" hidden></p>
+                    <div class="full" data-tf-part="extra" hidden></div>
+                    <footer class="pm-modal-footer full">
+                        <button type="button" class="pm-button" data-tf-part="cancel">Cancel</button>
+                        <button type="submit" class="pm-button primary" data-tf-part="submit"><i class="fa-solid fa-floppy-disk"></i> @enPage.Item3</button>
+                    </footer>
+                </form>
+            </section>
+        </section>
+    }
 </div>
 
 @* ======================= Evidence of one item ======================= *@
@@ -170,5 +221,6 @@
 <script src="~/js/pm-grid.js" asp-append-version="true"></script>
 <script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>
 <script src="~/js/Shared/evidence-picker.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
 <script src="~/js/Tprm/tprm-common.js" asp-append-version="true"></script>
 <script src="~/js/Tprm/tprm-engagements.js" asp-append-version="true"></script>

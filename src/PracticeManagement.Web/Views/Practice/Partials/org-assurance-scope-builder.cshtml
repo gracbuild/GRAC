@@ -23,6 +23,57 @@
         AND / OR (first condition in a group is ignored). Each condition
         picks a dimension, optionally NOT, and either "include all" or
         an explicit set of values (multi-select).
+
+    534 (2026-11-13) -- Source Statements replace Practice Instances:
+      * Simple mode shows "Filter by Control Statements" (the dimension's
+        name; sir renamed it from Source Statements) instead of
+        "Filter by Practice Instances": a two-list tree picker
+        (Framework -> Release -> Source Structure -> Source Statement,
+        >, >>, <, <<) from js/Shared/statement-tree-picker.js.
+      * At run time the statements resolve to the practice instances of
+        the practices mapped to them (sp_org_assurance_scope_resolve).
+      * PRACTICE_INSTANCE stays as a dimension so scopes already saved
+        with it keep working. It is not offered any more (LEGACY_DIMS).
+
+    2026-11-13 (sir) -- SIMPLE ONLY. The Advanced mode (groups, AND / OR /
+    NOT, "include all values", labels) and its mode toggle are removed.
+      * A scope that Simple mode cannot show -- one saved in Advanced mode,
+        or with a Practice Instances pick -- opens READ-ONLY as sentences
+        (window.gracAuditScopeSummary, js/Shared/audit-scope-summary.js,
+        the same rendering as the audit's view page). It keeps applying
+        as saved. "Replace with a simple scope" (Draft only) clears the
+        builder to an empty simple scope; nothing is written until Save.
+      * Save is exposed as window.__oaScopeBuilder.save() -> Promise<bool>
+        so the Audit Definition page's single Save can run it. Saving a
+        read-only legacy scope is a no-op (true).
+
+    562 (2026-11-15, sir -- Audit Change spec 4.2.1, Step 1 SELECT AUDIT
+    SUBJECTS): the cards are the audit subject types -- one per
+    Operationalize dependency type (DEP_<CODE> dimensions: Person, Tool,
+    Asset, Vendor, Application, Process, Location, ...; values from the
+    type's source table), and nothing else: Control Statements is no
+    longer offered (sir, 2026-11-15); a scope saved with it opens
+    read-only (legacy) and applies as saved. A subject resolves to the
+    practice instances that depend on it, at execution (562 resolver).
+    Subjects add up -- the audit covers the instances of every subject
+    picked. A scope saved on the older Departments / Vendors / Assets
+    filters opens read-only (legacy) too.
+    562 (2026-11-15, sir): Step 1 is laid out as Operationalize ->
+    Dependencies -- one Category | Objects table (Asset with its Category /
+    Sub Category / Type filters, Department / Person, Vendor, Team,
+    Committee, Location, Business Function), drawn by the shared
+    js/Shared/dependency-picker.js. Only the categories Operationalize
+    offers are shown, and only active objects.
+    After a load or a save the page fires `audit-scope-loaded`
+    { organizationId, definitionId, editable } -- Step 2 (Discover,
+    Partials/_audit-scope-step) listens for it.
+
+    543 (2026-11-13, sir) -- the scope moved from Audit Definition to Audit
+    Configuration, where it is the first step and opens in its own popup.
+      * window.__oaScopeBuilder.reload() re-reads the saved scope quietly
+        (the Reload button's code); the popup runs it on every open.
+      * Hosted there (window.__oaHostNoUrl) picking the audit no longer
+        writes ?definitionId= into the address bar.
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 
@@ -55,7 +106,7 @@
        between definitions without going back to the Definitions
        screen. When the URL carries ?definitionId=X, that value is
        preselected here on load. *@
-    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+    <div class="pm-toolbar" id="oaScopePickerBar" style="flex-wrap:wrap; gap:8px; align-items:end;">
         <label class="pm-field">
             <span>Organization</span>
             <select class="pm-input" id="oaScopePickOrg" style="min-width:220px;">
@@ -92,25 +143,19 @@
          style="margin:8px 0; padding:8px 12px; border-radius:var(--radius-md); font-size:13px;"></div>
 
     @* ===================================================================
-       Mode toggle. Simple is the default; Advanced unlocks groups /
-       AND / OR / NOT / labels / non-pickable dimensions.
+       Read-only legacy scope (2026-11-13). A scope Simple mode cannot
+       show -- saved in the removed Advanced mode, or with a Practice
+       Instances pick -- is shown as sentences and keeps applying.
        =================================================================== *@
-    <div id="oaScopeModeToggle" hidden style="margin:12px 0; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--neutral-50); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <div style="font-size:13px; color:var(--fg-secondary);">
-            <strong style="color:var(--fg-strong);">Mode:</strong>
-            <span id="oaScopeModeSimpleLabel" style="margin-left:8px;">Simple</span>
-            <span style="color:var(--fg-subtle);">&middot;</span>
-            <span id="oaScopeModeAdvancedLabel">Advanced</span>
-            <span id="oaScopeModeHint" style="margin-left:12px; color:var(--fg-muted); font-style:italic;">
-                Simple mode is easiest for most cases. Switch to Advanced if you need AND / OR / NOT rules.
-            </span>
-        </div>
-        <div role="group" aria-label="Mode" style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden;">
-            <button type="button" id="oaScopeModeSimpleBtn"   class="pm-button"
-                    style="border:none; border-radius:0; padding:4px 12px;" aria-pressed="true">Simple</button>
-            <button type="button" id="oaScopeModeAdvancedBtn" class="pm-button"
-                    style="border:none; border-radius:0; padding:4px 12px;" aria-pressed="false">Advanced</button>
-        </div>
+    <div id="oaScopeLegacy" class="oa-scope-legacy" hidden>
+        <p class="pm-hint" style="margin:0 0 8px;">
+            This scope was built with advanced rules (groups, AND / OR / NOT, or Practice Instances),
+            so it is shown read-only. It still applies as saved. To change it, replace it with a simple scope.
+        </p>
+        <div id="oaScopeLegacySummary"></div>
+        <button class="pm-button" id="oaScopeReplaceBtn" type="button">
+            <i class="fa-solid fa-rotate" aria-hidden="true"></i> Replace with a simple scope
+        </button>
     </div>
 
     @* ===================================================================
@@ -119,131 +164,18 @@
     <div id="oaScopeSimpleMode" hidden style="margin-top:12px;">
         <div style="background:var(--primary-50); border:1px solid var(--primary-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px; font-size:13px; color:var(--primary-700);">
             <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-            <strong>How to use this page:</strong>
-            Pick values under any of the filters below. The audit will apply to items that match
-            <em>every filter you fill in</em>. Leave a filter empty to skip it.
+            <strong>Step 1 &mdash; Select Audit Subjects.</strong>
+            Pick what this audit covers, as in Operationalize &rarr; Dependencies. The audit covers the practice
+            instances that depend on <em>any</em> object you pick. Leave a category empty to skip it.
         </div>
-        <div id="oaScopeSimpleFilters" style="display:grid; grid-template-columns:1fr; gap:10px;"></div>
+        <div id="oaScopeSimpleFilters"></div>
     </div>
 
-    @* ===================================================================
-       Advanced Mode -- existing groups / conditions / operators UI
-       =================================================================== *@
-    <div id="oaScopeAdvancedMode" hidden>
-        <div id="oaScopeGroupsHost" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;"></div>
-
-        <div style="margin-top:12px;">
-            <button class="pm-button" id="oaScopeAddGroupBtn" type="button">
-                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Group
-            </button>
-        </div>
-    </div>
 </section>
 
-@* Simple Mode filter card template *@
-<template id="oaScopeSimpleFilterTemplate">
-    <div class="oa-simple-filter" data-dim-code=""
-         style="border:1px solid var(--border-strong); border-radius:var(--radius-md); background:var(--bg-surface);">
-        <div class="oa-simple-filter-header"
-             style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; cursor:pointer;">
-            <div style="min-width:0; flex:1;">
-                <div data-role="dim-name" style="font-weight:600; color:var(--fg-strong); font-size:14px;">Filter Name</div>
-                <div data-role="dim-summary" style="color:var(--fg-muted); font-size:12px; margin-top:2px;">Not filtered</div>
-            </div>
-            <div style="display:flex; align-items:center; gap:6px;">
-                <span data-role="count-badge" class="pm-badge" hidden></span>
-                <i data-role="chevron" class="fa-solid fa-chevron-down" aria-hidden="true" style="color:var(--fg-subtle);"></i>
-            </div>
-        </div>
-        <div class="oa-simple-filter-body" hidden
-             style="border-top:1px solid var(--border); padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; gap:8px; align-items:center;">
-                <input class="pm-input" data-role="search" type="text" placeholder="Search..."
-                       style="flex:1;" />
-                <button data-role="select-all" type="button" class="pm-button">Select all</button>
-                <button data-role="clear"      type="button" class="pm-button">Clear</button>
-            </div>
-            <div data-role="list"
-                 style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:var(--radius-sm); padding:6px 8px;">
-                <!-- Checkboxes rendered by JS. -->
-            </div>
-            <div data-role="status" style="font-size:12px; color:var(--fg-muted);"></div>
-        </div>
-    </div>
-</template>
 
-<template id="oaScopeGroupTemplate">
-    <div class="oa-scope-group" data-group-index=""
-         style="border:1px solid var(--border-strong); border-radius:var(--radius-md); padding:12px; background:var(--neutral-50);">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
-            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-secondary);">
-                Combine with previous group:
-                <select data-role="group-operator"
-                        style="padding:4px 8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm);">
-                    <option value="AND">AND (both groups apply)</option>
-                    <option value="OR">OR (either group applies)</option>
-                </select>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-secondary); flex:1; min-width:220px;">
-                Label:
-                <input data-role="group-label" type="text" maxlength="200" placeholder="Optional label for this group"
-                       style="padding:4px 8px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); flex:1;" />
-            </label>
-            <button data-role="remove-group" type="button" class="pm-button"
-                    style="color:var(--danger-700);" title="Remove this group">
-                <i class="fa-solid fa-trash" aria-hidden="true"></i>
-            </button>
-        </div>
-        <div data-role="conditions-host" style="display:flex; flex-direction:column; gap:8px;"></div>
-        <div style="margin-top:8px;">
-            <button data-role="add-condition" class="pm-button" type="button">
-                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Condition
-            </button>
-        </div>
-    </div>
-</template>
-
-<template id="oaScopeConditionTemplate">
-    <div class="oa-scope-condition"
-         style="border:1px solid var(--border); border-radius:var(--radius-md); padding:10px; background:var(--bg-surface);">
-        <div style="display:grid; grid-template-columns:150px 1fr 140px 140px auto; gap:8px; align-items:center;">
-            <label style="font-size:12px; color:var(--fg-secondary);">
-                Match:
-                <select data-role="condition-operator"
-                        style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:2px;">
-                    <option value="AND">AND (all conditions)</option>
-                    <option value="OR">OR (any condition)</option>
-                </select>
-            </label>
-            <label style="font-size:12px; color:var(--fg-secondary);">
-                Filter By:
-                <select data-role="dimension"
-                        style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:2px;">
-                </select>
-            </label>
-            <label style="font-size:12px; color:var(--fg-secondary); display:flex; align-items:center; gap:6px;">
-                <input data-role="is-not" type="checkbox" />
-                <span>Exclude selected</span>
-            </label>
-            <label style="font-size:12px; color:var(--fg-secondary); display:flex; align-items:center; gap:6px;">
-                <input data-role="include-all" type="checkbox" />
-                <span>Include all values</span>
-            </label>
-            <button data-role="remove-condition" type="button" class="pm-button"
-                    style="color:var(--danger-700);" title="Remove this condition">
-                <i class="fa-solid fa-trash" aria-hidden="true"></i>
-            </button>
-        </div>
-        <div data-role="values-host" style="margin-top:8px;">
-            <label style="font-size:12px; color:var(--fg-secondary);">Values:</label>
-            <select data-role="values" multiple size="5"
-                    style="width:100%; padding:4px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); margin-top:4px;">
-            </select>
-            <div data-role="values-hint" style="font-size:11px; color:var(--fg-muted); margin-top:4px;"></div>
-        </div>
-    </div>
-</template>
-
+<script src="~/js/Shared/dependency-picker.js" asp-append-version="true"></script>
+<script src="~/js/Shared/audit-scope-summary.js" asp-append-version="true"></script>
 <script>
 (function () {
     'use strict';
@@ -251,6 +183,18 @@
     if (!wf) { console.error('__wfCommon missing'); return; }
 
     const API = '/practice/api/org-assurance';
+
+    // 562: the subject types -- one DEP_<CODE> dimension per Operationalize
+    // dependency type, nothing else (sir, 2026-11-15: Control Statements
+    // removed). Every other dimension (Control Statements, Practice
+    // Instances, the older Departments / Vendors / Assets) is legacy: a
+    // scope that uses it opens read-only and applies as saved.
+    const isSubjectDim  = function (code) { return String(code || '').indexOf('DEP_') === 0; };
+    const isLegacyDim   = function (code) { return !isSubjectDim(code); };
+    // The dimensions Simple mode offers: pickable subject types.
+    const simpleDims    = function () {
+        return state.dimensions.filter(function (d) { return d.isPickable && isSubjectDim(d.dimensionCode); });
+    };
     const U   = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
 
     const state = {
@@ -261,21 +205,35 @@
         header       : null,          // OrgAssuranceScopeHeader
         definition   : null,          // Assurance Definition detail
         dimensions   : [],            // 17 rows
-        valueCache   : {},            // dimensionCode -> [ {id, code, name} ]
-        model        : { groups: [] },// in-memory Advanced edit model
+        model        : { groups: [] },// the loaded scope (groups / conditions / values)
 
         // ----- Simple Mode state -----
-        // 'simple' | 'advanced'. Set on load based on compatibility of
-        // the loaded scope; user can toggle.
+        // 'simple' | 'legacy'. Set on load: 'legacy' when the saved scope
+        // cannot be shown in Simple mode (shown read-only, 2026-11-13).
         mode         : 'simple',
         // dimensionCode -> [ {entityId, entityCode, entityName} ]
-        simpleSelections : {},
-        // Free-text search input per dimension (survives collapse).
-        simpleSearches   : {}
+        simpleSelections : {}
     };
 
     document.addEventListener('DOMContentLoaded', boot);
     if (document.readyState !== 'loading') boot();
+
+    // 2026-11-04: a definition saved on the same page (the Audit Definition
+    // workspace hosts the definition form and this builder together) must
+    // appear in the picker at once. The picker was filled only at boot and
+    // on an organization change, so a NEW definition was missing until the
+    // page was refreshed, and the workspace could not select it (its
+    // setSelect retries for 3 seconds, waiting for the option to exist).
+    // Only the list is refreshed here; the workspace then selects the
+    // definition through the picker's own change handler, as before. When
+    // the saved definition belongs to another organization, the workspace
+    // changes the organization picker, whose handler reloads the list.
+    document.addEventListener('audit-definition-saved', function (e) {
+        const d = (e && e.detail) || {};
+        if (!d.definitionId || !state.orgId) return;
+        if (d.organizationId && String(d.organizationId) !== String(state.orgId)) return;
+        populateDefinitionPicker();   // also picks up a renamed definition
+    });
 
     function readDefinitionIdFromUrl() {
         try {
@@ -333,7 +291,8 @@
             state.header       = null;
             renderBanner();
             renderReadonlyBannerIfNeeded();
-            document.getElementById('oaScopeGroupsHost').innerHTML = '';
+            document.getElementById('oaScopeLegacy').hidden     = true;
+            document.getElementById('oaScopeSimpleMode').hidden = true;
             document.getElementById('oaScopeSaveBtn').disabled = true;
             document.getElementById('oaScopeBanner').hidden = true;
             populateDefinitionPicker();
@@ -417,8 +376,10 @@
 
     async function selectDefinition(definitionId) {
         state.definitionId = definitionId;
-        // Reflect selection in the URL so refresh keeps the choice.
-        try {
+        // Reflect selection in the URL so refresh keeps the choice --
+        // standalone only. 543: hosted on Audit Configuration
+        // (window.__oaHostNoUrl, 537) no record id goes into the address bar.
+        if (!window.__oaHostNoUrl) try {
             const u = new URL(window.location.href);
             u.searchParams.set('definitionId', String(definitionId));
             window.history.replaceState(null, '', u.toString());
@@ -445,19 +406,16 @@
         renderBanner();
         renderReadonlyBannerIfNeeded();
         buildModelFromServer();
-        state.valueCache = {};   // avoid stale picks across definitions
 
-        // Pick the default mode based on the loaded scope. Empty and
-        // simple-compatible scopes default to Simple; anything using
-        // Advanced-only features (OR, NOT, multiple groups, include_all,
-        // non-pickable dimensions, duplicate dimensions in one group)
-        // starts in Advanced.
-        state.mode = isSimpleCompatible(state.model) ? 'simple' : 'advanced';
+        // Empty and simple-compatible scopes open in Simple mode; anything
+        // else (OR, NOT, several groups, include_all, non-pickable or
+        // legacy dimensions, a dimension twice) opens read-only.
+        state.mode = isSimpleCompatible(state.model) ? 'simple' : 'legacy';
         loadSimpleFromModel();
-        document.getElementById('oaScopeModeToggle').hidden = false;
         applyMode();
 
         document.getElementById('oaScopeSaveBtn').disabled = !state.header.isEditable;
+        announceLoaded();   // 562
     }
 
     // Resolves state.orgId and state.definition for the given
@@ -535,7 +493,7 @@
         // The API returns { header: {..., isEditable, versionId, currentStatusCode},
         // groups: [...], conditions: [...], values: [...] }.
         // Flatten header fields onto state.header so existing callers
-        // (renderBanner / renderReadonlyBannerIfNeeded / renderGroups /
+        // (renderBanner / renderReadonlyBannerIfNeeded / applyMode /
         // buildModelFromServer / save button gating) keep working.
         const hdr = (json && (json.header || json.Header)) || {};
         state.header = {
@@ -573,7 +531,7 @@
             'v' + (d.currentVersionNumber || d.CurrentVersionNumber || h.versionId || '?');
         document.getElementById('oaScopeHeading').textContent = 'Scope: ' + (d.definitionName || d.DefinitionName || '');
         document.getElementById('oaScopeSubtitle').textContent =
-            'Configure the audit scope using groups + conditions across 17 dimensions with AND / OR / NOT operators.';
+            'Pick the control statements, assets, departments and vendors this audit applies to.';
     }
 
     function renderReadonlyBannerIfNeeded() {
@@ -621,283 +579,39 @@
     }
 
     // -----------------------------------------------------------------
-    // Render
-    // -----------------------------------------------------------------
-    function renderGroups() {
-        const host = document.getElementById('oaScopeGroupsHost');
-        host.innerHTML = '';
-        state.model.groups.forEach(function (g, gi) {
-            host.appendChild(renderGroup(g, gi));
-        });
-        if (state.model.groups.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'pm-empty';
-            empty.style.padding = '16px';
-            empty.textContent = state.header.isEditable
-                ? 'No scope defined yet. Click "Add Group" to start.'
-                : 'No scope has been configured for this version.';
-            host.appendChild(empty);
-        }
-        // Read-only lock down.
-        if (!state.header.isEditable) {
-            document.querySelectorAll('.oa-scope-group input, .oa-scope-group select, .oa-scope-group button')
-                    .forEach(function (el) { el.disabled = true; });
-            document.getElementById('oaScopeAddGroupBtn').disabled = true;
-        }
-    }
-
-    function renderGroup(g, gi) {
-        const tpl  = document.getElementById('oaScopeGroupTemplate').content.cloneNode(true);
-        const root = tpl.querySelector('.oa-scope-group');
-        root.setAttribute('data-group-index', String(gi));
-
-        const opSel = root.querySelector('[data-role="group-operator"]');
-        opSel.value = g.groupOperator || 'AND';
-        if (gi === 0) { opSel.disabled = true; opSel.title = 'First group has no previous group to combine with.'; }
-        opSel.addEventListener('change', function () { g.groupOperator = opSel.value; });
-
-        const lbl = root.querySelector('[data-role="group-label"]');
-        lbl.value = g.groupLabel || '';
-        lbl.addEventListener('input', function () { g.groupLabel = lbl.value; });
-
-        root.querySelector('[data-role="remove-group"]').addEventListener('click', async function () {
-            if (!await window.gracUi.confirm('Remove this group and its conditions?',
-                  { type: 'warning', title: 'Remove group', confirmText: 'Remove' })) return;
-            state.model.groups.splice(gi, 1);
-            renderGroups();
-        });
-
-        const condHost = root.querySelector('[data-role="conditions-host"]');
-        g.conditions.forEach(function (c, ci) {
-            condHost.appendChild(renderCondition(g, gi, c, ci));
-        });
-
-        root.querySelector('[data-role="add-condition"]').addEventListener('click', function () {
-            g.conditions.push({
-                dimensionCode     : state.dimensions.length ? state.dimensions[0].dimensionCode : '',
-                isNot             : false,
-                conditionOperator : 'AND',
-                conditionOrder    : g.conditions.length + 1,
-                includeAll        : false,
-                values            : []
-            });
-            renderGroups();
-        });
-
-        return root;
-    }
-
-    function renderCondition(g, gi, c, ci) {
-        const tpl  = document.getElementById('oaScopeConditionTemplate').content.cloneNode(true);
-        const root = tpl.querySelector('.oa-scope-condition');
-
-        // Combine operator.
-        const opSel = root.querySelector('[data-role="condition-operator"]');
-        opSel.value = c.conditionOperator || 'AND';
-        if (ci === 0) { opSel.disabled = true; opSel.title = 'First condition in a group has no previous condition.'; }
-        opSel.addEventListener('change', function () { c.conditionOperator = opSel.value; });
-
-        // Filter By (dimension) select.
-        const dimSel = root.querySelector('[data-role="dimension"]');
-        state.dimensions.forEach(function (d) {
-            const opt = document.createElement('option');
-            opt.value = d.dimensionCode;
-            opt.textContent = d.dimensionName + (d.isPickable ? '' : ' (no value picker yet)');
-            opt.setAttribute('data-pickable', d.isPickable ? '1' : '0');
-            dimSel.appendChild(opt);
-        });
-        dimSel.value = c.dimensionCode || (state.dimensions[0] ? state.dimensions[0].dimensionCode : '');
-        dimSel.addEventListener('change', function () {
-            c.dimensionCode = dimSel.value;
-            c.values = [];
-            populateValues(root, c);
-        });
-
-        // NOT + include-all.
-        const notCb = root.querySelector('[data-role="is-not"]');
-        notCb.checked = !!c.isNot;
-        notCb.addEventListener('change', function () { c.isNot = notCb.checked; });
-
-        const allCb = root.querySelector('[data-role="include-all"]');
-        allCb.checked = !!c.includeAll;
-        allCb.addEventListener('change', function () {
-            c.includeAll = allCb.checked;
-            populateValues(root, c);
-        });
-
-        root.querySelector('[data-role="remove-condition"]').addEventListener('click', async function () {
-            if (!await window.gracUi.confirm('Remove this condition?',
-                  { type: 'warning', title: 'Remove condition', confirmText: 'Remove' })) return;
-            g.conditions.splice(ci, 1);
-            renderGroups();
-        });
-
-        // Initial values render.
-        populateValues(root, c);
-
-        return root;
-    }
-
-    async function populateValues(condRoot, c) {
-        const sel  = condRoot.querySelector('[data-role="values"]');
-        const hint = condRoot.querySelector('[data-role="values-hint"]');
-        sel.innerHTML = '';
-
-        if (c.includeAll) {
-            sel.disabled = true;
-            hint.textContent = 'All values of this dimension will be in scope.';
-            return;
-        }
-        const dim = state.dimensions.find(function (d) { return d.dimensionCode === c.dimensionCode; });
-        if (!dim) {
-            sel.disabled = true;
-            hint.textContent = 'Pick a dimension first.';
-            return;
-        }
-        if (!dim.isPickable) {
-            sel.disabled = true;
-            hint.textContent = 'Value picker for "' + dim.dimensionName +
-                '" is not yet wired to a Practice Management lookup. Tick "Include all values" to keep this condition, or wait for Stage 2b.';
-            return;
-        }
-        sel.disabled = !state.header.isEditable;
-        hint.textContent = 'Loading...';
-
-        try {
-            const arr = await fetchValues(dim.dimensionCode);
-            sel.innerHTML = '';
-            arr.forEach(function (v) {
-                const opt = document.createElement('option');
-                opt.value = String(v.id != null ? v.id : '');
-                const label = (v.name || '') + (v.code ? ' (' + v.code + ')' : '');
-                opt.textContent = label;
-                opt.setAttribute('data-code', v.code || '');
-                opt.setAttribute('data-name', v.name || '');
-                if (c.values.some(function (x) { return String(x.entityId) === opt.value; })) {
-                    opt.selected = true;
-                }
-                sel.appendChild(opt);
-            });
-            hint.textContent = arr.length
-                ? 'Hold Ctrl / Cmd to multi-select.'
-                : 'No values available for this dimension in this organization.';
-
-            sel.addEventListener('change', function () {
-                c.values = Array.from(sel.selectedOptions).map(function (opt) {
-                    return {
-                        entityId   : Number(opt.value),
-                        entityCode : opt.getAttribute('data-code') || null,
-                        entityName : opt.getAttribute('data-name') || null
-                    };
-                });
-            });
-        } catch (err) {
-            hint.textContent = 'Failed to load values: ' + (err.message || err);
-        }
-    }
-
-    async function fetchValues(dimensionCode) {
-        if (state.valueCache[dimensionCode]) return state.valueCache[dimensionCode];
-        const url = U(API + '/scope-dimensions/' + encodeURIComponent(dimensionCode) +
-                      '/values?organizationId=' + encodeURIComponent(state.orgId));
-        const r = await fetch(url, { credentials: 'same-origin' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const b = await r.json();
-        const rows = (b && (b.data || b.Data)) || [];
-        // Normalize casing.
-        const norm = rows.map(function (v) {
-            return { id: v.id != null ? v.id : v.Id,
-                     code: v.code != null ? v.code : v.Code,
-                     name: v.name != null ? v.name : v.Name };
-        }).filter(function (v) { return v.id != null; });
-        state.valueCache[dimensionCode] = norm;
-        return norm;
-    }
-
-    // -----------------------------------------------------------------
     // Static wiring
     // -----------------------------------------------------------------
     function wireStaticButtons() {
-        document.getElementById('oaScopeAddGroupBtn').addEventListener('click', function () {
-            if (!state.definitionId || !state.header) {
-                setMessage('error', 'Pick a definition first.');
-                return;
-            }
-            if (!state.header.isEditable) {
-                setMessage('error', 'This version is not a Draft, so scope cannot be edited here.');
-                return;
-            }
-            state.model.groups.push({
-                groupOperator : state.model.groups.length === 0 ? 'AND' : 'AND',
-                groupOrder    : state.model.groups.length + 1,
-                groupLabel    : '',
-                conditions    : []
-            });
-            renderGroups();
-        });
-
-        document.getElementById('oaScopeReloadBtn').addEventListener('click', async function () {
-            if (!state.definitionId || !state.orgId) {
-                setMessage('error', 'Pick an organization and definition first.');
-                return;
-            }
-            state.valueCache = {};
-            try {
-                await loadDefinitionById(state.definitionId);
-                await loadScope();
-                buildModelFromServer();
-                loadSimpleFromModel();
-                state.mode = isSimpleCompatible(state.model) ? 'simple' : 'advanced';
-                applyMode();
-                renderBanner();
-                renderReadonlyBannerIfNeeded();
-                document.getElementById('oaScopeSaveBtn').disabled = !state.header.isEditable;
-                setMessage('ok', 'Reloaded.');
-            } catch (err) {
-                setMessage('error', 'Reload failed: ' + (err.message || err));
-            }
-        });
+        document.getElementById('oaScopeReloadBtn').addEventListener('click', function () { reloadScope(false); });
 
         document.getElementById('oaScopeSaveBtn').addEventListener('click', saveScope);
 
-        // Mode toggle.
-        document.getElementById('oaScopeModeSimpleBtn').addEventListener('click', function () {
-            if (state.mode === 'simple') return;
-            // Advanced -> Simple is only allowed when the current
-            // Advanced model is simple-compatible. Otherwise ask the
-            // user to first clean up the advanced expression.
-            if (!isSimpleCompatible(state.model)) {
-                setMessage('error',
-                    'This scope uses Advanced features (OR / NOT / multiple groups / "All values" / dimensions with no picker). ' +
-                    'Remove those in Advanced mode before switching to Simple.');
-                return;
-            }
+        // 2026-11-13: a legacy (advanced) scope is replaced, never edited.
+        // Clears the builder to an empty simple scope; Save writes it.
+        document.getElementById('oaScopeReplaceBtn').addEventListener('click', async function () {
+            if (!state.header || !state.header.isEditable) return;
+            if (!await window.gracUi.confirm(
+                    'Replace this scope with a simple one? The current rules are removed when you save.',
+                    { type: 'warning', title: 'Replace scope', confirmText: 'Replace' })) return;
+            state.model = { groups: [] };
+            state.simpleSelections = {};
             state.mode = 'simple';
-            loadSimpleFromModel();
             applyMode();
-            setMessage('ok', 'Switched to Simple mode.');
-        });
-        document.getElementById('oaScopeModeAdvancedBtn').addEventListener('click', function () {
-            if (state.mode === 'advanced') return;
-            // Simple -> Advanced: convert simpleSelections into groups so
-            // the user can extend the rule freely.
-            state.model = buildModelFromSimple();
-            state.mode  = 'advanced';
-            applyMode();
-            setMessage('ok', 'Switched to Advanced mode.');
+            setMessage('ok', 'Pick the filters below, then save to replace the old scope.');
         });
     }
 
+    // Resolves true when there was nothing to save or the save worked,
+    // false when it failed (the message is shown above the filters).
     async function saveScope() {
-        if (!state.header.isEditable) return;
+        if (!state.header || !state.header.isEditable) return true;
+        // A read-only legacy scope is left exactly as saved.
+        if (state.mode === 'legacy') return true;
 
-        // Simple Mode: translate simpleSelections into the same JSON shape
-        // the backend already understands. One group, N conditions (one
-        // per non-empty dimension), AND-combined, no NOT, no include_all.
-        // Advanced Mode: use the model as edited by the user.
-        const modelToSend = state.mode === 'simple'
-            ? buildModelFromSimple()
-            : state.model;
+        // Simple selections in the JSON shape the backend already
+        // understands: one group, one AND condition per non-empty
+        // dimension, no NOT, no include_all.
+        const modelToSend = buildModelFromSimple();
 
         const body = {
             organizationId : Number(state.orgId),
@@ -935,17 +649,12 @@
             for (let ci = 0; ci < g.conditions.length; ci++) {
                 const c = g.conditions[ci];
                 if (!c.dimensionCode) {
-                    setMessage('error', (state.mode === 'simple'
-                        ? 'Pick a filter for row ' + (ci + 1) + '.'
-                        : 'Group ' + (gi+1) + ' condition ' + (ci+1) + ': pick a dimension.'));
-                    return;
+                    setMessage('error', 'Pick a filter for row ' + (ci + 1) + '.');
+                    return false;
                 }
                 if (!c.includeAll && (!c.values || c.values.length === 0)) {
-                    setMessage('error', (state.mode === 'simple'
-                        ? 'Pick at least one value for every filter you fill in.'
-                        : 'Group ' + (gi+1) + ' condition ' + (ci+1) +
-                          ': pick at least one value or enable "All values".'));
-                    return;
+                    setMessage('error', 'Pick at least one value for every filter you fill in.');
+                    return false;
                 }
             }
         }
@@ -962,12 +671,61 @@
             if (!r.ok) {
                 setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
                     (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
-                return;
+                return false;
             }
             setMessage('ok', 'Scope saved.');
+            // Let a host page repaint its status chips.
+            document.dispatchEvent(new CustomEvent('audit-setup-changed'));
+            announceLoaded();   // 562: Step 2 re-discovers from the saved subjects
+            return true;
         } catch (err) {
             setMessage('error', 'Save failed: ' + (err.message || err));
+            return false;
         }
+    }
+
+    // 543: Reload, also run quietly (no "Reloaded." line) by the Audit
+    // Configuration page each time it opens the Scope Builder popup, so a
+    // popup closed without saving never shows its discarded picks again.
+    async function reloadScope(quiet) {
+        if (!state.definitionId || !state.orgId) {
+            if (!quiet) setMessage('error', 'Pick an organization and definition first.');
+            return false;
+        }
+        try {
+            await loadDefinitionById(state.definitionId);
+            await loadScope();
+            buildModelFromServer();
+            loadSimpleFromModel();
+            state.mode = isSimpleCompatible(state.model) ? 'simple' : 'legacy';
+            applyMode();
+            renderBanner();
+            renderReadonlyBannerIfNeeded();
+            document.getElementById('oaScopeSaveBtn').disabled = !state.header.isEditable;
+            announceLoaded();   // 562
+            if (!quiet) setMessage('ok', 'Reloaded.');
+            return true;
+        } catch (err) {
+            setMessage('error', 'Reload failed: ' + (err.message || err));
+            return false;
+        }
+    }
+
+    // 2026-11-13: the Audit Definition page's single Save ran this.
+    // 543: the Audit Configuration page's Scope Builder popup runs save and
+    // reload (the scope moved there from Audit Definition).
+    window.__oaScopeBuilder = { save: saveScope, reload: function () { return reloadScope(true); } };
+
+    // 562: tell Step 2 (Discover) which audit is loaded and whether it can
+    // be edited.
+    function announceLoaded() {
+        try {
+            document.dispatchEvent(new CustomEvent('audit-scope-loaded', { detail: {
+                organizationId : state.orgId != null ? Number(state.orgId) : null,
+                definitionId   : state.definitionId != null ? Number(state.definitionId) : null,
+                editable       : !!(state.header && state.header.isEditable)
+            }}));
+        } catch (_) { /* the scope itself loaded; never fail on the notification */ }
     }
 
     function setMessage(kind, text) {
@@ -998,13 +756,16 @@
             if (!c.dimensionCode) return false;
             const dim = state.dimensions.find(function (d) { return d.dimensionCode === c.dimensionCode; });
             if (!dim || !dim.isPickable) return false;
+            // 534: a legacy Practice Instances pick has no Simple card any
+            // more, so the scope opens read-only (legacy), where it is kept.
+            if (isLegacyDim(c.dimensionCode)) return false;
             if (seen.has(c.dimensionCode)) return false;
             seen.add(c.dimensionCode);
         }
         return true;
     }
 
-    // Copy the Advanced model's conditions into state.simpleSelections
+    // Copy the loaded model's conditions into state.simpleSelections
     // so switching modes preserves picks.
     function loadSimpleFromModel() {
         state.simpleSelections = {};
@@ -1022,13 +783,12 @@
         }
     }
 
-    // Build the same JSON shape the Advanced model uses, but from the
+    // Build the same JSON shape the loaded model uses, but from the
     // Simple selections. One AND group; one AND condition per non-empty
     // dimension; no NOT, no include_all.
     function buildModelFromSimple() {
         const conditions = [];
-        state.dimensions
-            .filter(function (d) { return d.isPickable; })
+        simpleDims()
             .forEach(function (d) {
                 const vals = state.simpleSelections[d.dimensionCode] || [];
                 if (!vals.length) return;
@@ -1051,204 +811,58 @@
         };
     }
 
-    // Show the requested mode section and reflect it in the toggle.
+    // Simple filters, or the read-only legacy scope.
     function applyMode() {
         const simple = state.mode === 'simple';
-        document.getElementById('oaScopeSimpleMode').hidden   = !simple;
-        document.getElementById('oaScopeAdvancedMode').hidden =  simple;
+        document.getElementById('oaScopeSimpleMode').hidden = !simple;
+        document.getElementById('oaScopeLegacy').hidden     =  simple;
+        if (simple) { renderSimpleFilters(); return; }
 
-        const sBtn = document.getElementById('oaScopeModeSimpleBtn');
-        const aBtn = document.getElementById('oaScopeModeAdvancedBtn');
-        sBtn.setAttribute('aria-pressed', String(simple));
-        aBtn.setAttribute('aria-pressed', String(!simple));
-        sBtn.style.background = simple ? 'var(--grac-navy-deep)' : '';
-        sBtn.style.color      = simple ? 'var(--fg-on-dark)'    : '';
-        aBtn.style.background = simple ? '' : 'var(--grac-navy-deep)';
-        aBtn.style.color      = simple ? '' : 'var(--fg-on-dark)';
-
-        if (simple) renderSimpleFilters();
-        else        renderGroups();
+        // The scope as saved, as sentences -- the same rendering as the
+        // audit's view page (window.gracAuditScopeSummary).
+        const h = state.header || {};
+        document.getElementById('oaScopeLegacySummary').innerHTML =
+            window.gracAuditScopeSummary.html({ groups: h.groups, conditions: h.conditions, values: h.values });
+        document.getElementById('oaScopeReplaceBtn').hidden = !h.isEditable;
     }
 
-    // Render one filter card per pickable dimension.
-    function renderSimpleFilters() {
+    // 562 (sir, 2026-11-15): Step 1 is Operationalize's Dependencies
+    // table -- js/Shared/dependency-picker.js. Each DEP_ dimension is one
+    // category (its name is the dependency type's name); a pick is kept
+    // in state.simpleSelections[dimensionCode], so saveScope and
+    // buildModelFromSimple are unchanged.
+    let renderSeq = 0;
+    async function renderSimpleFilters() {
         const host = document.getElementById('oaScopeSimpleFilters');
-        host.innerHTML = '';
-        const dims = state.dimensions.filter(function (d) { return d.isPickable; });
+        const dims = simpleDims().filter(function (d) { return d.dependencyTypeId != null; });
         if (!dims.length) {
-            host.innerHTML = '<div class="pm-empty" style="padding:12px;">No pickable dimensions are wired to a Practice Management lookup yet.</div>';
+            host.innerHTML = '<div class="pm-empty" style="padding:12px;">No dependency categories are set up on this database.</div>';
             return;
         }
-        dims.forEach(function (dim) {
-            host.appendChild(renderSimpleFilterCard(dim));
+        const seq = ++renderSeq;
+        const selected = {};
+        dims.forEach(function (d) {
+            selected[d.dimensionCode] = (state.simpleSelections[d.dimensionCode] || [])
+                .map(function (v) { return v.entityId; });
         });
-        if (!state.header.isEditable) {
-            host.querySelectorAll('input, button').forEach(function (el) { el.disabled = true; });
-        }
-    }
-
-    function renderSimpleFilterCard(dim) {
-        const tpl  = document.getElementById('oaScopeSimpleFilterTemplate').content.cloneNode(true);
-        const root = tpl.querySelector('.oa-simple-filter');
-        root.setAttribute('data-dim-code', dim.dimensionCode);
-
-        root.querySelector('[data-role="dim-name"]').textContent = 'Filter by ' + dim.dimensionName;
-        updateSimpleFilterSummary(root, dim);
-
-        // Header click toggles the body.
-        const header  = root.querySelector('.oa-simple-filter-header');
-        const body    = root.querySelector('.oa-simple-filter-body');
-        const chev    = root.querySelector('[data-role="chevron"]');
-        header.addEventListener('click', async function (e) {
-            // Don't collapse when clicking on the badge.
-            if (e.target.closest('[data-role="count-badge"]')) return;
-            const nowHidden = !body.hidden;
-            body.hidden = nowHidden;
-            chev.className = 'fa-solid ' + (nowHidden ? 'fa-chevron-down' : 'fa-chevron-up');
-            if (!nowHidden) {
-                // Expanding -- load values if not cached, then render.
-                await ensureValuesLoaded(dim.dimensionCode, body);
-                renderSimpleValueList(root, dim);
-                const search = root.querySelector('[data-role="search"]');
-                if (search) search.focus();
+        await window.gracDependencyPicker.render(host, {
+            orgId      : state.orgId,
+            categories : dims.map(function (d) {
+                return { name: d.dimensionName, typeId: d.dependencyTypeId, key: d.dimensionCode };
+            }),
+            selected   : selected,
+            readOnly   : !(state.header && state.header.isEditable),
+            onChange   : function (picked) {
+                if (seq !== renderSeq) return;
+                const next = {};
+                dims.forEach(function (d) {
+                    next[d.dimensionCode] = (picked[d.dimensionCode] || []).map(function (v) {
+                        return { entityId: v.id, entityCode: null, entityName: v.name };
+                    });
+                });
+                state.simpleSelections = next;
             }
         });
-
-        // Search input.
-        const search = root.querySelector('[data-role="search"]');
-        search.value = state.simpleSearches[dim.dimensionCode] || '';
-        search.addEventListener('input', function () {
-            state.simpleSearches[dim.dimensionCode] = search.value;
-            renderSimpleValueList(root, dim);
-        });
-
-        // Select all / Clear -- affect only currently filtered rows.
-        root.querySelector('[data-role="select-all"]').addEventListener('click', function () {
-            const visible = filteredValuesFor(dim.dimensionCode, state.simpleSearches[dim.dimensionCode] || '');
-            const current = state.simpleSelections[dim.dimensionCode] || [];
-            const byId = new Map(current.map(function (v) { return [String(v.entityId), v]; }));
-            visible.forEach(function (v) {
-                if (v.id == null) return;
-                byId.set(String(v.id), { entityId: v.id, entityCode: v.code || null, entityName: v.name || null });
-            });
-            state.simpleSelections[dim.dimensionCode] = Array.from(byId.values());
-            renderSimpleValueList(root, dim);
-            updateSimpleFilterSummary(root, dim);
-        });
-        root.querySelector('[data-role="clear"]').addEventListener('click', function () {
-            state.simpleSelections[dim.dimensionCode] = [];
-            renderSimpleValueList(root, dim);
-            updateSimpleFilterSummary(root, dim);
-        });
-
-        return root;
-    }
-
-    async function ensureValuesLoaded(dimCode, cardBody) {
-        if (state.valueCache[dimCode]) return;
-        const status = cardBody.querySelector('[data-role="status"]');
-        const list   = cardBody.querySelector('[data-role="list"]');
-        list.innerHTML = '';
-        if (status) status.textContent = 'Loading values...';
-        try {
-            const url = U(API + '/scope-dimensions/' + encodeURIComponent(dimCode) +
-                          '/values?organizationId=' + encodeURIComponent(state.orgId));
-            const r = await fetch(url, { credentials: 'same-origin' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            const b = await r.json();
-            const rows = (b && (b.data || b.Data)) || [];
-            state.valueCache[dimCode] = rows.map(function (v) {
-                return { id: v.id != null ? v.id : v.Id,
-                         code: v.code != null ? v.code : v.Code,
-                         name: v.name != null ? v.name : v.Name };
-            }).filter(function (v) { return v.id != null; });
-        } catch (err) {
-            state.valueCache[dimCode] = [];
-            if (status) status.textContent = 'Failed to load values: ' + (err.message || err);
-        }
-    }
-
-    function filteredValuesFor(dimCode, search) {
-        const all = state.valueCache[dimCode] || [];
-        const q = String(search || '').trim().toLowerCase();
-        if (!q) return all;
-        return all.filter(function (v) {
-            const n = String(v.name || '').toLowerCase();
-            const c = String(v.code || '').toLowerCase();
-            return n.indexOf(q) >= 0 || c.indexOf(q) >= 0;
-        });
-    }
-
-    function renderSimpleValueList(cardRoot, dim) {
-        const list   = cardRoot.querySelector('[data-role="list"]');
-        const status = cardRoot.querySelector('[data-role="status"]');
-        const search = state.simpleSearches[dim.dimensionCode] || '';
-        const values = filteredValuesFor(dim.dimensionCode, search);
-        const selected = state.simpleSelections[dim.dimensionCode] || [];
-        const selectedIds = new Set(selected.map(function (v) { return String(v.entityId); }));
-
-        if (!values.length) {
-            list.innerHTML = '<div style="padding:8px; color:var(--fg-subtle); font-size:12px;">' +
-                (state.valueCache[dim.dimensionCode] && state.valueCache[dim.dimensionCode].length
-                    ? 'No matches.'
-                    : 'No values available for this organization.') + '</div>';
-        } else {
-            list.innerHTML = values.map(function (v) {
-                const id = String(v.id);
-                const label = (v.name || '') + (v.code ? ' (' + v.code + ')' : '');
-                return '<label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; cursor:pointer;">'
-                     + '<input type="checkbox" data-role="value" data-id="' + wf.escape(id)
-                     + '" data-code="' + wf.escape(v.code || '')
-                     + '" data-name="' + wf.escape(v.name || '') + '"'
-                     + (selectedIds.has(id) ? ' checked' : '') + ' />'
-                     + '<span>' + wf.escape(label) + '</span>'
-                     + '</label>';
-            }).join('');
-        }
-
-        list.querySelectorAll('input[data-role="value"]').forEach(function (cb) {
-            cb.addEventListener('change', function () {
-                const id   = cb.getAttribute('data-id');
-                const code = cb.getAttribute('data-code') || null;
-                const name = cb.getAttribute('data-name') || null;
-                const list = state.simpleSelections[dim.dimensionCode] || [];
-                if (cb.checked) {
-                    if (!list.some(function (v) { return String(v.entityId) === id; })) {
-                        list.push({ entityId: Number(id), entityCode: code, entityName: name });
-                    }
-                } else {
-                    const idx = list.findIndex(function (v) { return String(v.entityId) === id; });
-                    if (idx >= 0) list.splice(idx, 1);
-                }
-                state.simpleSelections[dim.dimensionCode] = list;
-                updateSimpleFilterSummary(cardRoot, dim);
-            });
-        });
-
-        if (status) {
-            const total  = (state.valueCache[dim.dimensionCode] || []).length;
-            const shown  = values.length;
-            const chosen = selected.length;
-            status.textContent = chosen + ' selected'
-                + (search ? ' · showing ' + shown + ' of ' + total : ' · ' + total + ' available');
-        }
-    }
-
-    function updateSimpleFilterSummary(cardRoot, dim) {
-        const selected = state.simpleSelections[dim.dimensionCode] || [];
-        const summary  = cardRoot.querySelector('[data-role="dim-summary"]');
-        const badge    = cardRoot.querySelector('[data-role="count-badge"]');
-        if (!selected.length) {
-            summary.textContent = 'Not filtered (all ' + dim.dimensionName.toLowerCase() + ' will be in scope)';
-            badge.hidden = true;
-            badge.textContent = '';
-        } else {
-            const names = selected.map(function (v) { return v.entityName || v.entityCode || ('#' + v.entityId); });
-            const preview = names.slice(0, 3).join(', ') + (names.length > 3 ? ', +' + (names.length - 3) + ' more' : '');
-            summary.textContent = selected.length + ' selected: ' + preview;
-            badge.hidden = false;
-            badge.textContent = selected.length + ' selected';
-        }
     }
 
     async function safeJson(r) { try { return await r.json(); } catch (_) { return null; } }

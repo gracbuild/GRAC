@@ -32,6 +32,20 @@ public interface IOrgAssuranceQuestionService
     Task<OrgAssuranceCommandResult> DeleteSetAsync(
         long organizationId, long questionSetId, string? actor, CancellationToken cancellationToken);
 
+    // 551: versions and approval
+    Task<IReadOnlyList<OrgAssuranceQuestionSetVersionRow>> ListVersionsAsync(
+        long organizationId, long questionSetId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<OrgAssuranceQuestionSetImpactRow>> GetImpactAsync(
+        long organizationId, long questionSetId, CancellationToken cancellationToken);
+    Task<OrgAssuranceCommandResult> NewVersionAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken);
+    Task<OrgAssuranceCommandResult> SubmitAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken);
+    Task<OrgAssuranceCommandResult> ReturnAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken);
+    Task<OrgAssuranceQuestionSetApproveResult> ApproveAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken);
+
     // Questions
     Task<IReadOnlyList<OrgAssuranceQuestionRow>> ListQuestionsAsync(
         long organizationId, long questionSetId, CancellationToken cancellationToken);
@@ -41,6 +55,9 @@ public interface IOrgAssuranceQuestionService
         OrgAssuranceQuestionSaveRequest request, CancellationToken cancellationToken);
     Task<OrgAssuranceCommandResult> DeleteQuestionAsync(
         long organizationId, long questionId, string? actor, CancellationToken cancellationToken);
+    // 520: the whole questions grid of a set; Id carries the rows saved.
+    Task<OrgAssuranceCommandResult> SaveQuestionGridAsync(
+        long questionSetId, OrgAssuranceQuestionGridSaveRequest request, CancellationToken cancellationToken);
 }
 
 public sealed class OrgAssuranceQuestionService(
@@ -115,7 +132,15 @@ public sealed class OrgAssuranceQuestionService(
                     reader["Status"]?.ToString() ?? "Active",
                     Convert.ToInt64(reader["QuestionCount"]),
                     ReadDateTimeOrNull(reader, "EnteredDt"),
-                    ReadDateTimeOrNull(reader, "UpdatedDt")));
+                    ReadDateTimeOrNull(reader, "UpdatedDt"),
+                    // 535 columns; tolerated as absent before 535 is run.
+                    HasColumn(reader, "MandatoryCount") ? ReadLongOrNull(reader, "MandatoryCount")  : null,
+                    HasColumn(reader, "TotalWeight")    ? ReadDecimalOrNull(reader, "TotalWeight")  : null,
+                    // 551 columns; tolerated as absent before 551 is run.
+                    HasColumn(reader, "RootQuestionSetId")   ? ReadLongOrNull(reader,   "RootQuestionSetId")   : null,
+                    HasColumn(reader, "VersionNumber")       ? ReadIntOrNull(reader,    "VersionNumber")       : null,
+                    HasColumn(reader, "VersionStatus")       ? ReadStringOrNull(reader, "VersionStatus")       : null,
+                    HasColumn(reader, "ActiveVersionNumber") ? ReadIntOrNull(reader,    "ActiveVersionNumber") : null));
             }
         }
 
@@ -148,7 +173,182 @@ public sealed class OrgAssuranceQuestionService(
             ReadStringOrNull(reader, "EnteredBy"),
             ReadDateTimeOrNull(reader, "EnteredDt"),
             ReadStringOrNull(reader, "UpdatedBy"),
-            ReadDateTimeOrNull(reader, "UpdatedDt"));
+            ReadDateTimeOrNull(reader, "UpdatedDt"),
+            // 551 columns; tolerated as absent before 551 is run.
+            HasColumn(reader, "RootQuestionSetId")     ? ReadLongOrNull(reader,     "RootQuestionSetId")     : null,
+            HasColumn(reader, "VersionNumber")         ? ReadIntOrNull(reader,      "VersionNumber")         : null,
+            HasColumn(reader, "VersionStatus")         ? ReadStringOrNull(reader,   "VersionStatus")         : null,
+            HasColumn(reader, "PreviousQuestionSetId") ? ReadLongOrNull(reader,     "PreviousQuestionSetId") : null,
+            HasColumn(reader, "ChangeNote")            ? ReadStringOrNull(reader,   "ChangeNote")            : null,
+            HasColumn(reader, "SubmittedBy")           ? ReadStringOrNull(reader,   "SubmittedBy")           : null,
+            HasColumn(reader, "SubmittedDt")           ? ReadDateTimeOrNull(reader, "SubmittedDt")           : null,
+            HasColumn(reader, "ApprovedBy")            ? ReadStringOrNull(reader,   "ApprovedBy")            : null,
+            HasColumn(reader, "ApprovedDt")            ? ReadDateTimeOrNull(reader, "ApprovedDt")            : null,
+            HasColumn(reader, "ActiveQuestionSetId")   ? ReadLongOrNull(reader,     "ActiveQuestionSetId")   : null,
+            HasColumn(reader, "ActiveVersionNumber")   ? ReadIntOrNull(reader,      "ActiveVersionNumber")   : null,
+            HasColumn(reader, "OpenQuestionSetId")     ? ReadLongOrNull(reader,     "OpenQuestionSetId")     : null,
+            HasColumn(reader, "OpenVersionNumber")     ? ReadIntOrNull(reader,      "OpenVersionNumber")     : null,
+            HasColumn(reader, "OpenVersionStatus")     ? ReadStringOrNull(reader,   "OpenVersionStatus")     : null);
+    }
+
+    // -----------------------------------------------------------------
+    // 551: versions and approval
+    // -----------------------------------------------------------------
+    public async Task<IReadOnlyList<OrgAssuranceQuestionSetVersionRow>> ListVersionsAsync(
+        long organizationId, long questionSetId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_question_set_version_list";
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+        AddParam(command, "@question_set_id", DbType.Int64, questionSetId);
+
+        var rows = new List<OrgAssuranceQuestionSetVersionRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new OrgAssuranceQuestionSetVersionRow(
+                Convert.ToInt64(reader["QuestionSetId"]),
+                Convert.ToInt32(reader["VersionNumber"]),
+                reader["VersionStatus"]?.ToString() ?? "",
+                ReadStringOrNull(reader,   "SetName"),
+                ReadStringOrNull(reader,   "ChangeNote"),
+                Convert.ToInt64(reader["QuestionCount"]),
+                ReadStringOrNull(reader,   "SubmittedBy"),
+                ReadDateTimeOrNull(reader, "SubmittedDt"),
+                ReadStringOrNull(reader,   "ApprovedBy"),
+                ReadDateTimeOrNull(reader, "ApprovedDt"),
+                ReadStringOrNull(reader,   "EnteredBy"),
+                ReadDateTimeOrNull(reader, "EnteredDt")));
+        }
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<OrgAssuranceQuestionSetImpactRow>> GetImpactAsync(
+        long organizationId, long questionSetId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command    = connection.CreateCommand();
+        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = "grac_practice.sp_org_assurance_question_set_impact";
+        AddParam(command, "@organization_id", DbType.Int64, organizationId);
+        AddParam(command, "@question_set_id", DbType.Int64, questionSetId);
+
+        var rows = new List<OrgAssuranceQuestionSetImpactRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new OrgAssuranceQuestionSetImpactRow(
+                Convert.ToInt64(reader["DefinitionId"]),
+                reader["DefinitionCode"]?.ToString() ?? "",
+                reader["DefinitionName"]?.ToString() ?? "",
+                ReadIntOrNull(reader,    "CurrentVersionNumber"),
+                ReadStringOrNull(reader, "CurrentStatusCode"),
+                ReadStringOrNull(reader, "CurrentStatusName"),
+                ReadIntOrNull(reader,    "LinkedSetVersion"),
+                reader["ActionCode"]?.ToString() ?? "",
+                ReadStringOrNull(reader, "ActionText")));
+        }
+        return rows;
+    }
+
+    public async Task<OrgAssuranceCommandResult> NewVersionAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_question_set_new_version";
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@question_set_id", DbType.Int64,  questionSetId);
+            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
+            var idOut = command.CreateParameter();
+            idOut.ParameterName = "@question_set_id_out";
+            idOut.DbType        = DbType.Int64;
+            idOut.Direction     = ParameterDirection.Output;
+            command.Parameters.Add(idOut);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return new OrgAssuranceCommandResult(true, Convert.ToInt64(idOut.Value));
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "OrgAssuranceQuestionService.NewVersionAsync SQL error {Number}: {Message}", ex.Number, ex.Message);
+            return new OrgAssuranceCommandResult(false, Error: ex.Message, ReasonCode: MapReason(ex.Number));
+        }
+    }
+
+    public Task<OrgAssuranceCommandResult> SubmitAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken) =>
+        RunSetActionAsync("grac_practice.sp_org_assurance_question_set_submit", "@change_note", questionSetId, request, cancellationToken);
+
+    public Task<OrgAssuranceCommandResult> ReturnAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken) =>
+        RunSetActionAsync("grac_practice.sp_org_assurance_question_set_return", "@reason", questionSetId, request, cancellationToken);
+
+    private async Task<OrgAssuranceCommandResult> RunSetActionAsync(
+        string procedure, string noteParam, long questionSetId,
+        OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = procedure;
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@question_set_id", DbType.Int64,  questionSetId);
+            AddParam(command, noteParam,          DbType.String, (object?)request.Note  ?? DBNull.Value, 1000);
+            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return new OrgAssuranceCommandResult(true, questionSetId);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "OrgAssuranceQuestionService {Procedure} SQL error {Number}: {Message}", procedure, ex.Number, ex.Message);
+            return new OrgAssuranceCommandResult(false, Error: ex.Message, ReasonCode: MapReason(ex.Number));
+        }
+    }
+
+    public async Task<OrgAssuranceQuestionSetApproveResult> ApproveAsync(
+        long questionSetId, OrgAssuranceQuestionSetActionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_question_set_approve";
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@question_set_id", DbType.Int64,  questionSetId);
+            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
+
+            var rows = new List<OrgAssuranceQuestionSetImpactRow>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new OrgAssuranceQuestionSetImpactRow(
+                    Convert.ToInt64(reader["DefinitionId"]),
+                    reader["DefinitionCode"]?.ToString() ?? "",
+                    reader["DefinitionName"]?.ToString() ?? "",
+                    null, null, null, null,
+                    reader["ActionCode"]?.ToString() ?? "",
+                    null,
+                    ReadIntOrNull(reader, "NewVersionNumber")));
+            }
+            return new OrgAssuranceQuestionSetApproveResult(true, rows);
+        }
+        catch (SqlException ex)
+        {
+            logger.LogWarning(ex, "OrgAssuranceQuestionService.ApproveAsync SQL error {Number}: {Message}", ex.Number, ex.Message);
+            return new OrgAssuranceQuestionSetApproveResult(false, [], ex.Message, MapReason(ex.Number));
+        }
     }
 
     public async Task<OrgAssuranceQuestionSetSaveResult> SaveSetAsync(
@@ -288,6 +488,9 @@ public sealed class OrgAssuranceQuestionService(
             AddParam(command, "@display_order",       DbType.Int32,   request.DisplayOrder ?? 0);
             AddParam(command, "@weight",              DbType.Decimal, (object?)request.Weight ?? DBNull.Value);
             AddParam(command, "@expected_response",   DbType.String,  (object?)request.ExpectedResponse ?? DBNull.Value, -1);
+            AddParam(command, "@evidence_type_id",    DbType.Int32,   (object?)request.EvidenceTypeId ?? DBNull.Value); // 520
+            AddParam(command, "@expected_evidence",   DbType.String,  (object?)request.ExpectedEvidence ?? DBNull.Value, -1);
+            AddParam(command, "@status",              DbType.String,  (object?)request.Status ?? (object)"Active", 20);
             AddParam(command, "@actor",               DbType.String,  (object?)request.Actor ?? (object)"system", 100);
 
             var idOut = command.CreateParameter();
@@ -331,6 +534,44 @@ public sealed class OrgAssuranceQuestionService(
         {
             var reason = MapReason(ex.Number);
             logger.LogWarning(ex, "OrgAssuranceQuestionService.DeleteQuestionAsync SQL error {Number}: {Message}",
+                ex.Number, ex.Message);
+            return new OrgAssuranceCommandResult(false, Error: ex.Message, ReasonCode: reason);
+        }
+    }
+
+    public async Task<OrgAssuranceCommandResult> SaveQuestionGridAsync(
+        long questionSetId, OrgAssuranceQuestionGridSaveRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        // The procedure reads these exact camelCase names (520).
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            request.Questions ?? Array.Empty<OrgAssuranceQuestionGridRow>(),
+            new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = connection.CreateCommand();
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = "grac_practice.sp_org_assurance_question_set_questions_save";
+
+            AddParam(command, "@organization_id", DbType.Int64,  request.OrganizationId);
+            AddParam(command, "@question_set_id", DbType.Int64,  questionSetId);
+            AddParam(command, "@questions_json",  DbType.String, json, -1);
+            AddParam(command, "@actor",           DbType.String, (object?)request.Actor ?? (object)"system", 100);
+
+            var countOut = command.CreateParameter();
+            countOut.ParameterName = "@saved_count";
+            countOut.DbType        = DbType.Int32;
+            countOut.Direction     = ParameterDirection.Output;
+            command.Parameters.Add(countOut);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return new OrgAssuranceCommandResult(true, Convert.ToInt64(countOut.Value));
+        }
+        catch (SqlException ex)
+        {
+            var reason = MapReason(ex.Number);
+            logger.LogWarning(ex, "OrgAssuranceQuestionService.SaveQuestionGridAsync SQL error {Number}: {Message}",
                 ex.Number, ex.Message);
             return new OrgAssuranceCommandResult(false, Error: ex.Message, ReasonCode: reason);
         }
@@ -382,9 +623,26 @@ public sealed class OrgAssuranceQuestionService(
         ReadStringOrNull(r, "EnteredBy"),
         ReadDateTimeOrNull(r, "EnteredDt"),
         ReadStringOrNull(r, "UpdatedBy"),
-        ReadDateTimeOrNull(r, "UpdatedDt"));
+        ReadDateTimeOrNull(r, "UpdatedDt"),
+        // 520 columns. Read only when the procedure returns them, so a
+        // database that is behind the API (520 not run, or an earlier copy
+        // of it) still lists its questions instead of failing the request.
+        HasColumn(r, "EvidenceRequired") && r["EvidenceRequired"] != DBNull.Value && Convert.ToBoolean(r["EvidenceRequired"]),
+        HasColumn(r, "ExpectedEvidence") ? ReadStringOrNull(r, "ExpectedEvidence") : null,
+        HasColumn(r, "Status") ? (r["Status"]?.ToString() ?? "Active") : "Active",
+        HasColumn(r, "VersionNumber") && r["VersionNumber"] != DBNull.Value ? Convert.ToInt32(r["VersionNumber"]) : 1,
+        HasColumn(r, "EvidenceTypeId")   ? ReadIntOrNull(r,    "EvidenceTypeId")   : null,
+        HasColumn(r, "EvidenceTypeCode") ? ReadStringOrNull(r, "EvidenceTypeCode") : null,
+        HasColumn(r, "EvidenceTypeName") ? ReadStringOrNull(r, "EvidenceTypeName") : null);
 
-    // Reason mapping for SP THROW numbers (077).
+    private static bool HasColumn(System.Data.Common.DbDataReader r, string col)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+            if (string.Equals(r.GetName(i), col, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    // Reason mapping for SP THROW numbers (077, 520).
     private static string MapReason(int errorNumber) => errorNumber switch
     {
         53801 => "ORGANIZATION_ID_REQUIRED",
@@ -399,6 +657,18 @@ public sealed class OrgAssuranceQuestionService(
         53810 => "DUPLICATE_QUESTION_CODE",
         53811 => "QUESTION_NOT_FOUND",
         53812 => "SET_MISMATCH",
+        53813 => "RESPONSE_TYPE_REQUIRED",     // 520
+        53814 => "INVALID_STATUS",
+        53815 => "DUPLICATE_QUESTION_CODE_IN_GRID",
+        53816 => "INVALID_QUESTIONS",
+        53817 => "EVIDENCE_TYPE_NOT_FOUND",
+        53840 => "VERSION_NOT_DRAFT",          // 551
+        53841 => "VERSION_IN_PROGRESS",
+        53842 => "NO_ACTIVE_VERSION",
+        53843 => "NO_QUESTIONS",
+        53844 => "NOT_UNDER_REVIEW",
+        53846 => "SET_IN_USE",
+        53849 => "CLONE_FAILED",
         _     => "SQL_ERROR"
     };
 }

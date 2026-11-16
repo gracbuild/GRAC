@@ -1,26 +1,33 @@
 @*
-    Third Parties -- Third-Party Risk Management (migrations 486-490).
+    Vendor Registry -- Third-Party Management (migrations 486-490;
+    restructured by 521, TPM lifecycle redesign Phase 1).
     Rendered from Manage.cshtml when Model.Key == "tprm-third-parties".
 
-    Screen key : `tprm-third-parties`
-    Group      : Third-Party Risk
-    Menu       : nav-tprm (Third-Party Risk) -> Third Parties
+    Screen key : `tprm-third-parties` (unchanged by 521)
+    Group      : Third-Party Management
+    Menu       : nav-tprm (Third-Party Management) -> Vendor Registry
 
-    BRD step 1: a third party is registered once -- legal and trading
-    name, registration / tax / LEI identifiers, provider type, service
-    categories, contacts, relationship owner, lifecycle status and the
-    organization's custom fields. Before saving, possible duplicates (same
-    identifier, same normalised name, or a GRAC vendor with that name) are
-    listed and nothing is saved until the user confirms. GRAC vendors
-    (Dependencies) can be imported and linked, never copied. The detail
-    lists the third party's engagements; "New engagement" opens the
-    Engagements screen for it. Sample records (BRD 6) are clearly marked.
+    CR 2 section 4 (522): the master repository of every registered
+    vendor. Register vendor is lightweight -- legal and trading name,
+    primary service category, relationship owner, country and the primary
+    contact (name, e-mail, phone) -- and ACTIVATES the vendor at once, with
+    no approval; activation is not a TPRM assessment or admission. Edit
+    vendor adds the progressive information (identifiers, vendor type,
+    categories, address, ownership, profile, all contacts, custom fields),
+    none of it mandatory. Possible duplicates (on the attributes enabled in
+    VENDOR_MATCH_ATTRIBUTE) are listed before saving and each needs a
+    "different vendor" reason; a real duplicate is marked on the Duplicates
+    tab (archived, nothing merged). Lifecycle: Active / Inactive /
+    Suspended / Archived -- the detail offers only the changes
+    fn_tprm_vendor_transitions allows, each with a reason. There is no link
+    to the legacy GRAC vendor (Settings -> Dependencies). Sample records
+    are clearly marked.
 
     Same layout conventions as Evidence Center / Asset & Contract: compact
     page heading, organization picker, one pm-panel with a pm-toolbar of
     filters, pm-table-wrap grid + pm-grid pager, pm-modal dialogs.
 
-    Backend: practice/api/tprm/third-parties..., vendors..., samples/load
+    Backend: practice/api/tprm/third-parties..., samples/load
              (TprmController)
     Script : wwwroot/js/Tprm/tprm-common.js, tprm-third-parties.js
 *@
@@ -30,9 +37,10 @@
     bool tpHas(string action) => tpPermissions.Any(p => p.Equals(action, StringComparison.OrdinalIgnoreCase) || p == "*");
     var tpCanAdd = tpHas("ADD");
     var tpCanEdit = tpHas("EDIT");
+    var tpCanApprove = tpHas("APPROVE");
 }
 
-<div class="pm-page-heading compact">
+<div class="pm-page-heading compact" id="tpHeading">
     <div>
         <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
         <h1>@Model.Title</h1>
@@ -40,14 +48,14 @@
     </div>
 </div>
 
-<div id="tpRoot" data-can-add="@(tpCanAdd ? "1" : "0")" data-can-edit="@(tpCanEdit ? "1" : "0")">
-    <section class="pm-panel">
+<div id="tpRoot" data-can-add="@(tpCanAdd ? "1" : "0")" data-can-edit="@(tpCanEdit ? "1" : "0")" data-can-approve="@(tpCanApprove ? "1" : "0")">
+    <section class="pm-panel" id="tpList">
         <div class="pm-toolbar">
             <select id="tpOrg" title="Organization"><option value="">Select organization</option></select>
         </div>
         <p class="pm-message" id="tpMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-toolbar">
-            <input type="search" id="tpSearch" placeholder="Search name, code or identifier" maxlength="200" />
+            <input type="search" id="tpSearch" placeholder="Search vendor name, code or identifier" maxlength="200" />
             <select id="tpStatusFilter" title="Lifecycle status"><option value="">All statuses</option></select>
             <select id="tpCategoryFilter" title="Service category"><option value="">All service categories</option></select>
             <select id="tpSampleFilter" title="Sample records">
@@ -55,39 +63,69 @@
                 <option value="EXCLUDE">Organization records only</option>
                 <option value="ONLY">Sample records only</option>
             </select>
-            <label class="tprm-inline-check"><input type="checkbox" id="tpArchived" /> Include archived</label>
+            <select id="tpArchived" title="Archived vendors">
+                <option value="">Exclude archived</option>
+                <option value="true">Include archived</option>
+            </select>
             <button class="pm-button icon" id="tpRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             @if (tpCanAdd)
             {
-                <button class="pm-button" id="tpImport" type="button"><i class="fa-solid fa-file-import"></i> Import from vendors</button>
                 <button class="pm-button" id="tpSamples" type="button"><i class="fa-solid fa-flask"></i> Load sample records</button>
-                <button class="pm-button primary" id="tpNew" type="button"><i class="fa-solid fa-plus"></i> New third party</button>
+                <button class="pm-button primary" id="tpNew" type="button"><i class="fa-solid fa-plus"></i> Register vendor</button>
             }
         </div>
         <div class="pm-table-wrap">
             <table>
-                <thead><tr><th>Code</th><th>Third party</th><th>Provider type</th><th>Service category</th><th>Status</th><th>Engagements</th><th>Highest risk</th><th>Relationship owner</th></tr></thead>
+                <thead><tr><th>Code</th><th>Vendor</th><th>Vendor type</th><th>Service category</th><th>Status</th><th>Engagements</th><th>Highest risk</th><th>Relationship owner</th></tr></thead>
                 <tbody id="tpListBody"></tbody>
             </table>
         </div>
         <div id="tpPager"></div>
     </section>
+
+    @* Register vendor / Edit vendor -- a full page in place of the list
+       (2026-11-07). Register shows the eight CR 2 registration fields; Edit
+       shows them with the progressive information (522).
+       gracTprm.form({ page: "tpEditor" }) renders into the data-tf-part
+       elements below, exactly as it does into the shared modal. *@
+    <section id="tpEditor" hidden>
+        <div class="pm-page-heading compact">
+            <div>
+                <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+                <h1 data-tf-part="title">Register vendor</h1>
+                <p data-tf-part="intro" hidden></p>
+            </div>
+        </div>
+        <section class="pm-panel tprm-page-form">
+            <form class="pm-form-grid" data-tf-part="form" novalidate>
+                <div class="full tprm-form-fields" data-tf-part="fields"></div>
+                <p class="pm-message full" data-tf-part="message" role="status" aria-live="polite" hidden></p>
+                <div class="full" data-tf-part="extra" hidden></div>
+                <footer class="pm-modal-footer full">
+                    <button type="button" class="pm-button" data-tf-part="cancel">Cancel</button>
+                    <button type="submit" class="pm-button primary" data-tf-part="submit"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                </footer>
+            </form>
+        </section>
+    </section>
 </div>
 
-@* ======================= Third-party detail ======================= *@
+@* ======================= Vendor detail ======================= *@
 <div class="pm-modal" id="tpDetailModal" hidden>
     <div class="pm-modal-panel tprm-wide">
         <header>
-            <h2 id="tpDetailTitle">Third party</h2>
+            <h2 id="tpDetailTitle">Vendor</h2>
             <button class="pm-modal-close" type="button" data-close-tp="tpDetailModal" aria-label="Close">&times;</button>
         </header>
         <p class="pm-message" id="tpDetailMessage" role="status" aria-live="polite" hidden></p>
         <div class="tprm-info" id="tpDetailInfo"></div>
         <div class="tprm-actions" id="tpDetailActions"></div>
-        <div class="pm-tabs" role="tablist" aria-label="Third party">
+        <p class="tprm-note" id="tpDetailNote" hidden></p>
+        <div class="pm-tabs" role="tablist" aria-label="Vendor">
             <button role="tab" class="active" data-tp-tab="ENG" aria-selected="true">Engagements</button>
             <button role="tab" data-tp-tab="CONTACTS" aria-selected="false">Contacts</button>
             <button role="tab" data-tp-tab="PROFILE" aria-selected="false">Profile</button>
+            <button role="tab" data-tp-tab="DUPLICATES" aria-selected="false">Duplicates</button>
             <button role="tab" data-tp-tab="HISTORY" aria-selected="false">Status history</button>
         </div>
         <div data-tp-panel="ENG">
@@ -103,32 +141,24 @@
             </table></div>
         </div>
         <div data-tp-panel="PROFILE" hidden><div class="tprm-info" id="tpProfileInfo"></div></div>
+        <div data-tp-panel="DUPLICATES" hidden>
+            <p class="tprm-note">Other vendors that match this one on the identity attributes switched on in Configuration (Vendor duplicate-detection attributes). A match is reviewed, never merged: record that they are different vendors, or mark this one as the duplicate (a draft or inactive vendor with no open engagement; it is archived and points to the other). To undo a duplicate decision, restore the archived vendor.</p>
+            <div class="pm-table-wrap"><table>
+                <thead><tr><th>Match</th><th>Vendor</th><th>Why it matched</th><th>Review</th><th></th></tr></thead>
+                <tbody id="tpDupBody"></tbody>
+            </table></div>
+            <div class="tprm-subhead">Reviews recorded</div>
+            <div class="pm-table-wrap"><table>
+                <thead><tr><th>When</th><th>Other vendor</th><th>Decision</th><th>Reason</th><th>By</th></tr></thead>
+                <tbody id="tpReviewBody"></tbody>
+            </table></div>
+        </div>
         <div data-tp-panel="HISTORY" hidden>
             <div class="pm-table-wrap"><table>
                 <thead><tr><th>When</th><th>From</th><th>To</th><th>Reason</th><th>By</th></tr></thead>
                 <tbody id="tpHistoryBody"></tbody>
             </table></div>
         </div>
-    </div>
-</div>
-
-@* ======================= Vendor import (GRAC Dependencies) ======================= *@
-<div class="pm-modal" id="tpVendorModal" hidden>
-    <div class="pm-modal-panel tprm-wide">
-        <header>
-            <h2>Import from GRAC vendors</h2>
-            <button class="pm-modal-close" type="button" data-close-tp="tpVendorModal" aria-label="Close">&times;</button>
-        </header>
-        <p class="tprm-note">Vendors registered under Organization -&gt; Dependencies, with what already depends on them. Importing links the vendor to a third party (new or existing); the vendor record itself is not copied or changed.</p>
-        <p class="pm-message" id="tpVendorMessage" role="status" aria-live="polite" hidden></p>
-        <div class="pm-toolbar">
-            <input type="search" id="tpVendorSearch" placeholder="Search vendors" maxlength="200" />
-            <label class="tprm-inline-check"><input type="checkbox" id="tpVendorUnlinked" checked /> Not yet linked only</label>
-        </div>
-        <div class="pm-table-wrap"><table>
-            <thead><tr><th>Vendor</th><th>Category</th><th>Criticality</th><th>Contract</th><th>Depends on it</th><th>Third party</th><th></th></tr></thead>
-            <tbody id="tpVendorBody"></tbody>
-        </table></div>
     </div>
 </div>
 
@@ -139,5 +169,6 @@
 </style>
 
 <script src="~/js/pm-grid.js" asp-append-version="true"></script>
+<script src="~/js/Shared/secure-nav.js" asp-append-version="true"></script>
 <script src="~/js/Tprm/tprm-common.js" asp-append-version="true"></script>
 <script src="~/js/Tprm/tprm-third-parties.js" asp-append-version="true"></script>

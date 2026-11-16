@@ -1,0 +1,180 @@
+@*
+    Organization View  (2026-11-02)
+
+    Route: /OrganizationManagement/organization-view?code=<encrypted>
+
+    PURPOSE
+    -------
+    A read-only, single page showing everything recorded for ONE
+    organization. It is what a row click on Organization Management's
+    landing list opens. Organization Setup stays what it has always been
+    -- the edit / onboarding form -- and this page's Actions > Edit is how
+    you get there. (The first cut of this change made Organization Setup
+    itself render read-only; sir asked for a proper separate view page
+    instead, which is this.)
+
+    NO ID IN THE URL. The organization arrives inside the encrypted
+    navigation code (?code=), the NavigationContextProtector envelope every
+    other cross-screen drill in this app uses. Opened without one, the page
+    says so rather than falling back to some organization.
+
+    DATA SOURCES -- three reads, every one of them already existed. No new
+    endpoint, no new stored procedure, no new column:
+      * the organization row   -> POST {gateway}/organizations/query  { id }
+                                  (migration 510's sp_org_organization_list,
+                                  the same read the landing list uses -- it
+                                  is where SpocName comes from)
+      * attributes + subscribed
+        releases               -> POST {gateway}/organization-setup/query
+                                  (404's 'organization-setup' branch:
+                                  table 2 = the metadata definitions with
+                                  this organization's values, table 3 = the
+                                  authority/artifact/release tree carrying
+                                  IsSubscribed)
+      * lookup labels          -> GET  {gateway}/lookups
+                                  (Time Zone is stored as an id)
+
+    The Actions button is the shared one -- wwwroot/js/Shared/page-actions-
+    menu.js, window.gracPageActions.attach -- the same button and menu
+    Practice / Gap / Task / Exception View carry. Nothing about it is
+    re-implemented here.
+
+    Styling follows gap-view.cshtml's read-only page: section headings over
+    .ov-facts definition lists. Same visual language, no new design.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var permissions = ViewBag.Permissions as string[] ?? [];
+    // The module root is the organization list (PracticeController.Index ->
+    // ShowArea("organizations")). "/" when the module is served with no base
+    // path. Built from AppBasePath rather than a tag helper for the reason
+    // Manage.cshtml's Add Organization button documents: /OrganizationManagement
+    // is a PathBase in a hosted deployment but a conventional route on a plain
+    // host, and a tag helper can resolve against the Practice route instead.
+    string appBasePathForLinks = Convert.ToString(ViewBag.AppBasePath) ?? string.Empty;
+    var organizationListUrl = appBasePathForLinks.TrimEnd('/');
+    if (string.IsNullOrEmpty(organizationListUrl)) organizationListUrl = "/";
+}
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1 id="ovHeading">Organization</h1>
+        <p id="ovSubHeading">Everything recorded for this organization, read-only.</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <button type="button" class="pm-button" id="ovActionsBtn" aria-haspopup="true" aria-expanded="false">
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i> Actions
+            <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px; margin-left:2px;"></i>
+        </button>
+        <a class="pm-button" href="@organizationListUrl">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to Organizations
+        </a>
+    </div>
+</div>
+
+<section class="pm-panel" id="ovUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-circle-info pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="ovUnavailableTitle">Organization not found.</h2>
+        <p id="ovUnavailableBody">Open this page from the Organizations list.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="ovRoot" hidden>
+
+    <div class="pm-toolbar" style="justify-content:space-between">
+        <div>
+            <span class="pm-badge" id="ovStatusChip">-</span>
+            <strong id="ovTitle" style="margin-left:8px"></strong>
+        </div>
+        <button class="pm-button icon" id="ovRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
+            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+        </button>
+    </div>
+
+    <h3 class="ov-section">Organization Details</h3>
+    <dl class="ov-facts" id="ovDetails"></dl>
+
+    <h3 class="ov-section">Subscription</h3>
+    <dl class="ov-facts" id="ovSubscription"></dl>
+
+    <h3 class="ov-section">Address &amp; Locale</h3>
+    <dl class="ov-facts ov-facts-wide" id="ovAddress"></dl>
+
+    @* The metadata definitions and this organization's values, rendered
+       straight from the API rows (MetadataName + DataType) rather than from
+       a copy of practice.js's setupAttributeSchema -- one less place for the
+       two to drift. Hidden when the organization has no attributes. *@
+    <div id="ovAttributesWrap" hidden>
+        <h3 class="ov-section">Organization Attributes</h3>
+        <dl class="ov-facts" id="ovAttributes"></dl>
+    </div>
+
+    @* Subscribed releases, grouped Authority > Artifact, from the same tree
+       Organization Setup's subscription panel reads (IsSubscribed). A list,
+       not the landing list's "+N more" summary -- there is room here.
+       Each release shows its release owner (2026-11-03), read from the
+       subscribed-frameworks summary Standards & Frameworks uses. *@
+    <h3 class="ov-section">Standards &amp; Frameworks</h3>
+    <p class="pm-hint" id="ovFrameworksEmpty" hidden>This organization has no active repository subscriptions.</p>
+    <div class="ov-frameworks" id="ovFrameworks"></div>
+
+</section>
+
+<style>
+    /* Read-only facts panels, the same shape gap-view.cshtml uses for the
+       same job -- section heading over a definition list on a tinted panel. */
+    #ovRoot .ov-section {
+        margin: 18px 0 8px; font-size: 13px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .04em; color: var(--fg-secondary);
+    }
+    #ovRoot .ov-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
+        gap: 8px 20px; margin: 0 0 4px;
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md);
+    }
+    #ovRoot .ov-facts dt {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted);
+    }
+    #ovRoot .ov-facts dd {
+        margin: 0 0 6px; font-size: 13px; color: var(--neutral-700); overflow-wrap: anywhere;
+        white-space: pre-wrap;
+    }
+    #ovRoot .ov-facts dd.ov-empty { color: var(--fg-subtle); font-style: italic; }
+    #ovRoot .ov-facts.ov-facts-wide { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+    /* Authority > Artifact > releases. Indentation carries the hierarchy;
+       the release versions are chips so one artifact with six releases
+       stays one line deep. */
+    #ovRoot .ov-frameworks {
+        padding: 12px 14px; background: var(--neutral-50); border-radius: var(--radius-md);
+    }
+    #ovRoot .ov-authority { margin: 0 0 12px; }
+    #ovRoot .ov-authority:last-child { margin-bottom: 0; }
+    #ovRoot .ov-authority-name {
+        font-size: 12px; font-weight: 700; color: var(--neutral-700);
+        text-transform: uppercase; letter-spacing: .03em;
+    }
+    #ovRoot .ov-artifact { margin: 6px 0 0 14px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+    #ovRoot .ov-artifact-name { font-size: 13px; color: var(--neutral-700); font-weight: 600; }
+    #ovRoot .ov-release {
+        display: inline-block; padding: 1px 9px; border-radius: var(--radius-pill);
+        font-size: 11px; font-weight: 650;
+        background: var(--bg-surface); border: 1px solid var(--border-strong); color: var(--fg-secondary);
+    }
+    /* Release owner beside each release chip (2026-11-03). */
+    #ovRoot .ov-release-item { display: inline-flex; align-items: baseline; gap: 6px; }
+    #ovRoot .ov-release-owner { font-size: 12px; color: var(--fg-secondary); }
+    #ovRoot .ov-release-owner.ov-empty { color: var(--fg-subtle); font-style: italic; }
+</style>
+
+<script>
+    // What the page needs from the server. The generic Manage layout's own
+    // script block is not emitted for a workflow-screen partial (Manage.cshtml
+    // returns before its @@section Scripts), so each partial exposes its own.
+    window.pmApi = "@ViewBag.ApiBaseUrl";
+    window.pmPermissions = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(permissions));
+</script>
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Organization/organization-view.js" asp-append-version="true"></script>

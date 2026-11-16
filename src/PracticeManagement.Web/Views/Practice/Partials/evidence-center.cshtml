@@ -72,6 +72,8 @@
                 <button class="pm-button primary" id="ecUploadNew" type="button"><i class="fa-solid fa-upload"></i> Upload evidence</button>
             }
         </div>
+        @* 508: Policies & Documents dashboard drill-down banner (Shared/dashboard-drill.js). *@
+        <div id="ecDrillBanner" hidden></div>
         <div class="pm-table-wrap">
             <table>
                 <thead><tr><th>Evidence</th><th>Type</th><th>Owner</th><th>Valid to</th><th>Version</th><th>Used in</th><th>Classification</th><th>Status</th></tr></thead>
@@ -136,4 +138,5 @@
 <script src="~/js/pm-grid.js" asp-append-version="true"></script>
 @* 499: the shared upload dialog module, before the screen script that calls it. *@
 <script src="~/js/Shared/evidence-upload.js" asp-append-version="true"></script>
+<script src="~/js/Shared/dashboard-drill.js" asp-append-version="true"></script>   @* 508: Policies & Documents dashboard drill-down *@
 <script src="~/js/EvidenceCenter/evidence-center.js" asp-append-version="true"></script>

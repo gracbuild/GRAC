@@ -7,6 +7,7 @@
     Feature    : screen.org-assurance-workflow-config
     Backend    :
         GET  /practice/api/org-assurance/admin-workflow-templates
+        GET  /practice/api/org-assurance/admin-workflow-templates/{templateId}   (538: the template's stages)
         GET  /practice/api/org-assurance/workflow-stage-types
         GET  /practice/api/org-assurance/organization-roles?organizationId=
         GET  /practice/api/org-assurance/definitions/{id}?organizationId=
@@ -428,7 +429,9 @@
 
     async function selectDefinition(definitionId) {
         state.definitionId = definitionId;
-        try {
+        // 537: hosted on the Audit Configuration page, the host owns the
+        // address bar -- no record id is written there.
+        if (!window.__oaHostNoUrl) try {
             const u = new URL(window.location.href);
             u.searchParams.set('definitionId', String(definitionId));
             window.history.replaceState(null, '', u.toString());
@@ -584,10 +587,75 @@
                                         ? null : Number(document.getElementById('oaWfHeaderTotalSla').value)
             };
         }
-        document.getElementById('oaWfHeaderTemplate').onchange    = pull;
+        // 538: picking a template also brings its stages.
+        document.getElementById('oaWfHeaderTemplate').onchange    = function (e) {
+            const previous = state.headerForm ? state.headerForm.workflowTemplateId : null;
+            pull();
+            applyTemplate(previous, pull);
+        };
         document.getElementById('oaWfHeaderName').oninput         = pull;
         document.getElementById('oaWfHeaderTotalSla').oninput     = pull;
         document.getElementById('oaWfHeaderDescription').oninput  = pull;
+    }
+
+    // -----------------------------------------------------------------
+    // 538: a picked Admin template fills the stages -- only the stages
+    // (sir, 2026-11-13: name / SLA / description are not taken from the
+    // template). GET admin-workflow-templates/{id} returns its Active stages
+    // already shaped as organization stages; roles / employees are the
+    // organization's, so they stay to be picked. Existing stages are
+    // replaced only after a confirm; nothing is written until Save.
+    // -----------------------------------------------------------------
+    async function applyTemplate(previousTemplateId, pull) {
+        const sel = document.getElementById('oaWfHeaderTemplate');
+        const templateId = sel.value ? Number(sel.value) : null;
+        if (!templateId || !state.header || !state.header.isEditable) return;
+
+        let tpl = null;
+        try {
+            const r = await fetch(U(API + '/admin-workflow-templates/' + encodeURIComponent(templateId)), { credentials: 'same-origin' });
+            const j = await safeJson(r);
+            if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+            tpl = j && (j.data || j.Data);
+        } catch (err) {
+            setMessage('error', 'Could not load the template\'s stages: ' + (err.message || err));
+            return;
+        }
+        const pick = function (o, a, b) { return o ? (o[a] != null ? o[a] : o[b]) : null; };
+        const stages = (tpl && (tpl.stages || tpl.Stages)) || [];
+        if (!stages.length) {
+            setMessage('error', 'This template has no active stages to copy. Add the stages here.');
+            return;
+        }
+        if (state.stages.length) {
+            const go = await window.gracUi.confirm(
+                'Replace the ' + state.stages.length + ' stage(s) already here with the template\'s ' + stages.length + ' stage(s)?',
+                { type: 'warning', title: 'Use template stages', confirmText: 'Replace' });
+            if (!go) {
+                // Keep the stages and the template they came with.
+                sel.value = previousTemplateId != null ? String(previousTemplateId) : '';
+                pull();
+                return;
+            }
+        }
+
+        state.stages = stages.map(function (s, i) {
+            return {
+                stageOrder            : pick(s, 'stageOrder', 'StageOrder') || (i + 1),
+                stageCode             : pick(s, 'stageCode', 'StageCode') || '',
+                stageName             : pick(s, 'stageName', 'StageName') || '',
+                stageType             : pick(s, 'stageType', 'StageType') || 'CUSTOM',
+                assignedRoleId        : null, assignedRoleName     : null,
+                assignedEmployeeId    : null, assignedEmployeeName : null,
+                slaDays               : pick(s, 'slaDays', 'SlaDays'),
+                escalationRoleId      : null, escalationRoleName   : null,
+                escalationAfterDays   : null,
+                instructions          : pick(s, 'instructions', 'Instructions') || ''
+            };
+        });
+
+        renderStages();
+        setMessage('ok', stages.length + ' stage(s) copied from the template. Assign a role or employee to each stage, then Save.');
     }
 
     function renderStages() {
@@ -679,10 +747,15 @@
         document.body.appendChild(openMenuEl);
         positionRowMenu(trg);
     }
+    // 2026-11-13: one handler, not one more per render. renderStages()
+    // calls this every time; addEventListener stacked a handler per render,
+    // so after an edit two handlers ran -- the first opened the menu, the
+    // second saw the same trigger and closed it. body.onclick replaces the
+    // previous handler, as the Scoring and Triggers screens already do.
     function wireRowMenu() {
         const body = document.getElementById('oaWfStageBody');
         if (!body) return;
-        body.addEventListener('click', function (e) {
+        body.onclick = function (e) {
             const trg = e.target.closest('.pm-action-trigger');
             if (!trg || !body.contains(trg)) return;
             e.preventDefault(); e.stopPropagation();
@@ -696,7 +769,7 @@
                     state.stages.splice(idx, 1); renderStages();
                 } }
             ]);
-        }, { once: false });
+        };
     }
     document.addEventListener('click', function (e) {
         if (!openMenuEl) return;
@@ -863,23 +936,15 @@
             e.preventDefault(); saveStageFromDialog();
         });
 
-        document.getElementById('oaWfReloadBtn').addEventListener('click', async function () {
-            if (!state.definitionId || !state.orgId) { setMessage('error', 'Pick an organization and definition first.'); return; }
-            try {
-                await loadWorkflow();
-                renderBanner(); renderReadonlyBannerIfNeeded();
-                renderHeaderForm(); renderStages();
-                document.getElementById('oaWfSaveBtn').disabled     = !state.header.isEditable;
-                document.getElementById('oaWfAddStageBtn').disabled = !state.header.isEditable;
-                setMessage('ok', 'Reloaded.');
-            } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); }
-        });
+        document.getElementById('oaWfReloadBtn').addEventListener('click', function () { reloadWorkflow(false); });
 
         document.getElementById('oaWfSaveBtn').addEventListener('click', saveWorkflow);
     }
 
+    // 537: resolves true when saved, false otherwise, so the Audit
+    // Configuration page's one Save can run it (window.__oaWorkflowConfig).
     async function saveWorkflow() {
-        if (!state.header || !state.header.isEditable) return;
+        if (!state.header || !state.header.isEditable) return false;
 
         // Pull the header values one more time so pending edits are captured.
         const sel = document.getElementById('oaWfHeaderTemplate');
@@ -926,11 +991,31 @@
             if (!r.ok) {
                 setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
                     (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
-                return;
+                return false;
             }
             setMessage('ok', 'Workflow config saved.');
-        } catch (err) { setMessage('error', 'Save failed: ' + (err.message || err)); }
+            return true;
+        } catch (err) { setMessage('error', 'Save failed: ' + (err.message || err)); return false; }
     }
+    // 543: Reload, also run quietly (no "Reloaded." line) by the Audit
+    // Configuration page each time it opens this step's popup, so edits
+    // discarded by closing the popup unsaved are not shown again.
+    async function reloadWorkflow(quiet) {
+        if (!state.definitionId || !state.orgId) {
+            if (!quiet) setMessage('error', 'Pick an organization and definition first.');
+            return false;
+        }
+        try {
+            await loadWorkflow();
+            renderBanner(); renderReadonlyBannerIfNeeded();
+            renderHeaderForm(); renderStages();
+            document.getElementById('oaWfSaveBtn').disabled     = !state.header.isEditable;
+            document.getElementById('oaWfAddStageBtn').disabled = !state.header.isEditable;
+            if (!quiet) setMessage('ok', 'Reloaded.');
+            return true;
+        } catch (err) { setMessage('error', 'Reload failed: ' + (err.message || err)); return false; }
+    }
+    window.__oaWorkflowConfig = { save: saveWorkflow, reload: function () { return reloadWorkflow(true); } };
 
     // -----------------------------------------------------------------
     // Helpers

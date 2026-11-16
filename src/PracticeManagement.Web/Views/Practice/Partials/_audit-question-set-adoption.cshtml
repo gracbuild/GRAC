@@ -23,46 +23,78 @@
     Editable only while the current version is Draft (header.isEditable),
     the same rule every other config screen follows.
 
+    2026-11-05: this is the whole Question Set tab of the Audit Definition
+    page (the library below it was removed). New sets are made on Audit >
+    Question Sets: "Add new question set" opens that page's new-set form in
+    a new browser tab. Coming back to this tab (window focus) or "Refresh
+    list" re-reads the sets, keeping the picks not yet saved.
+
     Id prefix `oaAdopt` -- distinct from oaDef / oaScope / qs and every
     other hosted partial, so co-hosting stays collision-free.
+
+    2026-11-13: the Audit Definition page is one page with one Save, which
+    runs window.__oaAdoption.save() -> Promise<bool>. On that page this
+    panel's own Save button is hidden (practice-management.css).
+
+    543 (2026-11-13, sir): Question Sets moved to Audit Configuration, a
+    step there with its own popup. The popup's Save runs save(); each open
+    runs window.__oaAdoption.reload(), which re-reads the saved sets, so
+    picks discarded by closing the popup unsaved are not shown again.
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 
 <section class="pm-panel oa-adopt-panel" id="oaAdoptRoot">
-    <div class="pm-section-heading">
-        <h2>Question sets used by this audit</h2>
-        <p id="oaAdoptSubtitle">Pick an audit above to choose which question sets it asks.</p>
-    </div>
+    @* 2026-11-05: no heading -- the tab caption and the list labels already
+       say it. The line below is shown only when it says something the
+       page does not: no audit picked, or the version is not Draft. *@
+    <p class="pm-hint" id="oaAdoptSubtitle" hidden style="margin:0 0 8px;"></p>
 
     <div id="oaAdoptMessage" class="pm-message" style="display:none;"></div>
 
     <div id="oaAdoptBody" hidden>
+        @* 2026-11-05 layout: labels, boxes and hints are three rows of one
+           grid, so both boxes start on the same line whatever the hints
+           under them say, and the > / < and Up / Down buttons sit centred
+           beside the boxes. Areas restack for a narrow screen (CSS). *@
         <div class="oa-adopt-grid">
-            <div>
-                <label class="oa-adopt-label" for="oaAdoptAvailable">Available in this organization</label>
-                <select id="oaAdoptAvailable" multiple size="6"></select>
-                <p class="oa-adopt-hint">Select one or more, then Add.</p>
-            </div>
-            <div class="oa-adopt-actions">
-                <button type="button" class="pm-button" id="oaAdoptAdd" title="Adopt the selected sets">
-                    <i class="fa-solid fa-arrow-right" aria-hidden="true"></i> Add
+            <label class="oa-adopt-label oa-adopt-a-label" for="oaAdoptAvailable">
+                Available in this organization <span class="pm-badge" id="oaAdoptAvailableCount">0</span>
+            </label>
+            <label class="oa-adopt-label oa-adopt-s-label" for="oaAdoptSelected">
+                Selected for this audit <span class="pm-badge" id="oaAdoptSelectedCount">0</span>
+            </label>
+
+            <select id="oaAdoptAvailable" class="oa-adopt-box oa-adopt-a-box" multiple size="10"></select>
+            <div class="oa-adopt-actions oa-adopt-move">
+                @* Icon-only > / <, the dual-list pattern used across the
+                   product (fa-angle-right / fa-angle-left with a title). *@
+                <button type="button" class="pm-button" id="oaAdoptAdd" title="Add the selected sets to this audit" aria-label="Add the selected sets to this audit">
+                    <i class="fa-solid fa-angle-right" aria-hidden="true"></i>
                 </button>
-                <button type="button" class="pm-button" id="oaAdoptRemove" title="Remove the selected sets">
-                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Remove
+                <button type="button" class="pm-button" id="oaAdoptRemove" title="Remove the selected sets from this audit" aria-label="Remove the selected sets from this audit">
+                    <i class="fa-solid fa-angle-left" aria-hidden="true"></i>
                 </button>
             </div>
-            <div>
-                <label class="oa-adopt-label" for="oaAdoptSelected">Asked by this audit</label>
-                <select id="oaAdoptSelected" multiple size="6"></select>
-                <p class="oa-adopt-hint">Order follows this list. Use Up / Down to change it.</p>
-            </div>
-            <div class="oa-adopt-actions">
-                <button type="button" class="pm-button" id="oaAdoptUp" title="Move up">
+            <select id="oaAdoptSelected" class="oa-adopt-box oa-adopt-s-box" multiple size="10"></select>
+            <div class="oa-adopt-actions oa-adopt-order">
+                <button type="button" class="pm-button" id="oaAdoptUp" title="Move up" aria-label="Move up">
                     <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
                 </button>
-                <button type="button" class="pm-button" id="oaAdoptDown" title="Move down">
+                <button type="button" class="pm-button" id="oaAdoptDown" title="Move down" aria-label="Move down">
                     <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
                 </button>
+            </div>
+
+            <div class="oa-adopt-a-hint">
+                <p class="oa-adopt-hint">Select one or more, then &gt;.</p>
+                <p class="oa-adopt-hint oa-adopt-links">
+                    <a href="~/Practice/org-assurance-question-sets?new=1" target="_blank" rel="noopener" id="oaAdoptNewSet">
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add new question set</a>
+                    <a href="#" id="oaAdoptRefresh"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Refresh list</a>
+                </p>
+            </div>
+            <div class="oa-adopt-s-hint">
+                <p class="oa-adopt-hint">The audit asks the sets in this order. Use the up / down arrows to change it.</p>
             </div>
         </div>
 
@@ -122,11 +154,40 @@
     el.down.addEventListener('click', function () { nudge(1); });
     el.save.addEventListener('click', save);
 
+    // 2026-11-05: a set made in the Question Sets tab shows up here on return.
+    document.getElementById('oaAdoptRefresh').addEventListener('click', function (e) {
+        e.preventDefault(); refreshAvailable();
+    });
+    window.addEventListener('focus', function () {
+        if (!el.root.offsetParent) return;   // tab not on screen
+        refreshAvailable();
+    });
+
+    // Re-read the sets, keeping this tab's unsaved picks: everything not in
+    // the (local) "Selected for this audit" list is available.
+    async function refreshAvailable() {
+        if (!state.orgId || !state.definitionId || el.body.hidden) return;
+        try {
+            const r = await fetch(
+                U(API + '/definitions/' + encodeURIComponent(state.definitionId)
+                  + '/question-sets?organizationId=' + encodeURIComponent(state.orgId)),
+                { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const body = await r.json();
+            const all = ((body.adopted || body.Adopted) || []).concat((body.available || body.Available) || []).map(normalize);
+            const picked = new Set(state.adopted.map(function (a) { return String(a.questionSetId); }));
+            state.available = all.filter(function (a) { return !picked.has(String(a.questionSetId)); })
+                .sort(function (a, b) { return String(a.setName).localeCompare(String(b.setName)); });
+            render();
+        } catch (_) { /* keep what is on screen */ }
+    }
+
     async function reload() {
         clearMessage();
         if (!state.orgId || !state.definitionId) {
             el.body.hidden = true;
             el.subtitle.textContent = 'Pick an audit above to choose which question sets it asks.';
+            el.subtitle.hidden = false;
             return;
         }
 
@@ -148,8 +209,9 @@
 
             el.body.hidden = false;
             el.subtitle.textContent = state.editable
-                ? 'These sets are asked by the current draft version of this audit.'
+                ? ''
                 : 'Read-only: question sets can only be changed while the current version is Draft.';
+            el.subtitle.hidden = state.editable;
             setEnabled(state.editable);
             render();
         } catch (err) {
@@ -166,21 +228,29 @@
             questionCount : row.questionCount != null ? row.questionCount
                           : (row.QuestionCount != null ? row.QuestionCount : null),
             isMandatory   : row.isMandatory != null ? !!row.isMandatory
-                          : (row.IsMandatory != null ? !!row.IsMandatory : true)
+                          : (row.IsMandatory != null ? !!row.IsMandatory : true),
+            // 551: the question set version (only Active ones are offered;
+            // an adopted one can be Superseded on an Active audit version).
+            versionNumber : row.setVersionNumber || row.SetVersionNumber || null,
+            versionStatus : row.setVersionStatus || row.SetVersionStatus || ''
         };
     }
 
     function label(row) {
         const count = row.questionCount == null ? '' : ' - ' + row.questionCount + ' question(s)';
-        return (row.setName || '(unnamed)') + (row.setCode ? ' (' + row.setCode + ')' : '') + count;
+        const ver = row.versionNumber ? ' v' + row.versionNumber
+                  + (row.versionStatus && row.versionStatus !== 'Active' ? ' ' + row.versionStatus : '') : '';   // 551
+        return (row.setName || '(unnamed)') + (row.setCode ? ' (' + row.setCode + ver + ')' : '') + count;
     }
 
     function render() {
         fill(el.available, state.available);
         fill(el.selected,  state.adopted);
         el.stateText.textContent = state.adopted.length
-            ? state.adopted.length + ' set(s) asked by this audit'
-            : 'No question sets adopted yet';
+            ? state.adopted.length + ' set(s) selected for this audit'
+            : 'No question sets selected yet';
+        document.getElementById('oaAdoptAvailableCount').textContent = String(state.available.length);
+        document.getElementById('oaAdoptSelectedCount').textContent  = String(state.adopted.length);
     }
 
     function fill(sel, rows) {
@@ -227,11 +297,13 @@
         el.selected.value = id;
     }
 
+    // Resolves true when there was nothing to save or the save worked,
+    // false when it failed (the message is shown in this panel).
     async function save() {
-        if (!state.editable) return;
+        if (!state.editable) return true;
         if (!state.orgId || !state.definitionId) {
             showMessage('error', 'Pick an audit first.');
-            return;
+            return false;
         }
         clearMessage();
         el.save.disabled = true;
@@ -261,12 +333,18 @@
             showMessage('ok', 'Saved. This audit now asks ' + state.adopted.length + ' question set(s).');
             // Let the shell repaint the step chips.
             document.dispatchEvent(new CustomEvent('audit-setup-changed'));
+            return true;
         } catch (err) {
             showMessage('error', 'Save failed: ' + (err.message || err));
+            return false;
         } finally {
             el.save.disabled = false;
         }
     }
+
+    // 2026-11-13: the Audit Definition page's single Save ran this.
+    // 543: the Audit Configuration Question Sets popup runs both.
+    window.__oaAdoption = { save: save, reload: reload };
 
     function setEnabled(on) {
         [el.add, el.remove, el.up, el.down, el.save].forEach(function (b) { b.disabled = !on; });

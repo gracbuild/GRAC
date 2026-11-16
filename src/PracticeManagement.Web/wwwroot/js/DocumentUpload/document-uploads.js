@@ -49,12 +49,36 @@
     const sel = document.getElementById("docFilterOrganization");
     if (sel.options.length > 1 && !state.organizationId) {
       window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
+      // 508: opened from the Policies & Documents dashboard -- its
+      // organization (applied after the preference, the org-preference
+      // rule) and its type / stage / status.
+      const drill = window.__pmDrill ? window.__pmDrill.read() : null;
+      if (drill) window.__pmDrill.preselect(sel, drill.organizationId);
+      applyDashboardDrill(drill);
       state.organizationId = Number(sel.value) || null;
       if (state.organizationId) {
         await loadOrgScopedLookups();
         await refresh();
       }
     }
+  }
+
+  // 508: a dashboard drill names the master CODES it counted with
+  // (?type=POLICY&stage=Draft&status=Active); each is mapped to this page's
+  // own filter option through the lookups, so the list filters exactly as
+  // if the user had picked them. Unknown codes are ignored.
+  function applyDashboardDrill(d) {
+    if (!d || !d.active) return;
+    const pick = (selectId, key, rows, idField, codeField, code) => {
+      if (!code) return;
+      const row = rows.find(x => String(x[codeField] ?? x[codeField.charAt(0).toUpperCase() + codeField.slice(1)] ?? "") === code);
+      const id = row ? (row[idField] ?? row[idField.charAt(0).toUpperCase() + idField.slice(1)]) : null;
+      if (id !== null && id !== undefined && window.__pmDrill.preselect(selectId, id)) state[key] = Number(id);
+    };
+    pick("docFilterType",   "typeId",   state.lookups.types,    "documentTypeId",   "typeCode",   d.type);
+    pick("docFilterStage",  "stageId",  state.lookups.stages,   "documentStageId",  "stageCode",  d.stage);
+    pick("docFilterStatus", "statusId", state.lookups.statuses, "documentStatusId", "statusCode", d.status);
+    window.__pmDrill.banner("docDrillBanner", d);
   }
 
   // Fetches allowed orgs from the same endpoint tasks.cshtml / gaps.cshtml

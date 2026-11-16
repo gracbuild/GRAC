@@ -197,43 +197,41 @@
         { name: "responsibleParty",     label: "Responsible Party",   type: "text", hidden: true }
       ]
     },
-    // The cascade the other types do not have:
-    //   Trigger Mode -> (Scheduled ? Frequency : Domain -> Event, Due Within)
-    // CM's CHECK constraint ck_cm_assurance_spec_trigger enforces the same
-    // shape at the database, so the two halves are genuinely exclusive --
-    // not a styling choice.
+    // Control Management 086: an Assurance obligation is SCHEDULED only --
+    // the frequency is the whole "when".  An obligation raised every time
+    // something happens is an Event Response (below).
     Assurance: {
       heading: "Assurance Spec",
-      subheading: "What must be verified, and what triggers it.",
+      subheading: "What must be verified, and how often.",
       fields: [
         { name: "verificationMethod",   label: "Verification Method", type: "textarea", required: true, full: true },
-        { name: "triggerMode",          label: "Trigger Mode",        type: "trigger-mode", required: true, controls: true,
-          hint: "Scheduled runs on a frequency; event driven runs each time the event occurs." },
-        { name: "assuranceFrequencyId", label: "Assurance Frequency", type: "reference", required: true,
-          showWhen: () => triggerModeCode() === "Scheduled" },
-        // UI-only: the server stores the leaf event, which already knows
-        // its parent.
-        { name: "eventDomainId",        label: "Event Domain",        type: "event-domain", required: true, controls: true, transient: true,
-          showWhen: () => triggerModeCode() === "EventDriven" },
-        { name: "eventTypeId",          label: "Event",               type: "event-leaf", required: true,
-          showWhen: () => triggerModeCode() === "EventDriven",
-          hint: "This assurance is raised every time the selected event occurs." },
-        { name: "slaDays",              label: "Due Within (days)",   type: "number",
-          showWhen: () => triggerModeCode() === "EventDriven",
-          hint: "Days after the event to complete this. Leave blank for no deadline." },
+        { name: "assuranceFrequencyId", label: "Assurance Frequency", type: "reference", required: true },
         { name: "scope",                label: "Scope",               type: "text", hidden: true },
         { name: "assuranceParty",       label: "Assurance Party",     type: "text", hidden: true }
       ]
     },
+    // The event cascade (moved here from Assurance by CM 086):
+    //   People / Asset -> the event (Onboarding, Offboarding,
+    //   Commissioning, Decommissioning), then the action and the days.
+    // The save procedure copies the stored event_type_id into the column
+    // the event-driven checklists read (migration 513).
     EventResponse: {
       heading: "Event Response",
-      subheading: "If X occurs, do Y within SLA.",
+      subheading: "When the event occurs, what must be done and within how many days.",
       fields: [
-        { name: "triggerEvent",   label: "Trigger Event",   type: "textarea", required: true, full: true },
-        { name: "responseAction", label: "Response Action", type: "textarea", required: true, full: true },
-        { name: "slaValue",       label: "SLA Value",       type: "number" },
-        { name: "slaUnit",        label: "SLA Unit",        type: "select", options: ["", "Hours", "Days", "Weeks", "Months", "Years"] },
-        { name: "escalationPath", label: "Escalation Path", type: "text", hidden: true }
+        // UI-only: the server stores the leaf event, which already knows
+        // its parent.
+        { name: "eventDomainId",  label: "Applies To",        type: "event-domain", required: true, controls: true, transient: true,
+          hint: "People or Asset." },
+        { name: "eventTypeId",    label: "Event",             type: "event-leaf", required: true,
+          hint: "This response is raised every time the selected event occurs." },
+        { name: "responseAction", label: "Response Action",   type: "textarea", required: true, full: true },
+        { name: "slaDays",        label: "Due Within (days)", type: "number",
+          hint: "Days after the event to complete this. Leave blank for no deadline." },
+        // Retired from the panel (CM 086): the free text the event picker
+        // replaced. Kept so a stored value is not lost on edit.
+        { name: "triggerEvent",   label: "Trigger Event",     type: "textarea", hidden: true },
+        { name: "escalationPath", label: "Escalation Path",   type: "text", hidden: true }
       ]
     },
     Constraint: {
@@ -260,11 +258,14 @@
 
   let obligationTypes = null;   // null = not fetched yet
   let typesFetch = null;
+  // triggerModes is still loaded and exported through vocabulary(): an
+  // organization that has not yet approved Control Management 086's
+  // repository update still holds Event Driven assurance copies, and the
+  // Operationalize card reads them. This form no longer offers a mode.
   let triggerModes = [], eventTypes = [];
   let vocabularyFetch = null;
 
-  const triggerModeCode = () => String(typedValues.triggerMode ?? "");
-  const eventDomains    = () => eventTypes.filter(e => F(e, "isDomain") === true);
+  const eventDomains   = () => eventTypes.filter(e => F(e, "isDomain") === true);
   const eventLeaves     = domainId => eventTypes.filter(e =>
     F(e, "isDomain") !== true && String(F(e, "parentEventTypeId") || "") === String(domainId));
 
@@ -412,16 +413,10 @@
 
       if (field && field.controls) {
         // A controlling field changes which other fields exist, so it
-        // re-renders. Clear what it invalidates first: a stale event
-        // surviving a switch back to Scheduled would trip CM's CHECK
-        // constraint on save.
+        // re-renders. Clear what it invalidates first: an event chosen
+        // under People must not survive a switch to Asset.
         el.addEventListener("change", () => {
           commit();
-          if (name === "triggerMode") {
-            const code = triggerModeCode();
-            if (code !== "EventDriven") { typedValues.eventDomainId = ""; typedValues.eventTypeId = ""; }
-            if (code !== "Scheduled")   { typedValues.assuranceFrequencyId = ""; }
-          }
           if (name === "eventDomainId") typedValues.eventTypeId = "";
           renderTypedPanel(typeCode);
         });
@@ -454,24 +449,17 @@
         + "</select>";
     } else if (field.type === "reference") {
       control = "<select " + attr + ">" + options(lookup("frequencies"), value, "-- Select --") + "</select>";
-    } else if (field.type === "trigger-mode") {
-      // Falls back to free text when migration 230 has not run or Control
-      // Management 033 is not applied here -- a one-item or empty
-      // dropdown would be a dead end.
-      control = triggerModes.length
-        ? "<select " + attr + ">" + options(triggerModes, value, "-- Select Mode --") + "</select>"
-        : '<input type="text" ' + attr + ' value="' + esc(value) + '" placeholder="Scheduled or EventDriven">';
     } else if (field.type === "event-domain") {
       control = "<select " + attr + ">"
         + options(eventDomains().map(d => ({ value: String(F(d, "eventTypeId")),
                                              label: String(F(d, "eventName") || "") })),
-                  value, "-- Select Domain --") + "</select>";
+                  value, "-- Select People / Asset --") + "</select>";
     } else if (field.type === "event-leaf") {
       const domainId = String(typedValues.eventDomainId ?? "");
       const leaves = eventLeaves(domainId)
         .map(l => ({ value: String(F(l, "eventTypeId")), label: String(F(l, "eventName") || "") }));
       control = "<select " + attr + (domainId ? "" : " disabled") + ">"
-        + options(leaves, value, domainId ? "-- Select Event --" : "-- Select a domain first --")
+        + options(leaves, value, domainId ? "-- Select Event --" : "-- Select People / Asset first --")
         + "</select>";
     } else {
       control = '<input type="text" ' + attr + ' value="' + esc(value) + '">';
@@ -737,9 +725,8 @@
     });
 
     // The panel reads typedValues, so the stored JSON is loaded into it
-    // BEFORE the panel renders -- otherwise the Assurance cascade would
-    // draw its Scheduled half on an event-driven obligation and then
-    // clear the event when the mode was applied.
+    // BEFORE the panel renders -- otherwise the Event Response cascade
+    // would open with no People / Asset choice and an empty Event list.
     typedValues = {};
     if (row) {
       const item = parseJsonArray(opts.detailJson)[0] || {};
@@ -794,10 +781,10 @@
     // organisation-defined obligation through exactly the same path as a
     // published one.
     //
-    // Only the live half of a cascade is sent: CM's own form does the
-    // same, and its CHECK constraint refuses an event alongside a
-    // Scheduled trigger. `transient` fields (Event Domain) are a UI step
-    // and are never stored -- the leaf event knows its parent.
+    // A field a showWhen rule has taken off the panel is not sent (CM's
+    // own form does the same). `transient` fields (Applies To -- People /
+    // Asset) are a UI step and are never stored -- the leaf event knows
+    // its parent.
     const schema = TYPE_SCHEMA[type];
     const detail = {};
     if (schema) {
@@ -811,15 +798,19 @@
       });
     }
 
-    // The one rule worth refusing on this side: CM's constraint would
-    // reject it anyway, but as SQL error text rather than a sentence.
-    if (type === "Assurance") {
-      const mode = triggerModeCode();
-      if (mode === "EventDriven" && !String(typedValues.eventTypeId ?? "").trim()) {
-        msg("An event driven assurance needs an event."); return;
+    // The rules worth refusing on this side, as a sentence rather than
+    // SQL error text. Since Control Management 086 an Assurance is
+    // Scheduled only (so it needs its frequency), and an Event Response is
+    // what an event raises (so it needs the event).
+    if (type === "Assurance" && !String(typedValues.assuranceFrequencyId ?? "").trim()) {
+      msg("An assurance needs an assurance frequency."); return;
+    }
+    if (type === "EventResponse") {
+      if (!String(typedValues.eventTypeId ?? "").trim()) {
+        msg("Choose People or Asset, then the event that raises this response."); return;
       }
-      if (mode === "Scheduled" && !String(typedValues.assuranceFrequencyId ?? "").trim()) {
-        msg("A scheduled assurance needs an assurance frequency."); return;
+      if (!String(typedValues.responseAction ?? "").trim()) {
+        msg("A response action is required."); return;
       }
     }
 

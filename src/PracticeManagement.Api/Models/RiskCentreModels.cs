@@ -372,7 +372,10 @@ public sealed record RiskRegisterAssessRequest(
     string? ProcessName,
     string? AnalystRemarks,
     long? AnalysedByEmployeeId,
-    string? CallerDisplayName);
+    string? CallerDisplayName,
+    // 532: the risk methodology values (velocity, target, ...). Null when
+    // the organisation has no published methodology or the page sent none.
+    RiskMethodologyInput? Methodology = null);
 
 public sealed record RiskRegisterAssessResult(
     bool Success,
@@ -815,7 +818,9 @@ public sealed record RiskResidualSaveRequest(
     // Tolerated. Optional — omitting it leaves the existing decision
     // standing. Supplying it delegates to sp_risk_treatment_option_set,
     // which raises another treatment task if the option calls for one.
-    string? TreatmentOptionCode = null);
+    string? TreatmentOptionCode = null,
+    // 532
+    RiskMethodologyInput? Methodology = null);
 
 public sealed record RiskResidualSaveResult(
     bool Success,
@@ -1066,7 +1071,12 @@ public sealed record RiskDashboard(
     IReadOnlyList<RiskHeatmapCell> ResidualHeatmap,
     RiskHeatmapCoverage HeatmapCoverage,
     IReadOnlyList<RiskReviewAgeingBand> ReviewAgeing,
-    IReadOnlyList<RiskTopRisk> TopRisks);
+    IReadOnlyList<RiskTopRisk> TopRisks,
+    // ---- 505: Dashboard UI specification v2 (result sets 17-19) -----
+    // Empty on a database without 505. Open risks only.
+    IReadOnlyList<RiskGroupCount>? StageCounts = null,        // by workflow stage (register filter value)
+    IReadOnlyList<RiskGroupCount>? TreatmentOptions = null,   // by treatment option ("" = not decided)
+    IReadOnlyList<RiskGroupCount>? ResidualRatings = null);   // by ASSESSED residual rating
 
 // ---- 413: Risk Management dashboard ---------------------------------
 // Axis "L" = likelihood, "I" = impact: the values the organisation's
@@ -1094,7 +1104,9 @@ public sealed record RiskTopRisk(
     long? RiskOwnerEmployeeId, string? RiskOwnerName,
     string? InherentRatingCode, string? InherentRatingName, int? InherentRatingScore,
     string? ResidualRatingCode, string? ResidualRatingName, int? ResidualRatingScore,
-    string StatusCode);
+    string StatusCode,
+    // 505: appended; null on a database without 505.
+    string? WorkflowStageCode = null, DateTime? NextReviewDate = null);
 
 // Dashboard drill-down filters (413). Every member null = no opinion, so
 // the grids' own requests are unchanged.
@@ -1631,7 +1643,9 @@ public sealed record RiskReviewPerformRequest(
     string? CallerDisplayName,
     // 299. The cadence proposed alongside that date, carried the same
     // way and for the same reason.
-    int? ReviewFrequencyId = null);
+    int? ReviewFrequencyId = null,
+    // 532
+    RiskMethodologyInput? Methodology = null);
 
 public sealed record RiskReviewPerformResult(
     bool Success,
@@ -1645,7 +1659,7 @@ public sealed record RiskReviewPerformResult(
 // =====================================================================
 // Risk acceptance approval authority — migration 271
 //
-// Organization -> Risk Acceptance Approval Authority. Who may approve
+// Workflow Settings (533; was Risk Acceptance Approval Authority). Who may approve
 // accepting a risk, per rating level, separately for the inherent and
 // residual score.
 //
@@ -1946,3 +1960,50 @@ public sealed record RiskScopePracticeTask(
 public sealed record RiskScopePracticeContextResult(
     IReadOnlyList<RiskScopePracticeContext> Practices,
     IReadOnlyList<RiskScopePracticeTask>    Tasks);
+
+// =====================================================================
+// Risk methodology (migration 532). docs/risk-methodology.md.
+// =====================================================================
+
+/// <summary>One dimension's level on an assessment (higher = more risk).</summary>
+public sealed record RiskMethodologyValueInput(string DimensionCode, int LevelValue);
+
+/// <summary>Impact for one impact area (multi-dimension impact).</summary>
+public sealed record RiskMethodologyImpactAreaInput(string AreaCode, string ImpactCode);
+
+/// <summary>
+/// The methodology part of an inherent / review / residual save.
+/// MethodologyVersionId is the PUBLISHED version the page rendered; the
+/// save is refused (58332) when it has changed since.
+/// </summary>
+public sealed record RiskMethodologyInput(
+    long MethodologyVersionId,
+    IReadOnlyList<RiskMethodologyValueInput>? Values,
+    IReadOnlyList<RiskMethodologyImpactAreaInput>? ImpactAreas,
+    string? TargetRatingCode,
+    decimal? SingleLossAmount,
+    decimal? AnnualRate);
+
+/// <summary>Start a draft: copy of the published version (TemplateCode null) or a template
+/// (BLANK, ISO31000, COSO_ERM, ISO27005). Replace = throw an existing draft away first.</summary>
+public sealed record RiskMethodologyDraftCreateRequest(
+    long OrganizationId, string? TemplateCode, bool Replace, long? ActorEmployeeId, string? CallerDisplayName);
+
+/// <summary>The whole draft (sp_risk_methodology_draft_save payload shape).</summary>
+public sealed record RiskMethodologyDraftSaveRequest(
+    long OrganizationId, System.Text.Json.JsonElement Draft, long? ActorEmployeeId, string? CallerDisplayName);
+
+/// <summary>Publish or discard the draft.</summary>
+public sealed record RiskMethodologyOrganizationRequest(
+    long OrganizationId, long? ActorEmployeeId, string? CallerDisplayName);
+
+public sealed record RiskMethodologyActionResult(bool Success, long? MethodologyVersionId, int? VersionNo, string? Error);
+
+/// <summary>
+/// A read made of several named result sets (rows as camelCase
+/// dictionaries). Used for the methodology reads, whose sets the settings
+/// screen and the risk pages consume as they are.
+/// </summary>
+public sealed record RiskMethodologyReadResult(
+    bool Success, IReadOnlyDictionary<string, List<Dictionary<string, object?>>> Sets, string? Error);
+

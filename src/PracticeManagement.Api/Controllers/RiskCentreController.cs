@@ -1006,7 +1006,7 @@ public sealed class RiskCentreController(
     // =================================================================
     // Risk acceptance approval authority — migration 271
     //
-    // Organization -> Risk Acceptance Approval Authority. Org-scoped
+    // Risk Management -> Settings -> Workflow Settings (533). Org-scoped
     // configuration, so organizationId is required on the read and
     // carried in the body on the save — the same scoping every other
     // org-configuration endpoint in this product uses.
@@ -1124,5 +1124,71 @@ public sealed class RiskCentreController(
             skippedCount   = result.SkippedCount,
             unchangedCount = result.UnchangedCount
         });
+    }
+
+    // =================================================================
+    // Risk methodology -- migration 532. docs/risk-methodology.md.
+    //
+    // Settings -> Risk Methodology reads and edits the draft; Publish
+    // makes it the organisation's next version. The risk pages read the
+    // published version (methodology) and a risk's own values
+    // (register/{riskId}/methodology); the register grid reads one row
+    // per risk (register/methodology-summary). Saving the values is part
+    // of the existing assess / residual / review calls (Methodology).
+    // =================================================================
+
+    [HttpGet("methodology")]
+    public async Task<IActionResult> GetMethodology([FromQuery] long organizationId, CancellationToken ct)
+    {
+        if (organizationId <= 0) return BadRequest(new { success = false, error = "organizationId is required." });
+        var result = await svc.GetMethodologyAsync(organizationId, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("methodology/draft")]
+    public async Task<IActionResult> CreateMethodologyDraft([FromBody] RiskMethodologyDraftCreateRequest req, CancellationToken ct)
+    {
+        if (req is null || req.OrganizationId <= 0) return BadRequest(new { success = false, error = "organizationId is required." });
+        var result = await svc.CreateMethodologyDraftAsync(req, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("methodology/draft/save")]
+    public async Task<IActionResult> SaveMethodologyDraft([FromBody] RiskMethodologyDraftSaveRequest req, CancellationToken ct)
+    {
+        if (req is null || req.OrganizationId <= 0) return BadRequest(new { success = false, error = "organizationId is required." });
+        var result = await svc.SaveMethodologyDraftAsync(req, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("methodology/publish")]
+    public async Task<IActionResult> PublishMethodology([FromBody] RiskMethodologyOrganizationRequest req, CancellationToken ct)
+    {
+        if (req is null || req.OrganizationId <= 0) return BadRequest(new { success = false, error = "organizationId is required." });
+        var result = await svc.PublishMethodologyAsync(req, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("methodology/draft/discard")]
+    public async Task<IActionResult> DiscardMethodologyDraft([FromBody] RiskMethodologyOrganizationRequest req, CancellationToken ct)
+    {
+        if (req is null || req.OrganizationId <= 0) return BadRequest(new { success = false, error = "organizationId is required." });
+        var result = await svc.DiscardMethodologyDraftAsync(req, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpGet("register/{riskId:long}/methodology")]
+    public async Task<IActionResult> GetRiskMethodology(long riskId, CancellationToken ct)
+    {
+        var result = await svc.GetRiskMethodologyAsync(riskId, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpGet("register/methodology-summary")]
+    public async Task<IActionResult> GetMethodologySummary([FromQuery] long organizationId, CancellationToken ct)
+    {
+        if (organizationId <= 0) return BadRequest(new { success = false, error = "organizationId is required." });
+        var result = await svc.GetMethodologySummaryAsync(organizationId, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 }

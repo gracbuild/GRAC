@@ -26,6 +26,11 @@ A parent click now only toggles its children. No sidebar code changed.
 
 ## Layout
 
+> **Superseded (509, 2026-11-02).** Every module dashboard now uses the v2 layout
+> (see the 503-509 sections at the end and the `*-dashboard-v2.md` docs). The 414
+> arrangement below and its `.pm-dash-split` / `-side` / `-lists` / `-grid-dist` CSS
+> were removed; it is kept here as history.
+
 The same structure on every dashboard, showing only the blocks that
 module has real data for:
 
@@ -86,7 +91,12 @@ is a `<span>`, so its inline width was ignored. It is now
 | API | `GET /api/practice/management-dashboard/{module}?organizationId=` |
 
 `module` = `governance` | `issues-actions` | `audit-assurance` |
-`asset-contract` (451) | `tprm` (490) (404 for anything else). One call, one response:
+`asset-contract` (451) | `tprm` (490) | `documents` (508) (404 for anything else). One call, one response:
+
+`governance` and `documents` also receive the caller (`@caller_employee_id`,
+`@is_admin`, stamped from the session by the Web proxy): Governance applies
+Operationalize's ownership rule, Policies & Documents the Evidence Center
+visibility rule (`fn_pm_evidence_item_visible`) to its evidence figures.
 
 ```json
 {
@@ -213,3 +223,67 @@ list filters to, so they are not links.
   `js/Shared/dashboard-drill.js`, and the receiving pages (gaps, tasks,
   exception-centre, org-assurance-executions / -observations / -plans,
   resolve, practice.js).
+
+## 503 -- Governance on the v2 layout (2026-11-01)
+
+Governance now follows the Dashboard UI specification v2: executive KPIs, Needs
+attention, framework coverage, distributions and a watchlist, drawn by the shared
+components in `js/ManagementDashboard/dashboard-components.js` (`window.gracDash`).
+`sp_dashboard_governance` (503) adds criticality, evidence, dependency and watchlist
+rows on the same 414 contract (no API change); `ManagementDashboards.Sections` adds
+`evidence` and `dependencies` on child screen `resolve`. The other dashboards keep
+the layout described above until they move. Full detail, KPI dictionary and the
+out-of-scope register: `docs/governance-dashboard-v2.md`.
+
+## Home module overview (2026-11-02, after 503)
+
+Home shows one snapshot card per module dashboard the caller may open
+(`ManagementDashboards.HomeSnapshots`, `CanViewScreen`), each reading that
+dashboard's own endpoint, plus an Upcoming list from the dashboards' dated
+lists. The organisation Overview panel is removed. Detail:
+`docs/home-dashboard-v2.md`.
+
+## 504 -- Issues & Actions on the v2 layout (2026-11-02)
+
+`sp_dashboard_issues_actions` (504) adds Critical/High open issues, tasks due soon,
+waivers ending in 30 days, open issues by source, and 15-row overdue lists (414
+contract, no API change). The page renders through `loadIssuesActions` with the
+shared v2 components. Detail: `docs/issues-actions-dashboard-v2.md`.
+
+## 505 -- Risk Management on the v2 layout (2026-11-02)
+
+The Risk Centre Dashboard tab renders with the shared v2 components; drills stay
+in-page (`data-dash-drill`). `sp_risk_dashboard_counts` gains sets 17-19. Detail:
+`docs/risk-dashboard-v2.md`.
+
+## 506 -- Audit Assurance on the v2 layout (2026-11-02)
+
+`sp_dashboard_audit_assurance` (506) adds fieldwork progress, open event-driven audits,
+critical/high / no-due-date / issue-linked open findings, audits by origin, findings by
+type and an overdue-findings list (414 contract, no API change). Detail:
+`docs/audit-assurance-dashboard-v2.md`.
+
+## 507 -- Third-Party Risk on the v2 layout (2026-11-02)
+
+`sp_dashboard_tprm` (507) adds the high-risk engagements watchlist (490 contract, no
+API change); the page renders through `loadTprm`. Detail: `docs/tprm-dashboard-v2.md`.
+
+## 508 -- Policies & Documents dashboard (new, 2026-11-02)
+
+New screen `documents-dashboard` (menu "Dashboard", first child of Policies &
+Documents) on the v2 layout (`loadDocuments`). `sp_dashboard_documents` (414
+contract) has sections `documents` (Document Library), `acknowledgements`
+(Document Acknowledgements) and `docevidence` (Evidence Center -- "evidence" is
+Governance's). Drill-downs: Document Library reads `?type=` / `?stage=` /
+`?status=` master codes, Evidence Center `?validity=` / `?usage=` (both through
+`Shared/dashboard-drill.js`). Detail: `docs/documents-dashboard-v2.md`.
+
+## 509 -- Asset & Contract on the v2 layout (2026-11-02)
+
+The last dashboard on the 414 layout moved to v2 (`loadAssetContract`).
+`sp_dashboard_asset_contract` (451) is unchanged: no migration, no API change. With
+every dashboard on v2, the 414 renderers (`tile`, `bars`, `renderKpis`, `renderAgeing`,
+`renderDistributions`, `renderLists`) and the 414 load path were removed from
+`management-dashboard.js`, and the dedicated 414 layout CSS from `practice-management.css`.
+`gracDash.kpiCard` shows a dash for `value: null` (not available, e.g. no governance
+snapshot) instead of 0. Detail: `docs/asset-contract-dashboard-v2.md`.

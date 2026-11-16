@@ -1,5 +1,7 @@
 # Event Profiles — attribute-based checklist applicability
 
+> **2026-11-04 -- superseded in part.** "Event-driven obligation" now means an **Event Response** obligation with an event (People / Asset -> Onboarding, Offboarding, Commissioning, Decommissioning), not an Assurance with trigger mode Event Driven. See `event-response-event-driven.md` (Control Management 086 + Practice Management 513). Everything below about profiles, scopes, the Checklists tab and the raise still applies.
+
 **Migrations 329 (schema) / 330 (procs) / 331 (resolution) / 332 (menu) / 333 (optional converter) /
 340–344 (custom obligations reach this flow, Checklists tab, View Mapped Profiles)**
 **Screen key** `event-profiles` · **Feature flag** `screen.event-profiles` · **Menu** Organization → Event Profiles

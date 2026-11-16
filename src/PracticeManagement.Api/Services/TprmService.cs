@@ -20,7 +20,7 @@
 // session (TprmCaller); @caller_role_names is left to SQL, which derives
 // it from organization_employee.role_id.
 //
-// Errors: a THROW in 57500-57999 (TPRM), 55000-56299 (Gap Register / Risk
+// Errors: a THROW in 57500-58149 (TPRM; 521-523 use 58000-58149), 55000-56299 (Gap Register / Risk
 // Centre procedures TPRM calls) or 50000 is a sentence for the user and is
 // returned as is; a missing procedure (2812) says which migrations to
 // run; anything else is logged and replaced by a generic sentence.
@@ -64,12 +64,23 @@ public interface ITprmService
     Task<TprmSetsResult> ThirdPartyAsync(long thirdPartyId, TprmThirdPartyQuery request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmCommandResult> SaveThirdPartyAsync(TprmSaveThirdPartyRequest request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmCommandResult> SetThirdPartyStatusAsync(long thirdPartyId, TprmSetThirdPartyStatusRequest request, TprmCaller caller, CancellationToken cancellationToken);
-    Task<TprmRowsResult> VendorsAsync(TprmVendorsQuery request, TprmCaller caller, CancellationToken cancellationToken);
-    Task<TprmCommandResult> ImportVendorAsync(long vendorId, TprmImportVendorRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> ReviewVendorMatchAsync(long thirdPartyId, TprmReviewVendorMatchRequest request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmCommandResult> LoadSamplesAsync(TprmLoadSamplesRequest request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmRowsResult> EngagementsAsync(TprmEngagementsQuery request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmSetsResult> EngagementAsync(long engagementId, TprmEngagementQuery request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmCommandResult> SaveEngagementAsync(TprmSaveEngagementRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> SaveEngagementExposureAsync(long engagementId, TprmSaveEngagementExposureRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmSetsResult> ApplicabilityAsync(long engagementId, TprmApplicabilityQuery request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> RunScreeningAsync(long engagementId, TprmRunScreeningRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> DecideApplicabilityAsync(long engagementId, TprmDecideApplicabilityRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> ActOnAdmissionAsync(long admissionId, TprmActOnAdmissionRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> WithdrawAdmissionAsync(long admissionId, TprmWithdrawAdmissionRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmRowsResult> RiskRegisterAsync(TprmRiskRegisterQuery request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmSetsResult> RiskRegisterRecordAsync(long registerId, TprmRiskRegisterRecordQuery request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> RateProfileAreaAsync(long registerId, TprmRateProfileAreaRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> DecideImpactReviewAsync(long impactReviewId, TprmDecideImpactReviewRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> CloseRegisterRecordAsync(long registerId, TprmCloseRegisterRecordRequest request, TprmCaller caller, CancellationToken cancellationToken);
+    Task<TprmCommandResult> RecordProfileReviewAsync(long registerId, TprmRecordProfileReviewRequest request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmCommandResult> SaveScopeItemAsync(long engagementId, TprmSaveScopeItemRequest request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmCommandResult> RemoveScopeItemAsync(long scopeItemId, TprmRemoveScopeItemRequest request, TprmCaller caller, CancellationToken cancellationToken);
     Task<TprmSetsResult> DiscoveryAsync(long engagementId, TprmDiscoveryQuery request, TprmCaller caller, CancellationToken cancellationToken);
@@ -125,7 +136,7 @@ public sealed class TprmService(
             await using var connection = await OpenAsync(cancellationToken);
             await using var command    = Proc(connection, "grac_practice.sp_tprm_lookups");
             AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
-            return await SetsAsync(command, _ => ["values", "employees", "businessFunctions", "processes", "applications", "vendors", "contracts", "library", "customFields", "riskModel", "dimensions", "bands", "evidenceTypes", "roles"], cancellationToken);
+            return await SetsAsync(command, _ => ["values", "employees", "businessFunctions", "processes", "applications", "thirdParties", "contracts", "library", "customFields", "riskModel", "dimensions", "bands", "evidenceTypes", "roles"], cancellationToken);
         }
         catch (Exception ex)
         {
@@ -816,7 +827,7 @@ public sealed class TprmService(
             await using var command    = Proc(connection, "grac_practice.sp_tprm_third_party_get");
             AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
             AddParam(command, "@third_party_id", DbType.Int64, thirdPartyId);
-            return await SetsAsync(command, _ => ["header", "categories", "contacts", "engagements", "history", "customValues", "duplicates"], cancellationToken);
+            return await SetsAsync(command, _ => ["header", "categories", "contacts", "engagements", "history", "customValues", "duplicates", "transitions", "matchReviews"], cancellationToken);
         }
         catch (Exception ex)
         {
@@ -857,7 +868,7 @@ public sealed class TprmService(
             if (request.RelationshipOwnerEmployeeId is not null) AddParam(command, "@relationship_owner_employee_id", DbType.Int64, request.RelationshipOwnerEmployeeId);
             if (!string.IsNullOrWhiteSpace(request.ContactsJson)) AddParam(command, "@contacts_json", DbType.String, Text(request.ContactsJson), -1);
             if (!string.IsNullOrWhiteSpace(request.CustomJson)) AddParam(command, "@custom_json", DbType.String, Text(request.CustomJson), -1);
-            if (request.ConfirmDuplicates is not null) AddParam(command, "@confirm_duplicates", DbType.Boolean, request.ConfirmDuplicates);
+            if (!string.IsNullOrWhiteSpace(request.MatchReviewsJson)) AddParam(command, "@match_reviews_json", DbType.String, Text(request.MatchReviewsJson), -1);
             if (request.ExpectedRecordVersion is not null) AddParam(command, "@expected_record_version", DbType.Int64, request.ExpectedRecordVersion);
             AddParam(command, "@caller_is_admin", DbType.Boolean, caller.IsAdmin);
             AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
@@ -880,9 +891,10 @@ public sealed class TprmService(
             await using var command    = Proc(connection, "grac_practice.sp_tprm_third_party_status");
             AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
             AddParam(command, "@third_party_id", DbType.Int64, thirdPartyId);
+            AddParam(command, "@action", DbType.String, Text(request.Action), 20);
             if (!string.IsNullOrWhiteSpace(request.StatusCode)) AddParam(command, "@status_code", DbType.String, Text(request.StatusCode), 60);
-            if (request.Archive is not null) AddParam(command, "@archive", DbType.Boolean, request.Archive);
             if (!string.IsNullOrWhiteSpace(request.Reason)) AddParam(command, "@reason", DbType.String, Text(request.Reason), 1000);
+            if (!string.IsNullOrWhiteSpace(request.EvidenceReference)) AddParam(command, "@evidence_reference", DbType.String, Text(request.EvidenceReference), 500);
             AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
             AddParam(command, "@actor", DbType.String, caller.Actor, 100);
             return await CommandAsync(command, cancellationToken);
@@ -893,45 +905,26 @@ public sealed class TprmService(
         }
     }
 
-    // GET vendors
-    public async Task<TprmRowsResult> VendorsAsync(TprmVendorsQuery request, TprmCaller caller, CancellationToken cancellationToken)
+    // POST third-parties/{thirdPartyId}/match-reviews
+    public async Task<TprmCommandResult> ReviewVendorMatchAsync(long thirdPartyId, TprmReviewVendorMatchRequest request, TprmCaller caller, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
         {
             await using var connection = await OpenAsync(cancellationToken);
-            await using var command    = Proc(connection, "grac_practice.sp_tprm_vendor_discovery");
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_vendor_match_review_save");
             AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
-            if (!string.IsNullOrWhiteSpace(request.Search)) AddParam(command, "@search", DbType.String, Text(request.Search), 200);
-            if (request.OnlyUnlinked is not null) AddParam(command, "@only_unlinked", DbType.Boolean, request.OnlyUnlinked);
-            return await RowsAsync(command, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return new TprmRowsResult(false, [], 0, UserMessage(ex, "The list could not be loaded.", "sp_tprm_vendor_discovery"));
-        }
-    }
-
-    // POST vendors/{vendorId}/import
-    public async Task<TprmCommandResult> ImportVendorAsync(long vendorId, TprmImportVendorRequest request, TprmCaller caller, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        try
-        {
-            await using var connection = await OpenAsync(cancellationToken);
-            await using var command    = Proc(connection, "grac_practice.sp_tprm_vendor_import");
-            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
-            AddParam(command, "@vendor_id", DbType.Int64, vendorId);
-            if (request.ThirdPartyId is not null) AddParam(command, "@third_party_id", DbType.Int64, request.ThirdPartyId);
-            if (request.CreateEngagement is not null) AddParam(command, "@create_engagement", DbType.Boolean, request.CreateEngagement);
-            if (request.ConfirmDuplicates is not null) AddParam(command, "@confirm_duplicates", DbType.Boolean, request.ConfirmDuplicates);
+            AddParam(command, "@third_party_id", DbType.Int64, thirdPartyId);
+            AddParam(command, "@matched_third_party_id", DbType.Int64, request.MatchedThirdPartyId);
+            AddParam(command, "@decision", DbType.String, Text(request.Decision), 20);
+            AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 1000);
             AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
             AddParam(command, "@actor", DbType.String, caller.Actor, 100);
             return await CommandAsync(command, cancellationToken);
         }
         catch (Exception ex)
         {
-            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_vendor_import"));
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_vendor_match_review_save"));
         }
     }
 
@@ -970,6 +963,7 @@ public sealed class TprmService(
             if (!string.IsNullOrWhiteSpace(request.CriticalityCode)) AddParam(command, "@criticality_code", DbType.String, Text(request.CriticalityCode), 60);
             if (request.OwnerEmployeeId is not null) AddParam(command, "@owner_employee_id", DbType.Int64, request.OwnerEmployeeId);
             if (!string.IsNullOrWhiteSpace(request.Attention)) AddParam(command, "@attention", DbType.String, Text(request.Attention), 30);
+            if (!string.IsNullOrWhiteSpace(request.ApplicabilityStatus)) AddParam(command, "@applicability_status", DbType.String, Text(request.ApplicabilityStatus), 30);
             AddParam(command, "@caller_employee_id", DbType.Int64, caller.EmployeeId);
             if (request.PageNumber is not null) AddParam(command, "@page_number", DbType.Int32, request.PageNumber);
             if (request.PageSize is not null) AddParam(command, "@page_size", DbType.Int32, request.PageSize);
@@ -1011,31 +1005,22 @@ public sealed class TprmService(
             if (request.EngagementId is not null) AddParam(command, "@engagement_id", DbType.Int64, request.EngagementId);
             if (request.ThirdPartyId is not null) AddParam(command, "@third_party_id", DbType.Int64, request.ThirdPartyId);
             AddParam(command, "@engagement_title", DbType.String, Text(request.EngagementTitle), 250);
-            if (!string.IsNullOrWhiteSpace(request.ServiceDescription)) AddParam(command, "@service_description", DbType.String, Text(request.ServiceDescription), 2000);
-            if (!string.IsNullOrWhiteSpace(request.ScopeDescription)) AddParam(command, "@scope_description", DbType.String, Text(request.ScopeDescription), 2000);
-            if (!string.IsNullOrWhiteSpace(request.BusinessPurpose)) AddParam(command, "@business_purpose", DbType.String, Text(request.BusinessPurpose), 1000);
             if (!string.IsNullOrWhiteSpace(request.ServiceCategoryCode)) AddParam(command, "@service_category_code", DbType.String, Text(request.ServiceCategoryCode), 60);
+            if (!string.IsNullOrWhiteSpace(request.ServiceDescription)) AddParam(command, "@service_description", DbType.String, Text(request.ServiceDescription), 2000);
+            if (!string.IsNullOrWhiteSpace(request.BusinessPurpose)) AddParam(command, "@business_purpose", DbType.String, Text(request.BusinessPurpose), 1000);
+            if (!string.IsNullOrWhiteSpace(request.ServiceRecipient)) AddParam(command, "@service_recipient", DbType.String, Text(request.ServiceRecipient), 250);
             if (!string.IsNullOrWhiteSpace(request.EngagementTypeCode)) AddParam(command, "@engagement_type_code", DbType.String, Text(request.EngagementTypeCode), 60);
             if (!string.IsNullOrWhiteSpace(request.ServiceModelCode)) AddParam(command, "@service_model_code", DbType.String, Text(request.ServiceModelCode), 60);
             if (!string.IsNullOrWhiteSpace(request.DeliveryLocations)) AddParam(command, "@delivery_locations", DbType.String, Text(request.DeliveryLocations), 1000);
-            if (request.IsExisting is not null) AddParam(command, "@is_existing", DbType.Boolean, request.IsExisting);
-            if (request.ContractId is not null) AddParam(command, "@contract_id", DbType.Int64, request.ContractId);
-            if (!string.IsNullOrWhiteSpace(request.ContractReference)) AddParam(command, "@contract_reference", DbType.String, Text(request.ContractReference), 200);
-            if (request.ContractValue is not null) AddParam(command, "@contract_value", DbType.Decimal, request.ContractValue, precision: 19, scale: 2);
-            if (!string.IsNullOrWhiteSpace(request.CurrencyCode)) AddParam(command, "@currency_code", DbType.String, Text(request.CurrencyCode), 10);
             if (request.ProposedStartDt is not null) AddParam(command, "@proposed_start_dt", DbType.Date, request.ProposedStartDt?.Date);
             if (request.ProposedEndDt is not null) AddParam(command, "@proposed_end_dt", DbType.Date, request.ProposedEndDt?.Date);
+            if (request.RelationshipOwnerEmployeeId is not null) AddParam(command, "@relationship_owner_employee_id", DbType.Int64, request.RelationshipOwnerEmployeeId);
+            if (!string.IsNullOrWhiteSpace(request.ScopeDescription)) AddParam(command, "@scope_description", DbType.String, Text(request.ScopeDescription), 2000);
+            if (request.IsExisting is not null) AddParam(command, "@is_existing", DbType.Boolean, request.IsExisting);
+            if (request.BusinessOwnerEmployeeId is not null) AddParam(command, "@business_owner_employee_id", DbType.Int64, request.BusinessOwnerEmployeeId);
+            if (request.AssessorEmployeeId is not null) AddParam(command, "@assessor_employee_id", DbType.Int64, request.AssessorEmployeeId);
             if (request.ActualStartDt is not null) AddParam(command, "@actual_start_dt", DbType.Date, request.ActualStartDt?.Date);
             if (request.ActualEndDt is not null) AddParam(command, "@actual_end_dt", DbType.Date, request.ActualEndDt?.Date);
-            if (request.RenewalDt is not null) AddParam(command, "@renewal_dt", DbType.Date, request.RenewalDt?.Date);
-            if (request.BusinessOwnerEmployeeId is not null) AddParam(command, "@business_owner_employee_id", DbType.Int64, request.BusinessOwnerEmployeeId);
-            if (request.RelationshipOwnerEmployeeId is not null) AddParam(command, "@relationship_owner_employee_id", DbType.Int64, request.RelationshipOwnerEmployeeId);
-            if (request.AssessorEmployeeId is not null) AddParam(command, "@assessor_employee_id", DbType.Int64, request.AssessorEmployeeId);
-            if (!string.IsNullOrWhiteSpace(request.ServiceCriticalityCode)) AddParam(command, "@service_criticality_code", DbType.String, Text(request.ServiceCriticalityCode), 60);
-            if (!string.IsNullOrWhiteSpace(request.DataExposureCode)) AddParam(command, "@data_exposure_code", DbType.String, Text(request.DataExposureCode), 60);
-            if (request.RtoHours is not null) AddParam(command, "@rto_hours", DbType.Int32, request.RtoHours);
-            if (request.RpoHours is not null) AddParam(command, "@rpo_hours", DbType.Int32, request.RpoHours);
-            if (!string.IsNullOrWhiteSpace(request.SlaSummary)) AddParam(command, "@sla_summary", DbType.String, Text(request.SlaSummary), 2000);
             if (!string.IsNullOrWhiteSpace(request.Notes)) AddParam(command, "@notes", DbType.String, Text(request.Notes), -1);
             if (!string.IsNullOrWhiteSpace(request.CustomJson)) AddParam(command, "@custom_json", DbType.String, Text(request.CustomJson), -1);
             if (request.ExpectedRecordVersion is not null) AddParam(command, "@expected_record_version", DbType.Int64, request.ExpectedRecordVersion);
@@ -1047,6 +1032,294 @@ public sealed class TprmService(
         catch (Exception ex)
         {
             return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_engagement_save"));
+        }
+    }
+
+    // POST engagements/{engagementId}/exposure
+    public async Task<TprmCommandResult> SaveEngagementExposureAsync(long engagementId, TprmSaveEngagementExposureRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_engagement_exposure_save");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@engagement_id", DbType.Int64, engagementId);
+            if (!string.IsNullOrWhiteSpace(request.AppAccessAnswer)) AddParam(command, "@app_access_answer", DbType.String, Text(request.AppAccessAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.PremisesAccessAnswer)) AddParam(command, "@premises_access_answer", DbType.String, Text(request.PremisesAccessAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.DataProcessingAnswer)) AddParam(command, "@data_processing_answer", DbType.String, Text(request.DataProcessingAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.SubcontractingAnswer)) AddParam(command, "@subcontracting_answer", DbType.String, Text(request.SubcontractingAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.ImportantProcessAnswer)) AddParam(command, "@important_process_answer", DbType.String, Text(request.ImportantProcessAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.DisruptionImpactAnswer)) AddParam(command, "@disruption_impact_answer", DbType.String, Text(request.DisruptionImpactAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.ServiceCommitmentAnswer)) AddParam(command, "@service_commitment_answer", DbType.String, Text(request.ServiceCommitmentAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.ContractAnswer)) AddParam(command, "@contract_answer", DbType.String, Text(request.ContractAnswer), 10);
+            if (!string.IsNullOrWhiteSpace(request.ServiceCriticalityCode)) AddParam(command, "@service_criticality_code", DbType.String, Text(request.ServiceCriticalityCode), 60);
+            if (!string.IsNullOrWhiteSpace(request.DataProcessingDetails)) AddParam(command, "@data_processing_details", DbType.String, Text(request.DataProcessingDetails), 2000);
+            if (!string.IsNullOrWhiteSpace(request.CustomerImpactCode)) AddParam(command, "@customer_impact_code", DbType.String, Text(request.CustomerImpactCode), 60);
+            if (!string.IsNullOrWhiteSpace(request.SubstitutabilityCode)) AddParam(command, "@substitutability_code", DbType.String, Text(request.SubstitutabilityCode), 60);
+            if (!string.IsNullOrWhiteSpace(request.ExitDependencies)) AddParam(command, "@exit_dependencies", DbType.String, Text(request.ExitDependencies), 2000);
+            if (!string.IsNullOrWhiteSpace(request.SlaSummary)) AddParam(command, "@sla_summary", DbType.String, Text(request.SlaSummary), 2000);
+            if (request.RtoHours is not null) AddParam(command, "@rto_hours", DbType.Int32, request.RtoHours);
+            if (request.RpoHours is not null) AddParam(command, "@rpo_hours", DbType.Int32, request.RpoHours);
+            if (request.ContractId is not null) AddParam(command, "@contract_id", DbType.Int64, request.ContractId);
+            if (!string.IsNullOrWhiteSpace(request.ContractReference)) AddParam(command, "@contract_reference", DbType.String, Text(request.ContractReference), 200);
+            if (request.ContractValue is not null) AddParam(command, "@contract_value", DbType.Decimal, request.ContractValue, precision: 19, scale: 2);
+            if (!string.IsNullOrWhiteSpace(request.CurrencyCode)) AddParam(command, "@currency_code", DbType.String, Text(request.CurrencyCode), 10);
+            if (request.ContractStartDt is not null) AddParam(command, "@contract_start_dt", DbType.Date, request.ContractStartDt?.Date);
+            if (request.ContractEndDt is not null) AddParam(command, "@contract_end_dt", DbType.Date, request.ContractEndDt?.Date);
+            if (request.RenewalDt is not null) AddParam(command, "@renewal_dt", DbType.Date, request.RenewalDt?.Date);
+            if (!string.IsNullOrWhiteSpace(request.ContractDocuments)) AddParam(command, "@contract_documents", DbType.String, Text(request.ContractDocuments), 1000);
+            if (!string.IsNullOrWhiteSpace(request.ScopeJson)) AddParam(command, "@scope_json", DbType.String, Text(request.ScopeJson), -1);
+            if (request.ExpectedRecordVersion is not null) AddParam(command, "@expected_record_version", DbType.Int64, request.ExpectedRecordVersion);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_engagement_exposure_save"));
+        }
+    }
+
+    // GET engagements/{engagementId}/applicability
+    public async Task<TprmSetsResult> ApplicabilityAsync(long engagementId, TprmApplicabilityQuery request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_applicability_get");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@engagement_id", DbType.Int64, engagementId);
+            if (request.ReportId is not null) AddParam(command, "@report_id", DbType.Int64, request.ReportId);
+            return await SetsAsync(command, _ => ["reports", "report", "observations", "decisions", "admissions", "approvals"], cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmSetsResult(false, new Dictionary<string, IReadOnlyList<Dictionary<string, object?>>>(), UserMessage(ex, "The record could not be loaded.", "sp_tprm_applicability_get"));
+        }
+    }
+
+    // POST engagements/{engagementId}/screening
+    public async Task<TprmCommandResult> RunScreeningAsync(long engagementId, TprmRunScreeningRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_screening_run");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@engagement_id", DbType.Int64, engagementId);
+            AddParam(command, "@trigger_code", DbType.String, "REFRESH", 20);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_screening_run"));
+        }
+    }
+
+    // POST engagements/{engagementId}/applicability
+    public async Task<TprmCommandResult> DecideApplicabilityAsync(long engagementId, TprmDecideApplicabilityRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_applicability_decide");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@engagement_id", DbType.Int64, engagementId);
+            AddParam(command, "@decision", DbType.String, Text(request.Decision), 20);
+            AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 2000);
+            if (request.DecisionDt is not null) AddParam(command, "@decision_dt", DbType.Date, request.DecisionDt?.Date);
+            if (!string.IsNullOrWhiteSpace(request.EvidenceReferences)) AddParam(command, "@evidence_references", DbType.String, Text(request.EvidenceReferences), 2000);
+            if (!string.IsNullOrWhiteSpace(request.ApprovalReference)) AddParam(command, "@approval_reference", DbType.String, Text(request.ApprovalReference), 200);
+            if (!string.IsNullOrWhiteSpace(request.InformationRequest)) AddParam(command, "@information_request", DbType.String, Text(request.InformationRequest), 2000);
+            if (request.InformationFromEmployeeId is not null) AddParam(command, "@information_from_employee_id", DbType.Int64, request.InformationFromEmployeeId);
+            if (request.ExpectedReportId is not null) AddParam(command, "@expected_report_id", DbType.Int64, request.ExpectedReportId);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_applicability_decide"));
+        }
+    }
+
+    // POST admissions/{admissionId}/act
+    public async Task<TprmCommandResult> ActOnAdmissionAsync(long admissionId, TprmActOnAdmissionRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_admission_act");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@admission_id", DbType.Int64, admissionId);
+            AddParam(command, "@action", DbType.String, Text(request.Action), 20);
+            if (!string.IsNullOrWhiteSpace(request.Rationale)) AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 2000);
+            if (request.OnBehalfOfEmployeeId is not null) AddParam(command, "@on_behalf_of_employee_id", DbType.Int64, request.OnBehalfOfEmployeeId);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_admission_act"));
+        }
+    }
+
+    // POST admissions/{admissionId}/withdraw
+    public async Task<TprmCommandResult> WithdrawAdmissionAsync(long admissionId, TprmWithdrawAdmissionRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_admission_withdraw");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@admission_id", DbType.Int64, admissionId);
+            if (!string.IsNullOrWhiteSpace(request.Note)) AddParam(command, "@note", DbType.String, Text(request.Note), 1000);
+            AddParam(command, "@caller_is_admin", DbType.Boolean, caller.IsAdmin);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_admission_withdraw"));
+        }
+    }
+
+    // GET risk-register
+    public async Task<TprmRowsResult> RiskRegisterAsync(TprmRiskRegisterQuery request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_register_list");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            if (!string.IsNullOrWhiteSpace(request.Status)) AddParam(command, "@status", DbType.String, Text(request.Status), 20);
+            if (!string.IsNullOrWhiteSpace(request.BandCode)) AddParam(command, "@band_code", DbType.String, Text(request.BandCode), 60);
+            if (!string.IsNullOrWhiteSpace(request.Attention)) AddParam(command, "@attention", DbType.String, Text(request.Attention), 20);
+            if (!string.IsNullOrWhiteSpace(request.Search)) AddParam(command, "@search", DbType.String, Text(request.Search), 200);
+            if (request.PageNumber is not null) AddParam(command, "@page_number", DbType.Int32, request.PageNumber);
+            if (request.PageSize is not null) AddParam(command, "@page_size", DbType.Int32, request.PageSize);
+            return await RowsAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmRowsResult(false, [], 0, UserMessage(ex, "The list could not be loaded.", "sp_tprm_register_list"));
+        }
+    }
+
+    // GET risk-register/{registerId}
+    public async Task<TprmSetsResult> RiskRegisterRecordAsync(long registerId, TprmRiskRegisterRecordQuery request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_register_get");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@register_id", DbType.Int64, registerId);
+            return await SetsAsync(command, _ => ["header", "areas", "ratingHistory", "dimensions", "engagements", "findings", "decisions", "admissions", "impactReviews", "reviews", "history", "profileReviews"], cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmSetsResult(false, new Dictionary<string, IReadOnlyList<Dictionary<string, object?>>>(), UserMessage(ex, "The record could not be loaded.", "sp_tprm_register_get"));
+        }
+    }
+
+    // POST risk-register/{registerId}/ratings
+    public async Task<TprmCommandResult> RateProfileAreaAsync(long registerId, TprmRateProfileAreaRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_register_rating_save");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@register_id", DbType.Int64, registerId);
+            AddParam(command, "@area_code", DbType.String, Text(request.AreaCode), 60);
+            AddParam(command, "@band_code", DbType.String, Text(request.BandCode), 60);
+            AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 2000);
+            if (!string.IsNullOrWhiteSpace(request.EvidenceReference)) AddParam(command, "@evidence_reference", DbType.String, Text(request.EvidenceReference), 1000);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_register_rating_save"));
+        }
+    }
+
+    // POST risk-register/impact-reviews/{impactReviewId}/decide
+    public async Task<TprmCommandResult> DecideImpactReviewAsync(long impactReviewId, TprmDecideImpactReviewRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_register_impact_review_decide");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@impact_review_id", DbType.Int64, impactReviewId);
+            AddParam(command, "@outcome", DbType.String, Text(request.Outcome), 20);
+            AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 2000);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_register_impact_review_decide"));
+        }
+    }
+
+    // POST risk-register/{registerId}/close
+    public async Task<TprmCommandResult> CloseRegisterRecordAsync(long registerId, TprmCloseRegisterRecordRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_register_close");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@register_id", DbType.Int64, registerId);
+            AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 2000);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_register_close"));
+        }
+    }
+
+    // POST risk-register/{registerId}/profile-reviews
+    public async Task<TprmCommandResult> RecordProfileReviewAsync(long registerId, TprmRecordProfileReviewRequest request, TprmCaller caller, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var command    = Proc(connection, "grac_practice.sp_tprm_register_profile_review_save");
+            AddParam(command, "@organization_id", DbType.Int64, request.OrganizationId);
+            AddParam(command, "@register_id", DbType.Int64, registerId);
+            AddParam(command, "@rationale", DbType.String, Text(request.Rationale), 2000);
+            AddParam(command, "@actor_employee_id", DbType.Int64, caller.EmployeeId);
+            AddParam(command, "@actor", DbType.String, caller.Actor, 100);
+            return await CommandAsync(command, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new TprmCommandResult(false, null, [], UserMessage(ex, "The change could not be saved.", "sp_tprm_register_profile_review_save"));
         }
     }
 
@@ -1944,7 +2217,7 @@ public sealed class TprmService(
     {
         if (ex is SqlException sql)
         {
-            if (sql.Number is (>= 57500 and <= 57999) or (>= 55000 and <= 56299) or 50000)
+            if (sql.Number is (>= 57500 and <= 58149) or (>= 55000 and <= 56299) or 50000)
                 return sql.Message;
             if (sql.Number == 2812)
             {

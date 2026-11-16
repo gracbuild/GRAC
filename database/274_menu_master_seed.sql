@@ -222,11 +222,62 @@
 --     'nav-asset-contract'.
 --   476 -- 'evidence-center' (15, Evidence Center) under
 --     'nav-documents' (Policies & Documents).
+--   555 -- 'org-my-audits' (468, My Audits) under 'nav-assurance'
+--     (the auditor's own audits; Freeze Scope).
+--   566 -- 'org-audit-engagements' (467, Audit Engagements) under
+--     'nav-assurance' (planned and independent engagements).
+--   567 -- 'org-workpapers' (470, Workpapers) under 'nav-assurance'
+--     (Test Working Papers); 'org-assurance-observations' to 471.
+--   568 -- 'org-audit-reports' (472, Audit Reports) under 'nav-assurance'.
+--   530 -- 'evidence-automation' (16, Evidence Automation) under
+--     'nav-documents' (Policies & Documents).
 --   490 -- Third-Party Risk (2026-10-24): NEW root 'nav-tprm' (370, no
 --     url) with children 'tprm-dashboard' (369, first child, 416 rule),
 --     'tprm-third-parties' (371), 'tprm-engagements' (372),
 --     'tprm-reviews' (373) and 'tprm-configuration' (374). 490 itself
 --     grants only the 'Admin' role VIEW/ADD/EDIT/APPROVE (420 rule).
+--   508 -- 'documents-dashboard' (5, Dashboard) under 'nav-documents'
+--     (first child, 416 rule). 508 grants VIEW to roles that can VIEW
+--     a Policies & Documents child screen.
+--   511 -- 'subscription-requests' (20, Subscription Requests, module_type
+--     'Organization Setup') under the inactive 'Organization' group, like
+--     organization-setup: shown only in Organization Management. 511
+--     grants VIEW + APPROVE to GLOBAL-scope roles; Section 3 below grants
+--     every role full rights as on every other active row, and the Web tier
+--     additionally requires a GLOBAL-scope sign-in to list or decide.
+--   516 -- 'org-assurance-question-repository' (Question Repository) was
+--     added, then REMOVED again by 520 (row and permissions deleted).
+--   520 -- 'org-assurance-question-sets' (Question Sets) is Active again,
+--     moved from 'org-audit-definition' to directly under 'nav-assurance'
+--     at 445. 520 grants every active role that lacks it full rights.
+--   521 -- Third-Party Management Phase 1 (2026-11-07): the 490 rows are
+--     renamed -- root 'nav-tprm' "Third-Party Management", children
+--     "Vendor Registry" (tprm-third-parties), "Reviews & Monitoring"
+--     (tprm-reviews), "Configuration" (tprm-configuration); module_type
+--     "Third-Party Management". Keys, order, icons and grants unchanged.
+--   522 -- Third-Party Management CR 2 Round A (2026-11-08): the module
+--     shows only the CR 2 menus. 'tprm-engagements' is "Engagement
+--     Management"; 'tprm-configuration' moves to Settings
+--     ('nav-organization') as "Third-Party Settings" at 266 (beside Risk
+--     Settings, 265), module_type "Organization". 522 also sets
+--     show_in_sidebar = 0 on 'tprm-dashboard' and 'tprm-reviews' (still
+--     reachable from Home and the engagement); this seed has no
+--     show_in_sidebar column and leaves that flag alone.
+--   524 -- Third-Party Management CR 2 Round C (2026-11-09):
+--     'tprm-risk-register' (374, TP Risk Register) under 'nav-tprm'. 524
+--     grants it to the roles holding Engagement Management, with the
+--     same rights.
+--   532 -- 'risk-methodology' (Risk Methodology) under Settings
+--     ('nav-organization') at 267. 532 grants it to the ORG_ADMIN and
+--     GRAC_ADMIN roles only; Section 3 below (ALL) would widen that to
+--     every role -- run it with @RolesScope = 'ADMIN' to keep 532's grant.
+--   533 -- Risk Management -> Settings (2026-11-13): NEW group
+--     'risk-centre-settings' (Settings, url '#', 289) under 'risk-centre'.
+--     'risk-settings' (renamed Workflow, 291) and 'risk-methodology'
+--     (renamed Methodology, 292) both move under it, module_type Risk
+--     Management. 'risk-acceptance-authority' is Inactive: its grid is now
+--     a section of Workflow Settings. 533 grants the group to the roles
+--     holding either child.
 --
 -- Re-runnable: yes. A second run makes no changes.
 -- Rollback: database/274_menu_master_seed_rollback.sql
@@ -296,8 +347,14 @@ USING (VALUES
     (N'organization-dependencies'     , N'Dependencies'                      , N'Practice/Index/organization-dependencies'   ,  197, N'diagram-project'       , N'Organization'               , N'Active'),
     (N'organization-metadata'         , N'Organization Metadata'             , N'Practice/Index/organization-metadata'       ,   40, N'sliders'               , N'Organization Setup'         , N'Inactive'),
     (N'Practices'                     , N'Practices'                         , NULL                                          ,    2, N'list-check'            , N'Practice Management'        , N'Active'),
-    (N'organizations'                 , N'Organization Onboarding'           , N'Practice/Index/organizations'               ,   30, N'building'              , N'Organization Setup'         , N'Inactive'),
+    -- 512: Active and renamed, because it is the Organization Management
+    -- module's first menu entry (the way back to the list from Subscription
+    -- Requests). module_type 'Organization' on purpose, not 'Organization
+    -- Setup': _Layout's no-menu fallback lists Active 'Organization Setup'
+    -- screens under Organization Setup, and the list does not belong there.
+    (N'organizations'                 , N'Organizations'                     , N'Practice/Index/organizations'               ,    5, N'building'              , N'Organization'               , N'Active'),
     (N'organization-setup'            , N'Organization Setup'                , N'Practice/Index/organization-setup'          ,   10, N'building'              , N'Organization Setup'         , N'Active'),
+    (N'subscription-requests'         , N'Subscription Requests'             , N'Practice/Index/subscription-requests'       ,   20, N'file-circle-check'     , N'Organization Setup'         , N'Active'),   -- 511
     -- Inactive since 288. Every job this screen held moved to
     -- Operationalize: create -> Configure (139), profile + retire -> 222,
     -- restore + retired visibility + practice/requirement drill-down ->
@@ -375,18 +432,22 @@ USING (VALUES
     -- Audit Management containers, added by 276. Both are pages AND
     -- parents; the sidebar honours a parent's menu_url since 276.
     (N'org-audit-definition'          , N'Audit Definition'                  , N'Practice/org-audit-definition'              ,  440, N'file-shield'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-audit-configuration'       , N'Audit Configuration'               , N'Practice/org-audit-configuration'           ,  450, N'sliders'               , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-audit-configuration'       , N'Audit Configuration'               , N'Practice/org-audit-configuration'           ,  450, N'sliders'               , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 549 (opened from Audit Definition)
     (N'org-assurance-definitions'     , N'Audit Definitions'                 , N'Practice/org-assurance-definitions'         ,   10, N'file-shield'           , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
     (N'org-assurance-scope-builder'   , N'Scope Builder'                     , N'Practice/org-assurance-scope-builder'       ,   20, N'diagram-project'       , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
-    (N'org-assurance-question-sets'   , N'Question Sets'                     , N'Practice/org-assurance-question-sets'       ,   30, N'clipboard-list'        , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
-    (N'org-assurance-evidence-config' , N'Evidence Config'                   , N'Practice/org-assurance-evidence-config'     ,   10, N'file-circle-check'     , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-assurance-workflow-config' , N'Workflow Config'                   , N'Practice/org-assurance-workflow-config'     ,   20, N'sitemap'               , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-assurance-scoring-config'  , N'Scoring Config'                    , N'Practice/org-assurance-scoring-config'      ,   30, N'gauge'                 , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-question-sets'   , N'Question Sets'                     , N'Practice/org-assurance-question-sets'       ,  475, N'clipboard-list'        , N'Audit Assurance'            , N'Active'),   -- module_type by 384; Active under nav-assurance by 520; order 475 (last) by 540
+    (N'org-assurance-evidence-config' , N'Evidence Config'                   , N'Practice/org-assurance-evidence-config'     ,   10, N'file-circle-check'     , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 536 (evidence set per question)
+    (N'org-assurance-workflow-config' , N'Workflow Config'                   , N'Practice/org-assurance-workflow-config'     ,   20, N'sitemap'               , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
+    (N'org-assurance-scoring-config'  , N'Scoring Config'                    , N'Practice/org-assurance-scoring-config'      ,   30, N'gauge'                 , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
     (N'org-assurance-plans'           , N'Audit Plans'                       , N'Practice/org-assurance-plans'               ,  466, N'calendar-days'         , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-assurance-triggers'        , N'Triggers'                          , N'Practice/org-assurance-triggers'            ,   40, N'bolt'                  , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-assurance-scope-resolution', N'Scope Resolution'                  , N'Practice/org-assurance-scope-resolution'    ,   50, N'circle-nodes'          , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-triggers'        , N'Triggers'                          , N'Practice/org-assurance-triggers'            ,   40, N'bolt'                  , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
+    (N'org-assurance-scope-resolution', N'Scope Resolution'                  , N'Practice/org-assurance-scope-resolution'    ,   50, N'circle-nodes'          , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
+    (N'org-audit-engagements'         , N'Audit Engagements'                 , N'Practice/org-audit-engagements'             ,  467, N'briefcase'             , N'Audit Assurance'            , N'Active'),   -- added by 566
+    (N'org-my-audits'                 , N'My Audits'                         , N'Practice/org-my-audits'                     ,  468, N'user-check'            , N'Audit Assurance'            , N'Active'),   -- added by 555
     (N'org-assurance-executions'      , N'Executions'                        , N'Practice/org-assurance-executions'          ,  469, N'play-circle'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-assurance-observations'    , N'Observations'                      , N'Practice/org-assurance-observations'        ,  470, N'triangle-exclamation'  , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-workpapers'                , N'Workpapers'                        , N'Practice/org-workpapers'                    ,  470, N'file-pen'              , N'Audit Assurance'            , N'Active'),   -- added by 567
+    (N'org-assurance-observations'    , N'Observations'                      , N'Practice/org-assurance-observations'        ,  471, N'triangle-exclamation'  , N'Audit Assurance'            , N'Active'),   -- module_type by 384; order 471 by 567
+    (N'org-audit-reports'             , N'Audit Reports'                     , N'Practice/org-audit-reports'                 ,  472, N'file-lines'            , N'Audit Assurance'            , N'Active'),   -- added by 568
     (N'asset-category-assurance'      , N'Asset Category Assurance'          , N'Practice/Index/asset-category-assurance'    ,  316, N'boxes-stacked'         , N'Operations'                 , N'Inactive'),   -- retired by 409 (Asset Profiles replace it)
     -- Added by migration 332, after the export. The snapshot UPDATEs what
     -- it finds, so leaving this out would delete the Event Profiles menu
@@ -395,6 +456,8 @@ USING (VALUES
     (N'document-uploads'              , N'Document Library'                  , N'Practice/Index/document-uploads'            ,   10, N'file-lines'            , N'Policies & Documents'       , N'Active'),   -- renamed by 358, re-nested by 359, module_type by 384
     (N'document-acknowledgements'     , N'Document Acknowledgements'         , N'Practice/Index/document-acknowledgements'   ,   20, N'file-signature'        , N'Policies & Documents'       , N'Active'),   -- module_type by 384
     (N'evidence-center'               , N'Evidence Center'                   , N'Practice/Index/evidence-center'             ,   15, N'box-archive'           , N'Policies & Documents'       , N'Active'),   -- 476
+    (N'evidence-automation'           , N'Evidence Automation'               , N'Practice/Index/evidence-automation'         ,   16, N'plug'                  , N'Policies & Documents'       , N'Active'),   -- 530
+    (N'documents-dashboard'           , N'Dashboard'                         , N'Practice/Index/documents-dashboard'         ,    5, N'chart-pie'             , N'Policies & Documents'       , N'Active'),   -- 508
     (N'my-acknowledgements'           , N'My Acknowledgements'               , N'Practice/Index/my-acknowledgements'         ,   30, N'inbox'                 , N'My Notification'            , N'Active'),   -- moved under my-notifications by 384
     (N'nav-documents'                 , N'Policies & Documents'              , NULL                                          ,  400, N'folder-open'           , N'Policies & Documents'       , N'Active'),   -- moved by 359; renamed + root again by 384
     (N'exception-centre'              , N'Exceptions & Waivers'              , N'Practice/Index/exception-centre'            ,  270, N'shield-halved'         , N'Issues & Actions'           , N'Active'),   -- renamed by 384
@@ -406,6 +469,7 @@ USING (VALUES
     (N'risk-centre-review'            , N'Review Risk'                       , N'Practice/Index/risk-centre-review'          ,  284, N'rotate-left'           , N'Risk Management'            , N'Active'),
     (N'risk-centre-calendar'          , N'Calendar'                          , N'Practice/Index/risk-centre-calendar'        ,  285, N'calendar-days'         , N'Risk Management'            , N'Active'),
     (N'risk-centre-dashboard'         , N'Dashboard'                         , N'Practice/Index/risk-centre-dashboard'       ,  280, N'chart-pie'             , N'Risk Management'            , N'Active'),   -- first child since 416 (was 286)
+    (N'risk-centre-settings'          , N'Settings'                          , N'#'                                          ,  289, N'gear'                  , N'Risk Management'            , N'Active'),   -- 533: group, children wired in Section 2
     -- Inactive since 289 -- HIDDEN, NOT SUPERSEDED. Nothing replaces this
     -- screen: it is the only way to adopt Control Management SLA masters
     -- and tune warning / escalation thresholds and notify roles, and its
@@ -419,8 +483,9 @@ USING (VALUES
     -- url '#' until sir supplies the real links; set them here AND in the live row.
     (N'my-practices'                  , N'My Practices'                      , N'#'                                          ,   10, N'list-check'            , N'My Notification'            , N'Active'),
     (N'my-approvals'                  , N'My Approvals'                      , N'#'                                          ,   20, N'circle-check'          , N'My Notification'            , N'Active'),
-    (N'risk-acceptance-authority'     , N'Risk Acceptance Approval Authority', N'Practice/Index/risk-acceptance-authority'   ,  260, N'user-shield'           , N'Organization'               , N'Active'),
-    (N'risk-settings'                 , N'Risk Settings'                     , N'Practice/Index/risk-settings'               ,  265, N'sliders'               , N'Organization'               , N'Active'),   -- 458
+    (N'risk-acceptance-authority'     , N'Risk Acceptance Approval Authority', N'Practice/Index/risk-acceptance-authority'   ,  260, N'user-shield'           , N'Organization'               , N'Inactive'), -- 533: now a section of Workflow Settings
+    (N'risk-settings'                 , N'Workflow'                          , N'Practice/Index/risk-settings'               ,  291, N'sliders'               , N'Risk Management'            , N'Active'),   -- 458; renamed + moved by 533
+    (N'risk-methodology'              , N'Methodology'                       , N'Practice/Index/risk-methodology'            ,  292, N'scale-balanced'        , N'Risk Management'            , N'Active'),   -- 532; renamed + moved by 533
     -- Asset & Contract root + configuration screens (420). Root has no url
     -- (expand only, 416 convention); parents wired in Section 2.
     (N'nav-asset-contract'            , N'Asset & Contract'                  , NULL                                          ,  350, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),
@@ -442,14 +507,15 @@ USING (VALUES
     (N'asset-governance'              , N'Asset Governance'                  , N'Practice/Index/asset-governance'            ,  365, N'gauge-high'            , N'Asset & Contract'           , N'Active'),  -- 450
     (N'asset-contract-dashboard'      , N'Dashboard'                         , N'Practice/Index/asset-contract-dashboard'    ,  348, N'chart-pie'             , N'Asset & Contract'           , N'Active'),  -- 451
     (N'asset-reports'                 , N'Asset Reports'                     , N'Practice/Index/asset-reports'               ,  366, N'file-lines'            , N'Asset & Contract'           , N'Active'),  -- 452
-    -- Third-Party Risk root + screens (490). Root has no url (416
-    -- convention); parents wired in Section 2.
-    (N'nav-tprm'                      , N'Third-Party Risk'                  , NULL                                          ,  370, N'handshake'             , N'Third-Party Risk'           , N'Active'),  -- 490
-    (N'tprm-dashboard'                , N'Dashboard'                         , N'Practice/Index/tprm-dashboard'              ,  369, N'chart-pie'             , N'Third-Party Risk'           , N'Active'),  -- 490
-    (N'tprm-third-parties'            , N'Third Parties'                     , N'Practice/Index/tprm-third-parties'          ,  371, N'building'              , N'Third-Party Risk'           , N'Active'),  -- 490
-    (N'tprm-engagements'              , N'Engagements'                       , N'Practice/Index/tprm-engagements'            ,  372, N'file-signature'        , N'Third-Party Risk'           , N'Active'),  -- 490
-    (N'tprm-reviews'                  , N'Reviews'                           , N'Practice/Index/tprm-reviews'                ,  373, N'calendar-check'        , N'Third-Party Risk'           , N'Active'),  -- 490
-    (N'tprm-configuration'            , N'TPRM Configuration'                , N'Practice/Index/tprm-configuration'          ,  374, N'sliders'               , N'Third-Party Risk'           , N'Active')   -- 490
+    -- Third-Party Management root + screens (490; names 521). Root has no
+    -- url (416 convention); parents wired in Section 2.
+    (N'nav-tprm'                      , N'Third-Party Management'            , NULL                                          ,  370, N'handshake'             , N'Third-Party Management'     , N'Active'),  -- 490 / 521
+    (N'tprm-dashboard'                , N'Dashboard'                         , N'Practice/Index/tprm-dashboard'              ,  369, N'chart-pie'             , N'Third-Party Management'     , N'Active'),  -- 490 / 521
+    (N'tprm-third-parties'            , N'Vendor Registry'                   , N'Practice/Index/tprm-third-parties'          ,  371, N'building'              , N'Third-Party Management'     , N'Active'),  -- 490 / 521
+    (N'tprm-engagements'              , N'Engagement Management'             , N'Practice/Index/tprm-engagements'            ,  372, N'file-signature'        , N'Third-Party Management'     , N'Active'),  -- 490 / 521 / 522
+    (N'tprm-reviews'                  , N'Reviews & Monitoring'              , N'Practice/Index/tprm-reviews'                ,  373, N'calendar-check'        , N'Third-Party Management'     , N'Active'),  -- 490 / 521
+    (N'tprm-configuration'            , N'Third-Party Settings'              , N'Practice/Index/tprm-configuration'          ,  266, N'sliders'               , N'Organization'               , N'Active'),  -- 490 / 521 / 522 (under Settings)
+    (N'tprm-risk-register'            , N'TP Risk Register'                  , N'Practice/Index/tprm-risk-register'          ,  374, N'shield-halved'         , N'Third-Party Management'     , N'Active')   -- 524
 ) AS s(menu_key, menu_name, menu_url, display_order, icon_class, module_type, status)
 ON t.menu_key = s.menu_key
 WHEN MATCHED AND (
@@ -497,8 +563,9 @@ JOIN  (VALUES
     (N'organization-dependencies'     , N'nav-organization'),
     (N'organization-metadata'         , N'nav-organization'),
     (N'Practices'                     , N'Governance'),
-    (N'organizations'                 , N'nav-organization'),
+    (N'organizations'                 , N'Organization'),               -- moved by 512
     (N'organization-setup'            , N'Organization'),
+    (N'subscription-requests'         , N'Organization'),   -- 511
     (N'practice-instances'            , N'nav-governance'),
     (N'Operationalize'                , N'Practices'),
     (N'organization-controls'         , N'nav-governance'),
@@ -536,20 +603,26 @@ JOIN  (VALUES
     (N'org-audit-configuration'       , N'nav-assurance'),          -- added by 276
     (N'org-assurance-definitions'     , N'org-audit-definition'),   -- moved by 276
     (N'org-assurance-scope-builder'   , N'org-audit-definition'),   -- moved by 276
-    (N'org-assurance-question-sets'   , N'org-audit-definition'),   -- moved by 276
+    (N'org-assurance-question-sets'   , N'nav-assurance'),          -- moved by 276; back under nav-assurance by 520
     (N'org-assurance-evidence-config' , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-workflow-config' , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-scoring-config'  , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-plans'           , N'nav-assurance'),
     (N'org-assurance-triggers'        , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-scope-resolution', N'org-audit-configuration'),   -- moved by 276
+    (N'org-audit-engagements'         , N'nav-assurance'),   -- 566
+    (N'org-my-audits'                 , N'nav-assurance'),   -- 555
     (N'org-assurance-executions'      , N'nav-assurance'),
+    (N'org-workpapers'                , N'nav-assurance'),   -- 567
     (N'org-assurance-observations'    , N'nav-assurance'),
+    (N'org-audit-reports'             , N'nav-assurance'),   -- 568
     (N'asset-category-assurance'      , N'nav-organization'),
     (N'event-profiles'                , N'nav-organization'),   -- added by 332
     (N'document-uploads'              , N'nav-documents'),   -- renamed by 358, re-nested by 359
     (N'document-acknowledgements'     , N'nav-documents'),
     (N'evidence-center'               , N'nav-documents'),   -- 476
+    (N'evidence-automation'           , N'nav-documents'),   -- 530
+    (N'documents-dashboard'           , N'nav-documents'),   -- 508
     (N'my-acknowledgements'           , N'my-notifications'),   -- moved by 384
     (N'exception-centre'              , N'nav-oversight'),
     (N'org-sla-config'                , N'nav-governance'),
@@ -564,7 +637,9 @@ JOIN  (VALUES
     (N'risk-centre-calendar'          , N'risk-centre'),
     (N'risk-centre-dashboard'         , N'risk-centre'),
     (N'risk-acceptance-authority'     , N'nav-organization'),
-    (N'risk-settings'                 , N'nav-organization'),   -- 458
+    (N'risk-centre-settings'          , N'risk-centre'),        -- 533
+    (N'risk-settings'                 , N'risk-centre-settings'), -- 458; moved by 533
+    (N'risk-methodology'              , N'risk-centre-settings'), -- 532; moved by 533
     -- Module Dashboard submenus (416).
     (N'governance-dashboard'          , N'nav-governance'),
     (N'issues-actions-dashboard'      , N'nav-oversight'),
@@ -593,7 +668,8 @@ JOIN  (VALUES
     (N'tprm-third-parties'            , N'nav-tprm'),            -- 490
     (N'tprm-engagements'              , N'nav-tprm'),            -- 490
     (N'tprm-reviews'                  , N'nav-tprm'),            -- 490
-    (N'tprm-configuration'            , N'nav-tprm')             -- 490
+    (N'tprm-configuration'            , N'nav-organization'),    -- 490; under Settings since 522
+    (N'tprm-risk-register'            , N'nav-tprm')             -- 524
 ) AS x(child_key, parent_key) ON x.child_key = m.menu_key
 JOIN   grac_practice.menu_master p ON p.menu_key = x.parent_key
 WHERE  ISNULL(m.parent_menu_id, -1) <> p.menu_id;
@@ -648,7 +724,7 @@ JOIN  (VALUES
     (N'nav-documents'),      -- root again by 384 (Policies & Documents)
     (N'my-notifications'),   -- root by 384 (My Notification parent)
     (N'nav-asset-contract'), -- root added by 420 (Asset & Contract)
-    (N'nav-tprm')            -- root added by 490 (Third-Party Risk)
+    (N'nav-tprm')            -- root added by 490 (Third-Party Management, 521)
 ) AS r(menu_key) ON r.menu_key = m.menu_key
 WHERE  m.parent_menu_id IS NOT NULL;
 
@@ -685,6 +761,23 @@ IF COL_LENGTH('grac_practice.menu_master','show_in_sidebar') IS NOT NULL
         UPDATE grac_practice.menu_master
            SET show_in_sidebar = 0, updated_by = N''seed-274'', updated_dt = SYSUTCDATETIME()
          WHERE menu_key = N''role-menu-permissions'' AND show_in_sidebar = 1;';
+GO
+
+-- =====================================================================
+-- 2d. Sidebar visibility (512). 'organizations' is the Organization
+--     Management module's own menu entry and must not appear in Practice
+--     Management's sidebar. Its InActive 'Organization' parent already
+--     keeps it out of that tree; this is the explicit guard, so activating
+--     the group later cannot surface it. status stays Active, which is what
+--     makes the row a menu the module can project, and VisibleScreens --
+--     which that projection reads -- deliberately still includes rows
+--     hidden from the sidebar. Dynamic SQL for the same reason as 2c.
+-- =====================================================================
+IF COL_LENGTH('grac_practice.menu_master','show_in_sidebar') IS NOT NULL
+    EXEC sp_executesql N'
+        UPDATE grac_practice.menu_master
+           SET show_in_sidebar = 0, updated_by = N''seed-274'', updated_dt = SYSUTCDATETIME()
+         WHERE menu_key = N''organizations'' AND show_in_sidebar = 1;';
 GO
 
 -- =====================================================================

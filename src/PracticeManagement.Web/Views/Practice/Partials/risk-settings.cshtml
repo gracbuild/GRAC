@@ -1,9 +1,21 @@
 @*
-    Risk Settings -- migration 458 (2026-10-08).
+    Workflow Settings -- migration 458 (2026-10-08); renamed and moved by
+    533 (2026-11-13).
 
-    Screen key : `risk-settings`
-    Group      : Organization
-    Menu       : nav-organization (Settings) -> Risk Settings
+    Screen key : `risk-settings` (unchanged, so permissions carry over)
+    Group      : Risk Management
+    Menu       : risk-centre (Risk Management) -> risk-centre-settings
+                 (Settings) -> Workflow Settings
+                 (was nav-organization (Settings) -> Risk Settings)
+
+    533: sir asked for the risk configuration to sit under Risk
+    Management -> Settings as two menus, Workflow Settings and Risk
+    Methodology, with Risk Acceptance Approval Authority folded into this
+    page. That grid is included below the form as a section
+    (Partials/risk-acceptance-authority), driven by this page's org
+    picker through window.gracRiskAcceptanceAuthority.load(orgId). It
+    keeps its own Save: a different endpoint, and the two must not save
+    each other's unsaved edits.
 
     The Risk Centre settings (BRD §19, §22) used to open in a modal from a
     gear icon at the right of the Risk Candidate / Risk Register tab strip.
@@ -29,22 +41,25 @@
         <h1>@Model.Title</h1>
         <p>
             Approval before a risk is registered, the treatment-task default,
-            notifications and the residual-analysis rule for an organization.
+            notifications, the residual-analysis rule and who may approve
+            accepting a risk, for an organization.
         </p>
     </div>
 </div>
 
 <section class="pm-panel" id="rsRoot">
-    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; align-items:end;">
+    <div class="pm-toolbar pm-toolbar-fields" style="flex-wrap:wrap; gap:8px; align-items:end;">
         <label class="pm-field">
             <span>Organization</span>
             <select class="pm-input" id="rsPickOrg" style="min-width:260px;">
                 <option value="">Loading...</option>
             </select>
         </label>
-        <div style="display:flex; gap:6px;">
-            <button class="pm-button" id="rsReloadBtn" type="button">Reload</button>
-        </div>
+        @* Standard icon refresh button (533), as on the dashboards and Risk
+           Methodology. Reloads both sections. *@
+        <button class="pm-button icon" id="rsReloadBtn" type="button" title="Reload" aria-label="Reload">
+            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+        </button>
     </div>
 
     <form id="riskConfigForm" style="margin-top:12px;">
@@ -112,6 +127,9 @@
             <button type="submit" class="pm-button primary" id="rsSaveBtn"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
         </div>
     </form>
+
+    @* Risk Acceptance Approval Authority (271), a section since 533. *@
+    <partial name="Partials/risk-acceptance-authority" />
 </section>
 
 <style>

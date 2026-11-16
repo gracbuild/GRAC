@@ -240,3 +240,7 @@ collects a password fails every user create with SQL error 51152.
 changes for org admins. Users created under 208 keep the flag set but nothing
 reads it once the Web tier is reverted — the rollback script reports them so
 their passwords can be reset by hand.
+
+## Forgot password (migration 529, 2026-11-10)
+
+Self-service reset by an emailed one-time link: `secure/password-reset-request`, `secure/password-reset-validate`, `secure/password-reset-complete` (same bootstrap-token transport as `secure/authenticate`). The new password is written by `sp_org_user_set_password` (above) through `sp_password_reset_complete`, so `force_password_change` is cleared the same way. Contract, rules and configuration: `docs/forgot-password.md`.

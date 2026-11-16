@@ -15,6 +15,19 @@
 //   POST /definitions/{id}/approve             UnderReview -> Approved
 //   POST /definitions/{id}/activate            Approved -> Active
 //   POST /definitions/{id}/retire              Active -> Retired
+//   564 -- Control and Practice Mapping (Audit Configuration step):
+//   GET  /mapping-options?organizationId=     { practices: [{ id, code, name,
+//        instanceCount }], instances: [{ id, code, name, practiceId,
+//        practiceCode }] } -- active ones (controls: /scope-statement-tree)
+//   GET  /definitions/{id}/mapping?organizationId=&versionId=
+//        { header: { definitionId, versionId, statusCode, isEditable },
+//          items: [{ mappingId, mappingType, recordId, recordCode, recordName,
+//          manualKind, manualReference, note, displayOrder, practiceId,
+//          isAvailable }] }
+//   POST /definitions/{id}/mapping            { organizationId, items: [{
+//        mappingType (CONTROL_STATEMENT / PRACTICE / PRACTICE_INSTANCE /
+//        MANUAL), recordId, manualKind, reference, name, note }], actor }
+//        replaces the Draft version's mapping -> { definitionId, mappingCount }
 //
 // New, INDEPENDENT module. Follows the TaskController / WorkflowController
 // style: thin, delegates to IOrgAssuranceDefinitionService, plain JSON
@@ -65,6 +78,42 @@ public sealed class OrgAssuranceDefinitionController(
         catch (Exception ex)
         {
             logger.LogError(ex, "OrgAssuranceDefinitionController.ListAdminCategories failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // ================================================================
+    // 560: Assurance Approaches (dropdown feed)
+    // ================================================================
+    [HttpGet("approaches")]
+    public async Task<IActionResult> ListApproaches(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rows = await service.ListApproachesAsync(cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.ListApproaches failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // ================================================================
+    // 560: Audit Mandates (dropdown feed)
+    // ================================================================
+    [HttpGet("mandates")]
+    public async Task<IActionResult> ListMandates(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rows = await service.ListMandatesAsync(cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.ListMandates failed");
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -267,6 +316,30 @@ public sealed class OrgAssuranceDefinitionController(
         }
     }
 
+    // 534 -- Source Statements tree (Framework -> Release -> Source
+    // Structure -> Source Statement) for the Scope Builder's two-list
+    // picker. Web proxies it through its generic org-assurance GET, which
+    // checks the caller may use organizationId.
+    [HttpGet("scope-statement-tree")]
+    public async Task<IActionResult> ListScopeStatementTree(
+        [FromQuery] long? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+
+        try
+        {
+            var rows = await service.ListScopeStatementTreeAsync(organizationId.Value, cancellationToken);
+            return Ok(new { data = rows });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.ListScopeStatementTree failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
     [HttpGet("definitions/{id:long}/scope")]
     public async Task<IActionResult> GetScope(
         long id,
@@ -291,6 +364,103 @@ public sealed class OrgAssuranceDefinitionController(
         }
     }
 
+    // ================================================================
+    // 562: Scope Builder Step 2 -- Discover related GRAC intelligence,
+    // and which discovered categories the audit brings in.
+    // ================================================================
+    [HttpGet("definitions/{id:long}/scope-discovery")]
+    public async Task<IActionResult> GetScopeDiscovery(
+        long id,
+        [FromQuery] long? organizationId,
+        [FromQuery] long? versionId,
+        CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var result = await service.GetScopeDiscoveryAsync(organizationId.Value, id, versionId, cancellationToken);
+            return result is null ? NotFound(new { error = "Definition not found." }) : Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.GetScopeDiscovery failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("definitions/{id:long}/scope-categories")]
+    public async Task<IActionResult> SaveScopeCategories(
+        long id,
+        [FromBody] OrgAssuranceScopeCategorySaveRequest? body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await service.SaveScopeCategoriesAsync(body with { DefinitionId = id }, cancellationToken);
+        return result.Success
+            ? Ok(new { definitionId = result.DefinitionId })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
+    // ================================================================
+    // 564: Audit Configuration -- Control and Practice Mapping.
+    // ================================================================
+    [HttpGet("mapping-options")]
+    public async Task<IActionResult> GetMappingOptions(
+        [FromQuery] long? organizationId, CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var result = await service.GetMappingOptionsAsync(organizationId.Value, cancellationToken);
+            return Ok(new { practices = result.Practices, instances = result.Instances });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.GetMappingOptions failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("definitions/{id:long}/mapping")]
+    public async Task<IActionResult> GetMapping(
+        long id,
+        [FromQuery] long? organizationId,
+        [FromQuery] long? versionId,
+        CancellationToken cancellationToken)
+    {
+        if (organizationId is null or <= 0)
+            return BadRequest(new { error = "organizationId is required." });
+        try
+        {
+            var result = await service.GetMappingAsync(organizationId.Value, id, versionId, cancellationToken);
+            return result is null
+                ? NotFound(new { error = "Definition not found." })
+                : Ok(new { header = result.Header, items = result.Items });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.GetMapping failed for id {Id}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("definitions/{id:long}/mapping")]
+    public async Task<IActionResult> SaveMapping(
+        long id,
+        [FromBody] OrgAssuranceMappingSaveRequest? body,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return BadRequest(new { error = "Request body is required." });
+        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
+        var result = await service.SaveMappingAsync(body with { DefinitionId = id }, cancellationToken);
+        return result.Success
+            ? Ok(new { definitionId = id, mappingCount = result.MappingCount })
+            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
+    }
+
     [HttpPost("definitions/{id:long}/scope")]
     public async Task<IActionResult> SaveScope(
         long id,
@@ -309,7 +479,10 @@ public sealed class OrgAssuranceDefinitionController(
     }
 
     // ================================================================
-    // Evidence Configuration (Stage 2 -- BRD Part 2 Sec 5)
+    // Evidence Types -- the lookup a question's Evidence Type is picked
+    // from (Question Sets). The per-definition Evidence Configuration
+    // endpoints (evidence-config GET/POST, collection-methods,
+    // frequencies) were removed by 536: evidence is set per question.
     // ================================================================
     [HttpGet("evidence-types")]
     public async Task<IActionResult> ListEvidenceTypes(CancellationToken cancellationToken)
@@ -326,76 +499,6 @@ public sealed class OrgAssuranceDefinitionController(
         }
     }
 
-    [HttpGet("collection-methods")]
-    public async Task<IActionResult> ListCollectionMethods(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var rows = await service.ListCollectionMethodsAsync(cancellationToken);
-            return Ok(new { data = rows });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "OrgAssuranceDefinitionController.ListCollectionMethods failed");
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
-
-    [HttpGet("frequencies")]
-    public async Task<IActionResult> ListFrequencies(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var rows = await service.ListFrequenciesAsync(cancellationToken);
-            return Ok(new { data = rows });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "OrgAssuranceDefinitionController.ListFrequencies failed");
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
-
-    [HttpGet("definitions/{id:long}/evidence-config")]
-    public async Task<IActionResult> GetEvidenceConfig(
-        long id,
-        [FromQuery] long? organizationId,
-        [FromQuery] long? versionId,
-        CancellationToken cancellationToken)
-    {
-        if (organizationId is null or <= 0)
-            return BadRequest(new { error = "organizationId is required." });
-
-        try
-        {
-            var result = await service.GetEvidenceConfigAsync(organizationId.Value, id, versionId, cancellationToken);
-            return result is null
-                ? NotFound(new { error = "Definition or version not found." })
-                : Ok(result);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "OrgAssuranceDefinitionController.GetEvidenceConfig failed for id {Id}", id);
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
-
-    [HttpPost("definitions/{id:long}/evidence-config")]
-    public async Task<IActionResult> SaveEvidenceConfig(
-        long id,
-        [FromBody] OrgAssuranceEvidenceConfigSaveRequest? body,
-        CancellationToken cancellationToken)
-    {
-        if (body is null) return BadRequest(new { error = "Request body is required." });
-        if (body.OrganizationId <= 0) return BadRequest(new { error = "organizationId is required." });
-
-        var effective = body with { DefinitionId = id };
-        var result    = await service.SaveEvidenceConfigAsync(effective, cancellationToken);
-        return result.Success
-            ? Ok(new { definitionId = result.DefinitionId })
-            : BadRequest(new { error = result.Error, reasonCode = result.ReasonCode });
-    }
-
     // ================================================================
     // Workflow Configuration (Stage 2 -- BRD Part 2 Sec 6)
     // ================================================================
@@ -410,6 +513,25 @@ public sealed class OrgAssuranceDefinitionController(
         catch (Exception ex)
         {
             logger.LogError(ex, "OrgAssuranceDefinitionController.ListAdminWorkflowTemplates failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    // 538: one Admin template with its stages -- the Workflow screen fills its
+    // stage grid from this when a template is picked (nothing is saved here).
+    [HttpGet("admin-workflow-templates/{templateId:long}")]
+    public async Task<IActionResult> GetAdminWorkflowTemplate(long templateId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await service.GetAdminWorkflowTemplateAsync(templateId, cancellationToken);
+            return result is null
+                ? NotFound(new { error = "Workflow template not found." })
+                : Ok(new { data = result });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OrgAssuranceDefinitionController.GetAdminWorkflowTemplate failed for {TemplateId}", templateId);
             return StatusCode(500, new { error = ex.Message });
         }
     }

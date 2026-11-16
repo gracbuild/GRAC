@@ -1,3 +1,4 @@
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @model PracticeManagement.Web.Models.PracticeScreen
 @{
     ViewData["Title"] = Model.Title;
@@ -44,6 +45,15 @@
         "event-profiles",
         // Full-page practice view (migration 139) -- replaces the view modal.
         "practice-view",
+        // Full-page organization view (2026-11-02) -- opened by a row on
+        // Organization Management's landing list. Read-only; its Actions >
+        // Edit goes to organization-setup. Its own partial and its own JS,
+        // so Organization Setup stays purely the edit/onboarding page.
+        "organization-view",
+        // Organization Management -> Subscription Requests (migration 511):
+        // approve / reject framework subscription requests. Own partial, own
+        // proxy (practice/api/subscription-requests).
+        "subscription-requests",
         // Resolve (migrations 140/141): a flat owner-scoped list, and a
         // full-page workspace per instance. "resolve" moves here from the
         // generic grid, so practice.js no longer renders the old tabbed
@@ -60,14 +70,17 @@
         "org-assurance-definitions",
         "org-assurance-scope-builder",
         "org-assurance-question-sets",
-        "org-assurance-evidence-config",
         "org-assurance-workflow-config",
         "org-assurance-scoring-config",
         "org-assurance-plans",
+        "org-audit-engagements",              // 566
         "org-assurance-triggers",
         "org-assurance-scope-resolution",
+        "org-my-audits",                      // 555
         "org-assurance-executions",
+        "org-workpapers",                     // 567
         "org-assurance-observations",
+        "org-audit-reports",                  // 568
         // "org-assurance-gaps" retired (109-113); Assurance gaps now
         // land in the unified Gap Center (Practice/Index/gaps).
         // Document Upload + Acknowledgement module (migrations 146-154).
@@ -80,6 +93,9 @@
         // Evidence Center (migration 476): own partial, own JS, own proxy
         // (practice/api/evidence-center).
         "evidence-center",
+        // Evidence Automation (migration 530): own partial, own JS, own proxy
+        // (practice/api/evidence-automation).
+        "evidence-automation",
         // Task Centre v2 Phase 4 (migrations 201-203) -- the in-app
         // dispatcher for SLA task notifications. Personal inbox, scoped to
         // the session's employee id.
@@ -94,14 +110,15 @@
         // Adopts Control Management SLA masters into per-org configs with
         // warning/escalation thresholds, notify roles and process bindings.
         "org-sla-config",
-        // Organization -> Risk Acceptance Approval Authority (271).
-        // An Organization configuration screen, not a Risk module one:
-        // it configures the organisation's approval authority, and the
-        // Risk Centre reads it. Menu row is a child of nav-organization.
-        "risk-acceptance-authority",
-        // Settings -> Risk Settings (458, 2026-10-08): the Risk Centre
-        // settings that used to open from a gear on the risk pages.
+        // Risk Management -> Settings -> Workflow Settings (458; moved and
+        // renamed by 533): the Risk Centre settings that used to open from a
+        // gear on the risk pages, plus the Risk Acceptance Approval Authority
+        // grid (271), which since 533 is a section of this page and no longer
+        // a screen of its own.
         "risk-settings",
+        // Risk Management -> Settings -> Risk Methodology (532; moved by 533):
+        // the organisation's versioned risk methodology.
+        "risk-methodology",
         // Task View / Exception View (326) -- dedicated read-only full-page
         // views. Same "route" screen convention as gap-view/gap-detail:
         // no menu row, reached only by ?taskId=/?exceptionId= links from
@@ -171,7 +188,9 @@
         "tprm-third-parties",
         "tprm-engagements",
         "tprm-reviews",
-        "tprm-configuration"
+        "tprm-configuration",
+        // CR 2 Round C (migration 524): TP Risk Register.
+        "tprm-risk-register"
     };
     // Risk Management submenus (migration 383). Each of these keys is its
     // own route/screen but REUSES the existing risk-centre partial, opened
@@ -228,6 +247,38 @@
     };
 
     var isOrganizationOnboarding = Model.Key == "organization-setup";
+    var isOrganizationManagementModule = ViewBag.IsOrganizationManagementModule as bool? ?? false;
+    // 2026-11-02: the Organization Setup page INSIDE the Organization
+    // Management module, reached by clicking a row on that module's landing
+    // list. Three things follow from it:
+    //
+    //   1. Only the Organization tab shows. Location / Department /
+    //      Business Function / Teams / Committees / Users are managed from
+    //      Organization Administration, and the request was to drop them.
+    //   2. No Organization combo box. The organization comes from the row
+    //      that was clicked, so choosing one again is meaningless.
+    //   3. A Back button to the list, because the generic #pageBackBtn is
+    //      suppressed on organization-workspace screens.
+    //
+    // Viewing an organization read-only is NOT this page's job: that is the
+    // organization-view screen (Partials/organization-view.cshtml), which the
+    // landing list's row click opens and whose Actions > Edit comes here.
+    //
+    // Deliberately scoped to this page AND this module: Organization
+    // Administration keeps its six tabs, Organization Dependencies keeps its
+    // three (hiding those would leave that page with nothing on it), and the
+    // same screen served under Practice Management is unchanged.
+    var organizationSetupInModule = isOrganizationOnboarding && isOrganizationManagementModule;
+    // The Organization Setup page's URL for the landing list's "Add
+    // Organization" button -- see that button for why it is the area key
+    // under AppBasePath and not the "OrganizationSetup" attribute route.
+    string appBasePathForLinks = Convert.ToString(ViewBag.AppBasePath) ?? string.Empty;
+    var organizationSetupUrl = appBasePathForLinks.TrimEnd('/') + "/organization-setup";
+    // The module root, which is the organization list (PracticeController
+    // .Index -> ShowArea("organizations")). Used by the view page's Back
+    // button; "/" when the module is served without a base path.
+    var organizationListUrl = appBasePathForLinks.TrimEnd('/');
+    if (string.IsNullOrEmpty(organizationListUrl)) organizationListUrl = "/";
     var isOrganizationAdministration = Model.Key == "organization-administration";
     var isOrganizationDependencies = Model.Key == "organization-dependencies";
     var isDependencyWorkbench = Model.Key.StartsWith("workbench-", StringComparison.OrdinalIgnoreCase);
@@ -278,6 +329,37 @@
         {
         <a class="pm-button" id="pageBackBtn" asp-controller="Practice" asp-action="Index" asp-route-areaKey=""><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
         }
+        @* The Organization Management landing list (2026-11-02). "Add" here
+           does not open the generic record dialog -- an organization is
+           created on the Organization Setup page, whose Organization
+           selector already offers "New Organization" when it is opened
+           with no organization context. So this is a link to that page,
+           not the #addRecord button, and it is gated on the same ADD
+           permission the generic button is.
+
+           Built from AppBasePath rather than asp-action, and on the AREA
+           KEY rather than the "OrganizationSetup" attribute route:
+           /OrganizationManagement is a PathBase in a hosted deployment but
+           a conventional route on a plain host (Program.cs,
+           "OrganizationManagement/{areaKey?}"), and a tag helper here can
+           resolve against the Practice route registered before it and emit
+           /Practice/... instead. "<base>/organization-setup" is the one
+           spelling that is correct under both -- the same one practice.js
+           uses for the row click. *@
+        @if (Model.Key == "organizations" && permissions.Contains("ADD"))
+        {
+        <a class="pm-button primary" href="@organizationSetupUrl"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Organization</a>
+        }
+        @* Back to the organization list. The generic #pageBackBtn above is
+           suppressed on every organization-workspace screen and points at
+           the Practice Management home besides, so the view page would
+           otherwise have no way back to the list it was opened from -- the
+           sidebar's "Organization Setup" entry reopens this page, not the
+           list. Same button and icon as #pageBackBtn. *@
+        @if (organizationSetupInModule)
+        {
+        <a class="pm-button" href="@organizationListUrl"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back</a>
+        }
         @if (!isOrganizationWorkspace && !isDependencyWorkbench && Model.Key != "organizations" && Model.Key != "audit-trace" && Model.Key != "control-applicability" && !isResolve && !isReadOnlyAssuranceView && permissions.Contains("ADD"))
         {
             <button class="pm-button primary" id="addRecord" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> @(Model.Key == "organization-controls" ? "Add Release" : Model.Key == "organization-requirements" || Model.Key == "practices" ? "Add Practice" : Model.Key == "practice-instances" ? "Add New Instance" : Model.Key == "assurance-generation" ? "Generate Activity" : Model.Key == "assurance-activities" ? "Add Activity" : Model.Key == "roles" ? "Add Role" : "Add Record")</button>
@@ -299,7 +381,12 @@
 {
 <section class="pm-panel pm-setup" id="organizationSetup">
     <div class="pm-setup-toolbar">
-        <label><span>Organization</span><select id="setupOrganization"><option value="">@(isOrganizationOnboarding ? "New Organization" : "Select Organization")</option></select></label>
+        @* Hidden, not removed, when the organization comes from the landing
+           list: practice.js reads #setupOrganization.value unconditionally
+           in loadOrganizationSetup / saveOrganizationSetup and populates it
+           in populateSetupOrganizationSelector, so the element still has to
+           exist -- it just must not be a control the user picks from. *@
+        <label @(organizationSetupInModule ? "hidden" : "")><span>Organization</span><select id="setupOrganization"><option value="">@(isOrganizationOnboarding ? "New Organization" : "Select Organization")</option></select></label>
         @if (isOrganizationOnboarding)
         {
             <button class="pm-button primary" id="saveOrganizationSetup" type="button">Save Organization Setup</button>
@@ -311,11 +398,14 @@
         {
         <button type="button" class="active" data-setup-tab="organization">Organization</button>
         }
-        @for (var i = 0; i < setupChildTabs.Length; i++)
+        @if (!organizationSetupInModule)
         {
-            var tab = setupChildTabs[i];
-            var activeClass = isOrganizationDependencies && i == 0 ? "active" : "";
-            <button type="button" class="@activeClass" data-setup-tab="@tab.Key">@tab.Title</button>
+            for (var i = 0; i < setupChildTabs.Length; i++)
+            {
+                var tab = setupChildTabs[i];
+                var activeClass = isOrganizationDependencies && i == 0 ? "active" : "";
+                <button type="button" class="@activeClass" data-setup-tab="@tab.Key">@tab.Title</button>
+            }
         }
     </div>
     @if (!isOrganizationDependencies)
@@ -356,8 +446,14 @@
                shown with the screen's ADD/EDIT grant (same heading + button
                pattern as the child tabs below). Saved through
                /practice/api/org-sso. practice.js hides the card when the
-               caller cannot read it. *@
-            @if (isOrganizationAdministration)
+               caller cannot read it.
+               2026-11-15 (sir): shown only when single sign-on is set up in
+               this deployment's configuration -- at least one provider
+               under "Sso" with its ClientId and ClientSecret
+               (SsoProviders.Enabled, the same test the login page and
+               Program.cs use). With no "Sso" section the card is not
+               rendered, and practice.js skips it (it guards on the card). *@
+            @if (isOrganizationAdministration && PracticeManagement.Web.Services.SsoProviders.Enabled(Configuration).Count > 0)
             {
             <section class="pm-setup-card" id="setupSsoCard">
                 <div class="pm-section-heading inline">
@@ -414,7 +510,7 @@
     </div>
     </div>
     }
-    @for (var i = 0; i < setupChildTabs.Length; i++)
+    @for (var i = 0; i < (organizationSetupInModule ? 0 : setupChildTabs.Length); i++)
     {
         var tab = setupChildTabs[i];
         var activeClass = isOrganizationDependencies && i == 0 ? "active" : "";
@@ -521,7 +617,15 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         {
             <input id="search" placeholder="Search..." />
         }
-        <select id="organizationFilter"><option value="">All organizations</option></select>
+        @* The Organization Management landing list (2026-11-02) hides the
+           filters that cannot apply to it: the rows ARE the organizations,
+           and Owner / Criticality / Origin are not columns of an
+           organization, so picking one would narrow nothing. Search,
+           Status and the Entered from/to dates all work -- 510's
+           sp_org_organization_list takes @@p_search, @@p_status, @@date_from
+           and @@date_to. The elements stay in the DOM because practice.js
+           reads .value on each of them unconditionally in loadRows(). *@
+        <select id="organizationFilter" @(Model.Key == "organizations" ? "hidden" : "")><option value="">All organizations</option></select>
         @* source-statements (Control Statements) shows one release's statement
            tree at a time; this filter switches between the ready releases
            (2026-09-28, filled by practice.js openControlStatementsRelease). *@
@@ -546,9 +650,9 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         {
             <input id="search" placeholder="Search practices..." />
         }
-        <select id="originTypeFilter" @(usesApplicabilityFilters || Model.Key == "source-statements" ? "hidden" : "")><option value="">All origins</option></select>
-        <select id="criticalityFilter" @(Model.Key == "organization-requirements" || Model.Key == "organization-controls" ? "hidden" : "")><option value="">All criticalities</option></select>
-        <input id="ownerFilter" placeholder="Owner..." @(usesApplicabilityFilters ? "hidden" : "") />
+        <select id="originTypeFilter" @(usesApplicabilityFilters || Model.Key == "source-statements" || Model.Key == "organizations" ? "hidden" : "")><option value="">All origins</option></select>
+        <select id="criticalityFilter" @(Model.Key == "organization-requirements" || Model.Key == "organization-controls" || Model.Key == "organizations" ? "hidden" : "")><option value="">All criticalities</option></select>
+        <input id="ownerFilter" placeholder="Owner..." @(usesApplicabilityFilters || Model.Key == "organizations" ? "hidden" : "") />
         @* Entered from / to (2026-10-08): also hidden on Control Statements
            (source-statements). Its tree comes from release-statements/query,
            which takes no date filter, so the two inputs showed blank and
@@ -712,6 +816,10 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
         window.pmDataScope="@(ViewBag.DataScope ?? "ORGANIZATION")";
         window.pmRoleName="@(ViewBag.RoleName ?? "")";
         window.pmEmployeeId="@(ViewBag.EmployeeId ?? "")";
+        // 2026-11-02: Organization Setup behaves differently inside the
+        // Organization Management module (read-only first, Actions > Edit,
+        // no Organization combo) -- see organizationSetupInModule above.
+        window.pmOrganizationSetupInModule=@organizationSetupInModule.ToString().ToLowerInvariant();
     </script>
     <script src="~/js/scope-checklist-editor.js" asp-append-version="true"></script>
     <script src="~/js/role-menu-permission-editor.js" asp-append-version="true"></script>

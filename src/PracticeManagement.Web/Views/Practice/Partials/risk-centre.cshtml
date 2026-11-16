@@ -589,76 +589,20 @@
         <button class="pm-button icon" id="dashRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
             <i class="fa-solid fa-arrows-rotate"></i>
         </button>
+        <div class="pm-dx-context" id="dashContext" aria-live="polite"></div>
     </div>
 
-    @* Risk Management dashboard (413). One call to /dashboard paints every
-       block; every tile, band, heatmap cell and Top 5 row drills into the
-       EXISTING Candidates / Register / Review lists (no second list page),
-       which then show a filter banner with the way back. *@
-
-    @* Layout (change request 2026-10-01): two rows, each split
-       25% | 25% | 50% (.risk-dash-row).
-         Row 1 -- left 50%: Risk candidate tiles (one row of 4) above
-                  Risk register tiles (4 + 1), on one shared 4-column
-                  grid so the two sets line up; right 50%: the two
-                  heatmaps side by side.
-         Row 2 -- Candidate ageing | Risk review ageing (the register's
-                  ageing) | Top 5 risks by rating.
-       The dashboard ends there. The approval queue moved to the Risk
-       Candidates tab (it is a worklist, and the approver needs it);
-       Overdue risk actions and the Notification outbox were removed. *@
-
-    @* --- Row 1: summaries + heatmaps --- *@
-    <div class="risk-dash-row">
-        <div class="risk-dash-span2">
-            <h3 class="risk-subhead">Risk candidates</h3>
-            <div class="risk-tiles risk-tiles-4" id="dashCandidateTiles"></div>
-            <h3 class="risk-subhead">Risk register</h3>
-            <div class="risk-tiles risk-tiles-4" id="dashRegisterTiles"></div>
-        </div>
-        <div>
-            @* Heatmaps: two, never combined. Cells are the organisation's
-               own risk matrix; counts are open risks. *@
-            <h3 class="risk-subhead">Risk rating <span class="pm-hint">(open risks)</span></h3>
-            <div class="risk-heatmaps">
-                <div>
-                    <h4 class="risk-subhead">Inherent <span class="pm-hint">likelihood &times; impact &rarr; inherent rating</span></h4>
-                    <div class="risk-heatmap" id="dashHeatInherent"></div>
-                    <p class="pm-hint" id="dashHeatInherentNote"></p>
-                </div>
-                <div>
-                    <h4 class="risk-subhead">Residual <span class="pm-hint">likelihood &times; impact &rarr; residual rating</span></h4>
-                    <div class="risk-heatmap" id="dashHeatResidual"></div>
-                    <p class="pm-hint" id="dashHeatResidualNote"></p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    @* --- Row 2: ageing + Top 5 --- *@
-    <div class="risk-dash-row">
-        <div>
-            <h3 class="risk-subhead">Candidate ageing <span class="pm-hint">(open candidates only)</span></h3>
-            <div class="risk-bars" id="dashAgeing"></div>
-        </div>
-        <div>
-            <h3 class="risk-subhead">Risk review ageing <span class="pm-hint">(pending and overdue only)</span></h3>
-            <div class="risk-bars" id="dashReviewAgeing"></div>
-        </div>
-        <div>
-            <h3 class="risk-subhead">Top 5 risks by rating</h3>
-            <div class="pm-table-wrap">
-                <table id="topRiskTable">
-                    <thead>
-                        <tr><th>Risk</th><th>Owner</th><th>Inherent rating</th><th>Residual rating</th></tr>
-                    </thead>
-                    <tbody id="topRiskTableBody">
-                        <tr><td colspan="4" class="pm-empty-row">No open risks.</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    @* Risk Management dashboard (413; v2 layout 505 -- Dashboard UI
+       specification v2, section 8). One call to /dashboard
+       (sp_risk_dashboard_counts) paints everything; risk-centre.js
+       renders it with the shared components (window.gracDash):
+         executive KPIs -> Needs attention | inherent + residual heatmaps
+         and the treatment lifecycle -> distributions -> Top risks.
+       Every tile, bar, heatmap cell and watchlist row drills into the
+       EXISTING Candidates / Register / Review lists in this page
+       (data-dash-drill), which show a filter banner with the way back.
+       The approval queue stays on the Risk Candidates tab (2026-10-01). *@
+    <div id="riskDashBody"></div>
 </section>
 
 @* The Risk Centre settings modal (BRD §19, §22) moved to its own page,
@@ -1150,6 +1094,11 @@
                     <div id="raRating" class="risk-rating-preview">Select likelihood and impact</div>
                 </div>
             </div>
+            @* 532: Risk methodology -- the organisation's extra dimensions,
+               target, impact by area and quantification. Rendered by
+               mountMethodology() in risk-centre.js; stays hidden when the
+               organisation has no published methodology. *@
+            <div id="raMethodology" class="risk-method" hidden></div>
         </section>
 
         @* ---- Analysis detail ----------------------------------------
@@ -1524,6 +1473,11 @@
                     </span>
                 </label>
             </div>
+            @* 532: Risk methodology -- the organisation's extra dimensions,
+               target, impact by area and quantification. Rendered by
+               mountMethodology() in risk-centre.js; stays hidden when the
+               organisation has no published methodology. *@
+            <div id="rrMethodology" class="risk-method" hidden></div>
         </section>
 
         @* ---- Scope ---------------------------------------------------
@@ -1765,6 +1719,11 @@
                     </span>
                 </label>
             </div>
+            @* 532: Risk methodology -- the organisation's extra dimensions,
+               target, impact by area and quantification. Rendered by
+               mountMethodology() in risk-centre.js; stays hidden when the
+               organisation has no published methodology. *@
+            <div id="rvMethodology" class="risk-method" hidden></div>
         </section>
 
         @* ---- Impact Details -----------------------------------------
@@ -3223,31 +3182,14 @@
     .risk-heatmaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
                      gap: 16px; margin-bottom: 8px; }
 
-    /* Dashboard rows (2026-10-01): 25% | 25% | 50%. min-width:0 lets a
-       column shrink below its content (a table or heatmap) instead of
-       pushing the row wider than the panel. Inside the 50% column the two
-       heatmaps sit side by side. Below 1200px the 50% block drops under
-       the two 25% blocks; below 900px everything stacks. */
-    .risk-dash-row { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 16px;
-                     align-items: start; margin-bottom: 8px; }
-    .risk-dash-row > * { min-width: 0; }
-    .risk-dash-row .risk-heatmaps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    /* Row 1's left half holds both tile sets: candidate (4) and register
-       (4 + 1) share one 4-column grid, so the cards line up column by
-       column and with Row 2's 25% blocks below (2 cards = 25%). */
-    .risk-dash-row > .risk-dash-span2 { grid-column: span 2; }
-    .risk-dash-row .risk-tiles-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    @@media (max-width: 1200px) {
-        .risk-dash-row { grid-template-columns: 1fr 1fr; }
-        .risk-dash-row > :last-child { grid-column: 1 / -1; }
-    }
-    @@media (max-width: 900px) {
-        .risk-dash-row { grid-template-columns: 1fr; }
-        .risk-dash-row > .risk-dash-span2 { grid-column: 1 / -1; }
-    }
+    /* 505: the two heatmaps sit side by side inside their v2 card; one
+       column on a narrow screen. (The 2026-10-01 .risk-dash-row grid and
+       .risk-tiles-4 went with the old layout.) */
+    .pm-dx .risk-heatmaps { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; }
+    .pm-dx .risk-heatmaps h4 { margin-top: 0; }
+
     @@media (max-width: 640px) {
-        .risk-dash-row .risk-heatmaps { grid-template-columns: 1fr; }
-        .risk-dash-row .risk-tiles-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .pm-dx .risk-heatmaps { grid-template-columns: 1fr; }
     }
     .risk-heatmap { display: grid; gap: 3px; font-size: 12px; }
     .risk-heatmap .hm-axis { color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis;
@@ -3272,6 +3214,17 @@
     .risk-rating-preview[data-rating="High"]     { background: var(--danger-200); color: var(--danger-700); }
     .risk-rating-preview[data-rating="Medium"]   { background: var(--warning-50); color: var(--warning-700); }
     .risk-rating-preview[data-rating="Low"]      { background: var(--success-100); color: var(--success-700); }
+
+    /* 532: risk methodology fields on the scoring pages, and the register's
+       appetite / target / trend / priority tags under the residual cell. */
+    .risk-method { margin-top: 12px; }
+    .risk-method .risk-subhead { margin: 12px 0 8px; }
+    .risk-method-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .risk-method-tag {
+        display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: var(--radius-sm);
+        background: var(--bg-subtle); color: var(--neutral-700); font-size: 11px; font-weight: 600;
+    }
+    .risk-method-tag.is-alert { background: var(--danger-50); color: var(--danger-700); }
 
     /* Modal overlay (defensive CSS same as exception + gap-detail so
        pm-modal renders as a proper popup regardless of global stylesheet). */
@@ -4172,6 +4125,8 @@
    risk-centre.js. (291) *@
 <partial name="Partials/_workflow-common" />
 
+@* 505: shared dashboard components (window.gracDash) for the Dashboard tab. *@
+<script src="~/js/ManagementDashboard/dashboard-components.js" asp-append-version="true"></script>
 <script src="~/js/RiskCentre/risk-centre.js" asp-append-version="true"></script>
 
 @* THE common Task / Sub Task creation form, shared with Task Center.

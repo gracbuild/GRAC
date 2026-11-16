@@ -36,6 +36,17 @@ public sealed class SecurePracticeClient(HttpClient httpClient, IConfiguration c
     public Task<string> AuthenticateExternalAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
         SendAsync("secure/authenticate-external", token, request, cancellationToken);
 
+    // Forgot password (529, 2026-11-10): issue / check / use an emailed reset
+    // link. Same bootstrap-token transport as sign-in.
+    public Task<string> PasswordResetRequestAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/password-reset-request", token, request, cancellationToken);
+
+    public Task<string> PasswordResetValidateAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/password-reset-validate", token, request, cancellationToken);
+
+    public Task<string> PasswordResetCompleteAsync(string token, SecureRepositoryRequest request, CancellationToken cancellationToken) =>
+        SendAsync("secure/password-reset-complete", token, request, cancellationToken);
+
     private async Task<string> SendAsync(string path, string token, SecureRepositoryRequest request, CancellationToken cancellationToken)
     {
         request.TimestampUtc = DateTimeOffset.UtcNow;

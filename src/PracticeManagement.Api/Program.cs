@@ -75,6 +75,8 @@ builder.Services.AddOrgAssuranceSetupService();
 builder.Services.AddPracticePickerService();
 builder.Services.AddOrgAssurancePlanService();
 builder.Services.AddOrgAssuranceExecutionService();
+builder.Services.AddOrgAssuranceWorkpaperService();   // 567: Test Working Papers
+builder.Services.AddOrgAssuranceReportService();      // 568: Audit Reports
 builder.Services.AddOrgAssuranceObservationService();
 // Organization SLA Config (migrations 178/179/180). Independent module
 // that adopts Control Management SLA masters into per-org configs with
@@ -87,6 +89,10 @@ builder.Services.AddOrgSlaConfigService();
 // set RepositoryChangeDetect:Enabled=false to drive it from SQL Agent.
 builder.Services.AddPracticeRepositoryChangeService();
 builder.Services.AddPracticeRepositoryChangeDetectWorker();
+// Subscription requests (migration 511): Organization Management approves
+// or rejects the requests organizations raise from Add Release -> Subscribe
+// from Repository (406). Same procedures Control Management's screen uses.
+builder.Services.AddPracticeSubscriptionRequestService();
 // Parent-menu landing dashboards (migrations 413 / 414): Governance,
 // Issues & Actions, Audit & Assurance. Read-only.
 builder.Services.AddPracticeManagementDashboardService();
@@ -105,6 +111,12 @@ builder.Services.AddPracticeAssetConfigService();
 // evidence files, uploaded once and linked wherever used. Visibility and
 // edit rights live in the procedures (fn_pm_evidence_item_visible).
 builder.Services.AddPracticeEvidenceCenterService();
+// Evidence Automation (migration 530, plan Part A Phase 1): evidence sent by
+// the organisation's own systems (webhook / file drop) is stored in the
+// Evidence Center and PROPOSED for review; nothing is linked until a person
+// accepts it. The file-drop and "not received" passes run in
+// TaskNotificationWorker (EvidenceAutomation* / EvidenceFileDrop* options).
+builder.Services.AddPracticeEvidenceAutomationService();
 // Third-Party Risk Management (migrations 486-490): registration,
 // engagements, inherent / residual risk, due diligence, decisions,
 // onboarding and monitoring. Every rule lives in the sp_tprm_* procedures;

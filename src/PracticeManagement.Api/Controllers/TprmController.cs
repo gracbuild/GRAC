@@ -36,12 +36,23 @@
 //   GET  third-parties/{thirdPartyId}                                   sp_tprm_third_party_get
 //   POST third-parties                                                  sp_tprm_third_party_save
 //   POST third-parties/{thirdPartyId}/status                            sp_tprm_third_party_status
-//   GET  vendors                                                        sp_tprm_vendor_discovery
-//   POST vendors/{vendorId}/import                                      sp_tprm_vendor_import
+//   POST third-parties/{thirdPartyId}/match-reviews                     sp_tprm_vendor_match_review_save
 //   POST samples/load                                                   sp_tprm_sample_load
 //   GET  engagements                                                    sp_tprm_engagement_list
 //   GET  engagements/{engagementId}                                     sp_tprm_engagement_get
 //   POST engagements                                                    sp_tprm_engagement_save
+//   POST engagements/{engagementId}/exposure                            sp_tprm_engagement_exposure_save
+//   GET  engagements/{engagementId}/applicability                       sp_tprm_applicability_get
+//   POST engagements/{engagementId}/screening                           sp_tprm_screening_run
+//   POST engagements/{engagementId}/applicability                       sp_tprm_applicability_decide
+//   POST admissions/{admissionId}/act                                   sp_tprm_admission_act
+//   POST admissions/{admissionId}/withdraw                              sp_tprm_admission_withdraw
+//   GET  risk-register                                                  sp_tprm_register_list
+//   GET  risk-register/{registerId}                                     sp_tprm_register_get
+//   POST risk-register/{registerId}/ratings                             sp_tprm_register_rating_save
+//   POST risk-register/impact-reviews/{impactReviewId}/decide           sp_tprm_register_impact_review_decide
+//   POST risk-register/{registerId}/close                               sp_tprm_register_close
+//   POST risk-register/{registerId}/profile-reviews                     sp_tprm_register_profile_review_save
 //   POST engagements/{engagementId}/scope                               sp_tprm_scope_item_save
 //   POST engagements/scope/{scopeItemId}/remove                         sp_tprm_scope_item_remove
 //   GET  engagements/{engagementId}/discovery                           sp_tprm_engagement_discover
@@ -329,20 +340,12 @@ public sealed class TprmController(ITprmService tprmService) : ControllerBase
         return Command(await tprmService.SetThirdPartyStatusAsync(thirdPartyId, request, Caller, cancellationToken));
     }
 
-    [HttpGet("vendors")]
-    public async Task<IActionResult> Vendors([FromQuery] TprmVendorsQuery request, CancellationToken cancellationToken)
+    [HttpPost("third-parties/{thirdPartyId:long}/match-reviews")]
+    public async Task<IActionResult> ReviewVendorMatch(long thirdPartyId, [FromBody] TprmReviewVendorMatchRequest request, CancellationToken cancellationToken)
     {
         if (request is null) return BadRequest(new { error = "Request body is required." });
         if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
-        return Rows(await tprmService.VendorsAsync(request, Caller, cancellationToken));
-    }
-
-    [HttpPost("vendors/{vendorId:long}/import")]
-    public async Task<IActionResult> ImportVendor(long vendorId, [FromBody] TprmImportVendorRequest request, CancellationToken cancellationToken)
-    {
-        if (request is null) return BadRequest(new { error = "Request body is required." });
-        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
-        return Command(await tprmService.ImportVendorAsync(vendorId, request, Caller, cancellationToken));
+        return Command(await tprmService.ReviewVendorMatchAsync(thirdPartyId, request, Caller, cancellationToken));
     }
 
     [HttpPost("samples/load")]
@@ -375,6 +378,102 @@ public sealed class TprmController(ITprmService tprmService) : ControllerBase
         if (request is null) return BadRequest(new { error = "Request body is required." });
         if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
         return Command(await tprmService.SaveEngagementAsync(request, Caller, cancellationToken));
+    }
+
+    [HttpPost("engagements/{engagementId:long}/exposure")]
+    public async Task<IActionResult> SaveEngagementExposure(long engagementId, [FromBody] TprmSaveEngagementExposureRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.SaveEngagementExposureAsync(engagementId, request, Caller, cancellationToken));
+    }
+
+    [HttpGet("engagements/{engagementId:long}/applicability")]
+    public async Task<IActionResult> Applicability(long engagementId, [FromQuery] TprmApplicabilityQuery request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Sets(await tprmService.ApplicabilityAsync(engagementId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("engagements/{engagementId:long}/screening")]
+    public async Task<IActionResult> RunScreening(long engagementId, [FromBody] TprmRunScreeningRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.RunScreeningAsync(engagementId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("engagements/{engagementId:long}/applicability")]
+    public async Task<IActionResult> DecideApplicability(long engagementId, [FromBody] TprmDecideApplicabilityRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.DecideApplicabilityAsync(engagementId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("admissions/{admissionId:long}/act")]
+    public async Task<IActionResult> ActOnAdmission(long admissionId, [FromBody] TprmActOnAdmissionRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.ActOnAdmissionAsync(admissionId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("admissions/{admissionId:long}/withdraw")]
+    public async Task<IActionResult> WithdrawAdmission(long admissionId, [FromBody] TprmWithdrawAdmissionRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.WithdrawAdmissionAsync(admissionId, request, Caller, cancellationToken));
+    }
+
+    [HttpGet("risk-register")]
+    public async Task<IActionResult> RiskRegister([FromQuery] TprmRiskRegisterQuery request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Rows(await tprmService.RiskRegisterAsync(request, Caller, cancellationToken));
+    }
+
+    [HttpGet("risk-register/{registerId:long}")]
+    public async Task<IActionResult> RiskRegisterRecord(long registerId, [FromQuery] TprmRiskRegisterRecordQuery request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Sets(await tprmService.RiskRegisterRecordAsync(registerId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("risk-register/{registerId:long}/ratings")]
+    public async Task<IActionResult> RateProfileArea(long registerId, [FromBody] TprmRateProfileAreaRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.RateProfileAreaAsync(registerId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("risk-register/impact-reviews/{impactReviewId:long}/decide")]
+    public async Task<IActionResult> DecideImpactReview(long impactReviewId, [FromBody] TprmDecideImpactReviewRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.DecideImpactReviewAsync(impactReviewId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("risk-register/{registerId:long}/close")]
+    public async Task<IActionResult> CloseRegisterRecord(long registerId, [FromBody] TprmCloseRegisterRecordRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.CloseRegisterRecordAsync(registerId, request, Caller, cancellationToken));
+    }
+
+    [HttpPost("risk-register/{registerId:long}/profile-reviews")]
+    public async Task<IActionResult> RecordProfileReview(long registerId, [FromBody] TprmRecordProfileReviewRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null) return BadRequest(new { error = "Request body is required." });
+        if (request.OrganizationId is not > 0) return BadRequest(new { error = "organizationId is required." });
+        return Command(await tprmService.RecordProfileReviewAsync(registerId, request, Caller, cancellationToken));
     }
 
     [HttpPost("engagements/{engagementId:long}/scope")]
@@ -693,15 +792,16 @@ public sealed class TprmController(ITprmService tprmService) : ControllerBase
     {
         if (!result.Success) return BadRequest(new { error = result.Error });
         var outcome = result.Row is not null && result.Row.TryGetValue("Result", out var r) ? r?.ToString() : null;
-        // 409: nothing saved -- possible duplicates; the screen shows them and
-        // offers "Register anyway" (confirmDuplicates).
+        // 409: nothing saved -- possible duplicates that still need a review
+        // (521); the screen shows them and asks, for each, why it is a
+        // different vendor, then saves again with matchReviewsJson.
         return string.Equals(outcome, "DUPLICATES", StringComparison.OrdinalIgnoreCase)
             ? Conflict(new
               {
                   duplicate = true,
                   result = result.Row,
                   duplicates = result.Duplicates,
-                  error = "This looks like a third party that is already registered. Check the matches below."
+                  error = "Possible duplicates found. Nothing was saved: review each match below."
               })
             : Ok(new { success = true, result = result.Row });
     }

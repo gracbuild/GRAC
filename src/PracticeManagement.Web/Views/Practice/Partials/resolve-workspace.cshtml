@@ -4111,10 +4111,10 @@
                  + ' data-category-id="' + esc(typeId ?? '') + '"'
                  + (dept ? ' data-dept-type-id="' + esc(String(dept.typeId)) + '"' : '') + '>'
                  + '<td>' + (dept
-                        ? '<strong>' + esc(PERSON_DEPT_CATEGORY) + ' / ' + esc(categoryName) + '</strong>'
+                        ? esc(PERSON_DEPT_CATEGORY) + ' / ' + esc(categoryName)
                           + ((dept.mine.length || mine.length)
                               ? ' <span class="rw-note">(' + dept.mine.length + ' / ' + mine.length + ')</span>' : '')
-                        : '<strong>' + esc(categoryName) + '</strong>'
+                        : esc(categoryName)
                           + (mine.length ? ' <span class="rw-note">(' + mine.length + ')</span>' : ''))
                  + '</td>'
                  + '<td>'

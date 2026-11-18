@@ -12,6 +12,9 @@
 // Users tab "Approve" action for a user created by SSO that waits for
 // approval. Same guard as Save (the Users tab sits under the same
 // organization-administration area, PermissionAreaMap "users").
+// 2026-11-16: that Users tab was retired; Approve now sits on User
+// Management (screen "users"), so approve-user also accepts ADD / EDIT on
+// that screen's area.
 // =====================================================================
 using System.Net.Http.Headers;
 using ControlManagement.Security;
@@ -30,6 +33,7 @@ public sealed class OrganizationSsoSettingController(
 {
     private const string ApiBaseKey = "ApiBaseUrl";
     private static readonly string Area = PermissionAreaMap.For("organization-administration");
+    private static readonly string UsersArea = PermissionAreaMap.For("users");
 
     private HttpClient BuildClient()
     {
@@ -81,11 +85,11 @@ public sealed class OrganizationSsoSettingController(
             if (doc.RootElement.TryGetProperty("organizationId", out var org)) org.TryGetInt64(out organizationId);
         }
         catch (System.Text.Json.JsonException) { return BadRequest(new { error = "Invalid request body." }); }
-        if (Guard(organizationId, write: true) is { } error) return error;
+        if (Guard(organizationId, write: true, alsoArea: UsersArea) is { } error) return error;
         return await ForwardAsync(HttpMethod.Post, "api/practice/org-sso/approve-user", body, ct);
     }
 
-    private IActionResult? Guard(long organizationId, bool write)
+    private IActionResult? Guard(long organizationId, bool write, string? alsoArea = null)
     {
         if (HttpContext.Session.GetString(PracticeSessionIdentity.UserKey) is null)
             return Unauthorized(new { error = "Session expired." });
@@ -94,9 +98,10 @@ public sealed class OrganizationSsoSettingController(
         if (!HttpContext.IsOrganizationAllowed(organizationId))
             return StatusCode(StatusCodes.Status403Forbidden, new { error = "Caller not authorised for this organization." });
         var roles = Roles();
-        var allowed = write
-            ? permissionPolicy.IsAllowed(roles, Area, "ADD") || permissionPolicy.IsAllowed(roles, Area, "EDIT")
-            : permissionPolicy.IsAllowed(roles, Area, "VIEW");
+        bool Can(string area) => write
+            ? permissionPolicy.IsAllowed(roles, area, "ADD") || permissionPolicy.IsAllowed(roles, area, "EDIT")
+            : permissionPolicy.IsAllowed(roles, area, "VIEW");
+        var allowed = Can(Area) || (alsoArea is not null && Can(alsoArea));
         return allowed ? null : StatusCode(StatusCodes.Status403Forbidden, new { error = "You do not have access to Organization Administration." });
     }
 

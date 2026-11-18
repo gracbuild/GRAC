@@ -229,6 +229,32 @@
 --   567 -- 'org-workpapers' (470, Workpapers) under 'nav-assurance'
 --     (Test Working Papers); 'org-assurance-observations' to 471.
 --   568 -- 'org-audit-reports' (472, Audit Reports) under 'nav-assurance'.
+--   577 -- 'nav-audit-intelligence' (465, Audit Intelligence, no url)
+--     under 'nav-assurance', with 'org-audit-universe' (10, Audit
+--     Universe) and 'org-audit-universe-config' (20, Universe
+--     Configuration) under it.
+--   578 -- Audit Assurance grouped (sir's list): under 'nav-assurance'
+--     after the Dashboard, groups (no url) 'nav-audit-intelligence'
+--     (441), 'nav-audit-definition' (442: org-audit-definition 10 "Audit
+--     Definitions", org-assurance-question-sets 20), 'nav-audit-planning'
+--     (443: org-assurance-plans 10 "Annual Audit Plans",
+--     org-audit-engagements 20), 'nav-audit-execution' (444: org-my-audits
+--     10, org-assurance-executions 20, org-workpapers 30),
+--     'nav-audit-findings' (445: org-assurance-observations 10),
+--     'nav-audit-reporting' (446: org-audit-reports 10).
+--   580 -- 'org-audit-universe-mapping' (30, Framework & Practice Mapping)
+--     under 'nav-audit-intelligence'.
+--   581 -- 'org-audit-risk-intelligence' (40, Risk Intelligence) under
+--     'nav-audit-intelligence'.
+--   582 -- 'org-audit-rbia-config' (50, RBIA Configuration) and
+--     'org-audit-rbia-assessment' (60, RBIA Assessment) under 'nav-audit-intelligence'.
+--   583 -- 'org-audit-plan-recommendations' (70, Audit Plan Recommendations)
+--     under 'nav-audit-intelligence'.
+--   585 -- 'organization-administration' (sidebar "Organization") url removed:
+--     a pure group that opens / closes its sub-menu.
+--   586 -- Asset & Contract grouped: nav-asset-inventory, nav-asset-contracts,
+--     nav-asset-operations, nav-asset-governance-reporting, nav-asset-configuration
+--     (371-375, under 'nav-asset-contract'; Dashboard stays first).
 --   530 -- 'evidence-automation' (16, Evidence Automation) under
 --     'nav-documents' (Policies & Documents).
 --   490 -- Third-Party Risk (2026-10-24): NEW root 'nav-tprm' (370, no
@@ -239,6 +265,21 @@
 --   508 -- 'documents-dashboard' (5, Dashboard) under 'nav-documents'
 --     (first child, 416 rule). 508 grants VIEW to roles that can VIEW
 --     a Policies & Documents child screen.
+--   575 -- module split: 'org-registry' renamed "Organizations &
+--     Legal Entities" (1, Organization Management only); NEW
+--     'org-registry-structure' (10, Organization Structure); it and
+--     'org-registry-people' (20) / 'org-registry-operations' (30) moved
+--     under the Practice Management root 'organization-administration'
+--     (now a page-parent) and shown in the sidebar (2d list trimmed).
+--   574 -- 'org-registry' renamed "Organization Structure" (1); NEW
+--     'org-registry-people' (2, People & Governance) and
+--     'org-registry-operations' (3, Business Operations), same placement
+--     as org-registry (under 'Organization', hidden from the sidebar, 2d).
+--   570 -- 'org-registry' (3, Organization Registry, module_type
+--     'Organization') under the inactive 'Organization' group, hidden from
+--     the Practice Management sidebar like 'organizations' (2d); and
+--     'organizations' renamed "Legal Entities" (the organization rows are
+--     the Legal Entity level of the registry hierarchy).
 --   511 -- 'subscription-requests' (20, Subscription Requests, module_type
 --     'Organization Setup') under the inactive 'Organization' group, like
 --     organization-setup: shown only in Organization Management. 511
@@ -278,6 +319,10 @@
 --     Management. 'risk-acceptance-authority' is Inactive: its grid is now
 --     a section of Workflow Settings. 533 grants the group to the roles
 --     holding either child.
+--   579 -- (2026-11-17) 'risk-settings' (Workflow, 291) and
+--     'risk-methodology' (Methodology, 292) move straight under
+--     'risk-centre' (Risk Management); the emptied 'risk-centre-settings'
+--     group is Inactive.
 --
 -- Re-runnable: yes. A second run makes no changes.
 -- Rollback: database/274_menu_master_seed_rollback.sql
@@ -352,7 +397,13 @@ USING (VALUES
     -- Requests). module_type 'Organization' on purpose, not 'Organization
     -- Setup': _Layout's no-menu fallback lists Active 'Organization Setup'
     -- screens under Organization Setup, and the list does not belong there.
-    (N'organizations'                 , N'Organizations'                     , N'Practice/Index/organizations'               ,    5, N'building'              , N'Organization'               , N'Active'),
+    -- 570: the organization rows ARE the Legal Entity level of the
+    -- Organization Registry hierarchy, so the list is "Legal Entities".
+    (N'org-registry'                  , N'Organizations & Legal Entities'    , N'Practice/Index/org-registry'                ,    1, N'sitemap'               , N'Organization'               , N'Active'),   -- 570, renamed by 574, 575
+    (N'org-registry-structure'        , N'Organization Structure'            , N'Practice/Index/org-registry-structure'      ,   10, N'sitemap'               , N'Organization'               , N'Active'),   -- 575
+    (N'org-registry-people'           , N'People & Governance'               , N'Practice/Index/org-registry-people'         ,   20, N'users'                 , N'Organization'               , N'Active'),   -- 574, moved by 575
+    (N'org-registry-operations'       , N'Business Operations'               , N'Practice/Index/org-registry-operations'     ,   30, N'diagram-project'       , N'Organization'               , N'Active'),   -- 574, moved by 575
+    (N'organizations'                 , N'Legal Entities'                    , N'Practice/Index/organizations'               ,    5, N'building'              , N'Organization'               , N'Active'),   -- renamed by 570
     (N'organization-setup'            , N'Organization Setup'                , N'Practice/Index/organization-setup'          ,   10, N'building'              , N'Organization Setup'         , N'Active'),
     (N'subscription-requests'         , N'Subscription Requests'             , N'Practice/Index/subscription-requests'       ,   20, N'file-circle-check'     , N'Organization Setup'         , N'Active'),   -- 511
     -- Inactive since 288. Every job this screen held moved to
@@ -379,7 +430,7 @@ USING (VALUES
     (N'workbench-tools'               , N'Tools'                             , N'Practice/Index/workbench-tools'             ,  250, N'screwdriver-wrench'    , N'Registers'                  , N'Inactive'),
     (N'workbench-vendors'             , N'Vendors'                           , N'Practice/Index/workbench-vendors'           ,  260, N'handshake'             , N'Registers'                  , N'Inactive'),
     (N'dashboard'                     , N'Home'                              , N'dashboard'                                  ,    0, N'house'                 , N'Dashboard'                  , N'Active'),   -- renamed by 384, icon by 403
-    (N'organization-administration'   , N'Organization'                      , N'Practice/Index/organization-administration' ,  490, N'building'              , N'Organization'               , N'Active'),   -- promoted to root by 402; placed above Settings (display_order) by 405
+    (N'organization-administration'   , N'Organization'                      , NULL                                          ,  490, N'building'              , N'Organization'               , N'Active'),   -- promoted to root by 402; placed above Settings (display_order) by 405; a pure group by 585
     (N'source-statements'             , N'Control Statements'                , N'Practice/Index/source-statements'           ,  105, N'file-lines'            , N'Governance'                 , N'Active'),   -- renamed by 363
     (N'organization-requirements'     , N'Organization Practices'            , N'Practice/Index/organization-requirements'   ,  110, N'list-check'            , N'Practice Management'        , N'Active'),
     (N'menu-master'                   , N'Menu Master'                       , N'Practice/Index/menu-master'                 ,    6, N'bars'                  , N'System'                     , N'Active'),
@@ -431,23 +482,36 @@ USING (VALUES
     (N'workflow-stages'               , N'Workflow Stages'                   , N'Practice/Index/workflow-stages'             ,  452, N'route'                 , N'Workflow'                   , N'Active'),
     -- Audit Management containers, added by 276. Both are pages AND
     -- parents; the sidebar honours a parent's menu_url since 276.
-    (N'org-audit-definition'          , N'Audit Definition'                  , N'Practice/org-audit-definition'              ,  440, N'file-shield'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-audit-definition'          , N'Audit Definitions'                 , N'Practice/org-audit-definition'              ,   10, N'file-shield'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384; under nav-audit-definition by 578
     (N'org-audit-configuration'       , N'Audit Configuration'               , N'Practice/org-audit-configuration'           ,  450, N'sliders'               , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 549 (opened from Audit Definition)
     (N'org-assurance-definitions'     , N'Audit Definitions'                 , N'Practice/org-assurance-definitions'         ,   10, N'file-shield'           , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
     (N'org-assurance-scope-builder'   , N'Scope Builder'                     , N'Practice/org-assurance-scope-builder'       ,   20, N'diagram-project'       , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384
-    (N'org-assurance-question-sets'   , N'Question Sets'                     , N'Practice/org-assurance-question-sets'       ,  475, N'clipboard-list'        , N'Audit Assurance'            , N'Active'),   -- module_type by 384; Active under nav-assurance by 520; order 475 (last) by 540
+    (N'org-assurance-question-sets'   , N'Question Sets'                     , N'Practice/org-assurance-question-sets'       ,   20, N'clipboard-list'        , N'Audit Assurance'            , N'Active'),   -- module_type by 384; Active under nav-assurance by 520; order 475 (last) by 540; under nav-audit-definition (20) by 578
     (N'org-assurance-evidence-config' , N'Evidence Config'                   , N'Practice/org-assurance-evidence-config'     ,   10, N'file-circle-check'     , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 536 (evidence set per question)
     (N'org-assurance-workflow-config' , N'Workflow Config'                   , N'Practice/org-assurance-workflow-config'     ,   20, N'sitemap'               , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
     (N'org-assurance-scoring-config'  , N'Scoring Config'                    , N'Practice/org-assurance-scoring-config'      ,   30, N'gauge'                 , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
-    (N'org-assurance-plans'           , N'Audit Plans'                       , N'Practice/org-assurance-plans'               ,  466, N'calendar-days'         , N'Audit Assurance'            , N'Active'),   -- module_type by 384
+    (N'org-assurance-plans'           , N'Annual Audit Plans'                , N'Practice/org-assurance-plans'               ,   10, N'calendar-days'         , N'Audit Assurance'            , N'Active'),   -- module_type by 384; under nav-audit-planning by 578
     (N'org-assurance-triggers'        , N'Triggers'                          , N'Practice/org-assurance-triggers'            ,   40, N'bolt'                  , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
     (N'org-assurance-scope-resolution', N'Scope Resolution'                  , N'Practice/org-assurance-scope-resolution'    ,   50, N'circle-nodes'          , N'Audit Assurance'            , N'Inactive'),   -- module_type by 384; Inactive by 539 (inside Audit Configuration)
-    (N'org-audit-engagements'         , N'Audit Engagements'                 , N'Practice/org-audit-engagements'             ,  467, N'briefcase'             , N'Audit Assurance'            , N'Active'),   -- added by 566
-    (N'org-my-audits'                 , N'My Audits'                         , N'Practice/org-my-audits'                     ,  468, N'user-check'            , N'Audit Assurance'            , N'Active'),   -- added by 555
-    (N'org-assurance-executions'      , N'Executions'                        , N'Practice/org-assurance-executions'          ,  469, N'play-circle'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384
-    (N'org-workpapers'                , N'Workpapers'                        , N'Practice/org-workpapers'                    ,  470, N'file-pen'              , N'Audit Assurance'            , N'Active'),   -- added by 567
-    (N'org-assurance-observations'    , N'Observations'                      , N'Practice/org-assurance-observations'        ,  471, N'triangle-exclamation'  , N'Audit Assurance'            , N'Active'),   -- module_type by 384; order 471 by 567
-    (N'org-audit-reports'             , N'Audit Reports'                     , N'Practice/org-audit-reports'                 ,  472, N'file-lines'            , N'Audit Assurance'            , N'Active'),   -- added by 568
+    (N'org-audit-engagements'         , N'Audit Engagements'                 , N'Practice/org-audit-engagements'             ,   20, N'briefcase'             , N'Audit Assurance'            , N'Active'),   -- added by 566; under nav-audit-planning by 578
+    (N'org-my-audits'                 , N'My Audits'                         , N'Practice/org-my-audits'                     ,   10, N'user-check'            , N'Audit Assurance'            , N'Active'),   -- added by 555; under nav-audit-execution by 578
+    (N'org-assurance-executions'      , N'Executions'                        , N'Practice/org-assurance-executions'          ,   20, N'play-circle'           , N'Audit Assurance'            , N'Active'),   -- module_type by 384; under nav-audit-execution by 578
+    (N'org-workpapers'                , N'Workpapers'                        , N'Practice/org-workpapers'                    ,   30, N'file-pen'              , N'Audit Assurance'            , N'Active'),   -- added by 567; under nav-audit-execution by 578
+    (N'org-assurance-observations'    , N'Observations'                      , N'Practice/org-assurance-observations'        ,   10, N'triangle-exclamation'  , N'Audit Assurance'            , N'Active'),   -- module_type by 384; order 471 by 567; under nav-audit-findings by 578
+    (N'org-audit-reports'             , N'Audit Reports'                     , N'Practice/org-audit-reports'                 ,   10, N'file-lines'            , N'Audit Assurance'            , N'Active'),   -- added by 568; under nav-audit-reporting by 578
+    (N'nav-audit-intelligence'        , N'Audit Intelligence'                , NULL                                          ,  441, N'brain'                 , N'Audit Assurance'            , N'Active'),   -- added by 577 (group); order 441 by 578
+    (N'nav-audit-definition'          , N'Audit Definition'                  , NULL                                          ,  442, N'file-shield'           , N'Audit Assurance'            , N'Active'),   -- added by 578 (group)
+    (N'nav-audit-planning'            , N'Audit Planning'                    , NULL                                          ,  443, N'calendar-days'         , N'Audit Assurance'            , N'Active'),   -- added by 578 (group)
+    (N'nav-audit-execution'           , N'Audit Execution'                   , NULL                                          ,  444, N'play-circle'           , N'Audit Assurance'            , N'Active'),   -- added by 578 (group)
+    (N'nav-audit-findings'            , N'Audit Findings'                    , NULL                                          ,  445, N'triangle-exclamation'  , N'Audit Assurance'            , N'Active'),   -- added by 578 (group)
+    (N'nav-audit-reporting'           , N'Audit Reporting'                   , NULL                                          ,  446, N'file-lines'            , N'Audit Assurance'            , N'Active'),   -- added by 578 (group)
+    (N'org-audit-universe'            , N'Audit Universe'                    , N'Practice/org-audit-universe'                ,   10, N'globe'                 , N'Audit Assurance'            , N'Active'),   -- added by 577
+    (N'org-audit-universe-config'     , N'Universe Configuration'            , N'Practice/org-audit-universe-config'         ,   20, N'sliders'               , N'Audit Assurance'            , N'Active'),   -- added by 577
+    (N'org-audit-universe-mapping'    , N'Framework & Practice Mapping'      , N'Practice/org-audit-universe-mapping'        ,   30, N'diagram-project'       , N'Audit Assurance'            , N'Active'),   -- added by 580
+    (N'org-audit-risk-intelligence'   , N'Risk Intelligence'                 , N'Practice/org-audit-risk-intelligence'       ,   40, N'shield-halved'         , N'Audit Assurance'            , N'Active'),   -- added by 581
+    (N'org-audit-rbia-config'         , N'RBIA Configuration'                , N'Practice/org-audit-rbia-config'             ,   50, N'sliders'               , N'Audit Assurance'            , N'Active'),   -- added by 582
+    (N'org-audit-rbia-assessment'     , N'RBIA Assessment'                   , N'Practice/org-audit-rbia-assessment'         ,   60, N'gauge-high'            , N'Audit Assurance'            , N'Active'),   -- added by 582
+    (N'org-audit-plan-recommendations', N'Audit Plan Recommendations'        , N'Practice/org-audit-plan-recommendations'    ,   70, N'list-check'            , N'Audit Assurance'            , N'Active'),   -- added by 583
     (N'asset-category-assurance'      , N'Asset Category Assurance'          , N'Practice/Index/asset-category-assurance'    ,  316, N'boxes-stacked'         , N'Operations'                 , N'Inactive'),   -- retired by 409 (Asset Profiles replace it)
     -- Added by migration 332, after the export. The snapshot UPDATEs what
     -- it finds, so leaving this out would delete the Event Profiles menu
@@ -469,7 +533,7 @@ USING (VALUES
     (N'risk-centre-review'            , N'Review Risk'                       , N'Practice/Index/risk-centre-review'          ,  284, N'rotate-left'           , N'Risk Management'            , N'Active'),
     (N'risk-centre-calendar'          , N'Calendar'                          , N'Practice/Index/risk-centre-calendar'        ,  285, N'calendar-days'         , N'Risk Management'            , N'Active'),
     (N'risk-centre-dashboard'         , N'Dashboard'                         , N'Practice/Index/risk-centre-dashboard'       ,  280, N'chart-pie'             , N'Risk Management'            , N'Active'),   -- first child since 416 (was 286)
-    (N'risk-centre-settings'          , N'Settings'                          , N'#'                                          ,  289, N'gear'                  , N'Risk Management'            , N'Active'),   -- 533: group, children wired in Section 2
+    (N'risk-centre-settings'          , N'Settings'                          , N'#'                                          ,  289, N'gear'                  , N'Risk Management'            , N'Inactive'), -- 533 group; empty since 579
     -- Inactive since 289 -- HIDDEN, NOT SUPERSEDED. Nothing replaces this
     -- screen: it is the only way to adopt Control Management SLA masters
     -- and tune warning / escalation thresholds and notify roles, and its
@@ -489,24 +553,29 @@ USING (VALUES
     -- Asset & Contract root + configuration screens (420). Root has no url
     -- (expand only, 416 convention); parents wired in Section 2.
     (N'nav-asset-contract'            , N'Asset & Contract'                  , NULL                                          ,  350, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),
-    (N'asset-field-dictionary'        , N'Field Dictionary'                  , N'Practice/Index/asset-field-dictionary'      ,  351, N'book'                  , N'Asset & Contract'           , N'Active'),
-    (N'asset-form-templates'          , N'Asset Form Templates'              , N'Practice/Index/asset-form-templates'        ,  352, N'table-list'            , N'Asset & Contract'           , N'Active'),
-    (N'asset-valuation-config'        , N'Asset Valuation'                   , N'Practice/Index/asset-valuation-config'      ,  353, N'scale-balanced'        , N'Asset & Contract'           , N'Active'),  -- 422
-    (N'asset-option-lists'            , N'Option Lists'                      , N'Practice/Index/asset-option-lists'          ,  354, N'list-ul'               , N'Asset & Contract'           , N'Active'),  -- 423
-    (N'asset-taxonomy'                , N'Asset Taxonomy'                    , N'Practice/Index/asset-taxonomy'              ,  355, N'sitemap'               , N'Asset & Contract'           , N'Active'),  -- 424
-    (N'asset-tech-catalog'            , N'Technology Catalogue'              , N'Practice/Index/asset-tech-catalog'          ,  356, N'microchip'             , N'Asset & Contract'           , N'Active'),  -- 425
-    (N'asset-register'                , N'Asset Register'                    , N'Practice/Index/asset-register'              ,  349, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),  -- 428
-    (N'asset-attestation'             , N'Asset Attestation'                 , N'Practice/Index/asset-attestation'           ,  357, N'clipboard-check'       , N'Asset & Contract'           , N'Active'),  -- 431
-    (N'asset-contracts'               , N'Contracts'                         , N'Practice/Index/asset-contracts'             ,  358, N'file-contract'         , N'Asset & Contract'           , N'Active'),  -- 434
-    (N'asset-notifications'           , N'Asset Notifications'               , N'Practice/Index/asset-notifications'         ,  359, N'bell-concierge'        , N'Asset & Contract'           , N'Active'),  -- 437
-    (N'asset-activities'              , N'Asset Activities'                  , N'Practice/Index/asset-activities'            ,  360, N'calendar-check'        , N'Asset & Contract'           , N'Active'),  -- 438
-    (N'asset-relationships'           , N'Asset Relationships'               , N'Practice/Index/asset-relationships'         ,  361, N'diagram-project'       , N'Asset & Contract'           , N'Active'),  -- 440
-    (N'business-services'             , N'Business Services'                 , N'Practice/Index/business-services'           ,  362, N'sitemap'               , N'Asset & Contract'           , N'Active'),  -- 441
-    (N'asset-discovery'               , N'Asset Discovery'                   , N'Practice/Index/asset-discovery'             ,  363, N'satellite-dish'        , N'Asset & Contract'           , N'Active'),  -- 442
-    (N'asset-privacy'                 , N'Asset Privacy'                     , N'Practice/Index/asset-privacy'               ,  364, N'user-shield'           , N'Asset & Contract'           , N'Active'),  -- 448
-    (N'asset-governance'              , N'Asset Governance'                  , N'Practice/Index/asset-governance'            ,  365, N'gauge-high'            , N'Asset & Contract'           , N'Active'),  -- 450
+    (N'nav-asset-inventory'           , N'Asset Inventory'                   , NULL                                          ,  371, N'boxes-stacked'        , N'Asset & Contract'           , N'Active'),   -- added by 586 (group)
+    (N'nav-asset-contracts'           , N'Contracts'                         , NULL                                          ,  372, N'file-contract'        , N'Asset & Contract'           , N'Active'),   -- added by 586 (group)
+    (N'nav-asset-operations'          , N'Asset Operations'                  , NULL                                          ,  373, N'calendar-check'       , N'Asset & Contract'           , N'Active'),   -- added by 586 (group)
+    (N'nav-asset-governance-reporting' , N'Governance & Reporting'            , NULL                                          ,  374, N'gauge-high'           , N'Asset & Contract'           , N'Active'),   -- added by 586 (group)
+    (N'nav-asset-configuration'       , N'Asset Configuration'               , NULL                                          ,  375, N'sliders'              , N'Asset & Contract'           , N'Active'),   -- added by 586 (group)
+    (N'asset-field-dictionary'        , N'Field Dictionary'                  , N'Practice/Index/asset-field-dictionary'      ,   30, N'book'                  , N'Asset & Contract'           , N'Active'),  -- under nav-asset-configuration by 586
+    (N'asset-form-templates'          , N'Asset Form Templates'              , N'Practice/Index/asset-form-templates'        ,   40, N'table-list'            , N'Asset & Contract'           , N'Active'),  -- under nav-asset-configuration by 586
+    (N'asset-valuation-config'        , N'Asset Valuation'                   , N'Practice/Index/asset-valuation-config'      ,   60, N'scale-balanced'        , N'Asset & Contract'           , N'Active'),  -- 422; under nav-asset-configuration by 586
+    (N'asset-option-lists'            , N'Option Lists'                      , N'Practice/Index/asset-option-lists'          ,   50, N'list-ul'               , N'Asset & Contract'           , N'Active'),  -- 423; under nav-asset-configuration by 586
+    (N'asset-taxonomy'                , N'Asset Taxonomy'                    , N'Practice/Index/asset-taxonomy'              ,   10, N'sitemap'               , N'Asset & Contract'           , N'Active'),  -- 424; under nav-asset-configuration by 586
+    (N'asset-tech-catalog'            , N'Technology Catalogue'              , N'Practice/Index/asset-tech-catalog'          ,   20, N'microchip'             , N'Asset & Contract'           , N'Active'),  -- 425; under nav-asset-configuration by 586
+    (N'asset-register'                , N'Asset Register'                    , N'Practice/Index/asset-register'              ,   10, N'boxes-stacked'         , N'Asset & Contract'           , N'Active'),  -- 428; under nav-asset-inventory by 586
+    (N'asset-attestation'             , N'Asset Attestation'                 , N'Practice/Index/asset-attestation'           ,   50, N'clipboard-check'       , N'Asset & Contract'           , N'Active'),  -- 431; under nav-asset-inventory by 586
+    (N'asset-contracts'               , N'Contracts'                         , N'Practice/Index/asset-contracts'             ,   10, N'file-contract'         , N'Asset & Contract'           , N'Active'),  -- 434; under nav-asset-contracts by 586
+    (N'asset-notifications'           , N'Asset Notifications'               , N'Practice/Index/asset-notifications'         ,   20, N'bell-concierge'        , N'Asset & Contract'           , N'Active'),  -- 437; under nav-asset-operations by 586
+    (N'asset-activities'              , N'Asset Activities'                  , N'Practice/Index/asset-activities'            ,   10, N'calendar-check'        , N'Asset & Contract'           , N'Active'),  -- 438; under nav-asset-operations by 586
+    (N'asset-relationships'           , N'Asset Relationships'               , N'Practice/Index/asset-relationships'         ,   30, N'diagram-project'       , N'Asset & Contract'           , N'Active'),  -- 440; under nav-asset-inventory by 586
+    (N'business-services'             , N'Business Services'                 , N'Practice/Index/business-services'           ,   40, N'sitemap'               , N'Asset & Contract'           , N'Active'),  -- 441; under nav-asset-inventory by 586
+    (N'asset-discovery'               , N'Asset Discovery'                   , N'Practice/Index/asset-discovery'             ,   20, N'satellite-dish'        , N'Asset & Contract'           , N'Active'),  -- 442; under nav-asset-inventory by 586
+    (N'asset-privacy'                 , N'Asset Privacy'                     , N'Practice/Index/asset-privacy'               ,   20, N'user-shield'           , N'Asset & Contract'           , N'Active'),  -- 448; under nav-asset-governance-reporting by 586
+    (N'asset-governance'              , N'Asset Governance'                  , N'Practice/Index/asset-governance'            ,   10, N'gauge-high'            , N'Asset & Contract'           , N'Active'),  -- 450; under nav-asset-governance-reporting by 586
     (N'asset-contract-dashboard'      , N'Dashboard'                         , N'Practice/Index/asset-contract-dashboard'    ,  348, N'chart-pie'             , N'Asset & Contract'           , N'Active'),  -- 451
-    (N'asset-reports'                 , N'Asset Reports'                     , N'Practice/Index/asset-reports'               ,  366, N'file-lines'            , N'Asset & Contract'           , N'Active'),  -- 452
+    (N'asset-reports'                 , N'Asset Reports'                     , N'Practice/Index/asset-reports'               ,   30, N'file-lines'            , N'Asset & Contract'           , N'Active'),  -- 452; under nav-asset-governance-reporting by 586
     -- Third-Party Management root + screens (490; names 521). Root has no
     -- url (416 convention); parents wired in Section 2.
     (N'nav-tprm'                      , N'Third-Party Management'            , NULL                                          ,  370, N'handshake'             , N'Third-Party Management'     , N'Active'),  -- 490 / 521
@@ -564,6 +633,10 @@ JOIN  (VALUES
     (N'organization-metadata'         , N'nav-organization'),
     (N'Practices'                     , N'Governance'),
     (N'organizations'                 , N'Organization'),               -- moved by 512
+    (N'org-registry'                  , N'Organization'),   -- 570
+    (N'org-registry-structure'        , N'organization-administration'),   -- 575
+    (N'org-registry-people'           , N'organization-administration'),   -- 574, moved by 575
+    (N'org-registry-operations'       , N'organization-administration'),   -- 574, moved by 575
     (N'organization-setup'            , N'Organization'),
     (N'subscription-requests'         , N'Organization'),   -- 511
     (N'practice-instances'            , N'nav-governance'),
@@ -599,23 +672,36 @@ JOIN  (VALUES
     (N'workflow-events'               , N'nav-workflow'),
     (N'workflows'                     , N'nav-workflow'),
     (N'workflow-stages'               , N'nav-workflow'),
-    (N'org-audit-definition'          , N'nav-assurance'),          -- added by 276
+    (N'org-audit-definition'          , N'nav-audit-definition'),          -- added by 276; nav-audit-definition by 578
     (N'org-audit-configuration'       , N'nav-assurance'),          -- added by 276
     (N'org-assurance-definitions'     , N'org-audit-definition'),   -- moved by 276
     (N'org-assurance-scope-builder'   , N'org-audit-definition'),   -- moved by 276
-    (N'org-assurance-question-sets'   , N'nav-assurance'),          -- moved by 276; back under nav-assurance by 520
+    (N'org-assurance-question-sets'   , N'nav-audit-definition'),          -- moved by 276; back under nav-assurance by 520; nav-audit-definition by 578
     (N'org-assurance-evidence-config' , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-workflow-config' , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-scoring-config'  , N'org-audit-configuration'),   -- moved by 276
-    (N'org-assurance-plans'           , N'nav-assurance'),
+    (N'org-assurance-plans'           , N'nav-audit-planning'),   -- nav-audit-planning by 578
     (N'org-assurance-triggers'        , N'org-audit-configuration'),   -- moved by 276
     (N'org-assurance-scope-resolution', N'org-audit-configuration'),   -- moved by 276
-    (N'org-audit-engagements'         , N'nav-assurance'),   -- 566
-    (N'org-my-audits'                 , N'nav-assurance'),   -- 555
-    (N'org-assurance-executions'      , N'nav-assurance'),
-    (N'org-workpapers'                , N'nav-assurance'),   -- 567
-    (N'org-assurance-observations'    , N'nav-assurance'),
-    (N'org-audit-reports'             , N'nav-assurance'),   -- 568
+    (N'org-audit-engagements'         , N'nav-audit-planning'),   -- 566; nav-audit-planning by 578
+    (N'org-my-audits'                 , N'nav-audit-execution'),   -- 555; nav-audit-execution by 578
+    (N'org-assurance-executions'      , N'nav-audit-execution'),   -- nav-audit-execution by 578
+    (N'org-workpapers'                , N'nav-audit-execution'),   -- 567; nav-audit-execution by 578
+    (N'org-assurance-observations'    , N'nav-audit-findings'),   -- nav-audit-findings by 578
+    (N'org-audit-reports'             , N'nav-audit-reporting'),   -- 568; nav-audit-reporting by 578
+    (N'nav-audit-intelligence'        , N'nav-assurance'),   -- 577
+    (N'nav-audit-definition'          , N'nav-assurance'),   -- 578
+    (N'nav-audit-planning'            , N'nav-assurance'),   -- 578
+    (N'nav-audit-execution'           , N'nav-assurance'),   -- 578
+    (N'nav-audit-findings'            , N'nav-assurance'),   -- 578
+    (N'nav-audit-reporting'           , N'nav-assurance'),   -- 578
+    (N'org-audit-universe'            , N'nav-audit-intelligence'),   -- 577
+    (N'org-audit-universe-config'     , N'nav-audit-intelligence'),   -- 577
+    (N'org-audit-universe-mapping'    , N'nav-audit-intelligence'),   -- 580
+    (N'org-audit-risk-intelligence'   , N'nav-audit-intelligence'),   -- 581
+    (N'org-audit-rbia-config'         , N'nav-audit-intelligence'),   -- 582
+    (N'org-audit-rbia-assessment'     , N'nav-audit-intelligence'),   -- 582
+    (N'org-audit-plan-recommendations', N'nav-audit-intelligence'),   -- 583
     (N'asset-category-assurance'      , N'nav-organization'),
     (N'event-profiles'                , N'nav-organization'),   -- added by 332
     (N'document-uploads'              , N'nav-documents'),   -- renamed by 358, re-nested by 359
@@ -638,31 +724,36 @@ JOIN  (VALUES
     (N'risk-centre-dashboard'         , N'risk-centre'),
     (N'risk-acceptance-authority'     , N'nav-organization'),
     (N'risk-centre-settings'          , N'risk-centre'),        -- 533
-    (N'risk-settings'                 , N'risk-centre-settings'), -- 458; moved by 533
-    (N'risk-methodology'              , N'risk-centre-settings'), -- 532; moved by 533
+    (N'risk-settings'                 , N'risk-centre'),        -- 458; 533 group, then 579 root
+    (N'risk-methodology'              , N'risk-centre'),        -- 532; 533 group, then 579 root
     -- Module Dashboard submenus (416).
     (N'governance-dashboard'          , N'nav-governance'),
     (N'issues-actions-dashboard'      , N'nav-oversight'),
     (N'audit-assurance-dashboard'     , N'nav-assurance'),
     -- Asset & Contract configuration screens (420).
-    (N'asset-field-dictionary'        , N'nav-asset-contract'),
-    (N'asset-form-templates'          , N'nav-asset-contract'),
-    (N'asset-valuation-config'        , N'nav-asset-contract'),  -- 422
-    (N'asset-option-lists'            , N'nav-asset-contract'),  -- 423
-    (N'asset-taxonomy'                , N'nav-asset-contract'),  -- 424
-    (N'asset-tech-catalog'            , N'nav-asset-contract'),  -- 425
-    (N'asset-register'                , N'nav-asset-contract'),  -- 428
-    (N'asset-attestation'             , N'nav-asset-contract'),  -- 431
-    (N'asset-contracts'               , N'nav-asset-contract'),  -- 434
-    (N'asset-notifications'           , N'nav-asset-contract'),  -- 437
-    (N'asset-activities'              , N'nav-asset-contract'),  -- 438
-    (N'asset-relationships'           , N'nav-asset-contract'),  -- 440
-    (N'business-services'             , N'nav-asset-contract'),  -- 441
-    (N'asset-discovery'               , N'nav-asset-contract'),  -- 442
-    (N'asset-privacy'                 , N'nav-asset-contract'),  -- 448
-    (N'asset-governance'              , N'nav-asset-contract'),  -- 450
+    (N'nav-asset-inventory'           , N'nav-asset-contract'),   -- 586 (group)
+    (N'nav-asset-contracts'           , N'nav-asset-contract'),   -- 586 (group)
+    (N'nav-asset-operations'          , N'nav-asset-contract'),   -- 586 (group)
+    (N'nav-asset-governance-reporting' , N'nav-asset-contract'),   -- 586 (group)
+    (N'nav-asset-configuration'       , N'nav-asset-contract'),   -- 586 (group)
+    (N'asset-field-dictionary'        , N'nav-asset-configuration'),  -- 586
+    (N'asset-form-templates'          , N'nav-asset-configuration'),  -- 586
+    (N'asset-valuation-config'        , N'nav-asset-configuration'),  -- 422, moved by 586
+    (N'asset-option-lists'            , N'nav-asset-configuration'),  -- 423, moved by 586
+    (N'asset-taxonomy'                , N'nav-asset-configuration'),  -- 424, moved by 586
+    (N'asset-tech-catalog'            , N'nav-asset-configuration'),  -- 425, moved by 586
+    (N'asset-register'                , N'nav-asset-inventory'),  -- 428, moved by 586
+    (N'asset-attestation'             , N'nav-asset-inventory'),  -- 431, moved by 586
+    (N'asset-contracts'               , N'nav-asset-contracts'),  -- 434, moved by 586
+    (N'asset-notifications'           , N'nav-asset-operations'),  -- 437, moved by 586
+    (N'asset-activities'              , N'nav-asset-operations'),  -- 438, moved by 586
+    (N'asset-relationships'           , N'nav-asset-inventory'),  -- 440, moved by 586
+    (N'business-services'             , N'nav-asset-inventory'),  -- 441, moved by 586
+    (N'asset-discovery'               , N'nav-asset-inventory'),  -- 442, moved by 586
+    (N'asset-privacy'                 , N'nav-asset-governance-reporting'),  -- 448, moved by 586
+    (N'asset-governance'              , N'nav-asset-governance-reporting'),  -- 450, moved by 586
     (N'asset-contract-dashboard'      , N'nav-asset-contract'),  -- 451
-    (N'asset-reports'                 , N'nav-asset-contract'),  -- 452
+    (N'asset-reports'                 , N'nav-asset-governance-reporting'),  -- 452, moved by 586
     -- Third-Party Risk screens (490).
     (N'tprm-dashboard'                , N'nav-tprm'),            -- 490
     (N'tprm-third-parties'            , N'nav-tprm'),            -- 490
@@ -777,7 +868,19 @@ IF COL_LENGTH('grac_practice.menu_master','show_in_sidebar') IS NOT NULL
     EXEC sp_executesql N'
         UPDATE grac_practice.menu_master
            SET show_in_sidebar = 0, updated_by = N''seed-274'', updated_dt = SYSUTCDATETIME()
-         WHERE menu_key = N''organizations'' AND show_in_sidebar = 1;';
+         WHERE menu_key IN (N''organizations'', N''org-registry'') AND show_in_sidebar = 1;';   -- org-registry: 570 (575 moved -people / -operations to the Practice Management sidebar)
+GO
+
+-- =====================================================================
+-- 2e. Sidebar visibility (575). The organization's own registry screens
+--     are Practice Management -> Organization menus; 574 had hidden two of
+--     them, so they are shown again explicitly. Dynamic SQL as 2c.
+-- =====================================================================
+IF COL_LENGTH('grac_practice.menu_master','show_in_sidebar') IS NOT NULL
+    EXEC sp_executesql N'
+        UPDATE grac_practice.menu_master
+           SET show_in_sidebar = 1, updated_by = N''seed-274'', updated_dt = SYSUTCDATETIME()
+         WHERE menu_key IN (N''org-registry-structure'', N''org-registry-people'', N''org-registry-operations'') AND show_in_sidebar = 0;';
 GO
 
 -- =====================================================================

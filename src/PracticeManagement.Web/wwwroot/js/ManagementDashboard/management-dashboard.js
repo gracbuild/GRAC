@@ -32,6 +32,12 @@
 // 506: Audit Assurance moved to the v2 layout (loadAuditAssurance);
 //      watchTable is the shared watchlist (Issues & Actions uses it too).
 // 504: Issues & Actions moved to the v2 layout too (loadIssuesActions).
+// 573: Governance framework filter (#mdFramework, beside the organization):
+//      "All frameworks" on first load; choosing one subscribed release
+//      limits framework coverage to that release and sends releaseId to
+//      sp_dashboard_governance, which scopes instances, evidence,
+//      dependencies, the watchlist and the practice counts to practices
+//      whose requirement belongs to it (fn_pm_release_requirements).
 // 503: Governance moved to the v2 dashboard layout (UI specification v2,
 // section 6): executive KPIs, Needs attention, framework coverage,
 // signature distributions and a watchlist, drawn with the shared
@@ -58,6 +64,7 @@
   const SCREEN  = root.dataset.screen;          // <module>-dashboard (the "from" of every drill)
   const ALLOWED = new Set(String(root.dataset.sections || "").split(",").filter(Boolean));
   let orgId = "";
+  let releaseId = "";   // 573: Governance framework filter ("" = all frameworks)
 
   // ---- drill targets --------------------------------------------------
   // One function per list page: (extra query values) -> URL. The
@@ -330,7 +337,8 @@
   }
 
   async function fetchDashboard() {
-    const r = await fetch(U(`/practice/api/management-dashboard/${encodeURIComponent(MODULE)}?organizationId=${encodeURIComponent(orgId)}`),
+    const rel = MODULE === "governance" && releaseId ? `&releaseId=${encodeURIComponent(releaseId)}` : "";   // 573
+    const r = await fetch(U(`/practice/api/management-dashboard/${encodeURIComponent(MODULE)}?organizationId=${encodeURIComponent(orgId)}${rel}`),
                           { credentials: "same-origin" });
     const b = await r.json().catch(() => ({}));
     if (!r.ok) {
@@ -346,16 +354,38 @@
   async function loadGovernance(body) {
     body.innerHTML = D.skeleton();
     const want = s => ALLOWED.has(s);
+    // 573: with a framework chosen, the practice counts come from
+    // sp_dashboard_governance (in scope of the release) instead of the
+    // organisation-wide dashboard-summary.
+    const filtered = !!releaseId;
     const [dash, fw, sum] = await Promise.all([
-      want("instances") || want("evidence") || want("dependencies") ? settle(fetchDashboard()) : Promise.resolve(null),
+      want("instances") || want("evidence") || want("dependencies") || (filtered && want("practices"))
+        ? settle(fetchDashboard()) : Promise.resolve(null),
       want("frameworks") ? settle(gatewayQuery("subscribed-frameworks", { organizationId: Number(orgId), pageNumber: 1, pageSize: 500 })) : Promise.resolve(null),
-      want("practices") ? settle(gatewayQuery("dashboard-summary", { organizationId: Number(orgId), pageNumber: 1, pageSize: 1 })) : Promise.resolve(null)
+      want("practices") && !filtered ? settle(gatewayQuery("dashboard-summary", { organizationId: Number(orgId), pageNumber: 1, pageSize: 1 })) : Promise.resolve(null)
     ]);
+    fillFrameworks(fw && fw.ok ? (fw.value[0] || []) : null);
     body.innerHTML = renderGovernance(dash, fw, sum);
     body.querySelectorAll(".pm-dx-row-2").forEach(D.balance);   // even out attention | lead visuals
     body.querySelectorAll("[data-md-retry]").forEach(b => b.addEventListener("click", load));
     setContext(dash && dash.ok ? (instancesOwnOnly(dash.value) ? "Instances you own" : "All instances") : "",
                "Instance, evidence and dependency figures follow Operationalize's ownership rule.");
+  }
+
+  // 573: the framework select lists the organisation's subscribed
+  // releases (the same subscribed-frameworks rows as Framework coverage).
+  // Shown on Governance only, and only when those rows could be read.
+  function fillFrameworks(releases) {
+    const sel = document.getElementById("mdFramework");
+    if (!sel) return;
+    if (!releases) { sel.hidden = !releaseId; return; }
+    const keep = releaseId;
+    sel.innerHTML = `<option value="">All frameworks</option>` + releases.map(r => {
+      const id = String(F(r, "ReleaseId") ?? "");
+      return id ? `<option value="${esc(id)}">${esc(F(r, "FrameworkRelease") || F(r, "ReleaseVersion") || id)}</option>` : "";
+    }).join("");
+    sel.value = [...sel.options].some(o => o.value === keep) ? keep : "";
+    sel.hidden = false;
   }
 
   function instancesOwnOnly(d) {
@@ -369,8 +399,17 @@
     const dist = g => (d ? F(d, "distributions") || [] : []).filter(x => F(x, "groupKey") === g);
     const instScope = d ? (instancesOwnOnly(d) ? "Your instances" : "All instances") : "";
 
-    const releases = fw && fw.ok ? (fw.value[0] || []) : null;
-    const summary = sum && sum.ok ? ((sum.value[0] || [])[0] || {}) : null;
+    // 573: a chosen framework shows its own release only.
+    const allReleases = fw && fw.ok ? (fw.value[0] || []) : null;
+    const releases = allReleases && releaseId
+      ? allReleases.filter(r => String(F(r, "ReleaseId")) === String(releaseId)) : allReleases;
+    // 573: with a framework chosen the practice counts are the governance
+    // KPIs (same definitions as dashboard-summary, in scope of the release).
+    const summary = releaseId
+      ? (has("practices.total") ? { TotalPractices: v("practices.total"), ApplicablePractices: v("practices.applicable"),
+                                    NotApplicablePractices: v("practices.notapplicable"), NotUpdatedPractices: v("practices.notupdated") } : null)
+      : (sum && sum.ok ? ((sum.value[0] || [])[0] || {}) : null);
+    const pracScope = releaseId ? "Selected framework" : "Organisation";
     const rs = k => (releases || []).reduce((s, r) => s + (Number(F(r, k)) || 0), 0);
 
     // Drill targets (existing screens, real filters only).
@@ -389,6 +428,10 @@
     if (dash && !dash.ok) fail("practice instances, evidence and dependencies", dash);
     if (fw && !fw.ok) fail("framework coverage", fw);
     if (sum && !sum.ok) fail("practice applicability", sum);
+    // 573 not run: the procedure has no @release_id / framework practice KPIs.
+    if (releaseId && dash && dash.ok && ALLOWED.has("practices") && !has("practices.total"))
+      errors.push(D.errorCard({ title: "Could not load practice applicability for this framework",
+        message: "Run database migration 573 (governance dashboard framework filter).", retryId: "" }));
 
     // ---- C. Executive KPIs ---------------------------------------------
     const kpis = [];
@@ -423,7 +466,7 @@
       if (has("practices.implemented")) {
         const impl = v("practices.implemented");
         kpis.push(D.kpiCard({
-          label: "Practices", scope: "Organisation", value: impl, suffix: `/ ${D.fmt(app)}`, href: prac(),
+          label: "Practices", scope: pracScope, value: impl, suffix: `/ ${D.fmt(app)}`, href: prac(),
           segments: [{ count: impl, tone: "success", label: "Implemented" },
                      { count: Math.max(0, app - impl), tone: "info", label: "Applicable, not implemented" }],
           segTotal: total,
@@ -433,7 +476,7 @@
       } else {
         const decided = D.pct(total - nu, total);
         kpis.push(D.kpiCard({
-          label: "Applicable practices", scope: "Organisation", value: app, href: prac(),
+          label: "Applicable practices", scope: pracScope, value: app, href: prac(),
           qualifier: `of ${D.fmt(total)} practices &middot; ${D.fmt(nu)} not updated`,
           meter: decided, meterTone: "info",
           title: "Organisation practices marked Applicable. Bar: practices with an applicability decision / all active practices."
@@ -555,7 +598,7 @@
       const items = [{ label: "Applicable", count: a, tone: "info" }, { label: "Not applicable", count: na, tone: "neutral" }];
       if (t - a - na - nu > 0) items.push({ label: "Other decision", count: t - a - na - nu, tone: "info2" });
       items.push({ label: "Not updated", count: nu, tone: "warning" });
-      charts.push(D.distCard({ title: "Practice applicability", scope: "Organisation", total: t, totalLabel: "practices", items,
+      charts.push(D.distCard({ title: "Practice applicability", scope: pracScope, total: t, totalLabel: "practices", items,
         footer: has("practices.noinstance") ? `<p class="pm-dx-foot"><span>Applicable without an instance</span><strong>${D.fmt(v("practices.noinstance"))}</strong></p>` : "",
         emptyText: "No practices yet." }));
     }
@@ -667,7 +710,11 @@
     if (!ctx) return;
     const org = document.getElementById("mdOrganization");
     const orgName = org && org.selectedIndex >= 0 ? org.options[org.selectedIndex].text : "";
+    // 573: the chosen framework, when the Governance filter is set.
+    const fwSel = document.getElementById("mdFramework");
+    const fwName = fwSel && !fwSel.hidden && fwSel.value && fwSel.selectedIndex >= 0 ? fwSel.options[fwSel.selectedIndex].text : "";
     ctx.innerHTML = [orgName && `<span><i class="fa-regular fa-building" aria-hidden="true"></i> ${esc(orgName)}</span>`,
+      fwName && `<span><i class="fa-solid fa-layer-group" aria-hidden="true"></i> ${esc(fwName)}</span>`,
       scope && `<span${scopeTitle ? ` title="${esc(scopeTitle)}"` : ""}><i class="fa-regular fa-user" aria-hidden="true"></i> ${esc(scope)}</span>`,
       `<span><i class="fa-regular fa-clock" aria-hidden="true"></i> Refreshed ${esc(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</span>`]
       .filter(Boolean).join("");
@@ -1528,7 +1575,11 @@
     if (wanted && [...sel.options].some(o => o.value === wanted)) sel.value = wanted;
     else window.gracOrgPref.apply(sel);   // 2026-10-06: last-picked org, else lowest id
     orgId = sel.value;
-    sel.addEventListener("change", () => { orgId = sel.value; load(); });
+    // 573: a new organization starts again from All frameworks (its
+    // subscribed releases are different).
+    sel.addEventListener("change", () => { orgId = sel.value; releaseId = ""; load(); });
+    const fwSel = document.getElementById("mdFramework");
+    if (fwSel) fwSel.addEventListener("change", () => { releaseId = fwSel.value; load(); });
     document.getElementById("mdRefreshBtn").addEventListener("click", load);
     await load();
   }

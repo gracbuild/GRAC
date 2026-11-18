@@ -726,7 +726,6 @@
 .cal-scheduler-table-wrap { margin: 0; }
 .cal-scheduler-table .cal-sched-obligation {
     color: var(--fg-default);
-    font-weight: 600;
 }
 .cal-scheduler-table .cal-side-source-badge { margin-bottom: 0; white-space: nowrap; }
 .cal-scheduler-table .cal-sched-next { white-space: nowrap; }

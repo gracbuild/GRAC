@@ -77,6 +77,10 @@ builder.Services.AddOrgAssurancePlanService();
 builder.Services.AddOrgAssuranceExecutionService();
 builder.Services.AddOrgAssuranceWorkpaperService();   // 567: Test Working Papers
 builder.Services.AddOrgAssuranceReportService();      // 568: Audit Reports
+builder.Services.AddOrgAssuranceUniverseService();    // 577: Audit Universe (Audit Intelligence)
+builder.Services.AddOrgAssuranceRbiaService();        // 582: RBIA (Audit Intelligence)
+builder.Services.AddOrgAssurancePlanRecommendationService();   // 583: Audit Plan Recommendations
+builder.Services.AddOrgAssuranceFindingService();              // 584: audit findings to Gap / Risk candidates
 builder.Services.AddOrgAssuranceObservationService();
 // Organization SLA Config (migrations 178/179/180). Independent module
 // that adopts Control Management SLA masters into per-org configs with
@@ -93,6 +97,10 @@ builder.Services.AddPracticeRepositoryChangeDetectWorker();
 // or rejects the requests organizations raise from Add Release -> Subscribe
 // from Repository (406). Same procedures Control Management's screen uses.
 builder.Services.AddPracticeSubscriptionRequestService();
+// Organization Registry (migrations 569-572): Organization -> Legal Entity
+// hierarchy and the registry areas of the organization master-data
+// workbook. Organization Management -> Organization Registry.
+builder.Services.AddPracticeOrgRegistryService();
 // Parent-menu landing dashboards (migrations 413 / 414): Governance,
 // Issues & Actions, Audit & Assurance. Read-only.
 builder.Services.AddPracticeManagementDashboardService();

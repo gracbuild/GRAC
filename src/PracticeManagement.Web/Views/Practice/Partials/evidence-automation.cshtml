@@ -63,7 +63,6 @@
         @* ---------------- Received ---------------- *@
         <div data-ea-panel="RECEIVED">
             <div class="pm-toolbar">
-                <input type="search" id="eaEvSearch" placeholder="Search source, obligation, instance or file" maxlength="200" />
                 <select id="eaEvStatus" title="Review status">
                     <option value="Proposed">Waiting for review</option>
                     <option value="Accepted">Accepted</option>
@@ -77,6 +76,7 @@
                     <option value="Unknown">Unknown</option>
                 </select>
                 <select id="eaEvSource" title="Source"><option value="">All sources</option></select>
+                <input type="search" id="eaEvSearch" placeholder="Search source, obligation, instance or file" maxlength="200" />
                 <button class="pm-button icon" id="eaEvRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             </div>
             <div class="pm-table-wrap">
@@ -91,7 +91,6 @@
         @* ---------------- Sources ---------------- *@
         <div data-ea-panel="SOURCES" hidden>
             <div class="pm-toolbar">
-                <input type="search" id="eaBdSearch" placeholder="Search source, obligation or instance" maxlength="200" />
                 <select id="eaBdChannel" title="Channel">
                     <option value="">All channels</option>
                     <option value="Webhook">Webhook</option>
@@ -112,6 +111,7 @@
                     <option value="Retired">Retired</option>
                     <option value="All">All</option>
                 </select>
+                <input type="search" id="eaBdSearch" placeholder="Search source, obligation or instance" maxlength="200" />
                 <button class="pm-button icon" id="eaBdRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
                 @if (eaCanAdd)
                 {

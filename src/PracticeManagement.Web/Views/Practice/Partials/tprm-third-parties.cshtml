@@ -55,7 +55,6 @@
         </div>
         <p class="pm-message" id="tpMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-toolbar">
-            <input type="search" id="tpSearch" placeholder="Search vendor name, code or identifier" maxlength="200" />
             <select id="tpStatusFilter" title="Lifecycle status"><option value="">All statuses</option></select>
             <select id="tpCategoryFilter" title="Service category"><option value="">All service categories</option></select>
             <select id="tpSampleFilter" title="Sample records">
@@ -67,6 +66,7 @@
                 <option value="">Exclude archived</option>
                 <option value="true">Include archived</option>
             </select>
+            <input type="search" id="tpSearch" placeholder="Search vendor name, code or identifier" maxlength="200" />
             <button class="pm-button icon" id="tpRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             @if (tpCanAdd)
             {

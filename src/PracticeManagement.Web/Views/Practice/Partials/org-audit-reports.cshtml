@@ -638,7 +638,7 @@
              + '<div class="pm-table-wrap" style="margin-top:8px;"><table><thead><tr><th style="width:80px;">Order</th><th>Section</th><th>Heading</th><th style="width:80px;">Include</th><th>Standard Text</th></tr></thead><tbody>'
              + t.sections.map(function (s, i) {
                    return '<tr><td><input class="pm-input" type="number" step="1" data-tpl-order="' + i + '" value="' + esc(s.displayOrder) + '" /></td>'
-                        + '<td style="white-space:normal;"><strong>' + esc(s.sectionCode) + '</strong><br /><span style="color:var(--fg-subtle);">' + esc(s.description || '') + '</span></td>'
+                        + '<td style="white-space:normal;">' + esc(s.sectionCode) + '<br /><span style="color:var(--fg-subtle);">' + esc(s.description || '') + '</span></td>'
                         + '<td><input class="pm-input" maxlength="200" data-tpl-heading="' + i + '" value="' + esc(s.heading) + '" /></td>'
                         + '<td><input type="checkbox" data-tpl-incl="' + i + '"' + (s.isIncluded ? ' checked' : '') + ' /></td>'
                         + '<td><textarea class="pm-input" rows="2" data-tpl-text="' + i + '" placeholder="Text the report starts with (optional)">' + esc(s.standardText) + '</textarea></td></tr>';

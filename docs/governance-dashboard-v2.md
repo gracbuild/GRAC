@@ -103,3 +103,37 @@ UI: `gracDash.kpiCard` takes optional `segments` + `segTotal` and renders a spli
 Deploy: run `528_governance_dashboard_practices_implemented.sql` (PASS row), deploy Web (js + css), hard refresh. Rollback: `528_..._rollback.sql` (503 body).
 
 Layout (2026-11-10): **Framework coverage** now sits on its own full-width row under the KPIs; below it *Needs attention* | *Implementation status* + *Practice applicability*, then the remaining analytics and the watchlist. JS only (`renderGovernance`), existing classes.
+
+## 2026-11-16 -- Framework filter (573)
+
+**Request:** a framework filter next to the organization; "All" first, a chosen
+framework shows only that framework.
+
+**UI** (`Partials/management-dashboard.cshtml`, `management-dashboard.js`):
+`#mdFramework` after the organization select, existing toolbar select style.
+Filled from the same `subscribed-frameworks` rows as Framework coverage
+(`fillFrameworks`); hidden until those rows load. Organization change resets it to
+All frameworks. The context strip shows the chosen framework.
+
+**What follows the filter**
+
+| Area | All frameworks | One framework |
+| --- | --- | --- |
+| Subscribed frameworks, Control statements, Framework coverage, statements not updated / updates pending | every subscribed release | that release's row only (client-side) |
+| Practices card, Practice applicability chart, Practices not updated | `dashboard-summary` (organisation) | governance KPIs `practices.total / applicable / notapplicable / notupdated` (same definitions), scope label "Selected framework" |
+| Practices implemented / without an instance | organisation | practices of the release |
+| Instances, evidence, dependencies, watchlist | ownership rule | ownership rule + practices of the release |
+
+**Which practices belong to a release:** `grac_practice.fn_pm_release_requirements(@organization_id, @release_id)`,
+the Practice View *Mapped frameworks* rule (301): an Active statement mapping whose
+release (`mapping.release_id`, else the statement's) is the release; or, for a
+requirement with no Active mapping, its organisation control's release. A practice is
+in scope through `practice.organization_requirement_id`; a practice can belong to
+several releases, so per-framework figures do not add up to the All figure.
+
+**SQL:** `573_governance_dashboard_framework_filter.sql` -- the TVF, and
+`sp_dashboard_governance` (528 body) with `@release_id BIGINT = NULL` (NULL = 528
+figures exactly) plus the four practice KPIs. Rollback restores the 528 body and
+drops the TVF.
+
+**API:** `releaseId` query parameter on both tiers (see `docs/management-dashboards.md`).

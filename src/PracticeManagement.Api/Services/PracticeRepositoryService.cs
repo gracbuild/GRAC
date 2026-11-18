@@ -5214,12 +5214,18 @@ public sealed class PracticeRepositoryService(IConfiguration configuration, ILog
                    pi.instance_code, pi.instance_name, pi.criticality, pi.assurance_mode,
                    pi.primary_owner, pi.practice_id, pi.primary_owner_id,
                    r.frequency_id, fm.frequency_name, fm.frequency_value, fm.frequency_unit,
-                   r.anchor_date, r.end_date, r.schedule_owner, r.notes, r.is_active
+                   r.anchor_date, r.end_date, r.schedule_owner, r.notes, r.is_active,
+                   -- 2026-11-16: the schedule's reviewer / approver (526), shown
+                   -- in the Calendar's List view.
+                   r.reviewer_employee_id, rev.employee_name AS reviewer_name,
+                   r.approver_employee_id, apr.employee_name AS approver_name
             FROM grac_practice.assurance_schedule_rule r
             JOIN grac_practice.practice_instance pi ON pi.practice_instance_id = r.practice_instance_id
             JOIN grac_practice.frequency_master fm ON fm.frequency_id = r.frequency_id
             LEFT JOIN grac_practice.practice_instance_obligation pio
                    ON pio.practice_instance_obligation_id = r.practice_instance_obligation_id
+            LEFT JOIN grac_practice.organization_employee rev ON rev.employee_id = r.reviewer_employee_id
+            LEFT JOIN grac_practice.organization_employee apr ON apr.employee_id = r.approver_employee_id
             WHERE r.status = N'Active' AND r.is_active = 1
               AND (@organization_id IS NULL OR r.organization_id = @organization_id)
             ORDER BY pi.instance_name

@@ -1,0 +1,222 @@
+@*
+    Risk Intelligence (581, CR2 - AA Part C -- Audit Intelligence)
+
+    A read / reference view, per Audit Universe subject, of what GRAC
+    already knows -- nothing here is copied or changed:
+      * Enterprise risks linked to the subject (Framework & Practice
+        Mapping, level Enterprise Risk -- Suggested and Confirmed): owner,
+        category, management's inherent and residual ratings, appetite
+        status and trend (the published risk methodology), treatment option,
+        open treatment actions, acceptance and reviews -- as Risk Management
+        holds them now.
+      * Gaps and exceptions of the subject's mapped practice instances /
+        practices; the instances' implementation status, open gaps and
+        obligations; previous audit findings recorded against them.
+    The risks are linked on Framework & Practice Mapping ("Refresh
+    Suggestions", or "+ Add Mapping" -> Enterprise Risks).
+    UX: the existing list look; organization and subject are select filters;
+    facts strip and section tables, no popups.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaRiUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-shield-halved pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaRiUnavailableTitle">Risk Intelligence is not available.</h2>
+        <p id="oaRiUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaRiRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaRiFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaRiFilterSubject"><option value="">Loading subjects...</option></select>
+        <select id="oaRiFilterRisks">
+            <option value="">Confirmed and suggested risks</option>
+            <option value="CONFIRMED">Confirmed risks only</option>
+        </select>
+        <button class="pm-button icon" id="oaRiRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+    </div>
+    <div class="pm-message" id="oaRiMessage" style="display:none;"></div>
+    <div id="oaRiBody" class="oa-ri-body" style="margin-top:12px;">
+        <p class="pm-empty">Select an organization.</p>
+    </div>
+</section>
+
+<style>
+    .oa-ri-body h3 { font-size: 14px; margin: 16px 0 6px; color: var(--fg-strong); }
+    .oa-ri-body h3:first-of-type { margin-top: 4px; }
+    .oa-ri-body .pm-table-wrap { margin: 6px 0; }
+    .oa-ri-sub { color: var(--fg-subtle); }
+</style>
+
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const APPETITE = { Above: 'Above appetite', Within: 'Within appetite', NotSet: 'Appetite not set' };
+    const TREND    = { Up: 'Went up', Down: 'Went down', Same: 'Unchanged', New: 'First assessment' };
+    const MAPPING  = { CONFIRMED: 'Confirmed', SUGGESTED: 'Suggested' };
+
+    const state = { orgId: '', subjectId: '', subjects: [], data: null };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    function d10(x) { return x ? String(x).substring(0, 10) : ''; }
+    function codeName(code, name) { return code ? code + ' - ' + (name || '') : (name || ''); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function table(head, rows, empty) {
+        return '<div class="pm-table-wrap"><table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('')
+             + '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" class="pm-empty">' + esc(empty) + '</td></tr>')
+             + '</tbody></table></div>';
+    }
+    function fact(label, value) {
+        return '<div class="pm-field"><span>' + esc(label) + '</span><div>' + esc(value == null ? '--' : value) + '</div></div>';
+    }
+    function td(v, wrap) { return '<td' + (wrap ? ' style="white-space:normal;"' : '') + '>' + esc(v == null || v === '' ? '--' : v) + '</td>'; }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaRiUnavailable', 'oaRiUnavailableTitle', 'oaRiUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaRiFilterOrg', orgs);
+        state.orgId = document.getElementById('oaRiFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaRiUnavailable', 'oaRiUnavailableTitle', 'oaRiUnavailableBody',
+                'Risk Intelligence is not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaRiRoot').hidden = false;
+        document.getElementById('oaRiFilterOrg').addEventListener('change', async function (e) { state.orgId = e.target.value || ''; await loadSubjects(); reload(); });
+        document.getElementById('oaRiFilterSubject').addEventListener('change', function (e) { state.subjectId = e.target.value || ''; reload(); });
+        document.getElementById('oaRiFilterRisks').addEventListener('change', function () { render(); });
+        document.getElementById('oaRiRefreshBtn').addEventListener('click', function () { reload(); });
+        await loadSubjects();
+        reload();
+    }
+
+    async function loadSubjects() {
+        const sel = document.getElementById('oaRiFilterSubject');
+        state.subjects = [];
+        if (!state.orgId) { sel.innerHTML = '<option value="">Select an organization first</option>'; state.subjectId = ''; return; }
+        try {
+            const lk = await getJson(API + '/universe-lookups?organizationId=' + encodeURIComponent(state.orgId));
+            state.subjects = g(lk, 'subjects') || [];
+        } catch (err) { wf.setMessage('oaRiMessage', 'Failed to load the subjects: ' + (err.message || err), 'error'); }
+        const keep = state.subjectId;
+        sel.innerHTML = state.subjects.length
+            ? state.subjects.map(function (s) {
+                  const id = String(g(s, 'id'));
+                  return '<option value="' + esc(id) + '"' + (id === String(keep) ? ' selected' : '') + '>' + esc(codeName(g(s, 'code'), g(s, 'name'))) + '</option>';
+              }).join('')
+            : '<option value="">No Audit Universe subjects yet</option>';
+        state.subjectId = sel.value || '';
+    }
+
+    async function reload() {
+        const body = document.getElementById('oaRiBody');
+        state.data = null;
+        if (!state.subjectId) { body.innerHTML = '<p class="pm-empty">' + (state.orgId ? 'Add subjects in Audit Universe first.' : 'Select an organization.') + '</p>'; return; }
+        body.innerHTML = '<p class="pm-empty">Loading...</p>';
+        try {
+            state.data = await getJson(API + '/universe/' + encodeURIComponent(state.subjectId) + '/risk-intelligence?organizationId=' + encodeURIComponent(state.orgId));
+            render();
+        } catch (err) { body.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>'; }
+    }
+
+    function render() {
+        const d = state.data;
+        if (!d) return;
+        const onlyConfirmed = document.getElementById('oaRiFilterRisks').value === 'CONFIRMED';
+        const risks = (g(d, 'risks') || []).filter(function (r) { return !onlyConfirmed || g(r, 'mappingStatus') === 'CONFIRMED'; });
+        const sm = (g(d, 'summary') || [])[0] || {};
+        let html = '<div class="oa-pl-plan-grid">'
+            + fact('Linked risks (confirmed)', g(sm, 'confirmedRisks') || 0)
+            + fact('Suggested risks (to review)', g(sm, 'suggestedRisks') || 0)
+            + fact('Above risk appetite', g(sm, 'aboveAppetite') || 0)
+            + fact('Accepted risks', g(sm, 'acceptedRisks') || 0)
+            + fact('Open gaps', g(sm, 'openGaps') || 0)
+            + fact('Mapped practice instances', g(sm, 'practiceInstances') || 0)
+            + fact('Previous audit findings', g(sm, 'findings') || 0)
+            + '</div>'
+            + '<p class="oa-pl-plan-facts" style="margin-top:8px;">Ratings, appetite, treatment and acceptance are management\'s, as Risk Management holds them now. '
+            + 'Link or unlink risks on Framework &amp; Practice Mapping (level Enterprise Risks).</p>';
+
+        html += '<h3>Enterprise Risks</h3>' + table(
+            ['Risk', 'Title', 'Category', 'Owner', 'Inherent', 'Residual', 'Appetite', 'Trend', 'Treatment', 'Open Actions', 'Acceptance', 'Next Review', 'Status', 'Link'],
+            risks.map(function (r) {
+                const residual = g(r, 'residualRatingName') || (g(r, 'currentStage') ? 'Residual assessment pending' : '');
+                const accepted = g(r, 'acceptedDt') ? 'Accepted ' + d10(g(r, 'acceptedDt')) + (g(r, 'acceptedByName') ? ' by ' + g(r, 'acceptedByName') : '') : '';
+                const review = d10(g(r, 'nextReviewDate')) + (g(r, 'reviewOverdue') ? ' (overdue)' : '');
+                const link = (MAPPING[g(r, 'mappingStatus')] || g(r, 'mappingStatus')) + (g(r, 'suggestionBasis') ? ': ' + g(r, 'suggestionBasis') : '');
+                return '<tr>' + td(g(r, 'riskNumber')) + td(g(r, 'riskTitle'), true) + td(g(r, 'riskCategoryName')) + td(g(r, 'riskOwnerName'))
+                     + td(g(r, 'inherentRatingName')) + td(residual) + td(APPETITE[g(r, 'appetiteStatus')] || g(r, 'appetiteStatus'))
+                     + td(TREND[g(r, 'trend')] || g(r, 'trend')) + td(g(r, 'treatmentOptionName')) + td(g(r, 'openTreatmentActions'))
+                     + td(accepted, true) + td(review) + td(g(r, 'statusCode')) + td(link, true) + '</tr>';
+            }), 'No enterprise risk is linked to this subject. Use Framework & Practice Mapping -> Refresh Suggestions, or + Add Mapping -> Enterprise Risks.');
+
+        html += '<h3>Gaps</h3>' + table(['Gap', 'Title', 'Severity', 'Status', 'Owner', 'Opened', 'Target', 'Closed', 'Practice Instance', 'Risk'],
+            (g(d, 'gaps') || []).map(function (x) {
+                return '<tr>' + td(g(x, 'gapNumber') || g(x, 'customGapId')) + td(g(x, 'gapTitle'), true) + td(g(x, 'severityName')) + td(g(x, 'status'))
+                     + td(g(x, 'ownerName')) + td(d10(g(x, 'openedDt'))) + td(d10(g(x, 'targetResolutionDate'))) + td(d10(g(x, 'closedDt')))
+                     + td(codeName(g(x, 'instanceCode'), g(x, 'instanceName')), true) + td(g(x, 'riskNumber')) + '</tr>';
+            }), 'No gaps on the mapped practice instances.');
+
+        html += '<h3>Exceptions</h3>' + table(['Exception', 'Status', 'Requested', 'Approved', 'Effective Until', 'Gap', 'Practices'],
+            (g(d, 'exceptions') || []).map(function (x) {
+                return '<tr>' + td(g(x, 'requestTitle'), true) + td(g(x, 'statusCode')) + td(d10(g(x, 'requestedDt'))) + td(d10(g(x, 'approvedDt')))
+                     + td(d10(g(x, 'effectiveUntil'))) + td(g(x, 'gapNumber')) + td(g(x, 'practices'), true) + '</tr>';
+            }), 'No exceptions on the mapped practices or their gaps.');
+
+        html += '<h3>Practice Assurance</h3>' + table(['Practice Instance', 'Practice', 'Owner', 'Implementation Status', 'Open Gaps', 'Obligations', 'Link'],
+            (g(d, 'instances') || []).map(function (x) {
+                return '<tr>' + td(codeName(g(x, 'instanceCode'), g(x, 'instanceName')), true) + td(codeName(g(x, 'practiceCode'), g(x, 'practiceName')), true)
+                     + td(g(x, 'primaryOwner')) + td(g(x, 'implementationStatus')) + td(g(x, 'openGaps')) + td(g(x, 'obligations'))
+                     + td(MAPPING[g(x, 'mappingStatus')] || g(x, 'mappingStatus')) + '</tr>';
+            }), 'No practice instance is mapped to this subject yet.');
+
+        html += '<h3>Previous Audit Findings</h3>' + table(['Finding', 'Title', 'Severity', 'Status', 'Execution', 'Observed', 'Closed', 'Practice Instance'],
+            (g(d, 'findings') || []).map(function (x) {
+                return '<tr>' + td(g(x, 'observationCode')) + td(g(x, 'observationTitle'), true) + td(g(x, 'severityName')) + td(g(x, 'statusCode'))
+                     + td(codeName(g(x, 'executionCode'), g(x, 'executionName')), true) + td(d10(g(x, 'observedDt'))) + td(d10(g(x, 'closedDt')))
+                     + td(codeName(g(x, 'instanceCode'), g(x, 'instanceName')), true) + '</tr>';
+            }), 'No audit findings recorded against the mapped practice instances.');
+
+        document.getElementById('oaRiBody').innerHTML = html;
+    }
+})();
+</script>

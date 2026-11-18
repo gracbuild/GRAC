@@ -1,0 +1,272 @@
+@*
+    Universe Configuration (577, CR2 - AA 3.5 -- Audit Intelligence)
+
+    The organization's Audit Universe masters: Categories, Subcategories,
+    Audit Classifications, Regulatory Significance Levels, Business
+    Criticality Levels, Universe Statuses and Subject Relationships.
+    Business Criticality, Regulatory Significance and (later) Audit Priority
+    are separate masters -- none of them is an enterprise risk rating.
+
+    UX (the Report Templates list and child rows, no popups; the master is
+    a select filter): a row (or its 3-dot Edit) opens its editor in a row
+    under it; "+ Add Value" opens one at the top. A code is set when the
+    value is made and not changed afterwards. Statuses are fixed by the
+    lifecycle: only their names, descriptions and order change. Nothing is
+    deleted -- a value is made inactive (subjects keep the value they have).
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaUcUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-sliders pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaUcUnavailableTitle">Universe Configuration is not available.</h2>
+        <p id="oaUcUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaUcRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaUcFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaUcFilterGroup">
+            <option value="CATEGORY">Audit Universe Categories</option>
+            <option value="SUBCATEGORY">Audit Universe Subcategories</option>
+            <option value="CLASSIFICATION">Audit Classifications</option>
+            <option value="REG_SIGNIFICANCE">Regulatory Significance Levels</option>
+            <option value="CRITICALITY">Business Criticality Levels</option>
+            <option value="STATUS">Universe Statuses</option>
+            <option value="RELATIONSHIP">Subject Relationships</option>
+        </select>
+        <select id="oaUcFilterActive">
+            <option value="">Active and inactive</option>
+            <option value="1">Active</option>
+            <option value="0">Inactive</option>
+        </select>
+        <button class="pm-button icon" id="oaUcRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaUcAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Value
+        </button>
+    </div>
+    <div class="pm-message" id="oaUcMessage" style="display:none;"></div>
+    <p class="oa-pl-plan-facts" id="oaUcHint" style="margin-top:8px;"></p>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:8px;">
+        <table>
+            <thead id="oaUcHead"></thead>
+            <tbody id="oaUcBody">
+                <tr><td class="pm-empty">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const HINT    = {
+        CATEGORY:         'What kind of auditable subject it is. Registry records are included with the category of their record type (Legal Entity, Business Unit, Branch / Location, Department, Business Function, Business Process).',
+        SUBCATEGORY:      'A finer grouping under a category.',
+        CLASSIFICATION:   'The organization\'s own audit classification of subjects.',
+        REG_SIGNIFICANCE: 'Audit-specific regulatory significance. Rank orders the levels (higher = more significant).',
+        CRITICALITY:      'Audit-specific business criticality. Rank orders the levels (higher = more critical).',
+        STATUS:           'The lifecycle: Discovered, Under Validation, Active, Inactive, Retired. The codes are fixed; the names can be changed.',
+        RELATIONSHIP:     'How two subjects relate, read as "subject A <relationship> subject B" (a region contains branches).'
+    };
+
+    const state = { orgId: '', group: 'CATEGORY', all: [], rows: {}, edit: null };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data)) || []); }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function trigger(id) {
+        return '<button type="button" class="pm-action-trigger" data-menu="' + esc(id) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span></button>';
+    }
+    function toggleCell(id, open, title, text) {
+        return '<span class="task-tree-cell"><button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '"'
+             + ' aria-expanded="' + (open ? 'true' : 'false') + '" title="' + esc(title) + '">'
+             + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span class="visually-hidden">' + esc(title) + '</span></button>'
+             + '<span>' + esc(text) + '</span></span>';
+    }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaUcUnavailable', 'oaUcUnavailableTitle', 'oaUcUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaUcFilterOrg', orgs);
+        state.orgId = document.getElementById('oaUcFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaUcUnavailable', 'oaUcUnavailableTitle', 'oaUcUnavailableBody',
+                'Universe Configuration is not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaUcRoot').hidden = false;
+        wire();
+        reload();
+    }
+    function wire() {
+        document.getElementById('oaUcFilterOrg').addEventListener('change', function (e) { state.orgId = e.target.value || ''; state.edit = null; reload(); });
+        document.getElementById('oaUcFilterGroup').addEventListener('change', function (e) { state.group = e.target.value; state.edit = null; render(); });
+        document.getElementById('oaUcFilterActive').addEventListener('change', function () { render(); });
+        document.getElementById('oaUcRefreshBtn').addEventListener('click', function () { reload(); });
+        document.getElementById('oaUcAddBtn').addEventListener('click', function () { openEdit(null); });
+        const body = document.getElementById('oaUcBody');
+        body.addEventListener('click', function (e) {
+            const t = e.target;
+            if (t.closest('.pm-action-trigger, .pm-action-menu')) return;
+            const a = t.closest('[data-do]');
+            if (a) { e.preventDefault(); if (a.getAttribute('data-do') === 'save') save(); else { state.edit = null; render(); } return; }
+            if (t.closest('.oa-pl-items, input, select, textarea, a, button')) return;
+            const tr = t.closest('tr[data-key]');
+            if (tr) openEdit(tr.getAttribute('data-key'));
+        });
+    }
+
+    async function reload() {
+        const body = document.getElementById('oaUcBody');
+        if (!state.orgId) { body.innerHTML = '<tr><td class="pm-empty">Select an organization.</td></tr>'; return; }
+        body.innerHTML = '<tr><td colspan="9" class="pm-empty">Loading...</td></tr>';
+        try {
+            state.all = rowsOf(await getJson(API + '/universe-masters?organizationId=' + encodeURIComponent(state.orgId)));
+            render();
+        } catch (err) { body.innerHTML = '<tr><td colspan="9" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+    }
+    function hasParent() { return state.group === 'SUBCATEGORY'; }
+    function hasRank() { return state.group === 'REG_SIGNIFICANCE' || state.group === 'CRITICALITY'; }
+    function cols() { return 7 + (hasParent() ? 1 : 0) + (hasRank() ? 1 : 0); }
+
+    function render() {
+        document.getElementById('oaUcHint').textContent = HINT[state.group] || '';
+        document.getElementById('oaUcAddBtn').hidden = state.group === 'STATUS';
+        document.getElementById('oaUcHead').innerHTML = '<tr><th>Code</th><th>Name</th>' + (hasParent() ? '<th>Category</th>' : '')
+            + (hasRank() ? '<th>Rank</th>' : '') + '<th>Description</th><th>Order</th><th>Active</th><th>Used by</th><th></th></tr>';
+        const active = document.getElementById('oaUcFilterActive').value;
+        const list = state.all.filter(function (m) {
+            return g(m, 'masterGroup') === state.group && (active === '' || (active === '1') === !!g(m, 'isActive'));
+        });
+        const n = cols();
+        state.rows = {};
+        let html = '';
+        if (state.edit && state.edit.id == null)
+            html += '<tr class="oa-pl-items-row is-selected" data-child="new"><td colspan="' + n + '"><div class="oa-pl-items">' + formHtml() + '</div></td></tr>';
+        html += list.map(function (m) {
+            const id = String(g(m, 'masterId'));
+            state.rows[id] = m;
+            const open = state.edit && String(state.edit.id) === id;
+            return '<tr class="pm-row-clickable' + (open ? ' oa-pl-open is-selected' : '') + '" data-key="' + esc(id) + '">'
+                 + '<td>' + toggleCell(id, open, 'Edit the value', g(m, 'code')) + '</td>'
+                 + '<td>' + esc(g(m, 'name')) + '</td>'
+                 + (hasParent() ? '<td>' + esc(g(m, 'parentName') || '--') + '</td>' : '')
+                 + (hasRank() ? '<td>' + esc(g(m, 'rankValue') == null ? '--' : g(m, 'rankValue')) + '</td>' : '')
+                 + '<td style="white-space:normal;">' + esc(g(m, 'description') || '') + '</td>'
+                 + '<td>' + esc(g(m, 'displayOrder')) + '</td>'
+                 + '<td>' + esc(g(m, 'isActive') ? 'Yes' : 'No') + '</td>'
+                 + '<td>' + esc(g(m, 'usageCount') || 0) + '</td>'
+                 + '<td>' + trigger(id) + '</td></tr>'
+                 + (open ? '<tr class="oa-pl-items-row is-selected" data-child="' + esc(id) + '"><td colspan="' + n + '"><div class="oa-pl-items">' + formHtml() + '</div></td></tr>' : '');
+        }).join('');
+        const body = document.getElementById('oaUcBody');
+        body.innerHTML = html || '<tr><td colspan="' + n + '" class="pm-empty">No values yet. Use "+ Add Value".</td></tr>';
+        body.querySelectorAll('[data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () { return [{ icon: 'fa-pen', label: 'Edit', run: function () { openEdit(id); } }]; });
+        });
+    }
+    function openEdit(id) {
+        if (id != null && state.edit && String(state.edit.id) === String(id)) { state.edit = null; render(); return; }
+        state.edit = { id: id, row: id == null ? null : state.rows[id] };
+        render();
+    }
+    function formHtml() {
+        const e = state.edit, m = e.row || {};
+        const sys = !!g(m, 'isSystem');
+        const yes = function (v) { return '<option value="1"' + (v ? ' selected' : '') + '>Yes</option><option value="0"' + (v ? '' : ' selected') + '>No</option>'; };
+        const cats = state.all.filter(function (c) {
+            return g(c, 'masterGroup') === 'CATEGORY' && (g(c, 'isActive') || String(g(c, 'masterId')) === String(g(m, 'parentMasterId')));
+        });
+        return '<p class="oa-pl-plan-facts"><strong>' + esc(e.id == null ? 'New value' : 'Edit ' + g(m, 'code')) + '</strong>'
+             + (e.id == null ? ' -- the code cannot be changed once saved.' : sys ? ' -- a lifecycle status: its code stays and it cannot be made inactive.' : '') + '</p>'
+             + '<div class="oa-pl-plan-grid">'
+             + '<label class="pm-field"><span>Code <span class="required">*</span></span><input class="pm-input" id="oaUcCode" maxlength="40" value="' + esc(g(m, 'code') || '') + '"' + (e.id != null ? ' disabled' : '') + ' /></label>'
+             + '<label class="pm-field oa-pl-span-2"><span>Name <span class="required">*</span></span><input class="pm-input" id="oaUcName" maxlength="200" value="' + esc(g(m, 'name') || '') + '" /></label>'
+             + (hasParent() ? '<label class="pm-field"><span>Category <span class="required">*</span></span><select class="pm-input" id="oaUcParent"><option value="">Choose...</option>'
+                   + cats.map(function (c) {
+                         return '<option value="' + esc(g(c, 'masterId')) + '"' + (String(g(c, 'masterId')) === String(g(m, 'parentMasterId')) ? ' selected' : '') + '>' + esc(g(c, 'name')) + '</option>';
+                     }).join('') + '</select></label>' : '')
+             + (hasRank() ? '<label class="pm-field"><span>Rank</span><input class="pm-input" type="number" step="1" id="oaUcRank" value="' + esc(g(m, 'rankValue') == null ? '' : g(m, 'rankValue')) + '" /></label>' : '')
+             + '<label class="pm-field"><span>Order</span><input class="pm-input" type="number" step="1" id="oaUcOrder" value="' + esc(g(m, 'displayOrder') == null ? 0 : g(m, 'displayOrder')) + '" /></label>'
+             + '<label class="pm-field"><span>Active</span><select class="pm-input" id="oaUcActive"' + (sys ? ' disabled' : '') + '>' + yes(e.id == null ? true : !!g(m, 'isActive')) + '</select></label>'
+             + '<label class="pm-field oa-pl-span-all"><span>Description</span><textarea class="pm-input" id="oaUcDesc" rows="2" maxlength="1000">' + esc(g(m, 'description') || '') + '</textarea></label>'
+             + '</div>'
+             + '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="save">Save</a><a href="#" class="oa-pl-more" data-do="cancel">Cancel</a></div>';
+    }
+    async function save() {
+        const e = state.edit, m = e.row || {};
+        const code = document.getElementById('oaUcCode').value.trim(), name = document.getElementById('oaUcName').value.trim();
+        if (!code || !name) { await window.gracUi.alert('Code and Name are required.', { type: 'error' }); return; }
+        const parent = hasParent() ? document.getElementById('oaUcParent').value : '';
+        if (hasParent() && !parent) { await window.gracUi.alert('Choose the Category.', { type: 'error' }); return; }
+        const rank = hasRank() ? document.getElementById('oaUcRank').value : '';
+        try {
+            await post('/universe-masters', {
+                organizationId: Number(state.orgId), universeMasterId: e.id != null ? Number(e.id) : null,
+                masterGroup: state.group, code: e.id != null ? g(m, 'code') : code, name: name,
+                description: document.getElementById('oaUcDesc').value.trim() || null,
+                parentMasterId: parent ? Number(parent) : null, rankValue: rank === '' ? null : Number(rank),
+                displayOrder: Number(document.getElementById('oaUcOrder').value || 0),
+                isActive: document.getElementById('oaUcActive').value === '1', actor: null });
+            state.edit = null;
+            wf.setMessage('oaUcMessage', 'Saved.', 'ok');
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+})();
+</script>

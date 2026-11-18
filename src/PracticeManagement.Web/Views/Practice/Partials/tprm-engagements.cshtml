@@ -86,7 +86,6 @@
         </div>
         <p class="pm-message" id="enMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-toolbar">
-            <input type="search" id="enSearch" placeholder="Search engagement, code or vendor" maxlength="200" />
             <select id="enStageFilter" title="Stage">
                 <option value="OPEN">Open engagements</option>
                 <option value="IN_ASSESSMENT">In assessment</option>
@@ -109,6 +108,7 @@
                 <option value="REASSESS">Reassessment required</option>
                 <option value="REVIEW_DUE">Review due in 30 days</option>
             </select>
+            <input type="search" id="enSearch" placeholder="Search engagement, code or vendor" maxlength="200" />
             <button class="pm-button icon" id="enRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             @if (enCanAdd)
             {

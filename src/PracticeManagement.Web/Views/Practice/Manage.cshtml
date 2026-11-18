@@ -54,6 +54,12 @@
         // approve / reject framework subscription requests. Own partial, own
         // proxy (practice/api/subscription-requests).
         "subscription-requests",
+        // Organization Management -> Organization Registry (migrations
+        // 569-572): Organization -> Legal Entity hierarchy and the registry
+        // areas of the organization master-data workbook. Own partial, own
+        // JS (js/Organization/org-registry.js), own proxy
+        // (practice/api/org-registry).
+        "org-registry",
         // Resolve (migrations 140/141): a flat owner-scoped list, and a
         // full-page workspace per instance. "resolve" moves here from the
         // generic grid, so practice.js no longer renders the old tabbed
@@ -81,6 +87,13 @@
         "org-workpapers",                     // 567
         "org-assurance-observations",
         "org-audit-reports",                  // 568
+        "org-audit-universe",                 // 577
+        "org-audit-universe-config",          // 577
+        "org-audit-universe-mapping",         // 580
+        "org-audit-risk-intelligence",        // 581
+        "org-audit-rbia-config",              // 582
+        "org-audit-rbia-assessment",          // 582
+        "org-audit-plan-recommendations",     // 583
         // "org-assurance-gaps" retired (109-113); Assurance gaps now
         // land in the unified Gap Center (Practice/Index/gaps).
         // Document Upload + Acknowledgement module (migrations 146-154).
@@ -225,6 +238,16 @@
         return;
     }
 
+    // 574/575: the Organization Registry's Practice Management menus share
+    // org-registry's partial.
+    if (Model.Key.Equals("org-registry-structure", StringComparison.OrdinalIgnoreCase)
+        || Model.Key.Equals("org-registry-people", StringComparison.OrdinalIgnoreCase)
+        || Model.Key.Equals("org-registry-operations", StringComparison.OrdinalIgnoreCase))
+    {
+        <partial name="Partials/org-registry" model="Model" />
+        return;
+    }
+
     if (workflowScreens.Contains(Model.Key))
     {
         @* Emitted before the early return below, so BOTH paths get it: the
@@ -285,6 +308,7 @@
     var isResolve = Model.Key == "resolve" || Model.Key == "practice-operationalization";
     var isReadOnlyAssuranceView = Model.Key == "assurance-dashboard" || Model.Key == "assurance-trends" || Model.Key == "practice-health" || Model.Key == "audit-intelligence" || Model.Key == "risk-intelligence";
     var isOrganizationWorkspace = isOrganizationOnboarding || isOrganizationAdministration || isOrganizationDependencies;
+    var showChildTabs = !organizationSetupInModule && !isOrganizationAdministration;
     var setupChildTabs = isOrganizationDependencies
         ? new[] {
             // Applications and Tools tabs retired -- the Asset taxonomy
@@ -299,15 +323,15 @@
             new { Key = "dependency-assets", Title = "Assets", Description = "Physical or logical assets (applications, tools, hardware, facilities) supporting practices." },
             new { Key = "dependency-processes", Title = "Processes", Description = "Business processes supporting organizational execution." }
         }
-        : isOrganizationAdministration
-        ? new[] {
-            new { Key = "locations", Title = "Location", Description = "Locations under the selected organization." },
-            new { Key = "departments", Title = "Department", Description = "Departments under the selected organization." },
-            new { Key = "business-functions", Title = "Business Function", Description = "Business functions under the selected organization." },
-            new { Key = "teams", Title = "Teams", Description = "Teams under the selected organization." },
-            new { Key = "committees", Title = "Committees", Description = "Committees under the selected organization." },
-            new { Key = "users", Title = "Users / Employees", Description = "Employees and users available for ownership and assignment." }
-        }
+        // Organization Administration's child tabs (Location, Department,
+        // Business Function, Teams, Committees, Users / Employees) were
+        // retired on 2026-11-16 (sir): the same records are maintained on
+        // Practice Management -> Organization -> Organization Structure /
+        // People & Governance / Business Operations (org-registry-*, 575),
+        // which took over their remaining fields (time zone, criticality,
+        // team sourcing / vendor / members), and on User Management (login,
+        // role, credentials, single sign-on approval). The page keeps its
+        // Organization tab only -- showChildTabs below.
         : new[] {
             new { Key = "locations", Title = "Location", Description = "Locations under the selected organization." },
             new { Key = "departments", Title = "Department", Description = "Departments under the selected organization." },
@@ -348,7 +372,7 @@
            uses for the row click. *@
         @if (Model.Key == "organizations" && permissions.Contains("ADD"))
         {
-        <a class="pm-button primary" href="@organizationSetupUrl"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Organization</a>
+        <a class="pm-button primary" href="@organizationSetupUrl"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Legal Entity</a>
         }
         @* Back to the organization list. The generic #pageBackBtn above is
            suppressed on every organization-workspace screen and points at
@@ -398,7 +422,7 @@
         {
         <button type="button" class="active" data-setup-tab="organization">Organization</button>
         }
-        @if (!organizationSetupInModule)
+        @if (showChildTabs)
         {
             for (var i = 0; i < setupChildTabs.Length; i++)
             {
@@ -510,7 +534,7 @@
     </div>
     </div>
     }
-    @for (var i = 0; i < (organizationSetupInModule ? 0 : setupChildTabs.Length); i++)
+    @for (var i = 0; i < (showChildTabs ? setupChildTabs.Length : 0); i++)
     {
         var tab = setupChildTabs[i];
         var activeClass = isOrganizationDependencies && i == 0 ? "active" : "";
@@ -608,15 +632,10 @@ else
 var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model.Key == "organization-controls";
 <section class="pm-panel">
     <div class="pm-toolbar @(usesApplicabilityFilters ? "pm-toolbar-compact" : "")">
-        @* On every other screen, search stays first -- unchanged. Organization
-           Practices moves it to the end of the filter row instead (right
-           before Clear Filter), so Organization -> Framework -> Applicability
-           Status all read left-to-right before the free-text box. Exactly one
-           of the two branches below renders #search, never both. *@
-        @if (Model.Key != "organization-requirements")
-        {
-            <input id="search" placeholder="Search..." />
-        }
+        @* 2026-11-16 (sir): on every screen the search box is the LAST
+           filter -- after every select / date / owner filter, before Clear
+           Filter and Refresh -- so the toolbars read the same everywhere.
+           #search is rendered once, after #dateToFilter below. *@
         @* The Organization Management landing list (2026-11-02) hides the
            filters that cannot apply to it: the rows ARE the organizations,
            and Owner / Criticality / Origin are not columns of an
@@ -646,10 +665,6 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
             <select id="sourceFilter"><option value="">All sources</option><option value="repository">Repository</option><option value="organization">Organization</option></select>
         }
         <select id="status" @(Model.Key == "organization-controls" ? "hidden" : "")><option value="">@(usesApplicabilityFilters ? "All applicability statuses" : "All statuses")</option></select>
-        @if (Model.Key == "organization-requirements")
-        {
-            <input id="search" placeholder="Search practices..." />
-        }
         <select id="originTypeFilter" @(usesApplicabilityFilters || Model.Key == "source-statements" || Model.Key == "organizations" ? "hidden" : "")><option value="">All origins</option></select>
         <select id="criticalityFilter" @(Model.Key == "organization-requirements" || Model.Key == "organization-controls" || Model.Key == "organizations" ? "hidden" : "")><option value="">All criticalities</option></select>
         <input id="ownerFilter" placeholder="Owner..." @(usesApplicabilityFilters || Model.Key == "organizations" ? "hidden" : "") />
@@ -659,6 +674,7 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
            did nothing. *@
         <input id="dateFromFilter" type="date" title="Entered from" @(usesApplicabilityFilters || Model.Key == "source-statements" ? "hidden" : "") />
         <input id="dateToFilter" type="date" title="Entered to" @(usesApplicabilityFilters || Model.Key == "source-statements" ? "hidden" : "") />
+        <input id="search" placeholder="@(Model.Key == "organization-requirements" ? "Search practices..." : "Search...")" />
         @if (usesApplicabilityFilters)
         {
             <button class="pm-button" id="clearFilters" type="button">Clear Filter</button>
@@ -825,5 +841,10 @@ var usesApplicabilityFilters = Model.Key == "organization-requirements" || Model
     <script src="~/js/role-menu-permission-editor.js" asp-append-version="true"></script>
     @* pm-grid before practice.js: the grid mounts its pager during init. *@
     <script src="~/js/pm-grid.js" asp-append-version="true"></script>
+    @* 2026-11-16: the Organization Practices applicability form's team list
+       (Shared/practice-teams.js) and the practice id read-back after an
+       Applicable save (Shared/practice-details.js). *@
+    <script src="~/js/Shared/practice-details.js" asp-append-version="true"></script>
+    <script src="~/js/Shared/practice-teams.js" asp-append-version="true"></script>
     <script src="~/js/practice.js" asp-append-version="true"></script>
 }

@@ -629,6 +629,163 @@ a.btn-signin:focus {
   }
 }
 
+/* ---- 2026-11-17: white sign-in column -----------------------------------
+   Sir: two columns -- the navy brand scene on the left, the sign-in part
+   on a white background on the right. Everything for it is in this block
+   (and the desktop media query below it), so removing the block brings
+   the glass card on the navy scene back unchanged.
+   Applies to every screen on this stylesheet (Sign in, Change password,
+   Forgot / Reset password), which share the layout. */
+.form-card,
+.form-card:hover,
+.form-card:focus-within {
+  border: 0;
+  background: var(--bg-surface);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transform: none;
+}
+
+.form-card::before,
+.form-card::after {
+  display: none;
+}
+
+.greeting h1 { color: var(--fg-default); }
+.greeting p { color: var(--fg-muted); }
+.form-label { color: var(--fg-muted); }
+.input-icon > i { color: var(--fg-subtle); }
+
+.login-split .form-control {
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+}
+
+.login-split .form-control::placeholder { color: var(--fg-subtle); }
+
+.login-split .form-control:focus {
+  border-color: var(--primary-500);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 3px rgba(70, 124, 235, .18);
+}
+
+.login-split .form-control:-webkit-autofill,
+.login-split .form-control:-webkit-autofill:hover,
+.login-split .form-control:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--fg-default);
+  box-shadow: 0 0 0 1000px var(--bg-surface) inset;
+  caret-color: var(--fg-default);
+}
+
+.pw-toggle { color: var(--fg-subtle); }
+.pw-toggle:hover,
+.pw-toggle:focus-visible {
+  color: var(--fg-default);
+  background: var(--bg-subtle);
+}
+
+.forgot-link { color: var(--primary-600); }
+.validation-message { color: var(--danger-600); }
+.login-notice { color: var(--success-700); }
+
+.sso-divider { color: var(--fg-subtle); }
+.sso-divider::before,
+.sso-divider::after { border-top-color: var(--border); }
+
+.btn-sso {
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--fg-default);
+}
+
+.btn-sso:hover,
+.btn-sso:focus {
+  border-color: var(--primary-500);
+  color: var(--fg-default);
+}
+
+/* Desktop: the white column runs the full height of the screen, to the
+   right edge; the brand scene keeps the rest. */
+@media (min-width: 993px) {
+  .login-wrapper {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .split-card {
+    /* 2026-11-17: brand side and white column split half and half. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    align-items: stretch;
+    max-width: none;
+    min-height: 100vh;
+  }
+
+  .brand-panel {
+    align-self: center;
+    width: 100%;
+    max-width: 960px;
+    /* Hub and tagline sit towards the left, under the logo, rather than
+       centred in the navy column. */
+    margin: 0 auto 0 0;
+    padding: calc(var(--login-logo-top) + var(--login-logo-h) + 24px) clamp(24px, 4vw, 56px) clamp(24px, 4vw, 48px);
+  }
+
+  .form-panel {
+    align-items: center;
+    padding: 48px clamp(24px, 4vw, 64px);
+    background: var(--bg-surface);
+    box-shadow: -24px 0 60px rgba(0, 0, 0, .28);
+    perspective: none;
+  }
+
+  /* The particle wave runs on across the white column too: the canvas is
+     lifted above the column's white background, and the content of both
+     sides is lifted above the canvas (the sign-in card keeps its own white
+     background, so the wave passes behind the form, not over it). */
+  .login-wave {
+    z-index: 1;
+  }
+
+  /* The tagline is centred under the Practice Core: same width as the
+     hub stage (max 720px, left-aligned in this column), text centred. */
+  .brand-tagline {
+    max-width: 720px;
+    text-align: center;
+    /* 10% smaller than the base clamp(24px, 2.8vw, 40px). */
+    font-size: clamp(22px, 2.52vw, 36px);
+    /* Closer to the hub (base margin clamp(16px, 3vw, 32px)): the stage's
+       bottom edge is already clear space below the lowest chips. */
+    margin-top: -8px;
+  }
+
+  /* Practice Core 10% smaller (base: width 31%, font clamp(14px, 2vw,
+     28px)); it stays centred in the stage, so the connectors still meet
+     it at the middle. */
+  .hub-core {
+    width: 27.9%;
+    font-size: clamp(13px, 1.8vw, 25px);
+  }
+
+  .hub-stage,
+  .brand-tagline,
+  .brand-modules,
+  .form-card {
+    position: relative;
+    z-index: 2;
+  }
+}
+
+/* Phone / tablet: the scene is stacked; the sign-in part is a white card. */
+@media (max-width: 992px) {
+  .form-card {
+    border-radius: 16px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .4);
+  }
+}
+
 /* Tablet / phone: the card comes first, then the tagline and modules.
    The hub is a desktop-sized picture -- at phone width its chips are too
    small to read -- so it is dropped, as the old flow diagram was. */

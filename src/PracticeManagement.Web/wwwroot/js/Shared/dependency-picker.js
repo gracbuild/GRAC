@@ -317,7 +317,7 @@
             }
             return '<tr data-dp-row data-key="' + esc(r.c.key) + '"'
                  + (r.dept ? ' data-dept-key="' + esc(r.dept.cat.key) + '"' : '') + '>'
-                 + '<td style="vertical-align:middle"><strong>' + esc(r.dept ? DEPT + ' / ' + r.name : r.name) + '</strong></td>'
+                 + '<td style="vertical-align:middle">' + esc(r.dept ? DEPT + ' / ' + r.name : r.name) + '</td>'
                  + '<td style="vertical-align:middle">' + cell + '</td></tr>';
         }).join('');
 

@@ -47,7 +47,6 @@
         </div>
         <p class="pm-message" id="ecMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-toolbar">
-            <input type="search" id="ecSearch" placeholder="Search title, file name or tag" maxlength="200" />
             <select id="ecTypeFilter" title="Evidence type"><option value="">All types</option></select>
             <select id="ecOwnerFilter" title="Owner"><option value="">All owners</option></select>
             <select id="ecValidityFilter" title="Validity">
@@ -66,6 +65,7 @@
                 <option value="Retired">Retired</option>
                 <option value="All">All</option>
             </select>
+            <input type="search" id="ecSearch" placeholder="Search title, file name or tag" maxlength="200" />
             <button class="pm-button icon" id="ecRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             @if (ecCanAdd)
             {

@@ -71,6 +71,9 @@ public sealed class ManagementDashboardController(
 
         var client = BuildClient();
         var relativeUrl = $"api/practice/management-dashboard/{Uri.EscapeDataString(module)}?organizationId={organizationId}";
+        // 573: Governance framework filter (one subscribed release).
+        if (long.TryParse(Request.Query["releaseId"], out var releaseId) && releaseId > 0)
+            relativeUrl += $"&releaseId={releaseId}";
         try
         {
             using var msg = new HttpRequestMessage(HttpMethod.Get, relativeUrl);

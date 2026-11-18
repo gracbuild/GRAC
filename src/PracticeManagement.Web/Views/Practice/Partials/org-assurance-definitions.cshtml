@@ -359,7 +359,9 @@
             const name = c.name || c.Name || '';
             const opt  = document.createElement('option');
             opt.value = String(id != null ? id : '');
-            opt.textContent = name + (code ? ' (' + code + ')' : '');
+            // 2026-11-16 (sir): the name only -- the code is not shown in
+            // brackets. It stays on data-code for whoever reads it.
+            opt.textContent = name || code;
             opt.setAttribute('data-code', code);
             opt.setAttribute('data-name', name);
             sel.appendChild(opt);

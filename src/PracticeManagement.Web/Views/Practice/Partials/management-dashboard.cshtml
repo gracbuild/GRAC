@@ -26,6 +26,11 @@
     Policies & Documents (508) and Asset & Contract (509). The 414
     "KPIs per section -> ageing -> distributions -> lists" layout above is
     gone (management-dashboard.js, practice-management.css).
+
+    573: Governance framework filter -- #mdFramework beside the
+    organization ("All frameworks" first; options are the organization's
+    subscribed releases). Hidden until Governance fills it; the other
+    dashboards never show it.
 *@
 @model PracticeManagement.Web.Models.PracticeScreen
 @{
@@ -45,6 +50,7 @@
          data-module="@module" data-screen="@Model.Key" data-sections="@string.Join(",", sections)">
     <div class="pm-toolbar">
         <select id="mdOrganization" title="Organization"><option value="">Select organization</option></select>
+        <select id="mdFramework" title="Framework" hidden><option value="">All frameworks</option></select>
         <button class="pm-button icon" id="mdRefreshBtn" type="button" title="Refresh" aria-label="Refresh">
             <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
         </button>

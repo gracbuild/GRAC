@@ -762,7 +762,7 @@
       const comment = editable && type !== "TEXT" ? `<input type="text" data-ans-text placeholder="Comment" value="${esc(type === "TEXT" ? "" : F(q, "answerText") || "")}" />` : "";
       const rating = F(q, "ratingCode") ? state.lk.badge("RESPONSE_RATING", F(q, "ratingCode")) : (F(q, "status") === "ANSWERED" ? '<span class="tprm-muted">Not rated</span>' : "");
       return `<tr class="en-q-row${F(q, "parentQuestionCode") ? " is-followup" : ""}" data-response="${esc(rid)}" data-type="${esc(type)}">
-        <td><strong>${esc(F(q, "questionCode"))}</strong> ${esc(F(q, "questionText"))}${yes(F(q, "isMandatory")) ? " *" : ""}
+        <td>${esc(F(q, "questionCode"))} ${esc(F(q, "questionText"))}${yes(F(q, "isMandatory")) ? " *" : ""}
           ${F(q, "guidance") ? `<div class="tprm-muted">${esc(F(q, "guidance"))}</div>` : ""}
           ${F(q, "sourceAuthority") ? `<div class="tprm-muted">Source: ${esc(F(q, "sourceAuthority"))}${F(q, "sourceReference") ? ", " + esc(F(q, "sourceReference")) : ""}${yes(F(q, "isRegulatory")) ? "" : " (not a regulatory requirement)"}</div>` : ""}</td>
         <td><div class="en-answer">${answer}${comment}</div>

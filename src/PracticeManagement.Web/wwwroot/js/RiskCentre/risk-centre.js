@@ -4534,7 +4534,7 @@
 
       if (!cat.isSelectable) {
         return `<tr>
-          <td><strong>${escapeHtml(cat.dependencyTypeName)}</strong></td>
+          <td>${escapeHtml(cat.dependencyTypeName)}</td>
           <td><span class="pm-hint">Not configured for object selection on this database.</span></td>
         </tr>`;
       }
@@ -4555,7 +4555,7 @@
       // which is why they are skipped here too.
       if (st.impactReadOnly) {
         return `<tr class="risk-dep-row" data-dep-cat="${cat.dependencyTypeId}">
-          <td><strong>${escapeHtml(cat.dependencyTypeName)}</strong>${
+          <td>${escapeHtml(cat.dependencyTypeName)}${
             mapped.length ? ` <span class="pm-hint">(${mapped.length})</span>` : ""}</td>
           <td>${mapped.length
             ? `<div class="risk-dep-chips">${mapped.map(d => {
@@ -6281,6 +6281,7 @@
       ? "Already accepted. Re-recording the decision replaces what was stored."
       : "Confirm that this level of residual risk is acceptable, and set when it comes back for review.");
     document.getElementById("acHeadStatus").innerHTML = lifecycleChip(risk);
+    renderDecisionHistory(riskId, "ac");   // 2026-11-18 -- not awaited; the form does not depend on it
 
     // ---- Read-only: the risk, and what it scored ---------------------
     // The SAME field lists the residual page's step 1 uses. Two lists
@@ -6366,7 +6367,12 @@
       resolveReviewFrequencyId(info.reviewFrequencyId, info.reviewFrequencyName),
       "-- select --");
 
-    setVal("acAcceptedDate", info.acceptedOn ? isoDate(info.acceptedOn) : isoDate(new Date()));
+    // 2026-11-16: the recorded date only when the risk IS accepted (re-
+    // recording that decision). A risk back for acceptance after a review
+    // (Monitoring) is a NEW acceptance, dated today -- carrying the old
+    // date over filed today's acceptance under the previous one's date.
+    setVal("acAcceptedDate", info.acceptedOn && risk.statusCode === "Accepted"
+      ? isoDate(info.acceptedOn) : isoDate(new Date()));
     // A year out, as a starting point rather than a policy. The field is
     // required and the server refuses a past date; the default only
     // saves the common case a calendar click.
@@ -7199,6 +7205,7 @@
       dd("Review due", risk.nextReviewDate ? window.gracFormatDateOnly(risk.nextReviewDate) : "--") +
       dd("Last reviewed", risk.lastReviewedOn
           ? `${window.gracFormatDateOnly(risk.lastReviewedOn)} (${risk.reviewCount} so far)` : "never");
+    renderDecisionHistory(riskId);   // 576 -- not awaited; the form does not depend on it
 
     const head = document.getElementById("rvHeadStatus");
     if (head) head.innerHTML = risk.riskNumber
@@ -7934,6 +7941,12 @@
       att.push({ title: "Target rating not met", severity: "Medium",
         count: mOpen.filter(x => x.targetMet === false).length,
         detail: "Residual rating is still above the target set at analysis or review." });
+    // 574: the likelihood / impact scale or the risk matrix changed; these
+    // risks keep their stored rating but are off the heat maps until
+    // assessed again.
+    if ((cov.reassessmentNeeded || 0) > 0)
+      att.push({ title: "Re-assessment needed", severity: "High", count: cov.reassessmentNeeded,
+        detail: "Assessed on an earlier likelihood / impact scale or risk matrix; not on the heat maps until assessed again." });
 
     // ---- E1. Heatmaps + lifecycle ---------------------------------------
     const levels = d.matrixLevels || [];
@@ -7941,11 +7954,13 @@
       `<div class="risk-heatmaps">
         <div><h4 class="risk-subhead">Inherent <span class="pm-hint">likelihood &times; impact</span></h4>
              <div class="risk-heatmap" id="dashHeatInherent"></div>
-             <p class="pm-hint">${escapeHtml(`${cov.inherentRated || 0} of ${open} open risks plotted.`)}</p></div>
+             <p class="pm-hint">${escapeHtml(`${(cov.inherentRated || 0) - (cov.inherentReassessment || 0)} of ${open} open risks plotted`
+               + ((cov.inherentReassessment || 0) > 0 ? `; ${cov.inherentReassessment} on the previous scale (re-assessment needed).` : "."))}</p></div>
         <div><h4 class="risk-subhead">Residual <span class="pm-hint">likelihood &times; impact</span></h4>
              <div class="risk-heatmap" id="dashHeatResidual"></div>
-             <p class="pm-hint">${escapeHtml(`${cov.residualRated || 0} of ${open} open risks plotted`
-               + ((cov.residualPending || 0) > 0 ? `; ${cov.residualPending} awaiting residual assessment.` : "."))}</p></div>
+             <p class="pm-hint">${escapeHtml(`${(cov.residualRated || 0) - (cov.residualReassessment || 0)} of ${open} open risks plotted`
+               + ((cov.residualPending || 0) > 0 ? `; ${cov.residualPending} awaiting residual assessment` : "")
+               + ((cov.residualReassessment || 0) > 0 ? `; ${cov.residualReassessment} on the previous scale (re-assessment needed)` : "") + ".")}</p></div>
       </div>` });
     const lifecycle = stages.length
       ? D.distCard({ title: "Treatment lifecycle", totalLabel: "open risks", mode: "bars",
@@ -8471,11 +8486,15 @@
     const m = state.methodology;
     if (!m) { host.hidden = true; host.innerHTML = ""; unlockImpact(prefix); return; }
 
-    let saved = null;
+    let saved = null, reassess = false;
     try {
       const r = await fetch(U(`${base}/register/${riskId}/methodology`), { credentials: "same-origin" });
       if (r.ok) {
         const b = await r.json();
+        // 574: assessed on an earlier likelihood / impact scale or risk
+        // matrix -- the stage's stored values are not offered again.
+        const sc = (b.sets?.scale || [])[0] || {};
+        reassess = !!(prefix === "rr" ? sc.residualReassessmentNeeded : sc.inherentReassessmentNeeded);
         const as = b.sets?.assessments || [];
         const slot = prefix === "rr" ? "Residual" : prefix === "ra" ? "Latest" : "Inherent";
         const a = as.find(x => x.slot === slot) || (prefix === "rr" ? null : as.find(x => x.slot === "Inherent"));
@@ -8489,17 +8508,27 @@
     const multi = v.impactMode === "Max" || v.impactMode === "Average";
     const quant = !!v.quantificationEnabled;
     const savedLevel = code => (saved?.values || []).find(x => x.valueKind === "Dimension" && x.valueCode === code)?.levelValue;
-    const savedArea  = code => (saved?.values || []).find(x => x.valueKind === "ImpactArea" && x.valueCode === code)?.levelValue;
+    // 574: impact-area levels are on the impact scale -- not re-offered after a scale change.
+    const savedArea  = code => reassess ? undefined : (saved?.values || []).find(x => x.valueKind === "ImpactArea" && x.valueCode === code)?.levelValue;
     const impactCodeOf = level => (state.options?.impact || []).find(x => x.levelValue === level)?.code || "";
 
+    // 574: a fresh likelihood and impact, on the current scale.
+    const reassessNote = reassess
+      ? `<p class="pm-form-message risk-reassess-note" role="status"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> `
+        + `Re-assessment needed: this risk was assessed on an earlier likelihood / impact scale or risk matrix. `
+        + `Select likelihood and impact again on the current scale.</p>`
+      : "";
+    if (reassess) { setVal(prefix + "Likelihood", ""); setVal(prefix + "Impact", ""); }
+
     if (!dims.length && !showTarget && !multi && !quant && v.scoringMode === "Matrix") {
+      if (reassess) { host.innerHTML = reassessNote; host.hidden = false; unlockImpact(prefix); onMethodologyChanged(prefix); return; }
       host.hidden = true; host.innerHTML = ""; unlockImpact(prefix); return;
     }
 
     const opt = (value, label, sel, title) =>
       `<option value="${escapeHtml(value)}"${sel ? " selected" : ""}${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(label)}</option>`;
 
-    let html = `<h3 class="risk-subhead">${escapeHtml(v.methodologyName || "Risk methodology")} <span class="pm-hint">version ${escapeHtml(v.versionNo)}`
+    let html = reassessNote + `<h3 class="risk-subhead">${escapeHtml(v.methodologyName || "Risk methodology")} <span class="pm-hint">version ${escapeHtml(v.versionNo)}`
       + `${v.scoringMode === "3D" ? " · 3D scoring" : v.scoringMode === "Priority" ? " · priority scoring" : ""}</span></h3>`
       + `<div class="pm-form-grid ra-grid-score">`;
 
@@ -8566,7 +8595,7 @@
       impactSel.disabled = multi;
       impactSel.title = multi ? "Derived from Impact by area below." : "";
     }
-    if (multi && saved && impactSel && !impactSel.value) impactSel.value = impactCodeOf(saved.derivedImpactValue);
+    if (multi && saved && impactSel && !impactSel.value && !reassess) impactSel.value = impactCodeOf(saved.derivedImpactValue);
     onMethodologyChanged(prefix);
   }
 
@@ -8677,6 +8706,35 @@
              ratingScore: r?.ratingRank ?? null, colourHex: r?.colourHex, score3d: score };
   }
 
+  // 576: every acceptance and review of the risk, newest first
+  // (sp_risk_decision_history_list), on the Review page ("rv") and, since
+  // 2026-11-18, the Accept page ("ac") -- one renderer, two hosts.
+  async function renderDecisionHistory(riskId, prefix = "rv") {
+    const host = document.getElementById(`${prefix}HistoryBody`);
+    if (!host) return;
+    const count = document.getElementById(`${prefix}HistoryCount`);
+    if (count) count.textContent = "";
+    host.innerHTML = `<tr><td colspan="4" class="pm-empty">Loading...</td></tr>`;
+    // apiGetChecked, not apiGet: a failure says WHY (e.g. migration 576 not
+    // run, or the Api not restarted) instead of looking like an empty list.
+    const res = await apiGetChecked(`/register/${riskId}/decision-history`);
+    const rows = res.ok ? res.data : null;
+    const list = Array.isArray(rows) ? rows : [];
+    if (count && list.length) count.textContent = `${list.length} event${list.length === 1 ? "" : "s"}`;
+    host.innerHTML = list.length
+      ? list.map(h => `<tr>
+          <td>${escapeHtml(h.eventType || "")}</td>
+          <td>${h.eventDate ? escapeHtml(window.gracFormatDateOnly(h.eventDate)) : "--"}</td>
+          <td>${escapeHtml(h.byName || "--")}</td>
+          <td class="risk-history-desc">${h.description ? escapeHtml(h.description) : '<span class="pm-hint">No remark</span>'}${
+            // An acceptance recorded with an earlier acceptance date says so.
+            h.acceptedOn && String(h.acceptedOn).slice(0, 10) !== String(h.eventDate || "").slice(0, 10)
+              ? `<div class="pm-hint">Acceptance date entered: ${escapeHtml(window.gracFormatDateOnly(h.acceptedOn))}</div>` : ""}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="4" class="pm-empty">${Array.isArray(rows) ? "Not accepted or reviewed yet."
+          : escapeHtml(`The history could not be loaded: ${res.error || "unknown error"}`)}</td></tr>`;
+  }
+
   // Register grid: appetite, trend, target and priority beside the
   // residual cell, from one summary read per refresh.
   // One row per risk (sp_risk_methodology_register_summary), shared by
@@ -8714,6 +8772,9 @@
         tags.push(`<span class="risk-method-tag" title="Priority score">P ${escapeHtml(s.priorityScore)}</span>`);
       if (s.score3d != null)
         tags.push(`<span class="risk-method-tag" title="3D score">3D ${escapeHtml(s.score3d)}</span>`);
+      // 574: rated on an earlier likelihood / impact scale or risk matrix.
+      if (s.inherentReassessmentNeeded || s.residualReassessmentNeeded)
+        tags.push(`<span class="risk-method-tag is-alert" title="Assessed on an earlier likelihood / impact scale or risk matrix. Assess it again on the current scale.">Re-assessment needed</span>`);
       if (tags.length) cell.insertAdjacentHTML("beforeend", `<div class="risk-method-tags">${tags.join("")}</div>`);
     });
   }

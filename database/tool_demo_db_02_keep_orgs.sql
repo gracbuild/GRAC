@@ -1,12 +1,23 @@
 -- =====================================================================
--- tool_demo_db_02_keep_orgs.sql  --  step 2 of 2: keep two organizations
+-- tool_demo_db_02_keep_orgs.sql  --  step 2 of 2: keep chosen organizations
 --
--- Run INSIDE grac_new_demo (the copy made by tool_demo_db_01_clone.sql).
+-- Run INSIDE the copy made by tool_demo_db_01_clone.sql (@TargetDatabase).
 -- It deletes every organization's data EXCEPT the ones in
--- @KeepOrganizationIds (default '1,9' = MSP and SD). Nothing else changes:
+-- @KeepOrganizationIds. Nothing else changes:
+--
+-- USES
+--   2026-10-06  grac_new_demo from UAT: @KeepOrganizationIds '1,9' (MSP, SD),
+--               @IncludeGracNew 0.
+--   2026-11-18  Grac_Pilot from grac_demo (sir): '1,11' (MSP, Lakeshore);
+--               @IncludeGracNew 1 -- GRAC_New rows of other organizations go
+--               too (its global rows, organization_id NULL, stay); other
+--               tables "structure only" through @EmptyTables (below).
+--   (the defaults below are the latest use)
 --   * schema, procedures, views, functions, triggers, security policy:
 --     untouched (rows only);
---   * schema GRAC_New (Control Management / repository): never touched;
+--   * schema GRAC_New (Control Management / repository): never touched
+--     while @IncludeGracNew = 0; with 1 it is treated like every other
+--     schema (rows of other organizations removed, global rows kept);
 --   * master / global tables: kept -- a row is deleted only if it carries
 --     an organization_id of another organization, or (below) it depended on
 --     a row that was deleted. Global rows (organization_id NULL) stay.
@@ -14,6 +25,12 @@
 -- HOW (no hand-written table list, so tables added later are covered)
 --   A. Every table outside GRAC_New that has an organization_id column:
 --      DELETE rows whose organization_id is set and not kept.
+--   A2. @EmptyTables: tables to keep as structure only (every row deleted).
+--      Comma list of LIKE patterns on schema.table, e.g.
+--      'grac_practice.%_log, grac_practice.notification_outbox'. Empty by
+--      default -- the dry run lists every table that keeps ALL its rows
+--      (no organization_id and nothing deleted by the cascade) with its row
+--      count, so the masters can be told from logs / queues before choosing.
 --   B. Cascade: rows left pointing at a deleted row are deleted too, FK by
 --      FK, pass after pass until a pass deletes nothing. Only foreign keys
 --      that were ENABLED and TRUSTED are followed -- for those SQL Server
@@ -28,11 +45,11 @@
 --   runs in ONE transaction.
 --
 -- SAFETY
---   * Refuses to run in any database but @TargetDatabase (grac_new_demo) --
+--   * Refuses to run in any database but @TargetDatabase (Grac_Pilot) --
 --     it can never be run against UAT by mistake.
 --   * @DryRun = 1 (default): does everything, prints what it deleted per
 --     table, then ROLLS BACK. Set @DryRun = 0 and @ConfirmDatabase =
---     'grac_new_demo' to keep the result.
+--     the target database name to keep the result.
 --   * Every kept organization id must exist, or it stops.
 --
 -- NOTES
@@ -48,10 +65,12 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @KeepOrganizationIds NVARCHAR(400) = N'1,9';   -- MSP, SD
-DECLARE @TargetDatabase      SYSNAME       = N'grac_new_demo';
+DECLARE @KeepOrganizationIds NVARCHAR(400) = N'1,11';  -- MSP, Lakeshore (demo was '1,9')
+DECLARE @TargetDatabase      SYSNAME       = N'Grac_Pilot';
+DECLARE @IncludeGracNew      BIT           = 1;        -- 0: GRAC_New never touched (the demo run)
+DECLARE @EmptyTables         NVARCHAR(MAX) = N'';      -- structure-only tables: LIKE patterns on schema.table
 DECLARE @DryRun              BIT           = 1;
-DECLARE @ConfirmDatabase     SYSNAME       = N'';      -- type grac_new_demo when @DryRun = 0
+DECLARE @ConfirmDatabase     SYSNAME       = N'';      -- type the target database name when @DryRun = 0
 
 DECLARE @CurrentDatabase SYSNAME = DB_NAME();   -- RAISERROR takes variables, not function calls
 IF @CurrentDatabase <> @TargetDatabase
@@ -96,14 +115,28 @@ DECLARE @keepList NVARCHAR(MAX) = (SELECT STRING_AGG(CONVERT(NVARCHAR(30), organ
 /* Scope: user tables outside GRAC_New                                 */
 /* ------------------------------------------------------------------ */
 IF OBJECT_ID('tempdb..#scope') IS NOT NULL DROP TABLE #scope;
-CREATE TABLE #scope (object_id INT PRIMARY KEY, qname NVARCHAR(400) NOT NULL, has_org BIT NOT NULL);
-INSERT #scope (object_id, qname, has_org)
+CREATE TABLE #scope (object_id INT PRIMARY KEY, qname NVARCHAR(400) NOT NULL, has_org BIT NOT NULL,
+                     plain_name NVARCHAR(300) NOT NULL, empty_it BIT NOT NULL DEFAULT 0);
+INSERT #scope (object_id, qname, has_org, plain_name)
 SELECT t.object_id, QUOTENAME(s.name) + N'.' + QUOTENAME(t.name),
-       CASE WHEN EXISTS (SELECT 1 FROM sys.columns c WHERE c.object_id = t.object_id AND c.name = N'organization_id') THEN 1 ELSE 0 END
+       CASE WHEN EXISTS (SELECT 1 FROM sys.columns c WHERE c.object_id = t.object_id AND c.name = N'organization_id') THEN 1 ELSE 0 END,
+       LOWER(s.name + N'.' + t.name)
   FROM sys.tables t
   JOIN sys.schemas s ON s.schema_id = t.schema_id
  WHERE t.is_ms_shipped = 0
-   AND LOWER(s.name) <> N'grac_new';
+   AND (@IncludeGracNew = 1 OR LOWER(s.name) <> N'grac_new');
+
+-- A2's tables (structure only).
+UPDATE x SET empty_it = 1
+  FROM #scope x
+ WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(ISNULL(@EmptyTables, N''), N',') p
+                WHERE LTRIM(RTRIM(p.value)) <> N''
+                  AND x.plain_name LIKE LOWER(LTRIM(RTRIM(p.value))));
+IF EXISTS (SELECT 1 FROM #scope WHERE empty_it = 1)
+BEGIN
+    PRINT '=== Tables kept as structure only (@EmptyTables) ===';
+    SELECT qname AS TableName FROM #scope WHERE empty_it = 1 ORDER BY qname;
+END
 
 -- Foreign keys touching the scope.
 IF OBJECT_ID('tempdb..#fk') IS NOT NULL DROP TABLE #fk;
@@ -189,6 +222,18 @@ BEGIN TRY
     END
     CLOSE c2; DEALLOCATE c2;
 
+    -- A2. Structure-only tables: every row.
+    DECLARE c2b CURSOR LOCAL FAST_FORWARD FOR SELECT qname FROM #scope WHERE empty_it = 1 ORDER BY qname;
+    OPEN c2b; FETCH NEXT FROM c2b INTO @q;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @sql = N'DELETE FROM ' + @q + N'; SET @n = @@ROWCOUNT;';
+        EXEC sp_executesql @sql, N'@n BIGINT OUTPUT', @n = @n OUTPUT;
+        IF @n > 0 INSERT #log VALUES (N'A2 structure only', @q, @n);
+        FETCH NEXT FROM c2b INTO @q;
+    END
+    CLOSE c2b; DEALLOCATE c2b;
+
     -- B. Cascade over trusted FKs inside the scope until nothing moves.
     SET @pass = 0;
     WHILE 1 = 1
@@ -261,6 +306,26 @@ BEGIN TRY
     SELECT table_q AS TableName, step AS Step, SUM(rows_deleted) AS RowsDeleted
       FROM #log GROUP BY table_q, step ORDER BY step, table_q;
     SELECT SUM(rows_deleted) AS TotalRowsDeleted FROM #log;
+
+    -- Tables that keep ALL their rows: no organization_id, not emptied,
+    -- nothing removed by the cascade -- the masters, and anything else
+    -- (logs, queues, ...) to add to @EmptyTables. With rows only.
+    PRINT '=== Tables kept in full (masters and other tables without organization_id) ===';
+    DECLARE @full TABLE (TableName NVARCHAR(400), RowsKept BIGINT);
+    DECLARE c5b CURSOR LOCAL FAST_FORWARD FOR
+        SELECT x.qname FROM #scope x
+         WHERE x.has_org = 0 AND x.empty_it = 0
+           AND NOT EXISTS (SELECT 1 FROM #log l WHERE l.table_q = x.qname);
+    OPEN c5b; FETCH NEXT FROM c5b INTO @q;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @sql = N'SELECT @n = COUNT_BIG(*) FROM ' + @q + N';';
+        EXEC sp_executesql @sql, N'@n BIGINT OUTPUT', @n = @n OUTPUT;
+        IF @n > 0 INSERT @full VALUES (@q, @n);
+        FETCH NEXT FROM c5b INTO @q;
+    END
+    CLOSE c5b; DEALLOCATE c5b;
+    SELECT TableName, RowsKept FROM @full ORDER BY TableName;
 
     IF @DryRun = 1
     BEGIN

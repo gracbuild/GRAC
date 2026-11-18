@@ -1,0 +1,144 @@
+@*
+    Organization Registry -- screen key `org-registry` (migrations 569-572).
+
+    575: the screens that render this partial --
+      org-registry            Organization Management: Organizations and
+                              Legal Entities (GRAC administration, GLOBAL)
+      org-registry-structure  Practice Management -> Organization: the
+      org-registry-people     organization's own registry, maintained by its
+      org-registry-operations users; Organizations / Legal Entities read-only
+    The page shows the tabs of its own screen (org-registry.js GROUPS).
+
+    Organization Management's organization master data, from the workbook
+    "GRAC_Organization_Registry" (sheets 01-13, controlled values sheet 15):
+
+      Organization (sheet 01)                       registry_organization
+        -> Legal Entity (sheet 02)                  organization (the
+           -> parent / subsidiary Legal Entities       existing GRAC
+                                                       organization row)
+           -> Organization Units, Locations, Departments, Business
+              Functions, Teams, People, Committees, Committee Members,
+              Business Processes, Products & Services, Delivery Channels
+
+    Layout: one tab per area of this menu; the toolbar's Organization and
+    Legal Entity selects set the context (the hierarchy panel was removed
+    on 2026-11-16 at sir's request). A row opens its record in a row under it
+    (no popups -- the Audit Plans child-row pattern, .oa-pl-wrap /
+    .oa-pl-items); Edit turns that row into the form, Add opens the form in
+    a row at the top. A reference shows as code - name and links to the
+    record it points at. There is no Delete: a record is retired through
+    its status and stays for traceability (workbook START HERE).
+
+    Who: the screen's grant (VIEW to see, ADD / EDIT to save); org-registry
+    also needs a GLOBAL-scope sign-in, the others are confined to the
+    caller's organizations -- enforced by Controllers/OrgRegistryController.cs.
+    Self-contained: talks to /practice/api/org-registry; the field
+    definitions are js/Organization/org-registry-fields.js (generated with
+    the migrations), the behaviour js/Organization/org-registry.js.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+@{
+    var permissions = ViewBag.Permissions as string[] ?? Array.Empty<string>();
+    var canAdd = permissions.Contains("ADD");
+    var canEdit = permissions.Contains("EDIT");
+    var isGlobal = string.Equals(ViewBag.DataScope as string, "GLOBAL", StringComparison.OrdinalIgnoreCase);
+    // 575: org-registry (Organization Management) is GRAC administration and
+    // needs a GLOBAL-scope sign-in; the Practice Management -> Organization
+    // screens are for the organization's own users (scoped by the proxy).
+    var adminScreen = string.Equals(Model.Key, "org-registry", StringComparison.OrdinalIgnoreCase);
+    var mayUse = !adminScreen || isGlobal;
+}
+
+<style>
+    /* Record row (view) */
+    #orrRoot .orr-facts { display: grid; gap: 8px 18px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); margin: 0; }
+    #orrRoot .orr-facts div { min-width: 0; }
+    #orrRoot .orr-facts dt { color: var(--fg-muted); font-size: 11px; font-weight: 700; letter-spacing: .02em; margin: 0 0 2px; text-transform: uppercase; }
+    #orrRoot .orr-facts dd { color: var(--fg-default); font-size: 13px; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    #orrRoot .orr-facts dd.orr-empty { color: var(--fg-subtle); font-style: italic; }
+    #orrRoot .orr-facts .orr-wide { grid-column: 1 / -1; }
+    #orrRoot .orr-flag { background: var(--warning-100, var(--neutral-200)); color: var(--warning-700, var(--fg-default)); margin-left: 6px; }
+    #orrRoot .orr-title { font-size: 14px; font-weight: 700; margin: 0 0 10px; }
+    #orrRoot .orr-title .orr-code { color: var(--fg-muted); font-weight: 600; margin-right: 6px; }
+    /* Record row (form) */
+    #orrRoot .orr-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    #orrRoot .orr-form .full { grid-column: 1 / -1; }
+    #orrRoot .orr-form label > span .orr-note,
+    #orrRoot .orr-facts dt .orr-note { color: var(--fg-subtle); cursor: help; margin-left: 4px; }
+    #orrRoot .orr-form [aria-invalid="true"],
+    #orrRoot .orr-form .orr-ref[aria-invalid="true"] .pm-checkcombo-trigger { border-color: var(--danger-500, #d92d20); }
+    #orrRoot .orr-form .orr-ref { position: relative; }
+    /* The two non-<label> field wrappers read like the form's labels. */
+    #orrRoot .orr-form .orr-ref-field,
+    #orrRoot .orr-form [data-multi] { color: var(--fg-secondary); display: block; font-size: 13px; font-weight: 650; }
+    #orrRoot .orr-form .orr-ref-field .pm-checkcombo,
+    #orrRoot .orr-form [data-multi] .pm-checkcombo { margin-top: 6px; }
+    #orrRoot [data-checkcombo-option] input[type="radio"] { accent-color: var(--primary-500); margin: 0; }
+    #orrRoot .orr-form .orr-ref .pm-checkcombo-trigger span[data-ref-text] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #orrRoot .orr-form-note { color: var(--fg-muted); font-size: 12px; margin: 0 0 10px; }
+    @@media (max-width: 1100px) { #orrRoot .orr-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    #orrRoot .orr-cell-ref { color: var(--primary-600); text-decoration: none; }
+    #orrRoot .orr-cell-ref:hover { text-decoration: underline; }
+    #orrRoot .orr-actions { align-items: center; display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+    /* 2026-11-16: the grid stays inside its panel. The shared child-row
+       wrapper .oa-pl-wrap sets overflow: visible (Audit Plans' tables are
+       narrow), so a wide registry table -- "code - name" references for
+       Legal Entity, Organization Unit, Location ... -- ran past the page.
+       Cell text now wraps (the shared .pm-table-wrap td is nowrap), and a
+       table that is still wider than the panel scrolls inside it. */
+    #orrRoot .oa-pl-wrap { overflow-x: auto; }
+    #orrRoot .oa-pl-wrap > table > tbody > tr > td { white-space: normal; overflow-wrap: anywhere; min-width: 90px; }
+</style>
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p class="pm-hint">@Model.Description</p>
+    </div>
+</div>
+
+<div id="orrRoot">
+    <div id="orrMessage" class="pm-message" hidden role="status"></div>
+
+    <section class="pm-panel" aria-label="Registry areas">
+        <div class="pm-tabs" id="orrTabs" role="tablist"></div>
+        <div class="pm-toolbar">
+            <select id="orrOrg" aria-label="Organization">
+                <option value="0">All Organizations</option>
+            </select>
+            <select id="orrLegalEntity" aria-label="Legal Entity">
+                <option value="0">All Legal Entities</option>
+            </select>
+            <select id="orrStatus" aria-label="Status"></select>
+            <input id="orrSearch" type="text" placeholder="Search code / name..." />
+            <button class="pm-button icon" id="orrRefresh" type="button" title="Refresh" aria-label="Refresh">
+                <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+            </button>
+            @if (canAdd && mayUse)
+            {
+                <button class="pm-button primary" id="orrAdd" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> <span id="orrAddText">Add</span></button>
+            }
+        </div>
+        <div class="pm-table-wrap oa-pl-wrap">
+            <table>
+                <thead><tr id="orrHead"></tr></thead>
+                <tbody id="orrRows"><tr><td class="pm-empty">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<script>
+    window.gracOrgRegistryPage = {
+        canAdd: @(canAdd && mayUse ? "true" : "false"),
+        canEdit: @(canEdit && mayUse ? "true" : "false"),
+        mayUse: @(mayUse ? "true" : "false"),
+        // 574: which of the registry's three menus this page is.
+        screen: "@Model.Key"
+    };
+</script>
+<script src="~/js/Shared/checkcombo.js" asp-append-version="true"></script>
+<script src="~/js/Organization/org-registry-fields.js" asp-append-version="true"></script>
+<script src="~/js/Organization/org-registry.js" asp-append-version="true"></script>

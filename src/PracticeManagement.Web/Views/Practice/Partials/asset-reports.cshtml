@@ -83,12 +83,12 @@
             </div>
             <p class="arp-note" id="arpReportInfo"></p>
             <div class="pm-toolbar" id="arpFilters">
-                <input type="search" id="arpSearch" placeholder="Search" maxlength="200" data-arp-filter="SEARCH" hidden />
                 <select id="arpStatus" title="Status" data-arp-filter="STATUS" hidden></select>
                 <select id="arpAssetType" title="Asset type" data-arp-filter="ASSET_TYPE" hidden></select>
                 <label class="arp-field" data-arp-filter="DATE_RANGE" hidden><span id="arpDateLabel">From</span><input type="date" id="arpDateFrom" /></label>
                 <label class="arp-field" data-arp-filter="DATE_RANGE" hidden><span>To</span><input type="date" id="arpDateTo" /></label>
                 <label class="arp-field" data-arp-filter="DAYS" hidden><span>Next / last days</span><input type="number" id="arpDays" min="1" max="3650" step="1" /></label>
+                <input type="search" id="arpSearch" placeholder="Search" maxlength="200" data-arp-filter="SEARCH" hidden />
                 <button class="pm-button primary" id="arpRun" type="button"><i class="fa-solid fa-play"></i> Run</button>
                 <button class="pm-button" id="arpExport" type="button" hidden><i class="fa-solid fa-file-csv"></i> Export CSV</button>
             </div>
@@ -170,11 +170,11 @@
                         <label class="arp-field"><span>Active</span><input type="checkbox" id="arpSchActive" /></label>
                     </div>
                     <div class="pm-toolbar">
-                        <label class="arp-field" data-arp-sch-filter="SEARCH"><span>Search</span><input type="text" id="arpSchSearch" maxlength="200" /></label>
                         <label class="arp-field" data-arp-sch-filter="STATUS"><span id="arpSchStatusLabel">Status</span><select id="arpSchStatus"></select></label>
                         <label class="arp-field" data-arp-sch-filter="ASSET_TYPE"><span>Asset type</span><select id="arpSchAssetType"></select></label>
                         <label class="arp-field" data-arp-sch-filter="DAYS"><span>Next / last days</span><input type="number" id="arpSchDays" min="1" max="3650" step="1" /></label>
                         <label class="arp-field" data-arp-sch-filter="DATE_RANGE"><span id="arpSchWindowLabel">Last days</span><input type="number" id="arpSchWindow" min="1" max="3650" step="1" /></label>
+                        <label class="arp-field" data-arp-sch-filter="SEARCH"><span>Search</span><input type="text" id="arpSchSearch" maxlength="200" /></label>
                     </div>
                     <div class="pm-toolbar">
                         <select id="arpSchEmp" title="Employee"></select>

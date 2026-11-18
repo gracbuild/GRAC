@@ -81,7 +81,6 @@
         <p class="pm-message" id="acoMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-tab-panel" data-aco-mainpanel="CONTRACTS">
         <div class="pm-toolbar">
-            <input type="search" id="acoSearch" placeholder="Search contract ID, name or vendor" maxlength="200" />
             <select id="acoStatus" title="Status">
                 <option value="">All statuses</option>
                 <option value="DRAFT">Draft</option>
@@ -92,6 +91,7 @@
             </select>
             <select id="acoVendorFilter" title="Vendor"><option value="">All vendors</option></select>
             <select id="acoTypeFilter" title="Contract type"><option value="">All types</option></select>
+            <input type="search" id="acoSearch" placeholder="Search contract ID, name or vendor" maxlength="200" />
             <button class="pm-button icon" id="acoRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             @if (acoCanAdd)
             {
@@ -143,8 +143,8 @@
         @* ---------------- coverage gaps (435) ---------------- *@
         <div class="pm-tab-panel" data-aco-mainpanel="GAPS" hidden>
             <div class="pm-toolbar">
-                <input type="search" id="acoGapSearch" placeholder="Search asset or asset type" maxlength="200" />
                 <select id="acoGapType" title="Coverage type"><option value="">All coverage types</option></select>
+                <input type="search" id="acoGapSearch" placeholder="Search asset or asset type" maxlength="200" />
             </div>
             <p class="aco-note">Active assets whose asset type requires a coverage type that is not covered (or is covered for less than the minimum period). Map them on a contract version, or change the requirement.</p>
             <div class="pm-table-wrap">
@@ -425,8 +425,8 @@
         <h3 class="aco-sub">Asset coverage</h3>
         <div id="acoCovForm" hidden>
             <div class="pm-toolbar">
-                <input type="search" id="acoCfAssetSearch" placeholder="Search assets by name or ID" maxlength="200" />
                 <select id="acoCfAssetType" title="Asset type"><option value="">All asset types</option></select>
+                <input type="search" id="acoCfAssetSearch" placeholder="Search assets by name or ID" maxlength="200" />
                 <select id="acoCfEnt" title="Entitlement"><option value="">No entitlement</option></select>
                 <select id="acoCfCovType" title="Coverage type"></select>
                 <button class="pm-button" id="acoCfFind" type="button"><i class="fa-solid fa-magnifying-glass"></i> Find</button>

@@ -23,6 +23,9 @@
 //       presetDefinitionId,         Add to Plan from an audit
 //       itemCount,                  the plan's engagements (the next order)
 //       definitions,                the host's audit list, if it has one
+//       preset,                     583: a new one's starting values
+//                                   { name, subject, from, to, objective }
+//                                   (Audit Plan Recommendations -> Accept)
 //       onSaved })                  called after a save
 //   gracEngagementForm.openScope(orgId, body, subtitle)
 //       body { planItemId } or { definitionIds, locationId }
@@ -428,6 +431,12 @@
             $('oaEngOrder').value = String((Number(S.opts.itemCount) || 0) + 1);
             if (S.opts.presetDefinitionId != null && S.opts.presetDefinitionId !== '')
                 S.engDefs = [String(S.opts.presetDefinitionId)];   // 546: from Add to Plan
+            const pre = S.opts.preset || {};                       // 583: from a recommendation
+            if (pre.name)      $('oaEngName').value      = pre.name;
+            if (pre.subject)   $('oaEngSubject').value   = pre.subject;
+            if (pre.from)      $('oaEngFrom').value      = onlyDate(pre.from);
+            if (pre.to)        $('oaEngTo').value        = onlyDate(pre.to);
+            if (pre.objective) $('oaEngObjective').value = pre.objective;
             await fillBranches(null, null);
             await attachAuditee(null, null, null, null);
         }

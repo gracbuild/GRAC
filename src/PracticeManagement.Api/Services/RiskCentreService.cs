@@ -95,6 +95,8 @@ public interface IRiskCentreService
     Task<RiskResidualSaveResult>              SaveResidualAnalysisAsync(long riskRegisterId, RiskResidualSaveRequest req, CancellationToken ct);
     Task<RiskResidualDetail?>                 GetResidualAnalysisAsync(long riskRegisterId, CancellationToken ct);
     Task<IReadOnlyList<RiskResidualVersionRow>> GetResidualHistoryAsync(long riskRegisterId, CancellationToken ct);
+    // 576: every acceptance and review, newest first.
+    Task<IReadOnlyList<RiskDecisionHistoryRow>> GetDecisionHistoryAsync(long riskRegisterId, CancellationToken ct);
 
     // ---- Practice / Asset mapping (migrations 261, 262) -------------
     Task<RiskMappingDetail>                   GetMappingAsync(long riskRegisterId, CancellationToken ct);
@@ -1261,6 +1263,28 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         return rows;
     }
 
+    // 576: sp_risk_decision_history_list.
+    public async Task<IReadOnlyList<RiskDecisionHistoryRow>> GetDecisionHistoryAsync(long riskRegisterId, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd  = Proc(conn, "grac_practice.sp_risk_decision_history_list");
+        AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId);
+        var rows = new List<RiskDecisionHistoryRow>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            rows.Add(new RiskDecisionHistoryRow(
+                Convert.ToInt64(r["HistoryId"]),
+                r["EventType"] as string ?? "",
+                Convert.ToDateTime(r["EventDate"]),
+                r["AcceptedOn"] as DateTime?,
+                r["ByName"] as string,
+                r["Description"] as string,
+                r["FromStatusCode"] as string,
+                r["ToStatusCode"] as string,
+                Convert.ToDateTime(r["RecordedOn"])));
+        return rows;
+    }
+
     public async Task<RiskRegisterActionResult> SetRegisterStatusAsync(long riskRegisterId, RiskRegisterStatusRequest req, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(req);
@@ -1665,7 +1689,11 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
         if (await r.NextResultAsync(ct) && await r.ReadAsync(ct))
             coverage = new RiskHeatmapCoverage(
                 NullableInt(r["OpenRisks"]), NullableInt(r["InherentRated"]),
-                NullableInt(r["ResidualRated"]), NullableInt(r["ResidualPending"]));
+                NullableInt(r["ResidualRated"]), NullableInt(r["ResidualPending"]),
+                // 574: present only once the migration has run.
+                HasColumn(r, "InherentReassessment") ? NullableInt(r["InherentReassessment"]) : 0,
+                HasColumn(r, "ResidualReassessment") ? NullableInt(r["ResidualReassessment"]) : 0,
+                HasColumn(r, "ReassessmentNeeded")   ? NullableInt(r["ReassessmentNeeded"])   : 0);
 
         var reviewAgeing = new List<RiskReviewAgeingBand>();
         if (await r.NextResultAsync(ct))
@@ -3607,12 +3635,13 @@ public sealed class RiskCentreService(IConfiguration configuration, ILogger<Risk
     public Task<RiskMethodologyReadResult> GetMethodologyAsync(long organizationId, CancellationToken ct) =>
         ReadMethodologySetsAsync("grac_practice.sp_risk_methodology_get",
             cmd => AddParam(cmd, "@organization_id", DbType.Int64, organizationId),
-            ["versions", "dimensions", "levels", "bands", "appetite", "ratings", "impactAreas", "categories", "history", "scale"], ct);
+            ["versions", "dimensions", "levels", "bands", "appetite", "ratings", "impactAreas", "categories", "history", "scale",
+             "matrix", "ratingCatalogue", "publishCheck"], ct);   // 574: + matrix, rating catalogue, publish check
 
     public Task<RiskMethodologyReadResult> GetRiskMethodologyAsync(long riskRegisterId, CancellationToken ct) =>
         ReadMethodologySetsAsync("grac_practice.sp_risk_methodology_assessment_get",
             cmd => AddParam(cmd, "@risk_register_id", DbType.Int64, riskRegisterId),
-            ["assessments", "values"], ct);
+            ["assessments", "values", "scale"], ct);   // 574: + re-assessment flags
 
     public Task<RiskMethodologyReadResult> GetMethodologySummaryAsync(long organizationId, CancellationToken ct) =>
         ReadMethodologySetsAsync("grac_practice.sp_risk_methodology_register_summary",

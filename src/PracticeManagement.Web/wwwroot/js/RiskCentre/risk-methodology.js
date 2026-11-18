@@ -13,6 +13,15 @@
 //
 // Auth: /practice/api/risk-centre/* enforces session + org isolation;
 // the writes also need EDIT on this screen (organisation admin).
+//
+// 574 (2026-11-16): Likelihood and Impact head the Dimensions table as two
+// locked rows (always on, required, every stage); only their levels are
+// edited -- names, descriptors and how many (2 to 10, numbered 1..n). The
+// Risk matrix section below gives every likelihood x impact cell a rating
+// and resizes with the levels (3x3, 4x4, 5x5 ...). Publishing a changed
+// scale or matrix warns first: risks already assessed are marked
+// "Re-assessment needed" and leave the heat maps until assessed again; the
+// server refuses while an assessment waits for approval (58349).
 // =====================================================================
 (() => {
   "use strict";
@@ -23,6 +32,13 @@
   const esc  = v => wf.escape(v);
 
   const TEMPLATE_LABEL = { ISO31000: "ISO 31000", COSO_ERM: "COSO ERM", ISO27005: "ISO 27005", BLANK: "Blank" };
+  // 574: true once the database has 574 (the version carries its scale).
+  const hasScale = () => (state.edit?.core?.LIKELIHOOD?.length || 0) > 0 && (state.edit?.core?.IMPACT?.length || 0) > 0;
+  // 574: the risk matrix's axes (level rows with these codes; no dimension row).
+  const CORE = [
+    ["LIKELIHOOD", "Likelihood", "How likely the risk is to happen."],
+    ["IMPACT",     "Impact",     "How severe the consequence would be."]
+  ];
 
   // sets = the GET answer; edit = the version on screen (draft, or the
   // published one read-only); editable = a draft exists.
@@ -51,6 +67,13 @@
     on("rmAddBand", "click", () => { readForm(); state.edit.bands.push({ minScore: null, maxScore: null, ratingCode: "" }); render(); });
     on("rmAddArea", "click", () => { readForm(); state.edit.areas.push({ areaCode: "", areaName: "", isNew: true }); render(); });
     on("rmAddAppetite", "click", () => { readForm(); state.edit.appetite.push({ riskCategoryCode: "", maxRatingCode: "", appetiteStatement: "" }); render(); });
+    // 574: every cell back to the suggested rating for its likelihood x impact.
+    on("rmMatrixDefaults", "click", () => {
+      readForm();
+      const e = state.edit, nl = e.core.LIKELIHOOD.length, ni = e.core.IMPACT.length;
+      e.matrix.forEach(c => { c.ratingCode = defaultRating(c.likelihoodValue, c.impactValue, nl, ni); });
+      render();
+    });
     ["rmScoringMode", "rmAppetite", "rmQuant", "rmImpactMode"].forEach(id => on(id, "change", () => { readForm(); render(); }));
 
     const orgs = await wf.loadOrgs();
@@ -132,7 +155,12 @@
       })),
       bands: mine("bands").map(b => ({ minScore: b.minScore, maxScore: b.maxScore, ratingCode: b.ratingCode })),
       appetite: mine("appetite").map(a => ({ riskCategoryCode: a.riskCategoryCode || "", maxRatingCode: a.maxRatingCode, appetiteStatement: a.appetiteStatement || "" })),
-      areas: mine("impactAreas").map(a => ({ areaCode: a.areaCode, areaName: a.areaName, isNew: false }))
+      areas: mine("impactAreas").map(a => ({ areaCode: a.areaCode, areaName: a.areaName, isNew: false })),
+      // 574
+      core: Object.fromEntries(CORE.map(([code]) => [code, levels.filter(l => l.dimensionCode === code)
+        .sort((a, b) => a.levelValue - b.levelValue)
+        .map(l => ({ levelValue: l.levelValue, levelName: l.levelName, descriptor: l.descriptor || "" }))])),
+      matrix: mine("matrix").map(c => ({ likelihoodValue: c.likelihoodValue, impactValue: c.impactValue, ratingCode: c.ratingCode }))
     };
   }
 
@@ -159,19 +187,24 @@
     document.getElementById("rmAppetitePanel").hidden = !e.appetiteEnabled;
     document.getElementById("rmAreasPanel").hidden = e.impactMode === "Single";
 
+    if (!ro && hasScale()) syncMatrix();   // 574
     renderDimensions(ro);
+    renderMatrix(ro);        // 574
     renderBands(ro);
     renderAppetite(ro);
     renderAreas(ro);
 
     document.querySelectorAll("#rmForm input, #rmForm select, #rmForm textarea").forEach(el => { el.disabled = ro || el.hasAttribute("data-off"); });
-    ["rmAddDim", "rmAddBand", "rmAddAppetite", "rmAddArea", "rmSaveBtn", "rmDiscardBtn", "rmPublishBtn"]
+    ["rmAddDim", "rmAddBand", "rmAddAppetite", "rmAddArea", "rmMatrixDefaults", "rmSaveBtn", "rmDiscardBtn", "rmPublishBtn"]
       .forEach(id => { document.getElementById(id).hidden = ro; });
-    document.querySelectorAll("#rmForm [data-rm-toggle-levels]").forEach(b => { b.disabled = false; });
+    // Levels can be looked at even read-only -- except a dimension that is
+    // switched off (data-off, 2026-11-17).
+    document.querySelectorAll("#rmForm [data-rm-toggle-levels]").forEach(b => { b.disabled = b.hasAttribute("data-off"); });
   }
 
   function renderDimensions(ro) {
     const body = document.getElementById("rmDimBody");
+    const coreBody = document.getElementById("rmCoreBody");   // 2026-11-17: Likelihood & Impact panel
     // A dimension that is not Enabled is never asked anywhere (risk-centre.js
     // drops it), so its Required / Inherent / Residual / Review boxes show
     // unticked and locked (data-off). The stored flags are kept, not read
@@ -179,7 +212,47 @@
     const box = (field, i, on, off) => off
       ? `<td class="rm-center"><input type="checkbox" data-dim="${i}" data-field="${field}" data-off disabled title="Enable the dimension first" /></td>`
       : `<td class="rm-center"><input type="checkbox" data-dim="${i}" data-field="${field}"${on ? " checked" : ""} /></td>`;
-    body.innerHTML = state.edit.dimensions.map((d, i) => {
+    // 574: Likelihood and Impact -- every box ticked; only the levels
+    // change. Values are 1..n in order (the matrix is keyed by them), so a
+    // level is added or removed at the top only.
+    // 2026-11-17 (sir): the boxes are not disabled; unticking one puts the
+    // tick back and says why (data-lock, wired below).
+    const lockBox = `<td class="rm-center"><input type="checkbox" checked data-lock title="Always on: likelihood and impact are asked at every stage" /></td>`;
+    const coreRows = !hasScale() ? "" : CORE.map(([code, name, descr]) => {
+      const lv = state.edit.core[code] || [];
+      const open = state.openLevels.has(code);
+      const row = `<tr class="rm-core-row">
+          ${lockBox}
+          <td class="rm-name-cell">
+            <div class="rm-name-row"><span class="rm-core-name">${esc(name)}</span><span class="rm-code" title="Risk matrix axis -- fixed">${esc(code)}</span></div>
+            <span class="rm-core-desc">${esc(descr)} Always asked; the risk matrix follows its levels.</span>
+          </td>
+          ${lockBox}${lockBox}${lockBox}${lockBox}
+          <td class="rm-center" title="Not weighted: likelihood x impact is the base of every score">&mdash;</td>
+          <td><button type="button" class="pm-button ghost" data-rm-toggle-levels="${code}">${lv.length} level${lv.length === 1 ? "" : "s"} <i class="fa-solid fa-chevron-${open ? "up" : "down"}"></i></button></td>
+          <td></td>
+        </tr>`;
+      const levels = !open ? "" : `<tr class="rm-levels"><td></td><td colspan="8">
+          <table>
+            <thead><tr><th style="width:80px;">Level</th><th>Name</th><th>Descriptor</th><th aria-label="Actions"></th></tr></thead>
+            <tbody>${lv.map((l, j) => `<tr>
+                <td class="rm-center">${esc(l.levelValue)}</td>
+                <td><input class="pm-input" type="text" maxlength="120" data-core="${code}" data-level="${j}" data-field="levelName" value="${esc(l.levelName)}" /></td>
+                <td><input class="pm-input" type="text" maxlength="500" data-core="${code}" data-level="${j}" data-field="descriptor" value="${esc(l.descriptor)}" /></td>
+                <td>${ro || j !== lv.length - 1 || lv.length <= 2 ? "" : `<button type="button" class="pm-button ghost" data-rm-remove-core="${code}" title="Remove the top level"><i class="fa-solid fa-trash"></i></button>`}</td>
+              </tr>`).join("")}</tbody>
+          </table>
+          ${ro || lv.length >= 10 ? "" : `<button type="button" class="pm-button ghost" data-rm-add-core="${code}" style="margin-top:6px;"><i class="fa-solid fa-plus"></i> Add level</button>`}
+          <p class="pm-hint" style="margin:6px 0 0;">Level 1 is the lowest. 2 to 10 levels; adding or removing one resizes the risk matrix.</p>
+        </td></tr>`;
+      return row + levels;
+    }).join("");
+    coreBody.innerHTML = coreRows;
+    document.getElementById("rmCorePanel").hidden = !hasScale();
+    body.innerHTML = (state.edit.dimensions.map((d, i) => {
+      // 2026-11-17 (sir): an unticked dimension's levels button is
+      // disabled, and its levels are not left open.
+      if (!d.isEnabled) state.openLevels.delete(i);
       const open = state.openLevels.has(i);
       const row = `<tr>
           ${box("isEnabled", i, d.isEnabled)}
@@ -197,7 +270,7 @@
           ${box("askResidual", i, d.askResidual, !d.isEnabled)}
           ${box("askReview", i, d.askReview, !d.isEnabled)}
           <td style="width:90px;"><input class="pm-input" type="number" min="0" step="0.25" data-dim="${i}" data-field="priorityWeight" value="${esc(d.priorityWeight)}" /></td>
-          <td><button type="button" class="pm-button ghost" data-rm-toggle-levels="${i}">${d.levels.length} level${d.levels.length === 1 ? "" : "s"} <i class="fa-solid fa-chevron-${open ? "up" : "down"}"></i></button></td>
+          <td><button type="button" class="pm-button ghost" data-rm-toggle-levels="${i}"${d.isEnabled ? "" : ` data-off disabled title="Enable the dimension first"`}>${d.levels.length} level${d.levels.length === 1 ? "" : "s"} <i class="fa-solid fa-chevron-${open ? "up" : "down"}"></i></button></td>
           <td>${ro || !d.isNew ? "" : `<button type="button" class="pm-button ghost" data-rm-remove-dim="${i}" title="Remove"><i class="fa-solid fa-trash"></i></button>`}</td>
         </tr>`;
       const levels = !open ? "" : `<tr class="rm-levels"><td></td><td colspan="8">
@@ -214,15 +287,22 @@
           <p class="pm-hint" style="margin:6px 0 0;">Level 1 is the lowest risk. Use 1 to 10.</p>
         </td></tr>`;
       return row + levels;
-    }).join("") || `<tr><td colspan="9" class="pm-empty">No dimensions. Add one, or start the draft from a template.</td></tr>`;
+    }).join("") || `<tr><td colspan="9" class="pm-empty">No other dimensions. Add one, or start the draft from a template.</td></tr>`);
 
     body.querySelectorAll('[data-field="isEnabled"]').forEach(b => b.addEventListener("change", () => { readForm(); render(); }));
-    body.querySelectorAll("[data-rm-toggle-levels]").forEach(b => b.addEventListener("click", () => {
+    // 2026-11-17: likelihood / impact are always on -- untick, tick back, say so.
+    coreBody.querySelectorAll("input[data-lock]").forEach(cb => cb.addEventListener("change", () => {
+      cb.checked = true;
+      window.gracUi.alert("Likelihood and impact are always asked, at every stage. Only their levels can be changed.",
+        { type: "info", title: "Likelihood & Impact" });
+    }));
+    [coreBody, body].forEach(host => host.querySelectorAll("[data-rm-toggle-levels]").forEach(b => b.addEventListener("click", () => {
       readForm();
-      const i = Number(b.getAttribute("data-rm-toggle-levels"));
+      const raw = b.getAttribute("data-rm-toggle-levels");
+      const i = /^\d+$/.test(raw) ? Number(raw) : raw;   // 574: LIKELIHOOD / IMPACT
       if (state.openLevels.has(i)) state.openLevels.delete(i); else state.openLevels.add(i);
       render();
-    }));
+    })));
     body.querySelectorAll("[data-rm-remove-dim]").forEach(b => b.addEventListener("click", () => {
       readForm();
       state.edit.dimensions.splice(Number(b.getAttribute("data-rm-remove-dim")), 1);
@@ -236,6 +316,21 @@
       d.levels.push({ levelValue: Math.min(next, 10), levelName: "", descriptor: "" });
       render();
     }));
+    // 574: likelihood / impact levels -- added or removed at the top.
+    coreBody.querySelectorAll("[data-rm-add-core]").forEach(b => b.addEventListener("click", () => {
+      readForm();
+      const lv = state.edit.core[b.getAttribute("data-rm-add-core")];
+      if (lv.length < 10) lv.push({ levelValue: lv.length + 1, levelName: "", descriptor: "" });
+      syncMatrix();
+      render();
+    }));
+    coreBody.querySelectorAll("[data-rm-remove-core]").forEach(b => b.addEventListener("click", () => {
+      readForm();
+      const lv = state.edit.core[b.getAttribute("data-rm-remove-core")];
+      if (lv.length > 2) lv.pop();
+      syncMatrix();
+      render();
+    }));
     body.querySelectorAll("[data-rm-remove-level]").forEach(b => b.addEventListener("click", () => {
       readForm();
       const [i, j] = b.getAttribute("data-rm-remove-level").split(":").map(Number);
@@ -244,9 +339,80 @@
     }));
   }
 
+  // 574: bands and appetite use the ratings of the version's own matrix
+  // (publish checks them against it). A saved choice the matrix no longer
+  // has stays visible, marked, so it is not lost silently.
   function ratingOptions(selected, blank) {
-    return `<option value="">${esc(blank)}</option>` + (state.sets.ratings || [])
-      .map(r => `<option value="${esc(r.ratingCode)}"${r.ratingCode === selected ? " selected" : ""}>${esc(r.ratingName || r.ratingCode)}</option>`).join("");
+    const list = matrixRatings();
+    const missing = selected && !list.some(r => r.ratingCode === selected)
+      ? `<option value="${esc(selected)}" selected>${esc(selected)} (not in the risk matrix)</option>` : "";
+    return `<option value="">${esc(blank)}</option>` + list
+      .map(r => `<option value="${esc(r.ratingCode)}"${r.ratingCode === selected ? " selected" : ""}>${esc(r.ratingName || r.ratingCode)}</option>`).join("") + missing;
+  }
+
+  // ---- 574: risk matrix -----------------------------------------------------
+  // Every rating the matrix may use (current matrix + earlier versions),
+  // lowest first; falls back to the current matrix's ratings.
+  function ratingCatalogue() {
+    const cat = state.sets.ratingCatalogue || [];
+    return cat.length ? cat : (state.sets.ratings || []);
+  }
+  function matrixRatings() {
+    const used = new Set((state.edit?.matrix || []).map(c => c.ratingCode).filter(Boolean));
+    const list = ratingCatalogue().filter(r => used.has(r.ratingCode));
+    return list.length ? list : (state.sets.ratings || []);
+  }
+  // Suggested rating for a cell: likelihood x impact as a share of the
+  // largest score, spread over the current ratings (lowest first).
+  function defaultRating(l, i, nl, ni) {
+    const cur = state.sets.ratings || [];
+    const list = cur.length ? cur : ratingCatalogue();
+    if (!list.length || !nl || !ni) return "";
+    const k = list.length;
+    return list[Math.min(k - 1, Math.max(0, Math.ceil((l * i) / (nl * ni) * k) - 1))].ratingCode;
+  }
+  // One cell per likelihood x impact pair: kept where it exists, suggested
+  // where the scale grew, dropped where it shrank.
+  function syncMatrix() {
+    const e = state.edit;
+    if (!e || !e.core) return;
+    const nl = e.core.LIKELIHOOD.length, ni = e.core.IMPACT.length;
+    const by = new Map((e.matrix || []).map(c => [`${c.likelihoodValue}|${c.impactValue}`, c]));
+    const out = [];
+    for (let l = 1; l <= nl; l++)
+      for (let i = 1; i <= ni; i++) {
+        const c = by.get(`${l}|${i}`);
+        out.push({ likelihoodValue: l, impactValue: i, ratingCode: c ? c.ratingCode : defaultRating(l, i, nl, ni) });
+      }
+    e.matrix = out;
+  }
+  // Rows = likelihood, highest first; columns = impact (the heat maps' layout).
+  function renderMatrix(ro) {
+    const e = state.edit;
+    document.getElementById("rmMatrixPanel").hidden = !hasScale();
+    if (!hasScale()) return;
+    const host = document.getElementById("rmMatrix");
+    const L = [...(e.core?.LIKELIHOOD || [])].sort((a, b) => b.levelValue - a.levelValue);
+    const I = [...(e.core?.IMPACT || [])].sort((a, b) => a.levelValue - b.levelValue);
+    document.getElementById("rmMatrixSize").textContent = L.length && I.length ? `${L.length} × ${I.length}` : "";
+    const cat = ratingCatalogue();
+    const info = code => cat.find(r => r.ratingCode === code) || {};
+    const cell = (l, i) => (e.matrix || []).find(c => c.likelihoodValue === l && c.impactValue === i) || { ratingCode: "" };
+    const swatch = hex => `<span class="rm-swatch" style="background:${esc(hex || "transparent")}"></span>`;
+    host.innerHTML = `<thead><tr><th class="rm-matrix-corner">Likelihood &darr; / Impact &rarr;</th>`
+      + I.map(x => `<th>${esc(x.levelValue)} &middot; ${esc(x.levelName || "")}</th>`).join("") + `</tr></thead><tbody>`
+      + L.map(lr => `<tr><th>${esc(lr.levelValue)} &middot; ${esc(lr.levelName || "")}</th>`
+          + I.map(ic => {
+              const c = cell(lr.levelValue, ic.levelValue), r = info(c.ratingCode);
+              return ro
+                ? `<td><span class="rm-cell">${swatch(r.colourHex)}${esc(r.ratingName || c.ratingCode || "--")}</span></td>`
+                : `<td><span class="rm-cell">${swatch(r.colourHex)}<select class="pm-input" data-mx-l="${lr.levelValue}" data-mx-i="${ic.levelValue}" aria-label="Rating for likelihood ${lr.levelValue}, impact ${ic.levelValue}">`
+                  + `<option value="">--</option>`
+                  + cat.map(o => `<option value="${esc(o.ratingCode)}"${o.ratingCode === c.ratingCode ? " selected" : ""}>${esc(o.ratingName || o.ratingCode)}</option>`).join("")
+                  + `</select></span></td>`;
+            }).join("") + `</tr>`).join("")
+      + `</tbody>`;
+    host.querySelectorAll("select[data-mx-l]").forEach(el => el.addEventListener("change", () => { readForm(); render(); }));
   }
 
   function renderBands(ro) {
@@ -254,7 +420,10 @@
     const scale = (state.sets.scale || [])[0] || {};
     const third = e.dimensions.find(d => d.dimensionCode === (e.thirdAxisCode || document.getElementById("rmThirdAxis").value));
     const maxThird = third ? third.levels.reduce((m, l) => Math.max(m, Number(l.levelValue) || 0), 0) : 0;
-    const max = (scale.maxLikelihood || 0) * (scale.maxImpact || 0) * maxThird;
+    // 574: the draft's own likelihood / impact scale.
+    const nl = e.core?.LIKELIHOOD?.length || scale.maxLikelihood || 0;
+    const ni = e.core?.IMPACT?.length || scale.maxImpact || 0;
+    const max = nl * ni * maxThird;
     document.getElementById("rmBandsHint").textContent = max
       ? `Score = likelihood × impact × ${third.dimensionName}. Every score from 1 to ${max} must fall in exactly one band.`
       : "Every score from 1 to the maximum must fall in exactly one band.";
@@ -336,6 +505,16 @@
       if (lv != null) { if (d.levels[Number(lv)]) d.levels[Number(lv)][f] = value; }
       else d[f] = f === "dimensionCode" ? String(value).toUpperCase() : value;
     });
+    // 574: likelihood / impact level names and the matrix ratings.
+    document.querySelectorAll("#rmCoreBody [data-core]").forEach(el => {
+      const l = (e.core[el.getAttribute("data-core")] || [])[Number(el.getAttribute("data-level"))];
+      if (l) l[el.getAttribute("data-field")] = el.value.trim();
+    });
+    document.querySelectorAll("#rmMatrix select[data-mx-l]").forEach(el => {
+      const c = (e.matrix || []).find(x => x.likelihoodValue === Number(el.getAttribute("data-mx-l"))
+                                         && x.impactValue === Number(el.getAttribute("data-mx-i")));
+      if (c) c.ratingCode = el.value;
+    });
     document.querySelectorAll("#rmBandBody [data-band]").forEach(el => {
       const b = e.bands[Number(el.getAttribute("data-band"))];
       if (b) b[el.getAttribute("data-field")] = el.tagName === "SELECT" ? el.value : (el.value === "" ? null : Number(el.value));
@@ -381,7 +560,14 @@
       appetite: e.appetite.filter(a => a.maxRatingCode).map(a => ({
         riskCategoryCode: a.riskCategoryCode || null, maxRatingCode: a.maxRatingCode, appetiteStatement: a.appetiteStatement || null })),
       impactAreas: e.areas.filter(a => a.areaCode && a.areaName)
-        .map((a, i) => ({ areaCode: a.areaCode, areaName: a.areaName, displayOrder: (i + 1) * 10 }))
+        .map((a, i) => ({ areaCode: a.areaCode, areaName: a.areaName, displayOrder: (i + 1) * 10 })),
+      // 574 (only when the version carries its scale)
+      ...(!hasScale() ? {} : {
+        likelihoodLevels: e.core.LIKELIHOOD.map(l => ({ levelValue: l.levelValue, levelName: l.levelName, descriptor: l.descriptor || null })),
+        impactLevels: e.core.IMPACT.map(l => ({ levelValue: l.levelValue, levelName: l.levelName, descriptor: l.descriptor || null })),
+        matrix: e.matrix.filter(c => c.ratingCode)
+          .map(c => ({ likelihoodValue: c.likelihoodValue, impactValue: c.impactValue, ratingCode: c.ratingCode }))
+      })
     };
   }
 
@@ -436,12 +622,50 @@
 
   async function publish() {
     if (!state.draft) return;
-    if (!await window.gracUi.confirm("Publish this draft? New assessments will use it; risks already assessed keep their version until their next assessment.")) return;
+    // 574: a changed likelihood / impact scale or matrix is warned about
+    // first (the server repeats the pending-approval check: 58349).
+    readForm();
+    const change = scaleChange();
+    const chk = (state.sets.publishCheck || [])[0] || {};
+    if (change && (chk.pendingApprovals || 0) > 0) {
+      const n = chk.pendingApprovals;
+      await window.gracUi.alert(`${n} risk assessment${n === 1 ? " is" : "s are"} waiting for approval. Approve or return `
+          + `${n === 1 ? "it" : "them"} before changing the likelihood / impact scale or the risk matrix.`,
+        { type: "warning", title: "Risk matrix cannot change yet" });
+      return;
+    }
+    const ok = change
+      ? await window.gracUi.confirm(`This version changes ${change}.\n\n`
+            + `${chk.openAssessedRisks || 0} open risk${chk.openAssessedRisks === 1 ? " was" : "s were"} assessed on the current scale. `
+            + `They keep their current ratings, but are marked "Re-assessment needed" and are shown separately on the heat maps `
+            + `until they are assessed again on the new scale.\n\nPublish this draft?`,
+          { type: "warning", title: "Risk matrix changes", confirmText: "Publish anyway" })
+      : await window.gracUi.confirm("Publish this draft? New assessments will use it; risks already assessed keep their version until their next assessment.");
+    if (!ok) return;
     if (!await saveDraft(true)) return;
     const res = await api("POST", "/methodology/publish", { organizationId: state.orgId });
     if (!res.ok) { msg(res.error, true); await load(); return; }
     await load();
     msg(`Published as version ${res.data.versionNo}.`);
+  }
+
+  // 574: what the draft changes in the scale or the matrix, against the
+  // published version (or the organisation's scale when nothing is
+  // published) -- "" when nothing.
+  function scaleChange() {
+    const e = state.edit;
+    if (!hasScale()) return "";
+    const pub = state.published ? toModel(state.published) : null;
+    const scale = (state.sets.scale || [])[0] || {};
+    const oldL = pub ? pub.core.LIKELIHOOD.length : (scale.maxLikelihood || 0);
+    const oldI = pub ? pub.core.IMPACT.length : (scale.maxImpact || 0);
+    const newL = e.core.LIKELIHOOD.length, newI = e.core.IMPACT.length;
+    if (oldL !== newL || oldI !== newI) return `the risk matrix from ${oldL} × ${oldI} to ${newL} × ${newI}`;
+    if (!pub) return "";
+    const key = c => `${c.likelihoodValue}|${c.impactValue}|${c.ratingCode}`;
+    const before = new Set(pub.matrix.map(key));
+    const changed = e.matrix.filter(c => c.ratingCode && !before.has(key(c))).length;
+    return changed ? `the rating of ${changed} risk matrix cell${changed === 1 ? "" : "s"}` : "";
   }
 
   // ---- helpers ------------------------------------------------------------

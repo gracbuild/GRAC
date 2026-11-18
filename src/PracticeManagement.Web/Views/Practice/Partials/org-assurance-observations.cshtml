@@ -882,17 +882,22 @@
         }
         if (status === 'Accepted') {
             items.push({ icon: 'fa-square-check',label: 'Resolve',           action: function () { doTransition(id, 'resolve', 'Resolution notes:'); } });
-            // Stage 4b -- the accept SP auto-generates a gap, but if
-            // that ever failed (advisory) or the gap was later
-            // soft-deleted, the observation.gap_id goes NULL. Offer a
-            // manual regenerate.
+            // 584 (CR2 8.2 / 9.2): an Accepted finding may become a Gap
+            // Candidate (Gap Center) and a Risk Candidate (Risk Centre);
+            // an Informational one does not (8.4). Accept itself raises
+            // only the remediation Task Candidate (199).
             const gapId = row && (row.gapId || row.GapId);
-            if (!gapId) {
-                items.push({ icon: 'fa-wand-magic-sparkles', label: 'Regenerate Gap',
+            const informational = (row && (row.severityCode || row.SeverityCode)) === 'Informational';
+            if (!gapId && !informational) {
+                items.push({ icon: 'fa-wand-magic-sparkles', label: 'Raise Gap Candidate',
                     action: function () { regenerateGap(id); } });
-            } else {
+            } else if (gapId) {
                 items.push({ icon: 'fa-arrow-up-right-from-square', label: 'Open Linked Gaps',
                     action: function () { openGapCenterForObservation(id); } });
+            }
+            if (!informational) {
+                items.push({ icon: 'fa-triangle-exclamation', label: 'Raise Risk Candidate',
+                    action: function () { raiseRiskCandidate(id); } });
             }
         }
         if (status === 'Resolved') {
@@ -963,8 +968,12 @@
     }
 
     async function regenerateGap(observationId) {
+        // 584: the gap generator lives on the Custom Gap API (the old
+        // org-assurance gaps route was retired in 113).
+        if (!await window.gracUi.confirm('Raise a Gap Candidate in the Gap Register from this finding? The Gap Register analyses it; the finding stays with Audit Assurance.',
+                                          { type: 'confirm', title: 'Raise Gap Candidate', confirmText: 'Raise' })) return;
         try {
-            const url  = U(API + '/gaps/generate');
+            const url  = U('/practice/api/gaps/custom/generate');
             const body = { organizationId: Number(state.orgId), observationId: Number(observationId) };
             const r = await fetch(url, {
                 method: 'POST', credentials: 'same-origin',
@@ -977,12 +986,39 @@
                     (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
                 return;
             }
-            const newGap = j && (j.gapId || j.GapId);
-            setMessage('ok', 'Gap regenerated' + (newGap ? ' (#' + newGap + ')' : '') + '.');
+            const newGap = j && (j.customGapId || j.CustomGapId || j.gapId || j.GapId);
+            setMessage('ok', 'Gap Candidate raised in the Gap Register' + (newGap ? ' (Gap #' + newGap + ')' : '') + '.');
             await reloadList();
             if (state.selectedObsId === Number(observationId)) await loadDetail(Number(observationId));
         } catch (err) {
-            setMessage('error', 'Regenerate failed: ' + (err.message || err));
+            setMessage('error', 'Raise Gap Candidate failed: ' + (err.message || err));
+        }
+    }
+
+    // 584 (CR2 9.2): a Risk Candidate for Risk Management, which registers
+    // it, links it to an existing risk or rejects it. An open candidate of
+    // the same finding is returned, not duplicated.
+    async function raiseRiskCandidate(observationId) {
+        if (!await window.gracUi.confirm('Raise a Risk Candidate in Risk Management from this finding? Risk Management decides whether it is a new risk, an existing one or not a risk.',
+                                          { type: 'confirm', title: 'Raise Risk Candidate', confirmText: 'Raise' })) return;
+        try {
+            const r = await fetch(U(API + '/audit-findings/' + encodeURIComponent(observationId) + '/risk-candidate'), {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organizationId: Number(state.orgId) })
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+                setMessage('error', ((j && (j.error || j.Error)) || 'HTTP ' + r.status) +
+                    (j && (j.reasonCode || j.ReasonCode) ? ' [' + (j.reasonCode || j.ReasonCode) + ']' : ''));
+                return;
+            }
+            const num = j && (j.candidateNumber || j.CandidateNumber);
+            const created = j && (j.created || j.Created);
+            setMessage('ok', created ? 'Risk Candidate ' + (num || '') + ' raised in Risk Management.'
+                                     : 'This finding already has Risk Candidate ' + (num || '') + ' (' + ((j && (j.statusCode || j.StatusCode)) || '') + ').');
+        } catch (err) {
+            setMessage('error', 'Raise Risk Candidate failed: ' + (err.message || err));
         }
     }
 

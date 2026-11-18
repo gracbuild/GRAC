@@ -60,7 +60,6 @@
         @* ---------------- occurrences (MINE / APPROVALS / ALL) ---------------- *@
         <div class="pm-tab-panel" data-aat-panel="LIST">
             <div class="pm-toolbar">
-                <input type="search" id="aatSearch" placeholder="Search asset name or ID" maxlength="200" />
                 <select id="aatStatus" title="Status">
                     <option value="">All statuses</option>
                     <option value="PENDING">Pending</option>
@@ -73,6 +72,7 @@
                     <option value="CLOSED">Closed</option>
                     <option value="CANCELLED">Cancelled</option>
                 </select>
+                <input type="search" id="aatSearch" placeholder="Search asset name or ID" maxlength="200" />
                 <button class="pm-button icon" id="aatRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             </div>
             <div class="pm-table-wrap">

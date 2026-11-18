@@ -1269,3 +1269,19 @@ Remaining for later phases: template inheritance from category / subcategory tem
 Phase 9 replaced the per-phase sweep with `tools/asset-audit` and ran it over the whole module (D226): no finding. The diagnostics and regression scripts were checked with the same tools (lexer audit, declared-variable scan) and contain no `INSERT ... EXEC` of a multi-result procedure. Runtime results are for UAT: run 16 (section 4 must be all PASS), 17 with `@confirm = 1` (all PASS / SKIPPED) and the 74 UAT cases.
 
 461 (D231) got the lexer audit (0 findings), a diff against the 436 body (only the split APPROVE check and the re-issue marker differ; the rollback is the 436 body verbatim), `node --check` of the script, the screen check (0 findings) and the C# / procedure check (230 calls, 0 issues; no API change). Not compiled or executed.
+
+### Menu grouped by area (586, 2026-11-18, sir)
+
+As Audit Assurance (578): the Dashboard stays first, then five groups (no url, they open / close) under Asset & Contract:
+
+| Group | Screens (order) |
+|---|---|
+| Asset Inventory (`nav-asset-inventory`, 371) | Asset Register, Asset Discovery, Asset Relationships, Business Services, Asset Attestation |
+| Contracts (`nav-asset-contracts`, 372) | Contracts |
+| Asset Operations (`nav-asset-operations`, 373) | Asset Activities, Asset Notifications |
+| Governance & Reporting (`nav-asset-governance-reporting`, 374) | Asset Governance, Asset Privacy, Asset Reports |
+| Asset Configuration (`nav-asset-configuration`, 375) | Asset Taxonomy, Technology Catalogue, Field Dictionary, Asset Form Templates, Option Lists, Asset Valuation |
+
+- Menu only: no screen, url, name or grant changes; a group shows while the role may open one of its screens (PermittedMenu). 274 amended.
+- Re-running 420-452 puts their row back directly under Asset & Contract -- run 586 again after any of them.
+- Rollback: `586_asset_contract_menu_groups_rollback.sql`. Users sign out and back in to see the change.

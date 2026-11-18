@@ -811,3 +811,17 @@ unchanged.
 
 **Deploy:** run 519, then deploy Api and Web in any order, then hard-refresh the browser. After
 a **rollback**, restart the Api, because the parameter probe is cached per process.
+
+## Applicable + teams in one Save (2026-11-16)
+
+**Request (sir).** Marking a practice Applicable and then running Assign Team was two steps. The Mark / Update Applicability dialog now carries the team selection: while the status is **Applicable** an **Assign Team** block (the same team list -- filter, Select all available, Clear, count; teams that already have an instance are ticked and locked) appears under Reason / Justification. **Save** records the applicability, re-reads the practice (marking Applicable creates the practice row, 218), then creates one Practice Instance per ticked team with the same `POST /practice/api/workflow/practice-configure/instances` Assign Team uses, and shows the same outcome sentence on the Practice Instances panel. Ticking no team just saves the applicability. If the instances cannot be created the applicability stays saved and the panel says so (use Actions > Assign Team). **Assign Team** stays for adding more teams later.
+
+**Also on the Organization Practices list** (Mark / Update Applicability from the row's 3-dot menu, `practice.js`, screen `organization-requirements`): the same Assign Team block appears while the status is Applicable. After the save, the practice id is read back (`gracPracticeDetails.load` -- the practice row may only exist from this save, 218), the instances are created, the list reloads, and the outcome sentence is shown as a message. (`practices` screen applicability is unchanged.)
+
+**Code.** The team list is one shared module, `wwwroot/js/Shared/practice-teams.js` (`window.gracPracticeTeams`), moved out of `practice-view.cshtml`'s Assign Team code:
+- `picker(ids)` -- load (`GET practice-configure/teams`, `practiceId` optional) / filter / select all / clear / count; `selectedIds()`, `reset()`, `loaded`.
+- `blockHtml(prefix)` / `ids(prefix)` -- the Assign Team block for a form.
+- `createInstances(orgId, practiceId, teamIds)` -- `POST practice-configure/instances`.
+- `summary(body)` / `summaryText(body)` -- the outcome sentence (was `outcomeSummary`).
+Used by Practice View's Assign Team dialog and applicability dialog, and by `practice.js` (`attachApplicabilityTeams` in `openForm`, `createApplicabilityInstances` in `saveForm`). `Manage.cshtml` loads `practice-details.js` and `practice-teams.js` before `practice.js`. Team checkboxes carry no `name`, so `collectForm()` ignores them. No API or database change.
+

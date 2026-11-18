@@ -25,7 +25,7 @@
     /* Progress reads at a glance: complete is quiet, outstanding is not. */
     #rvRoot .rv-progress { font-size: 12px; white-space: nowrap; }
     #rvRoot .rv-progress.done    { color: var(--success-700); }
-    #rvRoot .rv-progress.pending { color: var(--warning-700); font-weight: 600; }
+    #rvRoot .rv-progress.pending { color: var(--warning-700); }
     #rvRoot .rv-progress.none    { color: var(--fg-muted); }
 
     /* ---- Grid layout ----
@@ -62,7 +62,6 @@
        carrying a chip that names the state -- the row is still fully
        openable, which is the point of showing it at all. */
     #rvRoot .rv-grid tr.rv-retired td { background: var(--neutral-50); color: var(--fg-subtle); }
-    #rvRoot .rv-grid tr.rv-retired .rv-name { font-weight: 600; }
     #rvRoot .rv-retired-chip {
         background: var(--bg-subtle); border-radius: var(--radius-pill); color: var(--fg-secondary);
         font-size: 10px; font-weight: 700; letter-spacing: .04em;
@@ -223,7 +222,6 @@
            retired -- Organization -> Owner -> Status -> Search -> Show
            retired. Same id, same placeholder, same JS wiring; only its
            position moved (previously last, after Show retired). *@
-        <input type="search" id="rvSearch" placeholder="Filter by instance or practice..." />
         @* 287. Off by default. This list is a work queue, and one that
            silently included retired instances would be worse than one
            that could not show them -- but a retired instance had nowhere
@@ -238,6 +236,7 @@
             <option value="false" selected>Active only</option>
             <option value="true">Include Retired</option>
         </select>
+        <input type="search" id="rvSearch" placeholder="Filter by instance or practice..." />
         <button class="pm-button icon" id="rvRefreshBtn" type="button" title="Refresh">
             <i class="fa-solid fa-rotate-right"></i>
         </button>

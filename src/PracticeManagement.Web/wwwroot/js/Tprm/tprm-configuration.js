@@ -152,7 +152,7 @@
       <p class="tprm-note">Baseline items are illustrative; the source columns record where an item comes from and whether it is a regulatory requirement.</p>
       <div class="pm-table-wrap"><table><thead><tr><th>Item</th><th>Category / dimension</th><th>Details</th><th>Source</th><th>Origin</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows.map(x => `<tr class="${yes(F(x, "isHidden")) || F(x, "status") !== "Active" ? "cf-hidden-row" : ""}">
-        <td><strong>${esc(F(x, "itemCode"))}</strong> ${esc(F(x, "itemName"))}${F(x, "description") ? `<div class="tprm-muted">${esc(F(x, "description"))}</div>` : ""}</td>
+        <td>${esc(F(x, "itemCode"))} ${esc(F(x, "itemName"))}${F(x, "description") ? `<div class="tprm-muted">${esc(F(x, "description"))}</div>` : ""}</td>
         <td>${esc([F(x, "categoryCode"), F(x, "dimensionCode")].filter(Boolean).join(" / "))}</td>
         <td class="tprm-muted">${esc([F(x, "effectivenessCriteria") && `Effective when: ${F(x, "effectivenessCriteria")}`, yes(F(x, "isContractClause")) && "Contract clause",
             F(x, "evidenceRequirementCode") && `Evidence: ${F(x, "evidenceRequirementCode")}`, F(x, "validityMonths") && `Valid ${F(x, "validityMonths")} months`,
@@ -229,7 +229,7 @@
         acts.push(btn("template-adopt", "fa-copy", F(t, "adoptedTemplateId") ? "Take the update" : "Adopt", { id: F(t, "templateId") }));
       if (CAN_APPROVE && own) acts.push(btn("template-retire", F(t, "status") === "Active" ? "fa-box-archive" : "fa-rotate-left", F(t, "status") === "Active" ? "Retire" : "Restore", { id: F(t, "templateId"), restore: F(t, "status") === "Active" ? "0" : "1" }));
       return `<tr class="${F(t, "status") !== "Active" ? "cf-hidden-row" : ""}">
-        <td><strong>${esc(F(t, "templateCode"))}</strong> ${esc(F(t, "templateName"))}${F(t, "description") ? `<div class="tprm-muted">${esc(F(t, "description"))}</div>` : ""}</td>
+        <td>${esc(F(t, "templateCode"))} ${esc(F(t, "templateName"))}${F(t, "description") ? `<div class="tprm-muted">${esc(F(t, "description"))}</div>` : ""}</td>
         <td>${F(t, "templateKind") === "RISK_MODEL" ? "Risk model" : "Questionnaire"}${yes(F(t, "isDefault")) ? ' <span class="pm-badge">Default</span>' : ""}
           ${F(t, "templateKind") === "QUESTIONNAIRE" ? `<div class="tprm-muted">${yes(F(t, "isCore")) ? "Core" : esc([F(t, "appliesServiceCategories"), F(t, "appliesMinTierRank") ? `tier ${F(t, "appliesMinTierRank")}+` : ""].filter(Boolean).join(", "))}</div>` : ""}</td>
         <td>${F(t, "currentVersionNo") ? `v${esc(F(t, "currentVersionNo"))}` : "--"} <span class="tprm-muted">${esc(date(F(t, "currentActivatedDt")))}</span>
@@ -277,7 +277,7 @@
           (v.dimensions || []).map(d => `<tr><td>${esc(F(d, "dimensionCode"))}</td><td>${esc(F(d, "dimensionName"))}</td><td>${esc(F(d, "weight"))}</td><td>${itemBtns("DIMENSION", F(d, "dimensionId"))}</td></tr>`).join("") || empty(4, "None.")}</tbody></table></div>
         <div class="tprm-subhead">Factors ${edit ? btn("item-add-v", "fa-plus", "Add", { type: "FACTOR" }) : ""}</div>
         <div class="pm-table-wrap"><table><thead><tr><th>Factor</th><th>Dimension</th><th>Options (score)</th><th>Prefill</th><th></th></tr></thead><tbody>${
-          (v.factors || []).map(f => `<tr><td><strong>${esc(F(f, "factorCode"))}</strong> ${esc(F(f, "questionText"))}${yes(F(f, "isMandatory")) ? " *" : ""}</td><td>${esc(F(f, "dimensionCode"))}</td>
+          (v.factors || []).map(f => `<tr><td>${esc(F(f, "factorCode"))} ${esc(F(f, "questionText"))}${yes(F(f, "isMandatory")) ? " *" : ""}</td><td>${esc(F(f, "dimensionCode"))}</td>
             <td class="tprm-muted">${esc(opts(F(f, "factorId")))}</td><td>${esc(F(f, "prefillSource") || "")}</td><td>${itemBtns("FACTOR", F(f, "factorId"))}</td></tr>`).join("") || empty(5, "None.")}</tbody></table></div>
         <div class="tprm-subhead">Risk bands ${edit ? btn("item-add-v", "fa-plus", "Add", { type: "BAND" }) : ""}</div>
         <div class="pm-table-wrap"><table><thead><tr><th>Band</th><th>From score</th><th>Rank</th><th>Due-diligence tier</th><th></th></tr></thead><tbody>${
@@ -294,7 +294,7 @@
           (v.sections || []).map(s => `<tr><td>${esc(F(s, "sectionCode"))}</td><td>${esc(F(s, "title"))}</td><td>${itemBtns("SECTION", F(s, "sectionId"))}</td></tr>`).join("") || empty(3, "None.")}</tbody></table></div>
         <div class="tprm-subhead">Questions ${edit ? btn("item-add-v", "fa-plus", "Add", { type: "QUESTION" }) : ""}</div>
         <div class="pm-table-wrap"><table><thead><tr><th>Question</th><th>Type</th><th>Applies when</th><th>Options</th><th>Source</th><th></th></tr></thead><tbody>${
-          (v.questions || []).map(q => `<tr><td><strong>${esc(F(q, "questionCode"))}</strong> ${esc(F(q, "questionText"))}${yes(F(q, "isMandatory")) ? " *" : ""}
+          (v.questions || []).map(q => `<tr><td>${esc(F(q, "questionCode"))} ${esc(F(q, "questionText"))}${yes(F(q, "isMandatory")) ? " *" : ""}
               ${F(q, "parentQuestionCode") ? `<div class="tprm-muted">Follow-up of ${esc(F(q, "parentQuestionCode"))} when ${esc(F(q, "triggerOptionCodes") || "")}</div>` : ""}</td>
             <td>${esc(F(q, "responseType"))}${yes(F(q, "evidenceExpected")) ? '<div class="tprm-muted">evidence expected</div>' : ""}</td>
             <td class="tprm-muted">${esc([F(q, "minTierRank") && `tier ${F(q, "minTierRank")}+`, F(q, "appliesServiceCategories"), F(q, "appliesMinDataRank") && `data rank ${F(q, "appliesMinDataRank")}+`, F(q, "appliesAccessCodes")].filter(Boolean).join(", ") || "always")}</td>
@@ -419,7 +419,7 @@
       return;
     }
     const ruleRow = (kind, x) => `<tr class="${yes(F(x, "isHidden")) || yes(F(x, "isOverridden")) ? "cf-hidden-row" : ""}">
-      <td><strong>${esc(F(x, "ruleCode"))}</strong> ${esc(F(x, "ruleName"))}${yes(F(x, "isOverridden")) ? '<div class="tprm-muted">Changed by this organization (see its row)</div>' : ""}</td>
+      <td>${esc(F(x, "ruleCode"))} ${esc(F(x, "ruleName"))}${yes(F(x, "isOverridden")) ? '<div class="tprm-muted">Changed by this organization (see its row)</div>' : ""}</td>
       <td>${esc(F(x, "priority"))}</td>
       <td>${esc([F(x, "minBandRank") != null ? `band rank ${F(x, "minBandRank")}+` : "", F(x, "minCriticalityRank") != null ? `criticality rank ${F(x, "minCriticalityRank")}+` : ""].filter(Boolean).join(" or ") || "catch-all")}</td>
       <td>${kind === "approval"
@@ -488,7 +488,7 @@
       <div class="pm-toolbar">${picker("entity", ENTITIES, state.entity)}${CAN_CHANGE ? btn("field-add", "fa-plus", "Add field") : ""}</div>
       <p class="tprm-note">Fields the organization adds to vendors, engagements, findings and reviews. Mandatory fields are enforced on save; access by role limits who can change a field.</p>
       <div class="pm-table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Rules</th><th>Visible when</th><th>Use</th><th>Status</th><th></th></tr></thead><tbody>${
-        state.data.fields.map(f => `<tr class="${F(f, "status") !== "Active" ? "cf-hidden-row" : ""}"><td><strong>${esc(F(f, "fieldCode"))}</strong> ${esc(F(f, "label"))}</td>
+        state.data.fields.map(f => `<tr class="${F(f, "status") !== "Active" ? "cf-hidden-row" : ""}"><td>${esc(F(f, "fieldCode"))} ${esc(F(f, "label"))}</td>
           <td>${esc(F(f, "dataType"))}${F(f, "referenceKind") ? ` (${esc(F(f, "referenceKind"))})` : ""}</td>
           <td class="tprm-muted">${esc([yes(F(f, "isMandatory")) && "mandatory", F(f, "defaultValue") && `default ${F(f, "defaultValue")}`, F(f, "validationRegex") && "pattern",
               F(f, "minValue") != null && `min ${F(f, "minValue")}`, F(f, "maxValue") != null && `max ${F(f, "maxValue")}`, F(f, "accessRoleNames") && `roles: ${F(f, "accessRoleNames")}`].filter(Boolean).join(", "))}</td>

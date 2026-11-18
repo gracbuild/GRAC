@@ -1,6 +1,8 @@
 -- =====================================================================
 -- tool_demo_db_01_clone.sql  --  step 1 of 2: copy UAT to the demo DB
 --
+-- USES  2026-10-06 UAT -> demo; 2026-11-18 grac_demo -> Grac_Pilot (sir:
+--       masters + MSP (1) and Lakeshore (11) only; see docs/demo-database.md).
 -- REQUEST (2026-10-06)
 --   A demo database grac_new_demo built from UAT (grac_newphase_uat):
 --   every schema object, all of GRAC_New and every master table, but
@@ -31,8 +33,8 @@
 USE master;
 SET NOCOUNT ON;
 
-DECLARE @Source     SYSNAME        = N'grac_newphase_uat';
-DECLARE @Target     SYSNAME        = N'grac_demo';
+DECLARE @Source     SYSNAME        = N'grac_demo';    -- 2026-11-18 Grac_Pilot (sir); the demo was grac_newphase_uat -> grac_demo
+DECLARE @Target     SYSNAME        = N'Grac_Pilot';
 DECLARE @BackupFile NVARCHAR(4000) = NULL;
 DECLARE @DataPath   NVARCHAR(4000) = NULL;
 DECLARE @LogPath    NVARCHAR(4000) = NULL;

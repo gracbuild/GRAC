@@ -22,6 +22,14 @@ public sealed class PracticeController(
     // screen itself is untouched and still works under Practice Management.
     private static readonly string[] OrganizationManagementAreas =
     [
+        // Migrations 569-572: the Organization Registry -- Organization ->
+        // Legal Entity hierarchy and the registry areas. Since 570 it is the
+        // module's landing page (the top of the hierarchy) and first menu.
+        // 575: here it holds Organizations and Legal Entities only; the
+        // other registry areas are Practice Management -> Organization
+        // (org-registry-structure / -people / -operations), maintained by
+        // the organization's own users.
+        "org-registry",
         // The landing list -- the module root, and since 2026-11-02 a menu
         // entry as well (migration 512 made its menu_master row Active) --
         // and the read-only organization page its rows open, which has no
@@ -52,6 +60,10 @@ public sealed class PracticeController(
     // must still OPEN without appearing here.
     private static readonly string[] OrganizationManagementMenuAreas =
     [
+        // 570: the Organization Registry first -- it is the top of the
+        // Organization -> Legal Entity hierarchy; "organizations" below is
+        // now titled Legal Entities. 575: Organizations and Legal Entities only.
+        "org-registry",
         // The organization list. Added 2026-11-02: once you open the
         // approval screen there was no way back to the list, which is the
         // module's landing page and has no menu row of its own. First, so it
@@ -74,8 +86,12 @@ public sealed class PracticeController(
         // 2026-11-02: Organization Management opens on the list of
         // organizations. Picking a row goes to the organization page,
         // which is what this used to land on directly.
+        // 570: it opens on the Organization Registry, the top of the
+        // Organization -> Legal Entity hierarchy; the Legal Entities list
+        // ("organizations") is its second menu.
+        // A role without the org-registry grant still lands on the list.
         if (string.IsNullOrWhiteSpace(areaKey) && IsOrganizationManagementModule())
-            return ShowArea("organizations", cancellationToken: cancellationToken);
+            return ShowArea(CanViewScreen("org-registry") ? "org-registry" : "organizations", cancellationToken: cancellationToken);
         if (string.IsNullOrWhiteSpace(areaKey)) return Dashboard(cancellationToken);
         return ShowArea(areaKey, cancellationToken: cancellationToken);
     }
@@ -105,6 +121,27 @@ public sealed class PracticeController(
     [HttpGet("organizations")]
     public Task<IActionResult> Organizations(CancellationToken cancellationToken) =>
         ShowArea("organizations", cancellationToken: cancellationToken);
+
+    // Organization Registry (migrations 569-572). Same reason as
+    // Organizations above: under a hosted PathBase of /OrganizationManagement
+    // the path is just /org-registry, which no conventional route matches.
+    [HttpGet("OrgRegistry")]
+    [HttpGet("org-registry")]
+    public Task<IActionResult> OrgRegistry(CancellationToken cancellationToken) =>
+        ShowArea("org-registry", PracticeScreen.OrganizationGroup, cancellationToken);
+
+    // 575: the registry's three Practice Management -> Organization menus.
+    [HttpGet("org-registry-structure")]
+    public Task<IActionResult> OrgRegistryStructure(CancellationToken cancellationToken) =>
+        ShowArea("org-registry-structure", PracticeScreen.OrganizationGroup, cancellationToken);
+
+    [HttpGet("org-registry-people")]
+    public Task<IActionResult> OrgRegistryPeople(CancellationToken cancellationToken) =>
+        ShowArea("org-registry-people", PracticeScreen.OrganizationGroup, cancellationToken);
+
+    [HttpGet("org-registry-operations")]
+    public Task<IActionResult> OrgRegistryOperations(CancellationToken cancellationToken) =>
+        ShowArea("org-registry-operations", PracticeScreen.OrganizationGroup, cancellationToken);
 
     [HttpGet("OrganizationView")]
     [HttpGet("organization-view")]

@@ -23,6 +23,13 @@
     Edit = the organisation administrator (menu EDIT on this screen; the
     Web proxy refuses the writes otherwise).
 
+    574 (2026-11-16): Likelihood and Impact head the Dimensions table as
+    locked rows (always on, required, every stage); their levels -- names,
+    descriptors and how many -- are edited there. The Risk matrix section
+    rates every likelihood x impact cell and resizes with the levels.
+    Publishing a changed scale or matrix warns first (risks already
+    assessed are marked "Re-assessment needed").
+
     Backend:
         GET  /practice/api/risk-centre/methodology?organizationId=
         POST /practice/api/risk-centre/methodology/draft          { organizationId, templateCode, replace }
@@ -212,6 +219,43 @@
         </div>
     </section>
 
+    @* 2026-11-17 (sir): three groups -- Likelihood & Impact, then the Risk
+       matrix they drive, then the other Dimensions -- so the matrix sits
+       right under the levels it follows instead of under every dimension.
+       Same columns as Dimensions; rows rendered by risk-methodology.js
+       (renderDimensions -> #rmCoreBody). *@
+    <section class="pm-panel" id="rmCorePanel">
+        <div class="pm-section-heading">
+            <h2>Likelihood &amp; Impact</h2>
+            <p>Always asked, at every stage. Only their levels can be changed; the risk matrix below follows them.</p>
+        </div>
+        <div class="pm-table-wrap rm-compact">
+            <table>
+                <thead>
+                    <tr>
+                        <th>On</th><th>Dimension</th><th>Required</th>
+                        <th>Inherent</th><th>Residual</th><th>Review</th>
+                        <th>Weight</th><th>Levels</th><th aria-label="Actions"></th>
+                    </tr>
+                </thead>
+                <tbody id="rmCoreBody"></tbody>
+            </table>
+        </div>
+    </section>
+
+    @* 574: the version's risk matrix -- one rating per likelihood x impact
+       cell; it follows the Likelihood / Impact levels above. *@
+    <section class="pm-panel" id="rmMatrixPanel">
+        <div class="pm-section-heading">
+            <h2>Risk matrix <span class="rm-chip" id="rmMatrixSize"></span></h2>
+            <p>The rating of every likelihood &times; impact combination. Adding or removing a likelihood or impact level resizes it (3&times;3, 4&times;4, 5&times;5 ...). Changing the size or a rating marks risks already assessed for re-assessment when published.</p>
+        </div>
+        <div class="pm-table-wrap rm-compact">
+            <table class="rm-matrix" id="rmMatrix"></table>
+        </div>
+        <button type="button" class="pm-button ghost rm-add" id="rmMatrixDefaults"><i class="fa-solid fa-wand-magic-sparkles"></i> Default ratings</button>
+    </section>
+
     <section class="pm-panel">
         <div class="pm-section-heading">
             <h2>Dimensions</h2>
@@ -231,6 +275,7 @@
         </div>
         <button type="button" class="pm-button ghost rm-add" id="rmAddDim"><i class="fa-solid fa-plus"></i> Add dimension</button>
     </section>
+
 
     <div class="rm-actions">
         <p class="pm-form-message" id="rmMessage" role="status" aria-live="polite"></p>
@@ -273,7 +318,13 @@
     }
     #rmForm .rm-opt > .rm-opt-text { grid-column: 2; }
     #rmForm .rm-opt > .rm-opt-control { grid-column: 3; width: 100%; height: 34px; margin: 0; }
-    #rmForm .rm-opt > textarea.rm-opt-control { height: auto; min-height: 56px; }
+    /* Notes: the box sits under its title across the row (title column to
+       the right edge), so it lines up with the titles and hints above
+       instead of hanging in the narrow control column. */
+    #rmForm .rm-opt > textarea.rm-opt-control {
+        grid-column: 2 / 4; grid-row: 2; height: auto; min-height: 64px;
+        margin-top: 8px; resize: vertical;
+    }
     #rmForm .rm-toggle { cursor: pointer; align-items: start; }
     #rmForm .rm-toggle > input { grid-column: 1; margin: 2px 0 0; width: 16px; height: 16px; }
     #rmForm .rm-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -283,6 +334,7 @@
     @@media (max-width: 900px) {
         #rmForm .rm-opt { grid-template-columns: 16px minmax(0, 1fr); row-gap: 8px; }
         #rmForm .rm-opt > .rm-opt-control { grid-column: 2; }
+        #rmForm .rm-opt > textarea.rm-opt-control { grid-column: 2; }
     }
     #rmForm .rm-sub {
         margin: 0 0 0 32px; padding: 10px 12px 12px; border-left: 2px solid var(--primary-200);
@@ -304,7 +356,7 @@
        description below in a quieter, smaller field. */
     #rmForm td.rm-name-cell { min-width: 280px; white-space: normal; }
     #rmForm .rm-name-row { display: flex; align-items: center; gap: 8px; }
-    #rmForm .rm-name-row .pm-input { flex: 1 1 auto; font-weight: 600; }
+    #rmForm .rm-name-row .pm-input { flex: 1 1 auto; }
     #rmForm .rm-code {
         flex: none; padding: 2px 8px; border-radius: var(--radius-sm);
         background: var(--bg-subtle); color: var(--fg-muted);
@@ -318,6 +370,15 @@
         display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
         background: var(--bg-subtle); color: var(--neutral-700); font-size: 11px; font-weight: 600;
     }
+
+    /* 574: Likelihood / Impact rows and the risk matrix. */
+    #rmForm .rm-core-name { font-size: 13px; color: var(--fg-default); }
+    #rmForm .rm-core-desc { display: block; margin-top: 4px; font-size: 12px; color: var(--fg-muted); }
+    #rmForm .rm-matrix th { white-space: nowrap; }
+    #rmForm .rm-matrix .rm-matrix-corner { color: var(--fg-muted); font-weight: 400; }
+    #rmForm .rm-matrix .rm-cell { display: flex; align-items: center; gap: 6px; }
+    #rmForm .rm-matrix .rm-cell .pm-input { min-width: 110px; }
+    #rmForm .rm-swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; border: 1px solid var(--border); }
 
     /* Save / Discard / Publish at the end of the form, not in a card. */
     #rmForm .rm-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: 4px 0 16px; }

@@ -1231,6 +1231,9 @@
         kind,
         frequency: (r.frequency_name && String(r.frequency_name).trim()) || "—",
         owner,
+        // 2026-11-16: the schedule's reviewer / approver (526).
+        reviewer: (r.reviewer_name && String(r.reviewer_name).trim()) || "",
+        approver: (r.approver_name && String(r.approver_name).trim()) || "",
         next: nextScheduleDateForRule(r),
         practiceInstance,
         // Task Calendar Edit Scheduler (2026-09-23): carried through so
@@ -1268,7 +1271,9 @@
         r.obligation.toLowerCase().includes(q) ||
         r.kind.toLowerCase().includes(q) ||
         r.frequency.toLowerCase().includes(q) ||
-        r.owner.toLowerCase().includes(q));
+        r.owner.toLowerCase().includes(q) ||
+        r.reviewer.toLowerCase().includes(q) ||
+        r.approver.toLowerCase().includes(q));
     }
 
     // Stable order: obligation name, then type.
@@ -1287,7 +1292,7 @@
     const toolbar = `<div class="cal-scheduler-toolbar">
         <div class="cal-scheduler-search">
           <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-          <input type="search" id="calSchedulerSearch" placeholder="Search obligation, type, frequency or owner..."
+          <input type="search" id="calSchedulerSearch" placeholder="Search obligation, type, frequency, owner, reviewer or approver..."
                  aria-label="Search schedulers" value="${escapeAttr(schedulerSearch)}" />
         </div>
         <span class="cal-scheduler-count">${total} schedule${total === 1 ? "" : "s"}</span>
@@ -1327,6 +1332,8 @@
         <td><span class="cal-side-source-badge source-${escapeAttr(r.kind)}">${escapeHtml(kindLabel)}</span></td>
         <td>${escapeHtml(r.frequency)}</td>
         <td>${escapeHtml(r.owner)}</td>
+        <td>${r.reviewer ? escapeHtml(r.reviewer) : '<span class="cal-sched-none">No reviewer</span>'}</td>
+        <td>${r.approver ? escapeHtml(r.approver) : '<span class="cal-sched-none">No approver</span>'}</td>
         <td class="cal-sched-next">${r.next ? escapeHtml(formatListDate(r.next)) : '<span class="cal-sched-none">—</span>'}</td>
         ${actionsCell}
       </tr>`;
@@ -1353,6 +1360,8 @@
               <th>Type</th>
               <th>Frequency</th>
               <th>Owner</th>
+              <th>Reviewer</th>
+              <th>Approver</th>
               <th>Next Schedule Date</th>
               ${canEdit ? '<th aria-label="Actions"></th>' : ""}
             </tr>
@@ -1573,6 +1582,7 @@
         })
       });
       document.getElementById("calReviewDialog").close();
+      await refresh();   // the List view shows the reviewer / approver
     } catch (error) {
       reviewMessage(error.message, true);
     } finally {

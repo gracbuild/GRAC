@@ -325,6 +325,43 @@
 
     renderRelatedTasks();
     renderGapMappedPractices();
+    renderGapAuditSource();
+  }
+
+  // Migration 584 (CR2 - AA 8.2): a gap raised from audit findings shows
+  // their audit source -- read through the finding reference, not copied;
+  // the finding stays owned by Audit Assurance. Nothing for other gaps.
+  async function renderGapAuditSource() {
+    const dl = document.getElementById("gapDetailMetadata");
+    const orgId = state.orgId || (state.gapHeader && state.gapHeader.organizationId) || 0;
+    if (!dl || !orgId) return;
+    let rows = [];
+    try {
+      const r = await fetch(U("/practice/api/org-assurance/audit-findings/gap-source?organizationId=" + encodeURIComponent(orgId)
+                              + "&gapId=" + encodeURIComponent(state.gapId)), { credentials: "same-origin" });
+      if (!r.ok) return;
+      const j = await r.json();
+      rows = (j && (j.data || j.Data)) || [];
+    } catch (_) { return; }
+    const v = (o, k) => o[k] !== undefined ? o[k] : o[k.charAt(0).toUpperCase() + k.slice(1)];
+    const row = (label, value) => value != null && value !== ""
+      ? `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`
+      : "";
+    rows.forEach(o => {
+      dl.insertAdjacentHTML("beforeend",
+        row("Audit Finding", [v(o, "observationCode"), v(o, "observationTitle")].filter(Boolean).join(" - ")
+                             + (v(o, "observationStatus") ? ` (${v(o, "observationStatus")})` : "")) +
+        row("Audit Engagement", [v(o, "engagementCode"), v(o, "engagementName")].filter(Boolean).join(" - ")) +
+        row("Audit Execution", [v(o, "executionCode"), v(o, "executionName")].filter(Boolean).join(" - ")) +
+        row("Audit Universe Subject", v(o, "universeSubjects")) +
+        row("Related Practice / Entity", [v(o, "entityDimensionName"), v(o, "entityCode"), v(o, "entityName")].filter(Boolean).join(" - ")) +
+        row("Finding Severity", v(o, "severityName")) +
+        row("Audit Criteria", v(o, "auditCriteria")) +
+        row("Observed Condition", v(o, "conditionText")) +
+        row("Audit Risk / Impact", v(o, "riskImpact")) +
+        row("Management Response", v(o, "managementResponse")) +
+        row("Evidence References", v(o, "supportingEvidence")));
+    });
   }
 
   // Migration 382/388, reworked 2026-10-27 (496): the Practice

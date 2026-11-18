@@ -98,6 +98,12 @@ is a `<span>`, so its inline width was ignored. It is now
 Operationalize's ownership rule, Policies & Documents the Evidence Center
 visibility rule (`fn_pm_evidence_item_visible`) to its evidence figures.
 
+573: `governance` also takes an optional `releaseId` (both tiers:
+`...governance?organizationId=&releaseId=`). The Web proxy forwards it only
+when it is a positive number; the API passes `@release_id` to
+`sp_dashboard_governance` only when it is set, so "All frameworks" works
+on a database without 573. Other modules ignore it.
+
 ```json
 {
   "module": "issues-actions",
@@ -287,3 +293,10 @@ every dashboard on v2, the 414 renderers (`tile`, `bars`, `renderKpis`, `renderA
 `management-dashboard.js`, and the dedicated 414 layout CSS from `practice-management.css`.
 `gracDash.kpiCard` shows a dash for `value: null` (not available, e.g. no governance
 snapshot) instead of 0. Detail: `docs/asset-contract-dashboard-v2.md`.
+
+## 573 -- Governance framework filter (2026-11-16)
+
+A framework select (`#mdFramework`) beside the organization, Governance only:
+"All frameworks" on first load and after an organization change; the options
+are the organization's subscribed releases. Choosing one sends `releaseId`
+and the page shows only that framework. Detail: `docs/governance-dashboard-v2.md`.

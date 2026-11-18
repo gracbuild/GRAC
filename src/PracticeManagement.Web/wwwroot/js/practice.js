@@ -537,14 +537,17 @@
   // the same reason wrappedColumnsByScreen above is: renaming "Name" globally
   // would silently retitle a column on every other grid in the module.
   const columnLabelsByScreen = {
+    // 570: the organization rows are the Legal Entity level of the
+    // Organization Registry; RegistryOrganization is the Organization above.
     "organizations": {
-      Code: "Organisation Short Name",
-      Name: "Organisation Long Name",
+      Code: "Legal Entity Code",
+      Name: "Legal Entity Name",
+      RegistryOrganization: "Organization",
       SubscriptionStartDate: "Start Date",
       SubscriptionEndDate: "End Date",
       FrameworkSummary: "Selected Standards and Frameworks",
       SpocName: "SPOC Name",
-      Status: "Organisation Status"
+      Status: "Legal Entity Status"
     }
   };
   const setupChildScreens = {
@@ -1031,6 +1034,10 @@
     releaseUpdates: "Repository Updates",
     // Rule 6 — best-effort "Resend credentials" action on the Users tab.
     resendCredentials: "Resend Credentials",
+    // 467: a user created by single sign-on that waits for approval. On the
+    // Users / Employees tab of Organization Administration until that tab
+    // was retired (2026-11-16); now on User Management.
+    approveSso: "Approve",
     markApplicability: "Mark Applicability",
     updateApplicability: "Update Applicability",
     configure: "Configure",
@@ -1064,6 +1071,7 @@
     releaseUpdateOwner: "fa-user-gear",
     releaseUpdates: "fa-code-compare",
     resendCredentials: "fa-envelope",
+    approveSso: "fa-user-check",
     markApplicability: "fa-clipboard-check",
     updateApplicability: "fa-clipboard-check",
     configure: "fa-gear",
@@ -2647,7 +2655,9 @@
       });
       const b = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(b.error || b.message || ("HTTP " + r.status));
-      await loadSetupChildRows("users");
+      // User Management's grid, or the Users tab of Organization Setup.
+      if (screen.Key === "users") await loadRows();
+      else await loadSetupChildRows("users");
     } catch (error) {
       alert(error.message || "Unable to approve the user.");
     }
@@ -5576,11 +5586,15 @@
       else if (applicability === "applicable") actions = ["instances", "view", "updateApplicability"];
       else actions = ["updateApplicability", "view"];
     }
+    // User Management: Approve a user created by single sign-on that waits
+    // for approval (467); Reject is the existing Inactive action.
+    if (screen.Key === "users" && record && String(valueOf(record, "Status")) === "Pending Approval")
+      actions = [...actions.slice(0, 2), "approveSso", ...actions.slice(2)];
     return actions.filter(action => {
       if (RELEASE_OWNER_GATED_ACTIONS.includes(action) && releaseOwnerMissing()) return false;
       if (action === "view") return permissions.has("VIEW");
       if (action === "viewOperationalization" || action === "dependencyIntelligence") return permissions.has("VIEW");
-      if (action === "edit" || action === "configure" || action === "manage" || action === "map" || action === "subscribe" || action === "markApplicability" || action === "updateApplicability" || action === "resolveDependencies" || action === "modifyDependencies" || action === "bulkResolution" || action === "manageRoles" || action === "resendCredentials" || action === "newInstance") return permissions.has("EDIT") || permissions.has("ADD");
+      if (action === "edit" || action === "configure" || action === "manage" || action === "map" || action === "subscribe" || action === "markApplicability" || action === "updateApplicability" || action === "resolveDependencies" || action === "modifyDependencies" || action === "bulkResolution" || action === "manageRoles" || action === "resendCredentials" || action === "approveSso" || action === "newInstance") return permissions.has("EDIT") || permissions.has("ADD");
       if (action === "inactive") return permissions.has("DELETE");
       if (action === "accept" || action === "reject") return permissions.has("APPROVE") || permissions.has("EDIT");
       if (action === "practice" || action === "practices" || action === "instances" || action === "evidence" || action === "dependencies") return permissions.has("VIEW");
@@ -5718,6 +5732,61 @@
       statusSelect.dataset.reasonLockWired = "1";
       statusSelect.addEventListener("change", sync);
     }
+  }
+
+  // 2026-11-16 (sir): marking an Organization Practice Applicable also
+  // picks the teams that carry it out, so one Save records the
+  // applicability AND creates the Practice Instances -- no separate
+  // Assign Team step (Practice View's Assign Team stays for adding teams
+  // later). The team list is Shared/practice-teams.js, the same one
+  // Practice View uses; it shows only while the status is Applicable.
+  // The team checkboxes carry no name, so collectForm() ignores them.
+  let applicabilityTeams = null;
+  function attachApplicabilityTeams(mode, record) {
+    applicabilityTeams = null;
+    if (mode !== "applicability" || screen.Key !== "organization-requirements" || !window.gracPracticeTeams) return;
+    const statusSelect = fieldsHost.querySelector("[name='applicabilityStatus']");
+    if (!statusSelect) return;
+    const teams = window.gracPracticeTeams;
+    fieldsHost.insertAdjacentHTML("beforeend", teams.blockHtml("pmAp"));
+    const ids = teams.ids("pmAp");
+    const ctx = {
+      picker: teams.picker(ids),
+      organizationId: Number(valueOf(record, "OrganizationId") || fieldsHost.querySelector("[name='organizationId']")?.value || 0),
+      practiceId: Number(valueOf(record, "PracticeId") || 0),
+      requirementId: Number(state.id || valueOf(record, "Id") || 0)
+    };
+    applicabilityTeams = ctx;
+    const sync = () => {
+      const applicable = statusSelect.value === "Applicable";
+      document.getElementById(ids.block).hidden = !applicable;
+      if (applicable && !ctx.picker.loaded) ctx.picker.load(ctx.organizationId, ctx.practiceId);
+    };
+    sync();
+    statusSelect.addEventListener("change", sync);
+  }
+
+  // After the applicability is saved: the ticked teams become Practice
+  // Instances. The practice row may only exist from this save (migration
+  // 218), so its id is read back from the practice detail
+  // (Shared/practice-details.js). Returns the sentence to show, or "".
+  async function createApplicabilityInstances(data) {
+    const ctx = applicabilityTeams;
+    if (!ctx || data.applicabilityStatus !== "Applicable") return "";
+    const teamIds = ctx.picker.selectedIds();
+    if (!teamIds.length) return "";
+    let practiceId = ctx.practiceId;
+    if (!(practiceId > 0) && window.gracPracticeDetails) {
+      const res = await window.gracPracticeDetails.load({
+        organizationId: ctx.organizationId, organizationRequirementId: ctx.requirementId });
+      practiceId = Number(valueOf(res.practice || {}, "PracticeId") || 0);
+    }
+    if (!(practiceId > 0))
+      return "Applicability saved, but the practice record was not found, so no instances were created. Use Assign Team on the practice's page.";
+    const res = await window.gracPracticeTeams.createInstances(ctx.organizationId, practiceId, teamIds);
+    return res.ok
+      ? window.gracPracticeTeams.summaryText(res.body)
+      : "Applicability saved, but the practice instances were not created: " + res.error + " Use Assign Team on the practice's page.";
   }
 
   function fieldMarkup(field, value, readonly, record) {
@@ -6664,6 +6733,7 @@
     updateFrequencyFields();
     applyConditionalFields();
     applyApplicabilityReasonLock(mode);
+    attachApplicabilityTeams(mode, record);
 
     // Role Master owns the People side of event checklist mapping: the role
     // is the thing being scoped, so the mapping belongs on its own form
@@ -8687,6 +8757,9 @@
       }
 
       dialog.close();
+      // 2026-11-16: Applicable + ticked teams -> Practice Instances, before
+      // the list reloads so their counts show. Its own message, after the save's.
+      const teamsMessage = await createApplicabilityInstances(data);
       await loadLookups();
       if (isOrganizationWorkspace) {
         populateSetupOrganizationSelector();
@@ -8697,6 +8770,7 @@
       }
       const saveMessage = saveResult.message || saveResult.Message || "";
       if (saveMessage && saveMessage !== "Saved successfully.") window.alert(saveMessage);
+      if (teamsMessage) window.alert(teamsMessage);
     } catch (error) {
       showFormError(error);
     }
@@ -8882,6 +8956,7 @@
     }
     const id = valueOf(record, "Id");
     if (action === "resendCredentials" && screen.Key === "users") return resendUserCredentials(record);
+    if (action === "approveSso" && screen.Key === "users") return approveSsoUser(record);
     // Practice View is a full page, not a modal: it carries the practice
     // header, its obligations and the Configure panel, and a modal would put
     // all three inside a scrolling box within a scrolling page.

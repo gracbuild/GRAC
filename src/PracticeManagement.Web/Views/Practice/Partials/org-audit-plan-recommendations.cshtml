@@ -1,0 +1,501 @@
+@*
+    Audit Plan Recommendations (583, CR2 - AA Part E -- Audit Intelligence)
+
+    For a chosen Annual Audit Plan (Draft / Submitted), every Active Audit
+    Universe subject with its approved RBIA result (582) and assurance
+    intelligence (581, last audit) -- Recommended, Optional or Not assessed,
+    ranked, with the reasons. The Head of Internal Audit decides each one:
+      * a row's 3-dot opens its details in a row under it: the reasons, the
+        intelligence, and the suggested period / programme / audit
+        definition to change (no popups);
+      * Accept opens the existing engagement form prefilled; saving it
+        creates the planned engagement (the existing checks) and links it to
+        the subject; Defer; Reject (reason); Reopen;
+      * "+ Add Engagement" adds one outside the recommendations (the same
+        form);
+      * Generate refreshes the recommendations (decisions are kept).
+    Views: Recommendations / Engine Settings (bands to recommend, due window,
+    always-include rules, ranking order) / Decision History.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaPrUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-list-check pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaPrUnavailableTitle">Audit Plan Recommendations is not available.</h2>
+        <p id="oaPrUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaPrRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaPrFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaPrFilterPlan"><option value="">Loading plans...</option></select>
+        <select id="oaPrFilterView">
+            <option value="recs">Recommendations</option>
+            <option value="settings">Engine Settings</option>
+            <option value="history">Decision History</option>
+        </select>
+        <select id="oaPrFilterKind" data-for="recs">
+            <option value="">All kinds</option>
+            <option value="RECOMMENDED">Recommended</option>
+            <option value="OPTIONAL">Optional</option>
+            <option value="NOT_ASSESSED">Not assessed</option>
+        </select>
+        <select id="oaPrFilterStatus" data-for="recs">
+            <option value="">All decisions</option>
+            <option value="PROPOSED">Proposed</option>
+            <option value="ACCEPTED">Accepted</option>
+            <option value="DEFERRED">Deferred</option>
+            <option value="REJECTED">Rejected</option>
+        </select>
+        <input type="search" class="pm-input" id="oaPrSearch" data-for="recs" placeholder="Search subject" style="max-width:220px;" />
+        <button class="pm-button icon" id="oaPrRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaPrGenerateBtn" type="button" data-for="recs"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Generate</button>
+        <button class="pm-button" id="oaPrAddBtn" type="button" data-for="recs"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Engagement</button>
+    </div>
+    <p class="oa-pl-plan-facts" id="oaPrFacts" style="margin-top:8px;"></p>
+    <div class="pm-message" id="oaPrMessage" style="display:none;"></div>
+    <div id="oaPrBody" style="margin-top:8px;"><p class="pm-empty">Select an organization.</p></div>
+</section>
+
+<style>
+    #oaPrBody td { vertical-align: top; }
+    #oaPrBody .pm-input { min-width: 0; }
+    .oa-pr-sub { color: var(--fg-subtle); font-size: 0.85em; }
+</style>
+
+@* The engagement form (full view) -- shared with Audit Plans and Audit Engagements. *@
+<partial name="Partials/_audit-engagement-form" />
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const KIND    = { RECOMMENDED: 'Recommended', OPTIONAL: 'Optional', NOT_ASSESSED: 'Not assessed' };
+    const STATUS  = { PROPOSED: 'Proposed', ACCEPTED: 'Accepted', DEFERRED: 'Deferred', REJECTED: 'Rejected' };
+    const ACTION  = { GENERATE: 'Generated', UPDATE: 'Changed', ACCEPT: 'Accepted', DEFER: 'Deferred', REJECT: 'Rejected', REOPEN: 'Reopened' };
+    const RANK    = { RESIDUAL_SCORE: 'Residual audit risk score', PRIORITY: 'Audit priority (band)', REG_SIGNIFICANCE: 'Regulatory significance',
+                      CRITICALITY: 'Business criticality', LAST_AUDIT: 'Longest since last audit', OPEN_FINDINGS: 'Open findings (High / Critical first)',
+                      OPEN_GAPS: 'Open gaps', ABOVE_APPETITE: 'Linked risks above appetite' };
+
+    const state = { orgId: '', planId: '', plans: [], rows: [], summary: {}, open: null,
+                    programmes: [], definitions: [], settings: null, bands: [], rankOrder: [] };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data)) || []); }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    function d10(x) { return x ? String(x).substring(0, 10) : ''; }
+    function sc(x) { return x == null || x === '' ? '' : Number(x).toFixed(2); }
+    function codeName(c, n) { return c ? c + ' - ' + (n || '') : (n || ''); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function td(x) { return '<td>' + esc(x) + '</td>'; }
+    function fact(label, value) { return '<div class="pm-field"><span>' + esc(label) + '</span><div>' + (value !== '' && value != null ? esc(value) : '--') + '</div></div>'; }
+    function table(head, rows, empty) {
+        return '<div class="pm-table-wrap"><table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('')
+             + '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" class="pm-empty">' + esc(empty) + '</td></tr>') + '</tbody></table></div>';
+    }
+    function plan() { return state.plans.find(function (p) { return String(g(p, 'planId')) === String(state.planId); }) || null; }
+    function view() { return document.getElementById('oaPrFilterView').value; }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) { wf.unavailable('oaPrUnavailable', 'oaPrUnavailableTitle', 'oaPrUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.'); return; }
+        wf.populateOrgSelect('oaPrFilterOrg', orgs);
+        state.orgId = document.getElementById('oaPrFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaPrUnavailable', 'oaPrUnavailableTitle', 'oaPrUnavailableBody', 'Audit Plan Recommendations is not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaPrRoot').hidden = false;
+        document.getElementById('oaPrFilterOrg').addEventListener('change', function (e) { state.orgId = e.target.value || ''; state.planId = ''; loadOrg(); });
+        document.getElementById('oaPrFilterPlan').addEventListener('change', function (e) { state.planId = e.target.value || ''; loadPlanRefs().then(reload); });
+        document.getElementById('oaPrFilterView').addEventListener('change', function () { showFor(); reload(); });
+        ['oaPrFilterKind', 'oaPrFilterStatus'].forEach(function (id) { document.getElementById(id).addEventListener('change', reload); });
+        let t = null;
+        document.getElementById('oaPrSearch').addEventListener('input', function () { clearTimeout(t); t = setTimeout(reload, 350); });
+        document.getElementById('oaPrRefreshBtn').addEventListener('click', function () { loadOrg(); });
+        document.getElementById('oaPrGenerateBtn').addEventListener('click', generate);
+        document.getElementById('oaPrAddBtn').addEventListener('click', function () { openEngagement(null); });
+        const body = document.getElementById('oaPrBody');
+        body.addEventListener('click', onClick);
+        window.gracCheckCombo.wire(body);
+        showFor();
+        loadOrg();
+    }
+    function showFor() {
+        const v = view();
+        document.querySelectorAll('#oaPrRoot [data-for]').forEach(function (el) { el.hidden = el.getAttribute('data-for') !== v; });
+    }
+
+    async function loadOrg() {
+        state.plans = []; state.definitions = [];
+        if (!state.orgId) return;
+        try {
+            const res = await Promise.all([
+                getJson(API + '/plans?organizationId=' + encodeURIComponent(state.orgId) + '&page=1&pageSize=200'),
+                getJson(API + '/definitions?organizationId=' + encodeURIComponent(state.orgId) + '&page=1&pageSize=500')
+            ]);
+            state.plans = rowsOf(res[0]);
+            state.definitions = rowsOf(res[1]).filter(function (d) {
+                const st = g(d, 'currentStatusCode');
+                return st === 'Active' || (g(d, 'activeVersionId') != null && st !== 'Retired');
+            });
+        } catch (err) { wf.setMessage('oaPrMessage', 'Failed to load the plans: ' + (err.message || err), 'error'); }
+        const open = function (p) { return g(p, 'statusCode') === 'Draft' || g(p, 'statusCode') === 'Submitted'; };
+        state.plans.sort(function (a, b) { return (open(a) ? 0 : 1) - (open(b) ? 0 : 1); });
+        if (!state.plans.some(function (p) { return String(g(p, 'planId')) === String(state.planId); })) {
+            const first = state.plans.find(open) || state.plans[0];
+            state.planId = first ? String(g(first, 'planId')) : '';
+        }
+        document.getElementById('oaPrFilterPlan').innerHTML = state.plans.length
+            ? state.plans.map(function (p) {
+                  const id = String(g(p, 'planId'));
+                  return '<option value="' + esc(id) + '"' + (id === state.planId ? ' selected' : '') + '>'
+                       + esc(codeName(g(p, 'planCode'), g(p, 'planName')) + ' (' + (g(p, 'statusName') || g(p, 'statusCode')) + ')') + '</option>';
+              }).join('')
+            : '<option value="">No audit plans yet</option>';
+        await loadPlanRefs();
+        reload();
+    }
+    async function loadPlanRefs() {
+        state.programmes = [];
+        if (!state.planId) return;
+        try { state.programmes = rowsOf(await getJson(API + '/plans/' + encodeURIComponent(state.planId) + '/programmes?organizationId=' + encodeURIComponent(state.orgId))); }
+        catch (_) { state.programmes = []; }
+    }
+
+    async function reload() {
+        const v = view();
+        state.open = null;
+        if (v === 'settings') return loadSettings();
+        const body = document.getElementById('oaPrBody');
+        const p = plan();
+        if (!p) { document.getElementById('oaPrFacts').textContent = ''; body.innerHTML = '<p class="pm-empty">Add an Annual Audit Plan in Audit Plans first.</p>'; return; }
+        if (v === 'history') return loadHistory();
+        body.innerHTML = '<p class="pm-empty">Loading...</p>';
+        try {
+            const j = await getJson(API + '/plan-recommendations?organizationId=' + encodeURIComponent(state.orgId) + '&planId=' + encodeURIComponent(state.planId)
+                                    + '&kind=' + encodeURIComponent(document.getElementById('oaPrFilterKind').value)
+                                    + '&status=' + encodeURIComponent(document.getElementById('oaPrFilterStatus').value)
+                                    + '&search=' + encodeURIComponent(document.getElementById('oaPrSearch').value.trim()));
+            state.rows = rowsOf(j); state.summary = g(j, 'summary') || {};
+        } catch (err) { body.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>'; return; }
+        render();
+    }
+    function facts() {
+        const p = plan(), s = state.summary;
+        document.getElementById('oaPrFacts').textContent = p
+            ? 'Plan period ' + d10(g(p, 'periodFrom')) + ' to ' + d10(g(p, 'periodTo')) + ' -- ' + (g(p, 'statusName') || g(p, 'statusCode'))
+              + (g(s, 'planOpen') ? '' : ' (recommendations are decided while the plan is Draft or Submitted)')
+              + ' -- last generated ' + (g(s, 'lastGeneratedDt') ? String(g(s, 'lastGeneratedDt')).replace('T', ' ').substring(0, 16) : 'never')
+              + ' -- ' + (g(s, 'recommended') || 0) + ' recommended, ' + (g(s, 'optional') || 0) + ' optional, ' + (g(s, 'notAssessed') || 0) + ' not assessed; '
+              + (g(s, 'accepted') || 0) + ' accepted, ' + (g(s, 'deferred') || 0) + ' deferred, ' + (g(s, 'rejected') || 0) + ' rejected, ' + (g(s, 'proposed') || 0) + ' to decide.'
+            : '';
+        const canGen = !!g(s, 'isHeadOfInternalAudit') && !!g(s, 'planOpen');
+        document.getElementById('oaPrGenerateBtn').disabled = !canGen;
+        document.getElementById('oaPrAddBtn').disabled = !g(s, 'planOpen');
+    }
+
+    // ---------------------------------------------------------------
+    // Recommendations
+    // ---------------------------------------------------------------
+    function render() {
+        facts();
+        const rows = [];
+        state.rows.forEach(function (r) {
+            const id = String(g(r, 'planRecommendationId')), open = state.open === id;
+            const band = g(r, 'bandName') ? g(r, 'bandName') + ' (' + sc(g(r, 'residualScore')) + ')' : 'Not assessed';
+            const last = g(r, 'neverAudited') ? 'Never audited' : d10(g(r, 'lastAuditDt')) + (g(r, 'lastResult') ? ' - ' + g(r, 'lastResult') : '');
+            const risk = (g(r, 'linkedRisks') || 0) + ' linked, ' + (g(r, 'aboveAppetite') || 0) + ' above appetite, ' + (g(r, 'openTreatmentActions') || 0) + ' open actions';
+            const find = (g(r, 'findings') || 0) + ' (' + (g(r, 'openFindings') || 0) + ' open, ' + (g(r, 'openHighFindings') || 0) + ' High / Critical)';
+            const period = g(r, 'suggestedFrom') ? d10(g(r, 'suggestedFrom')) + ' to ' + d10(g(r, 'suggestedTo')) : '';
+            const status = (STATUS[g(r, 'status')] || g(r, 'status'))
+                         + (g(r, 'engagementCode') ? ': ' + g(r, 'engagementCode') + (g(r, 'engagementRemoved') ? ' (removed / cancelled)' : '') : '');
+            rows.push('<tr class="' + (open ? 'oa-pl-open is-selected' : '') + '">'
+                + td(g(r, 'rankNo')) + '<td>' + esc(codeName(g(r, 'universeRef'), g(r, 'subjectName'))) + '<div class="oa-pr-sub">' + esc(KIND[g(r, 'recKind')] || g(r, 'recKind')) + '</div></td>'
+                + td(band) + td(g(r, 'auditPriority')) + td(g(r, 'frequencyMonths') ? g(r, 'frequencyMonths') + ' months' : '')
+                + td(g(r, 'regSignificanceName')) + td(g(r, 'criticalityName')) + td(last)
+                + td(g(r, 'neverAudited') ? 'Now' : d10(g(r, 'dueBy'))) + td(risk) + td(g(r, 'openGaps') || 0) + td(find)
+                + td(period) + td(codeName(g(r, 'programmeCode'), g(r, 'programmeName'))) + td(status)
+                + '<td><button type="button" class="pm-action-trigger" data-menu="' + esc(id) + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
+                + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="visually-hidden">Actions</span></button></td></tr>');
+            if (open) rows.push('<tr class="oa-pl-items-row is-selected"><td colspan="16"><div class="oa-pl-items" id="oaPrDetail">' + detailHtml(r) + '</div></td></tr>');
+        });
+        document.getElementById('oaPrBody').innerHTML = '<div class="oa-pl-wrap">' + table(
+            ['#', 'Audit Universe Subject', 'RBIA Band (Residual)', 'Priority', 'Frequency', 'Reg. Significance', 'Criticality', 'Last Audit',
+             'Due By', 'Enterprise Risks', 'Open Gaps', 'Audit Findings', 'Suggested Period', 'Programme', 'Decision', ''],
+            rows, 'No recommendations for this plan. The Head of Internal Audit uses Generate (the subjects must be Active in Audit Universe).') + '</div>';
+        document.querySelectorAll('#oaPrBody [data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () { return menuFor(id); });
+        });
+    }
+    function rowById(id) { return state.rows.find(function (r) { return String(g(r, 'planRecommendationId')) === String(id); }) || null; }
+    function menuFor(id) {
+        const r = rowById(id), st = g(r, 'status'), can = !!g(r, 'canDecide');
+        const items = [{ icon: 'fa-circle-info', label: state.open === id ? 'Hide Details' : 'Details', run: function () { state.open = state.open === id ? null : id; render(); } }];
+        if (can && (st === 'PROPOSED' || st === 'DEFERRED')) items.push({ icon: 'fa-check', label: 'Accept (create engagement)', run: function () { accept(id); } });
+        if (can && st === 'PROPOSED') items.push({ icon: 'fa-clock', label: 'Defer', run: function () { act(id, 'DEFER'); } });
+        if (can && (st === 'PROPOSED' || st === 'DEFERRED')) items.push({ icon: 'fa-xmark', label: 'Reject', run: function () { act(id, 'REJECT'); } });
+        if (can && (st === 'DEFERRED' || st === 'REJECTED' || (st === 'ACCEPTED' && g(r, 'engagementRemoved')))) items.push({ icon: 'fa-rotate-left', label: 'Reopen', run: function () { act(id, 'REOPEN'); } });
+        items.push({ icon: 'fa-clock-rotate-left', label: 'History', run: function () { showHistory(id); } });
+        return items;
+    }
+    function detailHtml(r) {
+        const st = g(r, 'status'), edit = !!g(r, 'canDecide') && (st === 'PROPOSED' || st === 'DEFERRED'), dis = edit ? '' : ' disabled';
+        const p = plan();
+        const progs = '<option value="">(choose when accepting)</option>' + state.programmes.map(function (x) {
+            const id = String(g(x, 'programmeId'));
+            return '<option value="' + esc(id) + '"' + (String(g(r, 'programmeId')) === id ? ' selected' : '') + '>' + esc(codeName(g(x, 'programmeCode'), g(x, 'programmeName'))) + '</option>';
+        }).join('');
+        const defs = '<option value="">(choose when accepting)</option>' + state.definitions.map(function (d) {
+            const id = String(g(d, 'definitionId'));
+            return '<option value="' + esc(id) + '"' + (String(g(r, 'definitionId')) === id ? ' selected' : '') + '>' + esc(codeName(g(d, 'definitionCode'), g(d, 'definitionName'))) + '</option>';
+        }).join('');
+        let html = '<p class="oa-pl-plan-facts"><strong>' + esc(KIND[g(r, 'recKind')] || g(r, 'recKind')) + '</strong>: ' + esc(g(r, 'reasons') || '') + '</p>'
+            + '<div class="oa-pl-plan-grid">'
+            + fact('RBIA Assessment', g(r, 'rbiaRef') ? g(r, 'rbiaRef') + ' - ' + (g(r, 'bandName') || '') + ', residual ' + sc(g(r, 'residualScore')) : 'No approved RBIA assessment')
+            + fact('Last Audit', g(r, 'neverAudited') ? 'Never audited' : (g(r, 'lastEngagementCode') || '') + ' ' + d10(g(r, 'lastAuditDt')))
+            + fact('Last Audit Result', g(r, 'lastResult'))
+            + fact('Relevant Audit Definition', g(r, 'relevantDefinitionName'))
+            + fact('Facts as of', String(g(r, 'generatedDt') || '').replace('T', ' ').substring(0, 16))
+            + fact('Decision', (STATUS[st] || st) + (g(r, 'decidedBy') ? ' by ' + g(r, 'decidedBy') + ' ' + d10(g(r, 'decidedDt')) : '') + (g(r, 'decisionReason') ? ': ' + g(r, 'decisionReason') : ''))
+            + '</div>';
+        html += '<div class="oa-pl-plan-grid" style="margin-top:8px;">'
+            + '<label class="pm-field"><span>Audit From</span><input class="pm-input" type="date" id="oaPrFrom" min="' + esc(d10(g(p, 'periodFrom'))) + '" max="' + esc(d10(g(p, 'periodTo'))) + '" value="' + esc(d10(g(r, 'suggestedFrom'))) + '"' + dis + ' /></label>'
+            + '<label class="pm-field"><span>Audit To</span><input class="pm-input" type="date" id="oaPrTo" min="' + esc(d10(g(p, 'periodFrom'))) + '" max="' + esc(d10(g(p, 'periodTo'))) + '" value="' + esc(d10(g(r, 'suggestedTo'))) + '"' + dis + ' /></label>'
+            + '<label class="pm-field"><span>Programme</span><select class="pm-input" id="oaPrProg"' + dis + '>' + progs + '</select></label>'
+            + '<label class="pm-field"><span>Audit Definition</span><select class="pm-input" id="oaPrDef"' + dis + '>' + defs + '</select></label>'
+            + '</div>';
+        if (edit) html += '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="save" data-id="' + esc(g(r, 'planRecommendationId')) + '">Save</a> '
+                        + '<a href="#" class="oa-pl-add" data-do="accept" data-id="' + esc(g(r, 'planRecommendationId')) + '">Accept (create engagement)</a></div>';
+        html += '<div id="oaPrDetailHistory"></div>';
+        return html;
+    }
+    function onClick(e) {
+        const a = e.target.closest('[data-do]');
+        if (!a) return;
+        e.preventDefault();
+        const id = a.getAttribute('data-id'), what = a.getAttribute('data-do');
+        if (what === 'save') saveDetail(id);
+        else if (what === 'accept') saveDetail(id, true);
+        else if (what === 'rank-up' || what === 'rank-down') moveRank(Number(a.getAttribute('data-i')), what === 'rank-up' ? -1 : 1);
+        else if (what === 'settings-save') saveSettings();
+    }
+    function v(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+    async function saveDetail(id, thenAccept) {
+        const from = v('oaPrFrom'), to = v('oaPrTo');
+        if ((from === '') !== (to === '')) { await window.gracUi.alert('Give both the start and the end of the audit period, or neither.', { type: 'error' }); return; }
+        try {
+            await post('/plan-recommendations/' + encodeURIComponent(id) + '/update', {
+                organizationId: Number(state.orgId), suggestedFrom: from || null, suggestedTo: to || null,
+                programmeId: v('oaPrProg') === '' ? null : Number(v('oaPrProg')), definitionId: v('oaPrDef') === '' ? null : Number(v('oaPrDef')), actor: null });
+            if (thenAccept) { await reload(); state.open = id; render(); accept(id); return; }
+            wf.setMessage('oaPrMessage', 'Saved.', 'ok');
+            await reload(); state.open = id; render();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // Accept: the existing engagement form, prefilled; its save creates the
+    // engagement (plan-items), then the recommendation is linked to it.
+    function accept(id) {
+        const r = rowById(id);
+        if (!r) return;
+        const objective = 'Risk-based audit of ' + (g(r, 'subjectName') || '')
+            + (g(r, 'bandName') ? ' -- RBIA ' + g(r, 'bandName') + (g(r, 'auditPriority') ? ', ' + g(r, 'auditPriority') : '') : '') + '. ' + (g(r, 'reasons') || '');
+        openEngagement({
+            programmeId: g(r, 'programmeId'), definitionId: g(r, 'definitionId'),
+            preset: { name: g(r, 'subjectName'), subject: codeName(g(r, 'universeRef'), g(r, 'subjectName')),
+                      from: g(r, 'suggestedFrom'), to: g(r, 'suggestedTo'), objective: objective },
+            onSaved: async function (res) {
+                const eid = res && res.engagementId;
+                if (eid == null) { reload(); return; }
+                try {
+                    await post('/plan-recommendations/' + encodeURIComponent(id) + '/link', { organizationId: Number(state.orgId), planItemId: Number(eid), comment: null, actor: null });
+                    wf.setMessage('oaPrMessage', 'Accepted: the engagement was added to the plan and linked to ' + (g(r, 'subjectName') || 'the subject') + '.', 'ok');
+                } catch (err) {
+                    await window.gracUi.alert('The engagement was created, but linking it to the recommendation failed: ' + (err.message || err), { type: 'error' });
+                }
+                reload();
+            }
+        });
+    }
+    function openEngagement(rec) {
+        const p = plan();
+        if (!p) return;
+        window.gracEngagementForm.open({
+            orgId: state.orgId, origin: 'PLANNED', planId: g(p, 'planId'), planLabel: codeName(g(p, 'planCode'), g(p, 'planName')),
+            presetProgrammeId: rec ? rec.programmeId : null, presetDefinitionId: rec ? rec.definitionId : null,
+            itemCount: g(p, 'itemCount') || 0, preset: rec ? rec.preset : null,
+            onSaved: rec ? rec.onSaved : function () { wf.setMessage('oaPrMessage', 'Engagement added to the plan (outside the recommendations).', 'ok'); loadOrg(); }
+        });
+    }
+    async function act(id, what) {
+        const r = rowById(id);
+        const label = what === 'DEFER' ? 'Defer' : what === 'REJECT' ? 'Reject' : 'Reopen';
+        const reason = await window.gracUi.prompt((what === 'REJECT' ? 'Reason (required):' : 'Reason (optional):'),
+                                                  { title: label + ': ' + (g(r, 'subjectName') || ''), inputLabel: 'Reason', confirmText: label });
+        if (reason == null) return;
+        const text = String(reason).trim();
+        if (what === 'REJECT' && !text) { await window.gracUi.alert('Give the reason for rejecting it.', { type: 'error' }); return; }
+        try {
+            await post('/plan-recommendations/' + encodeURIComponent(id) + '/action', { organizationId: Number(state.orgId), action: what, reason: text || null, actor: null });
+            wf.setMessage('oaPrMessage', (ACTION[what] || label) + ': ' + (g(r, 'subjectName') || '') + '.', 'ok');
+            reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    async function generate() {
+        const p = plan();
+        if (!p) return;
+        if (!await window.gracUi.confirm('Generate the recommendations for ' + codeName(g(p, 'planCode'), g(p, 'planName')) + '? '
+                + 'Every Active Audit Universe subject is assessed with the engine settings; facts of undecided ones are refreshed, decisions are kept.',
+                { type: 'confirm', title: 'Generate Recommendations', confirmText: 'Generate' })) return;
+        try {
+            const r = await post('/plan-recommendations/generate', { organizationId: Number(state.orgId), planId: Number(state.planId), actor: null });
+            wf.setMessage('oaPrMessage', (g(r, 'generatedCount') || 0) + ' Active subject(s) assessed.', 'ok');
+            reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // ---------------------------------------------------------------
+    // History
+    // ---------------------------------------------------------------
+    async function fetchHistory(recId) {
+        return rowsOf(await getJson(API + '/plan-recommendations/history?organizationId=' + encodeURIComponent(state.orgId)
+                                    + '&planId=' + encodeURIComponent(state.planId) + (recId ? '&recommendationId=' + encodeURIComponent(recId) : '')));
+    }
+    function historyTable(rows, withSubject) {
+        return table(['When', 'Action'].concat(withSubject ? ['Subject'] : []).concat(['From', 'To', 'By', 'Comment']), rows.map(function (h) {
+            return '<tr>' + td(String(g(h, 'actionDt') || '').replace('T', ' ').substring(0, 16)) + td(ACTION[g(h, 'actionCode')] || g(h, 'actionCode'))
+                 + (withSubject ? td(g(h, 'universeRef') ? codeName(g(h, 'universeRef'), g(h, 'subjectName')) : '(plan)') : '')
+                 + td(STATUS[g(h, 'fromStatus')] || g(h, 'fromStatus')) + td(STATUS[g(h, 'toStatus')] || g(h, 'toStatus'))
+                 + td(g(h, 'actorName')) + td(g(h, 'comment')) + '</tr>';
+        }), 'No decisions yet.');
+    }
+    async function showHistory(id) {
+        state.open = id; render();
+        const host = document.getElementById('oaPrDetailHistory');
+        try { host.innerHTML = '<h3>History</h3>' + historyTable(await fetchHistory(id), false); }
+        catch (err) { host.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>'; }
+        host.scrollIntoView({ block: 'nearest' });
+    }
+    async function loadHistory() {
+        facts();
+        const body = document.getElementById('oaPrBody');
+        body.innerHTML = '<p class="pm-empty">Loading...</p>';
+        try { body.innerHTML = historyTable(await fetchHistory(null), true); }
+        catch (err) { body.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>'; }
+    }
+
+    // ---------------------------------------------------------------
+    // Engine settings
+    // ---------------------------------------------------------------
+    async function loadSettings() {
+        document.getElementById('oaPrFacts').textContent = 'The engine settings apply to every plan of the organization; changes apply from the next Generate.';
+        const body = document.getElementById('oaPrBody');
+        body.innerHTML = '<p class="pm-empty">Loading...</p>';
+        try {
+            const j = await getJson(API + '/plan-recommendation-settings?organizationId=' + encodeURIComponent(state.orgId));
+            state.settings = g(j, 'settings') || {}; state.bands = g(j, 'bands') || [];
+            state.rankOrder = String(g(state.settings, 'rankingOrder') || '').split(',').filter(Boolean);
+        } catch (err) { body.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>'; return; }
+        renderSettings();
+    }
+    function renderSettings() {
+        const s = state.settings, can = !!g(s, 'canEdit'), dis = can ? '' : ' disabled';
+        const chosen = String(g(s, 'includeBandCodes') || '').split(',').filter(Boolean);
+        const bandOpts = state.bands.map(function (b) { return { value: String(g(b, 'bandCode')), label: g(b, 'bandName') + ' (' + g(b, 'minScore') + '-' + g(b, 'maxScore') + ', ' + (g(b, 'auditPriority') || '') + ')' }; });
+        chosen.forEach(function (c) { if (!bandOpts.some(function (o) { return o.value === c; })) bandOpts.push({ value: c, label: c + ' (not in the published methodology)' }); });
+        const yn = function (id, val) { return '<select class="pm-input" id="' + id + '"' + dis + '><option value="1"' + (val ? ' selected' : '') + '>Yes</option><option value="0"' + (val ? '' : ' selected') + '>No</option></select>'; };
+        const rank = state.rankOrder.map(function (k, i) {
+            return '<tr>' + td(i + 1) + td(RANK[k] || k) + '<td>' + (can ? (i > 0 ? '<a href="#" data-do="rank-up" data-i="' + i + '">Move up</a> ' : '')
+                 + (i < state.rankOrder.length - 1 ? '<a href="#" data-do="rank-down" data-i="' + i + '">Move down</a>' : '') : '') + '</td></tr>';
+        });
+        document.getElementById('oaPrBody').innerHTML = '<div class="oa-pl-plan-grid">'
+            + '<label class="pm-field oa-pl-span-2"><span>Risk Bands to Recommend</span>'
+            + (bandOpts.length ? window.gracCheckCombo.html(bandOpts, chosen, { ariaLabel: 'Risk bands' }) : '<span class="oa-pr-sub">Publish an RBIA methodology first (RBIA Configuration).</span>') + '</label>'
+            + '<label class="pm-field"><span>Due Window (months after the plan end)</span><input class="pm-input" type="number" min="0" max="36" step="1" id="oaPrWindow" value="' + esc(g(s, 'dueWindowMonths')) + '"' + dis + ' /></label>'
+            + '<div class="pm-field"></div>'
+            + '<label class="pm-field"><span>Always: open High / Critical findings</span>' + yn('oaPrAFind', g(s, 'alwaysOpenHighFindings')) + '</label>'
+            + '<label class="pm-field"><span>Always: highest regulatory significance</span>' + yn('oaPrAReg', g(s, 'alwaysHighRegSignificance')) + '</label>'
+            + '<label class="pm-field"><span>Always: never audited</span>' + yn('oaPrANever', g(s, 'alwaysNeverAudited')) + '</label>'
+            + '</div>'
+            + '<p class="oa-pl-plan-facts" style="margin-top:8px;">A subject is Recommended when its RBIA band is one of the bands to recommend and its audit falls due (last audit + RBIA frequency) by the plan end plus the due window, '
+            + 'or when an always-include rule holds; otherwise it is Optional. Subjects without an approved RBIA are Not assessed. Every one can be accepted.</p>'
+            + '<h3>Ranking Order</h3>' + table(['#', 'Sort by (highest first)', ''], rank, 'No keys.')
+            + '<p class="oa-pl-plan-facts">' + (g(s, 'changedBy') ? 'Last changed by ' + esc(g(s, 'changedBy')) + ' on ' + esc(d10(g(s, 'changedDt'))) + '.' : '')
+            + (can ? '' : ' Only the Head of Internal Audit changes the settings.') + '</p>'
+            + (can ? '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="settings-save">Save Settings</a></div>' : '');
+        if (!can) document.querySelectorAll('#oaPrBody [data-checkcombo] input, #oaPrBody [data-checkcombo] button').forEach(function (el) { el.disabled = true; });
+    }
+    function readSettingsForm() {
+        const combo = document.querySelector('#oaPrBody [data-checkcombo]');
+        state.settings = Object.assign({}, state.settings, {
+            includeBandCodes: combo ? window.gracCheckCombo.values(combo).join(',') : g(state.settings, 'includeBandCodes'),
+            dueWindowMonths: v('oaPrWindow'), alwaysOpenHighFindings: v('oaPrAFind') === '1',
+            alwaysHighRegSignificance: v('oaPrAReg') === '1', alwaysNeverAudited: v('oaPrANever') === '1'
+        });
+    }
+    function moveRank(i, d) {
+        readSettingsForm();
+        const j = i + d, o = state.rankOrder;
+        if (j < 0 || j >= o.length) return;
+        const t = o[i]; o[i] = o[j]; o[j] = t;
+        renderSettings();
+    }
+    async function saveSettings() {
+        readSettingsForm();
+        const s = state.settings;
+        const w = Number(g(s, 'dueWindowMonths'));
+        if (!(w >= 0 && w <= 36)) { await window.gracUi.alert('The due window is 0 to 36 months.', { type: 'error' }); return; }
+        try {
+            await post('/plan-recommendation-settings', {
+                organizationId: Number(state.orgId), includeBandCodes: g(s, 'includeBandCodes') || '', dueWindowMonths: w,
+                alwaysOpenHighFindings: !!g(s, 'alwaysOpenHighFindings'), alwaysHighRegSignificance: !!g(s, 'alwaysHighRegSignificance'),
+                alwaysNeverAudited: !!g(s, 'alwaysNeverAudited'), rankingOrder: state.rankOrder.join(','), actor: null });
+            wf.setMessage('oaPrMessage', 'Settings saved. Use Generate on a plan to apply them.', 'ok');
+            loadSettings();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+})();
+</script>

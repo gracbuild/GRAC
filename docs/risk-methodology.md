@@ -144,3 +144,76 @@ The dashboard is per organisation (its organization filter). It adds only what t
 - The appetite and target checks are not clickable, because the register has no filter for them. The register rows carry the same tags.
 - `sp_risk_methodology_register_summary` returns `StatusCode` so that the dashboard can count open risks.
 - The change is in `risk-centre.js`: `refreshDashboard`, plus `fetchMethodologySummary`, which is shared with the register tags.
+
+## 574 -- Likelihood, impact and the risk matrix (2026-11-16)
+
+**Request:** add Likelihood and Impact to Dimensions. Every box is ticked and locked, and only their levels can change. 3x3, 4x4 and 5x5 methodologies must work. When the scale changes, older risks are marked "Re-assessment needed" and shown separately on the heat map. Publishing is allowed only when no assessment is waiting for approval, and the page warns first.
+
+### What the admin sees (Settings -> Risk Methodology)
+- **Dimensions** starts with two locked rows, **Likelihood** and **Impact**.
+  - On, Required, Inherent, Residual and Review are all ticked and disabled. Weight is not used.
+  - Their levels are edited in the same level grid as other dimensions: name and descriptor.
+  - Levels can be added or removed **at the top only**, so the values stay 1..n. Each axis has 2 to 10 levels.
+- **Risk matrix** (new section):
+  - One rating per likelihood x impact cell. Rows are likelihood, highest first; columns are impact, as on the heat maps.
+  - The matrix resizes with the levels. A new cell gets a suggested rating; the suggestion is L x I as a share of the maximum, spread over the current ratings.
+  - **Default ratings** re-suggests every cell.
+  - Ratings come from the organisation's own ratings: the current matrix plus any earlier version's. New rating codes cannot be invented here.
+- 3D bands and appetite offer the ratings of the version's own matrix. A saved choice that the matrix no longer has is shown as "(not in the risk matrix)".
+- **Publish** compares the draft with the published version.
+  - If the size changes, or any cell's rating changes, the page warns first. The warning shows the old and new size and how many open risks were assessed. Those risks keep their ratings, but they are marked "Re-assessment needed" and shown separately on the heat maps.
+  - If any assessment is waiting for approval, the page stops and says so. The server enforces the same rule (58349).
+
+**Layout (2026-11-17):** the editable sections come in three groups.
+1. **Likelihood & Impact**: its own panel, with the same columns as Dimensions.
+2. **Risk matrix**: directly under the levels it follows.
+3. **Dimensions**: the other dimensions.
+
+The Likelihood / Impact checkboxes are ticked and **not disabled**. Unticking one puts the tick back and shows "Likelihood and impact are always asked, at every stage. Only their levels can be changed."
+
+### Where it shows
+| Place | Behaviour |
+|---|---|
+| Risk register | Tag **Re-assessment needed** beside the residual cell (`decorateRegisterMethodology`). |
+| Risk Analysis / Review page | When the current inherent assessment is older than the scale change, a note is shown and Likelihood / Impact are **not pre-filled**. Impact-area levels are not pre-filled either. |
+| Residual page | The same, for the current residual assessment. |
+| Dashboard | Flagged risks are **not plotted** on the heat maps. The hint under each map reads "N on the previous scale (re-assessment needed)". Needs attention shows **Re-assessment needed** (only when > 0). |
+
+The flag clears for a stage when that stage is assessed again, because a newer analysis or residual assessment is then applied.
+
+### Database (574)
+| Object | Purpose |
+|---|---|
+| `risk_methodology_matrix_cell` (new) | The version's matrix: `likelihood_value`, `impact_value`, `rating_code`, `rating_name`, `colour_hex`. |
+| `risk_methodology_version.scale_changed` (new) | Set on publish when the scale or matrix changed. |
+| `risk_methodology_dimension_level` | Likelihood / impact levels are rows with the reserved codes `LIKELIHOOD` / `IMPACT`. They have **no dimension row**, so risk pages, priority / 3D scores and dashboard distributions never treat them as a dimension. A dimension may not use these codes (58342). |
+| `sp_risk_methodology_core_fill` (new) | Gives a version the organisation's current levels and matrix, for each part it lacks. Seeds 204's defaults for an organisation with no matrix. Used by templates, by draft create, and by the 574 backfill of every existing version. |
+| `fn_risk_scale_reassessment(@org)` (new) | Per risk: `inherent_reassess` and `residual_reassess`. A stage is flagged when its current assessment (`risk_analysis.analysis_dt`, `risk_residual_analysis.assessed_dt`) is older than the latest publish with `scale_changed = 1`. |
+| `sp_risk_methodology_draft_save` | Accepts `likelihoodLevels`, `impactLevels` and `matrix`. Each part is replaced only when present. Errors: 58343 (level needs a name), 58344 (2-10 levels numbered 1..n), 58345 (cell out of range or duplicate), 58346 (unknown rating). |
+| `sp_risk_methodology_publish` | Validates the scale (58344), that every cell has a rating (58347) and the approval threshold rating (58348). Bands and appetite are checked against the **draft's** matrix, and the 3D maximum uses the draft scale. Then it detects a scale change and refuses while assessments are pending (58349). Finally it syncs the published scale to the organisation, in the same transaction:<br>- `risk_likelihood_master` / `risk_impact_master`: existing levels are renamed; new levels are inserted as `LIKELIHOOD_n` / `IMPACT_n`; levels above the new top become **Inactive**, never deleted.<br>- `risk_matrix_cell` is replaced, with `rating_score = L x I` as in 204's seed.<br>It returns `ScaleChanged`. |
+| `sp_risk_methodology_get` | Adds set 11 `matrix`, set 12 `ratingCatalogue` and set 13 `publishCheck` (`PendingApprovals`, `OpenAssessedRisks`). |
+| `sp_risk_methodology_assessment_get` | Adds set 3 `scale` (`InherentReassessmentNeeded`, `ResidualReassessmentNeeded`). |
+| `sp_risk_methodology_register_summary` | Adds `InherentReassessmentNeeded` and `ResidualReassessmentNeeded`. |
+| `sp_risk_dashboard_counts` (505 body) | Sets 12 and 13 leave flagged risks out. Set 14 adds `InherentReassessment`, `ResidualReassessment` and `ReassessmentNeeded`. |
+
+- Stored ratings, names and scores on risks and analyses are **never rewritten**.
+- Every existing reader works on the new scale unchanged, because it reads the masters and `risk_matrix_cell`: `sp_risk_rating_resolve`, the scoring options, heat maps and the approval gate.
+- Rollback (`574_risk_methodology_matrix_rollback.sql`) restores the 532 and 505 bodies and drops the 574 objects. The organisation's masters and matrix stay as the last publish left them.
+
+### API changes
+- `GET methodology`: `sets` gains `matrix`, `ratingCatalogue` and `publishCheck`.
+- `POST methodology/draft/save`: `draft` may carry the following. Older clients that omit them keep the draft's scale.
+  - `likelihoodLevels: [{ levelValue, levelName, descriptor }]`
+  - `impactLevels: [...]`
+  - `matrix: [{ likelihoodValue, impactValue, ratingCode }]`
+- `POST methodology/publish`: unchanged. It refuses 58342-58349 verbatim.
+- `GET register/{riskId}/methodology`: `sets.scale`.
+- `GET register/methodology-summary`: `risks[]` gains `inherentReassessmentNeeded` and `residualReassessmentNeeded`.
+- Dashboard `heatmapCoverage` gains `inherentReassessment`, `residualReassessment` and `reassessmentNeeded` (0 before 574).
+
+### Deploy
+1. Run `574_risk_methodology_matrix.sql`. Expect 3 PASS rows. It requires 532 and 505.
+2. Restart the Api.
+3. Publish Web.
+4. Hard refresh.
+

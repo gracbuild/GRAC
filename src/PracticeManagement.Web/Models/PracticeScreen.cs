@@ -75,14 +75,31 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Practice Management sidebar never shows it. Own partial, own proxy
         // (practice/api/subscription-requests) -- no generic grid entity.
         new("subscription-requests","Subscription Requests","Approve or reject organizations' requests to subscribe to a Repository framework release.","file-circle-check",["Organization","Release","Version","RequestedBy","RequestedDate","Status","DecidedBy","DecisionDate"], OrganizationOnboardingGroup),
-        new("organization-administration","Organization Administration","Organization profile, locations, departments, business functions, teams, committees, and employees for organization users","building-user",["Code","Name","Industry","EntityType","Country","Status"], OrganizationAdministrationGroup),
+        new("organization-administration","Organization Administration","Organization profile, single sign-on and subscribed releases for organization users","building-user",["Code","Name","Industry","EntityType","Country","Status"], OrganizationAdministrationGroup),
         // Columns changed 2026-11-02: this screen is now the Organization
         // Management landing list. SubscriptionStartDate / EndDate come
         // from 404, SpocName and FrameworkSummary from the 510 read shim.
         // Headings are overridden per screen in practice.js
         // (columnLabelsByScreen) -- the generic columnLabel() would turn
         // "Name" into "Practice Instance Name" from its global map.
-        new("organizations","Organizations","Organizations on the platform, their subscription window, frameworks and SPOC.","building",["Code","Name","SubscriptionStartDate","SubscriptionEndDate","FrameworkSummary","SpocName","Status"], OrganizationGroup),
+        // 570: titled "Legal Entities" -- the organization rows ARE the Legal
+        // Entity level of the Organization Registry hierarchy -- with the
+        // Organization each sits under (RegistryOrganization).
+        new("organizations","Legal Entities","Legal Entities on the platform (each a GRAC organization), the Organization they belong to, their subscription window, frameworks and SPOC.","building",["Code","Name","RegistryOrganization","SubscriptionStartDate","SubscriptionEndDate","FrameworkSummary","SpocName","Status"], OrganizationGroup),
+        // Organization Registry (migrations 569-572): Organization -> Legal
+        // Entity hierarchy and the registry areas of the organization
+        // master-data workbook (units, locations, departments, functions,
+        // teams, people, committees, members, processes, products, channels).
+        // Its own partial; the Columns list is not used by it.
+        // 575: Organization Management keeps Organizations and Legal Entities
+        // (org-registry); the other registry areas are Practice Management ->
+        // Organization (the next three, same partial), maintained by the
+        // organization's own users, with Organizations / Legal Entities shown
+        // read-only. Each has its own grant (575).
+        new("org-registry","Organizations & Legal Entities","Organizations (GRAC tenants / groups) and the Legal Entities under them.","sitemap",["Code","Name","Status"], OrganizationGroup),
+        new("org-registry-structure","Organization Structure","Your Organization and Legal Entities, and their organization units, locations and departments.","sitemap",["Code","Name","Status"], OrganizationGroup),
+        new("org-registry-people","People & Governance","People, teams, committees and committee members of each Legal Entity.","users",["Code","Name","Status"], OrganizationGroup),
+        new("org-registry-operations","Business Operations","Business functions, business processes, products & services and delivery channels of each Legal Entity.","diagram-project",["Code","Name","Status"], OrganizationGroup),
         // Full-page, read-only organization view (2026-11-02). Opened by a
         // row on the Organization Management landing list above; its own
         // partial (Partials/organization-view.cshtml) and its own JS, so
@@ -91,7 +108,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // screen that governs it (see ScreenPermissionArea). Columns are
         // unused (the partial owns its layout) but kept meaningful so the
         // registry stays self-describing.
-        new("organization-view","Organization","Everything recorded for one organization, read-only.","building",["Code","Name","SpocName","Status"], OrganizationGroup),
+        new("organization-view","Legal Entity","Everything recorded for one Legal Entity (a GRAC organization), read-only.","building",["Code","Name","SpocName","Status"], OrganizationGroup),
         new("organization-metadata","Organization Metadata","Configurable metadata used for applicability discovery","sliders",["OrganizationId","MetadataName","DataType","ValueText","Status"], OrganizationGroup),
         new("repository-subscriptions","Standards & Frameworks","Organization subscriptions to repository artifacts and releases","bookmark",["OrganizationId","AuthorityId","ArtifactId","ReleaseId","SubscriptionStatus","Status"], GovernanceGroup),
         new("locations","Location Management","Organization locations used for operating context, ownership, and responsibility mapping","location-dot",["Organization","Name","LocationType","LocationHead","Region","Status"], OrganizationGroup),
@@ -415,7 +432,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Partials/_audit-flow-shell.cshtml), so every screen still has
         // exactly one implementation and every screen below remains
         // reachable on its own route and its own menu row.
-        new("org-audit-definition","Audit Definition","Define an audit in one flow: audit details, then scope, then question sets.","file-shield",["Step","Screen"], AuditManagementGroup),
+        new("org-audit-definition","Audit Definitions","Define an audit in one flow: audit details, then scope, then question sets.","file-shield",["Step","Screen"], AuditManagementGroup),
         new("org-audit-configuration","Audit Configuration","Configure an audit: scope, question sets, workflow and scoring. Opened from Audit Definition.","sliders",["Step","Screen"], AuditManagementGroup),
         new("org-assurance-definitions","Audit Definitions","Organization-level Audit Definitions with lifecycle Draft / Under Review / Approved / Active / Retired (BRD Part 2 Sec 1).","file-shield",["Code","Name","Category","Owner","Version","Status"], AuditManagementGroup),
         // Scope Builder (BRD Part 2 Sec 2). Menu row seeded by
@@ -444,7 +461,7 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Quarterly / Monthly / One-Time plans; items link to
         // assurance definitions with schedule + assignments.
         // Menu row seeded by migration 091.
-        new("org-assurance-plans","Audit Plans","Annual / Quarterly / Monthly / One-Time Audit Plans with items that schedule audits and assign owner / team / auditor / department / branch (BRD Part 2 Sec 8).","calendar-days",["Code","Name","Type","Period","Owner","Items","Status"], AuditManagementGroup),
+        new("org-assurance-plans","Annual Audit Plans","Annual / Quarterly / Monthly / One-Time Audit Plans with items that schedule audits and assign owner / team / auditor / department / branch (BRD Part 2 Sec 8).","calendar-days",["Code","Name","Type","Period","Owner","Items","Status"], AuditManagementGroup),
         // Triggers (BRD Part 2 Sec 9). Stage 3. Per-definition-version
         // triggers of type SCHEDULED / EVENT_DRIVEN / CONTINUOUS /
         // MANUAL. Menu row seeded by migration 094.
@@ -473,6 +490,25 @@ public sealed record PracticeScreen(string Key, string Title, string Description
         // Audit Reports (migration 568, spec 4.9): one report per engagement
         // from a section template; review, approval, issue, revisions.
         new("org-audit-reports","Audit Reports","Audit reports per engagement: objective, scope, coverage, findings, responses, recommendations and conclusion -- reviewed, approved and issued.","file-lines",["Engagement","Name","Plan","Lead / Reviewer","Executions Approved","Findings","Report","Status","Issued"], AuditManagementGroup),
+        // Audit Intelligence (migration 577, CR2 - AA Part A): the Audit
+        // Universe -- auditable subjects referencing Organization Registry
+        // records, classified, related, validated and approved by the Head of
+        // Internal Audit -- and its configurable masters.
+        new("org-audit-universe","Audit Universe","The governed inventory of auditable subjects: discovered from the Organization Registry or created, classified, related and approved by the Head of Internal Audit.","globe",["Universe ID","Subject","Category","Parent","Source","Subject Owner","Business Unit / Department","Business Criticality","Regulatory Significance","Status","Last Reviewed"], AuditManagementGroup),
+        new("org-audit-universe-config","Universe Configuration","Audit Universe categories, subcategories, audit classifications, regulatory significance and business criticality levels, statuses and subject relationships.","sliders",["Code","Name","Description","Order","Active","Used by"], AuditManagementGroup),
+        // Framework & Practice Mapping (migration 580, CR2 - AA Part B): each
+        // Universe subject's frameworks, releases, controls, requirements,
+        // obligations, practices and practice instances -- suggested from
+        // Operationalize dependencies, confirmed or rejected by the user.
+        new("org-audit-universe-mapping","Framework & Practice Mapping","Map each Audit Universe subject to its frameworks, releases, controls, requirements, obligations, GRAC practices and practice instances: GRAC suggests, you confirm or reject.","diagram-project",["Level","Code","Name","Context","Source","Status","Why Suggested","Decided By","Remarks"], AuditManagementGroup),
+        // Risk Intelligence (migration 581, CR2 - AA Part C): per Universe
+        // subject, its linked enterprise risks as Risk Management holds them
+        // (ratings, appetite, treatment, acceptance, reviews) with the gaps,
+        // exceptions, practice assurance and previous audit findings.
+        new("org-audit-risk-intelligence","Risk Intelligence","Per Audit Universe subject: its enterprise risks as Risk Management holds them, with related gaps, exceptions, practice assurance and previous audit findings.","shield-halved",["Risk","Title","Category","Owner","Inherent","Residual","Appetite","Trend","Treatment","Open Actions","Acceptance","Next Review","Status"], AuditManagementGroup),
+        new("org-audit-rbia-config","RBIA Configuration","The Risk-Based Internal Audit methodology: rating scale, inherent and control parameters with their questions and weights, scoring and risk bands -- versioned, published by the Head of Internal Audit.","sliders",["Code","Parameter","Kind","Weight %","Order","Assessment Focus","Questions"], AuditManagementGroup),
+        new("org-audit-rbia-assessment","RBIA Assessment","Risk-Based Internal Audit assessments of Audit Universe subjects: questionnaire, inherent / control / residual scores, risk band, audit priority and frequency, review and approval.","gauge-high",["Ref","Subject","Period","Type","Inherent","Control Eff.","Residual","Band","Priority","Frequency","Status","Assessor","Approved"], AuditManagementGroup),
+        new("org-audit-plan-recommendations","Audit Plan Recommendations","Engagements recommended for an Annual Audit Plan from approved RBIA results and assurance intelligence; the Head of Internal Audit accepts, defers or rejects each one.","list-check",["#","Audit Universe Subject","RBIA Band (Residual)","Priority","Frequency","Reg. Significance","Criticality","Last Audit","Due By","Enterprise Risks","Open Gaps","Audit Findings","Suggested Period","Programme","Decision"], AuditManagementGroup),
         new("org-assurance-executions","Executions","Materialize and manage live audit executions against resolved scope snapshots (BRD Part 2 Sec 9-10).","play-circle",["Execution","Definition","Status","Progress"], AuditManagementGroup),
         // Observations (BRD Part 2 Sec 11). Stage 4. Findings recorded
         // during an execution, evidence attachments, review + resolution

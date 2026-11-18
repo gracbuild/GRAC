@@ -1,0 +1,446 @@
+@*
+    Framework & Practice Mapping (580, CR2 - AA Part B -- Audit Intelligence)
+
+    Each Audit Universe subject is associated with the frameworks, releases,
+    controls (source structure), requirements (source statements),
+    obligations, GRAC practices and practice instances that apply to it --
+    and (581) the enterprise risks of the Risk Management register.
+    Only GRAC's own identifiers are kept; names are read live, and a mapped
+    record that is gone shows as "no longer available".
+
+    UX (the existing list look; filters are selects, no popups):
+      * Toolbar: organization, subject, level, status, source, search.
+      * "Refresh Suggestions": GRAC suggests mappings from what it already
+        knows -- the practice instances that depend on the subject's
+        Organization Registry records in Operationalize, their practices,
+        the statements those practices are mapped to (with their controls,
+        releases and frameworks) and the instances' obligations. Each
+        suggestion says why. Decided rows are never changed by a refresh.
+      * Tick rows -> Confirm / Reject (reason) / Deactivate (reason) /
+        Reactivate; the 3-dot does the same for one row.
+      * "+ Add Mapping" opens a row at the top: choose the level, then the
+        records (requirements in the control-statement tree picker, the
+        others in a multi-select); added mappings are Confirmed.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaUmUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-diagram-project pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaUmUnavailableTitle">Framework &amp; Practice Mapping is not available.</h2>
+        <p id="oaUmUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaUmRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaUmFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaUmFilterSubject"><option value="">Loading subjects...</option></select>
+        <select id="oaUmFilterLevel">
+            <option value="">All levels</option>
+            <option value="FRAMEWORK">Frameworks</option>
+            <option value="RELEASE">Releases</option>
+            <option value="CONTROL">Controls</option>
+            <option value="REQUIREMENT">Requirements</option>
+            <option value="OBLIGATION">Obligations</option>
+            <option value="PRACTICE">Practices</option>
+            <option value="PRACTICE_INSTANCE">Practice Instances</option>
+            <option value="RISK">Enterprise Risks</option>
+        </select>
+        <select id="oaUmFilterStatus">
+            <option value="">All statuses</option>
+            <option value="SUGGESTED">Suggested</option>
+            <option value="CONFIRMED">Confirmed</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="INACTIVE">Inactive</option>
+        </select>
+        <select id="oaUmFilterSource">
+            <option value="">All sources</option>
+            <option value="AUTO">Suggested by GRAC</option>
+            <option value="MANUAL">Added manually</option>
+        </select>
+        <input id="oaUmSearch" type="text" placeholder="Search code / name / context..." />
+        <button class="pm-button icon" id="oaUmRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button" id="oaUmSuggestBtn" type="button">
+            <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Refresh Suggestions
+        </button>
+        <button class="pm-button primary" id="oaUmAddBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Mapping
+        </button>
+    </div>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <button class="pm-button" type="button" data-bulk="CONFIRM"><i class="fa-solid fa-check" aria-hidden="true"></i> Confirm Selected</button>
+        <button class="pm-button" type="button" data-bulk="REJECT"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject Selected</button>
+        <button class="pm-button" type="button" data-bulk="DEACTIVATE"><i class="fa-solid fa-circle-pause" aria-hidden="true"></i> Deactivate Selected</button>
+        <button class="pm-button" type="button" data-bulk="REACTIVATE"><i class="fa-solid fa-circle-play" aria-hidden="true"></i> Reactivate Selected</button>
+        <span id="oaUmSelectedCount" style="color:var(--fg-subtle);">0 selected</span>
+    </div>
+    <p class="oa-pl-plan-facts" id="oaUmSummary" style="margin-top:8px;"></p>
+    <div class="pm-message" id="oaUmMessage" style="display:none;"></div>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:8px;" id="oaUmPicks">
+        <table>
+            <thead>
+                <tr><th style="width:36px;"><input type="checkbox" id="oaUmSelectAll" title="Select all" /></th>
+                    <th>Level</th><th>Code</th><th>Name</th><th>Context</th><th>Source</th><th>Status</th>
+                    <th>Why Suggested</th><th>Decided By</th><th>Remarks</th><th></th></tr>
+            </thead>
+            <tbody id="oaUmBody">
+                <tr><td colspan="11" class="pm-empty">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<style>
+    .oa-um-sub { color: var(--fg-subtle); }
+</style>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Shared/checkcombo.js" asp-append-version="true"></script>
+<script src="~/js/Shared/statement-tree-picker.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const LEVEL   = { FRAMEWORK: 'Framework', RELEASE: 'Release', CONTROL: 'Control', REQUIREMENT: 'Requirement',
+                      OBLIGATION: 'Obligation', PRACTICE: 'Practice', PRACTICE_INSTANCE: 'Practice Instance',
+                      RISK: 'Enterprise Risk' };   // 581
+    const ADD_LEVELS = [
+        ['FRAMEWORK', '1. Frameworks'], ['RELEASE', '1. Releases'], ['CONTROL', '2. Controls (source structure)'],
+        ['REQUIREMENT', '2. Requirements (control statements)'], ['PRACTICE', '3. GRAC Practices'],
+        ['PRACTICE_INSTANCE', '4. Practice Instances'], ['OBLIGATION', '4. Obligations of practice instances'],
+        ['RISK', '5. Enterprise Risks (Risk Management)']   // 581
+    ];
+    const STATUS  = { SUGGESTED: 'Suggested', CONFIRMED: 'Confirmed', REJECTED: 'Rejected', INACTIVE: 'Inactive' };
+    const SOURCE  = { AUTO: 'Suggested by GRAC', MANUAL: 'Added manually' };
+    const ACT     = { CONFIRM: 'Confirm', REJECT: 'Reject', DEACTIVATE: 'Deactivate', REACTIVATE: 'Reactivate' };
+    const DONE    = { CONFIRM: 'confirmed', REJECT: 'rejected', DEACTIVATE: 'deactivated', REACTIVATE: 'reactivated' };
+    const ALLOWED = { CONFIRM: ['SUGGESTED', 'REJECTED'], REJECT: ['SUGGESTED', 'CONFIRMED'], DEACTIVATE: ['CONFIRMED'], REACTIVATE: ['INACTIVE'] };
+
+    const state = { orgId: '', subjectId: '', subjects: [], rows: {}, selected: {}, add: null, picker: null };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data)) || []); }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    function d10(x) { return x ? String(x).substring(0, 10) : ''; }
+    function codeName(code, name) { return code ? code + ' - ' + (name || '') : (name || ''); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function trigger(id) {
+        return '<button type="button" class="pm-action-trigger" data-menu="' + esc(id) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span></button>';
+    }
+    function subjectRow() { return state.subjects.find(function (s) { return String(g(s, 'id')) === String(state.subjectId); }) || {}; }
+    function retired() { return g(subjectRow(), 'statusCode') === 'RETIRED'; }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaUmUnavailable', 'oaUmUnavailableTitle', 'oaUmUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaUmFilterOrg', orgs);
+        state.orgId = document.getElementById('oaUmFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaUmUnavailable', 'oaUmUnavailableTitle', 'oaUmUnavailableBody',
+                'Framework & Practice Mapping is not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaUmRoot').hidden = false;
+        wire();
+        await loadSubjects();
+        reload();
+    }
+
+    function wire() {
+        document.getElementById('oaUmFilterOrg').addEventListener('change', async function (e) {
+            state.orgId = e.target.value || ''; state.add = null; state.selected = {};
+            await loadSubjects(); reload();
+        });
+        document.getElementById('oaUmFilterSubject').addEventListener('change', function (e) {
+            state.subjectId = e.target.value || ''; state.add = null; state.selected = {}; reload();
+        });
+        ['oaUmFilterLevel', 'oaUmFilterStatus', 'oaUmFilterSource'].forEach(function (id) {
+            document.getElementById(id).addEventListener('change', function () { state.selected = {}; reload(); });
+        });
+        document.getElementById('oaUmSearch').addEventListener('input', function () {
+            clearTimeout(window.__oaUmSearchTimer);
+            window.__oaUmSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaUmRefreshBtn').addEventListener('click', function () { reload(); });
+        document.getElementById('oaUmSuggestBtn').addEventListener('click', suggest);
+        document.getElementById('oaUmAddBtn').addEventListener('click', openAdd);
+        document.querySelectorAll('[data-bulk]').forEach(function (b) {
+            b.addEventListener('click', function () { act(b.getAttribute('data-bulk'), Object.keys(state.selected)); });
+        });
+        document.getElementById('oaUmSelectAll').addEventListener('change', function (e) {
+            document.querySelectorAll('#oaUmBody input[data-pick]').forEach(function (cb) { cb.checked = e.target.checked; pick(cb); });
+        });
+        const body = document.getElementById('oaUmBody');
+        body.addEventListener('change', function (e) {
+            const t = e.target;
+            if (t.matches('input[data-pick]')) pick(t);
+            if (t.id === 'oaUmAddLevel') { state.add.level = t.value; drawAdd(); }
+        });
+        body.addEventListener('click', function (e) {
+            const a = e.target.closest('[data-do]');
+            if (!a) return;
+            e.preventDefault();
+            if (a.getAttribute('data-do') === 'add-save') saveAdd();
+            else if (a.getAttribute('data-do') === 'add-cancel') { closeAdd(); reload(); }
+        });
+        window.gracCheckCombo.wire(document.getElementById('oaUmPicks'));
+    }
+
+    async function loadSubjects() {
+        const sel = document.getElementById('oaUmFilterSubject');
+        state.subjects = [];
+        if (!state.orgId) { sel.innerHTML = '<option value="">Select an organization first</option>'; state.subjectId = ''; return; }
+        try {
+            const lk = await getJson(API + '/universe-lookups?organizationId=' + encodeURIComponent(state.orgId));
+            state.subjects = g(lk, 'subjects') || [];
+        } catch (err) { wf.setMessage('oaUmMessage', 'Failed to load the subjects: ' + (err.message || err), 'error'); }
+        const keep = state.subjectId;
+        sel.innerHTML = state.subjects.length
+            ? state.subjects.map(function (s) {
+                  const id = String(g(s, 'id'));
+                  return '<option value="' + esc(id) + '"' + (id === String(keep) ? ' selected' : '') + '>'
+                       + esc(codeName(g(s, 'code'), g(s, 'name')) + (g(s, 'statusCode') === 'RETIRED' ? ' (Retired)' : '')) + '</option>';
+              }).join('')
+            : '<option value="">No Audit Universe subjects yet</option>';
+        state.subjectId = sel.value || '';
+    }
+
+    async function reload() {
+        const body = document.getElementById('oaUmBody');
+        const ro = retired();
+        document.getElementById('oaUmSuggestBtn').disabled = !state.subjectId || ro;
+        document.getElementById('oaUmAddBtn').disabled = !state.subjectId || ro;
+        document.querySelectorAll('[data-bulk]').forEach(function (b) { b.disabled = !state.subjectId || ro; });
+        if (!state.subjectId) {
+            body.innerHTML = '<tr><td colspan="11" class="pm-empty">' + (state.orgId ? 'Add subjects in Audit Universe first.' : 'Select an organization.') + '</td></tr>';
+            document.getElementById('oaUmSummary').textContent = '';
+            return;
+        }
+        body.innerHTML = '<tr><td colspan="11" class="pm-empty">Loading...</td></tr>';
+        const qs = new URLSearchParams();
+        qs.set('organizationId', state.orgId);
+        [['oaUmFilterLevel', 'level'], ['oaUmFilterStatus', 'status'], ['oaUmFilterSource', 'source']].forEach(function (p) {
+            const v = document.getElementById(p[0]).value; if (v) qs.set(p[1], v);
+        });
+        const s = document.getElementById('oaUmSearch').value.trim();
+        if (s) qs.set('search', s);
+        try {
+            const j = await getJson(API + '/universe/' + encodeURIComponent(state.subjectId) + '/mappings?' + qs.toString());
+            render(rowsOf(j), g(j, 'counts') || []);
+        } catch (err) { body.innerHTML = '<tr><td colspan="11" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+    }
+
+    function render(rows, counts) {
+        const body = document.getElementById('oaUmBody');
+        const tot = { SUGGESTED: 0, CONFIRMED: 0, REJECTED: 0, INACTIVE: 0 };
+        counts.forEach(function (c) { tot[g(c, 'mappingStatus')] = (tot[g(c, 'mappingStatus')] || 0) + Number(g(c, 'mappingCount') || 0); });
+        document.getElementById('oaUmSummary').textContent = 'This subject: ' + tot.SUGGESTED + ' suggested, ' + tot.CONFIRMED + ' confirmed, '
+            + tot.REJECTED + ' rejected, ' + tot.INACTIVE + ' inactive.' + (retired() ? ' The subject is retired; its mappings are read-only.' : '');
+        state.rows = {};
+        let html = state.add ? '<tr class="oa-pl-items-row is-selected" data-child="new"><td colspan="11"><div class="oa-pl-items" id="oaUmAddHost"></div></td></tr>' : '';
+        html += rows.map(function (x) {
+            const id = String(g(x, 'universeMappingId'));
+            state.rows[id] = x;
+            const lvl = g(x, 'mappingLevel');
+            // where the record sits: a release in its framework, a control
+            // in its framework / release, a requirement in its framework /
+            // release / control; practices, instances and obligations carry
+            // their own context line.
+            const context = lvl === 'RELEASE' ? g(x, 'frameworkName')
+                          : lvl === 'CONTROL' ? [g(x, 'frameworkName'), g(x, 'releaseName')].filter(Boolean).join(' / ')
+                          : lvl === 'REQUIREMENT' ? [g(x, 'frameworkName'), g(x, 'releaseName'), g(x, 'controlName')].filter(Boolean).join(' / ')
+                          : (g(x, 'contextLabel') || '');
+            return '<tr data-key="' + esc(id) + '">'
+                 + '<td><input type="checkbox" data-pick="' + esc(id) + '"' + (state.selected[id] ? ' checked' : '') + (retired() ? ' disabled' : '') + ' /></td>'
+                 + '<td>' + esc(LEVEL[lvl] || lvl) + '</td>'
+                 + '<td>' + esc(g(x, 'recordCode') || '--') + '</td>'
+                 + '<td style="white-space:normal;">' + (g(x, 'isAvailable') ? esc(g(x, 'recordName')) : '<span class="oa-um-sub">No longer available (' + esc(g(x, 'recordKey')) + ')</span>') + '</td>'
+                 + '<td style="white-space:normal;">' + esc(context || '--') + '</td>'
+                 + '<td>' + esc(SOURCE[g(x, 'mappingSource')] || g(x, 'mappingSource')) + '</td>'
+                 + '<td>' + wf.badge(STATUS[g(x, 'mappingStatus')] || g(x, 'mappingStatus')) + '</td>'
+                 + '<td style="white-space:normal;">' + esc(g(x, 'suggestionBasis') || '--') + '</td>'
+                 + '<td>' + esc(g(x, 'confirmedBy') ? g(x, 'confirmedBy') + ' ' + d10(g(x, 'confirmedDt')) : '--') + '</td>'
+                 + '<td style="white-space:normal;">' + esc(g(x, 'remarks') || '') + '</td>'
+                 + '<td>' + (retired() ? '' : trigger(id)) + '</td></tr>';
+        }).join('');
+        body.innerHTML = html || '<tr><td colspan="11" class="pm-empty">No mappings yet. Use "Refresh Suggestions" to let GRAC suggest them, or "+ Add Mapping".</td></tr>';
+        if (state.add) drawAdd();
+        body.querySelectorAll('[data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () {
+                const st = g(state.rows[id], 'mappingStatus');
+                return Object.keys(ALLOWED).filter(function (a) { return ALLOWED[a].indexOf(st) >= 0; })
+                    .map(function (a) {
+                        return { icon: a === 'CONFIRM' || a === 'REACTIVATE' ? 'fa-check' : a === 'REJECT' ? 'fa-xmark' : 'fa-circle-pause',
+                                 label: ACT[a], run: function () { act(a, [id]); } };
+                    });
+            });
+        });
+        Object.keys(state.selected).forEach(function (k) { if (!state.rows[k]) delete state.selected[k]; });
+        countSelected();
+    }
+    function pick(cb) {
+        const k = cb.getAttribute('data-pick');
+        if (cb.checked) state.selected[k] = true; else delete state.selected[k];
+        countSelected();
+    }
+    function countSelected() { document.getElementById('oaUmSelectedCount').textContent = Object.keys(state.selected).length + ' selected'; }
+
+    async function act(action, ids) {
+        if (!ids.length) { await window.gracUi.alert('Tick the mappings first.', { type: 'error' }); return; }
+        const bad = ids.filter(function (id) { return ALLOWED[action].indexOf(g(state.rows[id], 'mappingStatus')) < 0; });
+        if (bad.length) {
+            await window.gracUi.alert(ACT[action] + ' applies to ' + ALLOWED[action].map(function (s) { return STATUS[s]; }).join(' / ')
+                + ' mappings only; ' + bad.length + ' of the selected are not.', { type: 'error' });
+            return;
+        }
+        let remarks = null;
+        if (action === 'REJECT' || action === 'DEACTIVATE') {
+            remarks = await window.gracUi.promptRequired('Why ' + (action === 'REJECT' ? 'reject' : 'deactivate') + ' ' + ids.length + ' mapping(s)?',
+                { title: ACT[action] + ' Mapping', confirmText: ACT[action], multiline: true });
+            if (remarks == null) return;
+        } else {
+            remarks = await window.gracUi.prompt(ACT[action] + ' ' + ids.length + ' mapping(s)? Remarks (optional):',
+                { title: ACT[action] + ' Mapping', confirmText: ACT[action], multiline: true });
+            if (remarks == null) return;
+        }
+        try {
+            const res = await post('/universe/' + encodeURIComponent(state.subjectId) + '/mappings/action', {
+                organizationId: Number(state.orgId), action: action, mappingIds: ids.map(Number), remarks: remarks || null, actor: null });
+            wf.setMessage('oaUmMessage', (g(res, 'appliedCount') || 0) + ' mapping(s) ' + DONE[action] + '.', 'ok');
+            state.selected = {};
+            reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    async function suggest() {
+        if (!state.subjectId) return;
+        try {
+            const res = await post('/universe/' + encodeURIComponent(state.subjectId) + '/mappings/suggest', { organizationId: Number(state.orgId), actor: null });
+            const n = g(res, 'suggestedCount') || 0;
+            wf.setMessage('oaUmMessage', n ? n + ' new suggestion(s). Review them and confirm or reject.'
+                : 'No new suggestions. GRAC suggests from the practice instances that depend on the subject\'s Organization Registry records in Operationalize.', 'ok');
+            reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // -----------------------------------------------------------------
+    // Add Mapping (a row at the top)
+    // -----------------------------------------------------------------
+    function openAdd() {
+        if (state.add) { closeAdd(); reload(); return; }
+        state.add = { level: 'FRAMEWORK', options: {} };
+        reload();
+    }
+    function closeAdd() {
+        if (state.picker) { state.picker.destroy(); state.picker = null; }
+        state.add = null;
+    }
+    async function drawAdd() {
+        const h = document.getElementById('oaUmAddHost');
+        if (!h || !state.add) return;
+        if (state.picker) { state.picker.destroy(); state.picker = null; }
+        const lvl = state.add.level;
+        h.innerHTML = '<p class="oa-pl-plan-facts"><strong>Add Mapping</strong> -- ' + esc(codeName(g(subjectRow(), 'code'), g(subjectRow(), 'name')))
+            + '. Added mappings are Confirmed; GRAC\'s suggestions are reviewed in the list below.</p>'
+            + '<div class="oa-pl-plan-grid">'
+            + '<label class="pm-field oa-pl-span-2"><span>Level</span><select class="pm-input" id="oaUmAddLevel">'
+            + ADD_LEVELS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === lvl ? ' selected' : '') + '>' + esc(l[1]) + '</option>'; }).join('')
+            + '</select></label>'
+            + '<label class="pm-field oa-pl-span-2"><span>Remarks</span><input class="pm-input" id="oaUmAddRemarks" maxlength="1000" /></label>'
+            + '</div><div id="oaUmAddPicker" style="margin-top:8px;"><p class="oa-pl-plan-facts">Loading...</p></div>'
+            + '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="add-save">Add Mapping</a>'
+            + '<a href="#" class="oa-pl-more" data-do="add-cancel">Cancel</a></div>';
+        const host = document.getElementById('oaUmAddPicker');
+        if (lvl === 'REQUIREMENT') {
+            host.innerHTML = '';
+            state.picker = window.gracStatementTreePicker.attach({
+                host: host, organizationId: state.orgId, selected: [], readOnly: false,
+                selectedInfo: 'These requirements (control statements) will be mapped to the subject.'
+            });
+            return;
+        }
+        try {
+            if (!state.add.options[lvl])
+                state.add.options[lvl] = rowsOf(await getJson(API + '/universe-mapping-options?organizationId=' + encodeURIComponent(state.orgId)
+                                                              + '&level=' + encodeURIComponent(lvl)));
+            if (!state.add || state.add.level !== lvl) return;
+            const opts = state.add.options[lvl].map(function (o) {
+                const ctx = g(o, 'contextLabel');
+                return { value: String(g(o, 'recordKey')), label: codeName(g(o, 'recordCode'), g(o, 'recordName')) + (ctx ? ' (' + ctx + ')' : '') };
+            });
+            host.innerHTML = opts.length
+                ? '<label class="pm-field"><span>' + esc(LEVEL[lvl]) + 's</span>' + window.gracCheckCombo.html(opts, [], { ariaLabel: LEVEL[lvl] }) + '</label>'
+                : '<p class="oa-pl-plan-facts">Nothing of this level is available in this organization.</p>';
+        } catch (err) { host.innerHTML = '<p class="oa-pl-plan-facts">Failed to load: ' + esc(err.message || err) + '</p>'; }
+    }
+    async function saveAdd() {
+        const lvl = state.add.level;
+        let keys;
+        if (lvl === 'REQUIREMENT') keys = (state.picker ? state.picker.getSelected() : []).map(function (s) { return String(s.entityId); });
+        else {
+            const combo = document.querySelector('#oaUmAddPicker [data-checkcombo]');
+            keys = combo ? window.gracCheckCombo.values(combo) : [];
+        }
+        if (!keys.length) { await window.gracUi.alert('Choose at least one record.', { type: 'error' }); return; }
+        try {
+            const res = await post('/universe/' + encodeURIComponent(state.subjectId) + '/mappings', {
+                organizationId: Number(state.orgId), level: lvl, keys: keys,
+                remarks: document.getElementById('oaUmAddRemarks').value.trim() || null, actor: null });
+            wf.setMessage('oaUmMessage', (g(res, 'addedCount') || 0) + ' mapping(s) added (Confirmed).', 'ok');
+            closeAdd();
+            reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+})();
+</script>

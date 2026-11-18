@@ -710,6 +710,25 @@ public sealed class RiskCentreController(
     public async Task<IActionResult> GetResidualHistory(long riskId, CancellationToken ct)
         => Ok(await svc.GetResidualHistoryAsync(riskId, ct));
 
+    // 576: every acceptance and review of the risk, newest first.
+    // A database without 576 (SQL 2812, procedure not found) gets a plain
+    // message rather than a bare 500, so the page can say what to run.
+    [HttpGet("register/{riskId:long}/decision-history")]
+    public async Task<IActionResult> GetDecisionHistory(long riskId, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await svc.GetDecisionHistoryAsync(riskId, ct));
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2812)
+        {
+            return StatusCode(StatusCodes.Status501NotImplemented, new
+            {
+                error = "Acceptance & review history is not set up in this database yet (run migration 576_risk_decision_history.sql)."
+            });
+        }
+    }
+
     // =================================================================
     // Practice / Asset mapping — migrations 261, 262
     //

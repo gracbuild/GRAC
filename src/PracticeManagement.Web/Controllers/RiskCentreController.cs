@@ -472,6 +472,14 @@ public sealed class RiskCentreController(
         return ForwardGetAsync($"api/practice/risk-centre/register/{riskId}/residual/history", ct);
     }
 
+    // 576: acceptance & review history (Review page).
+    [HttpGet("register/{riskId:long}/decision-history")]
+    public Task<IActionResult> GetDecisionHistory(long riskId, CancellationToken ct)
+    {
+        if (!TryGuardSession(out var err)) return Task.FromResult(err!);
+        return ForwardGetAsync($"api/practice/risk-centre/register/{riskId}/decision-history", ct);
+    }
+
     // ---- Practice / Asset mapping (migrations 261, 262) --------------
     // Record-scoped like the residual routes: no organizationId in the
     // URL, so the session guard is all this tier can check and the API

@@ -1653,6 +1653,7 @@
             </section>
         </div>
 
+
         @* ---- STEP 2 — the reassessment (the editable step) -----------
            No .ra-row-split wrapper. That row was a two-column grid
            holding Reassessment beside Justification; with Justification
@@ -1827,6 +1828,25 @@
                         as the proposed date &mdash; it does not decide where this risk goes next.
                     </span>
                 </label>
+            </div>
+        </section>
+
+        @* 576: every acceptance and review of this risk, newest first --
+           the note given each time stays visible after the next review
+           replaces it (sp_risk_decision_history_list). Read-only, last
+           panel of the page (sir, 2026-11-16). Event / Date / By narrow,
+           Description takes the rest, left-aligned. *@
+        <section class="pm-panel risk-history-panel" id="rvHistoryPanel">
+            <div class="pm-section-heading">
+                <h2>Acceptance &amp; review history <span class="pm-hint" id="rvHistoryCount"></span></h2>
+                <p>Each acceptance and review of this risk: when, by whom, and the note given.</p>
+            </div>
+            <div class="pm-table-wrap">
+                <table class="pm-table risk-history-table">
+                    <colgroup><col style="width:110px" /><col style="width:120px" /><col style="width:200px" /><col /></colgroup>
+                    <thead><tr><th>Event</th><th>Date</th><th>By</th><th>Description</th></tr></thead>
+                    <tbody id="rvHistoryBody"></tbody>
+                </table>
             </div>
         </section>
 
@@ -2533,6 +2553,24 @@
             </div>
         </section>
 
+        @* 576 / 2026-11-18 (sir): the same Acceptance & review history as
+           the Review page, last panel before the action bar -- earlier
+           decisions stay visible while this one is recorded. Read-only;
+           filled by renderDecisionHistory(riskId, "ac"). *@
+        <section class="pm-panel risk-history-panel" id="acHistoryPanel">
+            <div class="pm-section-heading">
+                <h2>Acceptance &amp; review history <span class="pm-hint" id="acHistoryCount"></span></h2>
+                <p>Each acceptance and review of this risk: when, by whom, and the note given.</p>
+            </div>
+            <div class="pm-table-wrap">
+                <table class="pm-table risk-history-table">
+                    <colgroup><col style="width:110px" /><col style="width:120px" /><col style="width:200px" /><col /></colgroup>
+                    <thead><tr><th>Event</th><th>Date</th><th>By</th><th>Description</th></tr></thead>
+                    <tbody id="acHistoryBody"></tbody>
+                </table>
+            </div>
+        </section>
+
         @* ---- Action bar ----------------------------------------------
            Sticky, like the residual page's: on a page this tall the
            alternative is scrolling to the end to save, then back up to
@@ -3225,6 +3263,14 @@
         background: var(--bg-subtle); color: var(--neutral-700); font-size: 11px; font-weight: 600;
     }
     .risk-method-tag.is-alert { background: var(--danger-50); color: var(--danger-700); }
+    /* 574: risk assessed on an earlier likelihood / impact scale or matrix */
+    .risk-reassess-note { margin: 0 0 8px; color: var(--danger-700); }
+    /* 576: acceptance / review notes keep their line breaks */
+    /*      (Review and Accept pages, .risk-history-panel)            */
+    .risk-history-panel .risk-history-table { table-layout: fixed; width: 100%; }
+    .risk-history-panel .risk-history-table th,
+    .risk-history-panel .risk-history-table td { text-align: left; vertical-align: top; }
+    .risk-history-panel .risk-history-desc { white-space: pre-wrap; overflow-wrap: anywhere; }
 
     /* Modal overlay (defensive CSS same as exception + gap-detail so
        pm-modal renders as a proper popup regardless of global stylesheet). */
@@ -4023,8 +4069,8 @@
     .risk-cal-ev.is-overdue { box-shadow: inset 2px 0 0 var(--danger-700); font-weight: 700; }
     .risk-cal-more { font-size: 10px; color: var(--fg-muted); margin-top: 2px; }
 
-    .risk-overdue { color: var(--danger-700); font-weight: 600; }
-    .risk-duetoday { color: var(--warning-600); font-weight: 600; }
+    .risk-overdue { color: var(--danger-700); }
+    .risk-duetoday { color: var(--warning-600); }
 
     /* ---- Treatment task hierarchy -----------------------------------
        Parent tasks own the commitment; sub tasks distribute the work.

@@ -49,7 +49,6 @@
         </div>
         <p class="pm-message" id="rvMessage" role="status" aria-live="polite" hidden></p>
         <div class="pm-toolbar">
-            <input type="search" id="rvSearch" placeholder="Search review, engagement or vendor" maxlength="200" />
             <select id="rvStatusFilter" title="Status">
                 <option value="OPEN">Open</option>
                 <option value="OVERDUE">Overdue</option>
@@ -72,6 +71,7 @@
                 <option value="90">Due in 90 days</option>
             </select>
             <select id="rvOwnerFilter" title="Owner"><option value="">All owners</option></select>
+            <input type="search" id="rvSearch" placeholder="Search review, engagement or vendor" maxlength="200" />
             <button class="pm-button icon" id="rvRefresh" type="button" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
             @if (rvCanApprove)
             {

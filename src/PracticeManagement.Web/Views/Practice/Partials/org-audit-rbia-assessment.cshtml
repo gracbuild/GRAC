@@ -1,0 +1,480 @@
+@*
+    RBIA Assessment (582, CR2 - AA 6.3 to 6.10 -- Audit Intelligence)
+
+    Risk-Based Internal Audit assessments of Audit Universe subjects on the
+    published RBIA methodology (RBIA Configuration).
+      * List: status / period / band / open-and-current filters and a search.
+      * Start Assessments: one or many ACTIVE subjects, the period, the type
+        (Initial / Annual / Event-driven + trigger reason) and the assessor;
+        a subject with an open assessment is skipped.
+      * A row's 3-dot menu opens the workspace in a row under it (no popups):
+        the subject's enterprise risk intelligence (581; frozen into the
+        assessment at approval), the questionnaire by parameter with the
+        indicator each question points at, the scores (inherent, control
+        effectiveness, residual), the system band, an override band with a
+        justification and evidence, the previous assessment and the history.
+      * Assessor: Save / Submit / Cancel; Audit Reviewer: Review / Return;
+        Head of Internal Audit: Approve / Return; Reassess an approved,
+        current assessment. The server re-checks every rule.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaRaUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-gauge-high pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaRaUnavailableTitle">RBIA Assessment is not available.</h2>
+        <p id="oaRaUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaRaRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaRaFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaRaFilterStatus">
+            <option value="">All statuses</option>
+            <option value="Draft">Draft</option>
+            <option value="Returned">Returned</option>
+            <option value="InReview">In Review</option>
+            <option value="PendingApproval">Pending Approval</option>
+            <option value="Approved">Approved</option>
+            <option value="Superseded">Superseded</option>
+            <option value="Cancelled">Cancelled</option>
+        </select>
+        <select id="oaRaFilterPeriod"><option value="">All periods</option></select>
+        <select id="oaRaFilterBand"><option value="">All bands</option></select>
+        <select id="oaRaFilterCurrent">
+            <option value="1">Open and current only</option>
+            <option value="0">All assessments</option>
+        </select>
+        <input type="search" class="pm-input" id="oaRaSearch" placeholder="Search reference or subject" style="max-width:240px;" />
+        <button class="pm-button icon" id="oaRaRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaRaStartBtn" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> Start Assessments</button>
+    </div>
+    <div class="pm-message" id="oaRaMessage" style="display:none;"></div>
+    <div id="oaRaStart" hidden style="margin-top:8px;"></div>
+    <div id="oaRaBody" style="margin-top:8px;"><p class="pm-empty">Select an organization.</p></div>
+</section>
+
+<style>
+    #oaRaBody td { vertical-align: top; }
+    #oaRaBody .pm-input { min-width: 0; }
+    .oa-ra-hint { color: var(--fg-subtle); font-size: 0.85em; }
+</style>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script src="~/js/Shared/checkcombo.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance/rbia';
+    const UAPI    = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const STATUS  = { Draft: 'Draft', Returned: 'Returned', InReview: 'In Review', PendingApproval: 'Pending Approval',
+                      Approved: 'Approved', Superseded: 'Superseded', Cancelled: 'Cancelled' };
+    const TYPE    = { INITIAL: 'Initial', ANNUAL: 'Annual', EVENT: 'Event-driven' };
+    const KIND    = { INHERENT: 'Inherent risk', CONTROL: 'Control effectiveness' };
+    const ACTION  = { CREATE: 'Created', SAVE: 'Saved', SUBMIT: 'Submitted', REVIEW: 'Reviewed', APPROVE: 'Approved',
+                      RETURN: 'Returned', CANCEL: 'Cancelled', REASSESS: 'Reassessment started', SUPERSEDE: 'Superseded' };
+
+    const state = { orgId: '', rows: [], open: null, ws: null, lookups: { people: [], subjects: [] }, dirty: false };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data)) || []); }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    function d10(x) { return x ? String(x).substring(0, 10) : ''; }
+    function sc(x) { return x == null || x === '' ? '' : Number(x).toFixed(2); }
+    function codeName(c, n) { return c ? c + ' - ' + (n || '') : (n || ''); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function td(x) { return '<td>' + esc(x) + '</td>'; }
+    function fact(label, value) { return '<div class="pm-field"><span>' + esc(label) + '</span><div>' + (value !== '' && value != null ? esc(value) : '--') + '</div></div>'; }
+    function table(head, rows, empty) {
+        return '<div class="pm-table-wrap"><table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('')
+             + '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" class="pm-empty">' + esc(empty) + '</td></tr>') + '</tbody></table></div>';
+    }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) { wf.unavailable('oaRaUnavailable', 'oaRaUnavailableTitle', 'oaRaUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.'); return; }
+        wf.populateOrgSelect('oaRaFilterOrg', orgs);
+        state.orgId = document.getElementById('oaRaFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaRaUnavailable', 'oaRaUnavailableTitle', 'oaRaUnavailableBody', 'RBIA Assessment is not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaRaRoot').hidden = false;
+        document.getElementById('oaRaFilterOrg').addEventListener('change', async function (e) {
+            if (!await leave()) { e.target.value = state.orgId; return; }
+            state.orgId = e.target.value || ''; closeStart(); loadLookups(); reload();
+        });
+        ['oaRaFilterStatus', 'oaRaFilterPeriod', 'oaRaFilterBand', 'oaRaFilterCurrent'].forEach(function (id) {
+            document.getElementById(id).addEventListener('change', async function () { if (await leave()) reload(); });
+        });
+        let t = null;
+        document.getElementById('oaRaSearch').addEventListener('input', function () { clearTimeout(t); t = setTimeout(async function () { if (await leave()) reload(); }, 350); });
+        document.getElementById('oaRaRefreshBtn').addEventListener('click', async function () { if (await leave()) reload(); });
+        document.getElementById('oaRaStartBtn').addEventListener('click', openStart);
+        const start = document.getElementById('oaRaStart');
+        start.addEventListener('click', function (e) {
+            const a = e.target.closest('[data-do]');
+            if (!a) return;
+            e.preventDefault();
+            if (a.getAttribute('data-do') === 'start-save') saveStart();
+            else closeStart();
+        });
+        window.gracCheckCombo.wire(start);
+        const body = document.getElementById('oaRaBody');
+        body.addEventListener('input', function (e) { if (e.target.closest('.oa-pl-items')) state.dirty = true; });
+        body.addEventListener('change', function (e) { if (e.target.closest('.oa-pl-items')) state.dirty = true; });
+        body.addEventListener('click', onWorkspaceClick);
+        await loadLookups();
+        reload();
+    }
+    async function leave() {
+        if (!state.dirty) return true;
+        const ok = await window.gracUi.confirm('The open assessment has unsaved answers. Leave without saving?', { type: 'warning', title: 'Unsaved changes', confirmText: 'Leave' });
+        if (ok) state.dirty = false;
+        return ok;
+    }
+
+    async function loadLookups() {
+        state.lookups = { people: [], subjects: [] };
+        if (!state.orgId) return;
+        try {
+            const lk = await getJson(UAPI + '/universe-lookups?organizationId=' + encodeURIComponent(state.orgId));
+            state.lookups = { people: g(lk, 'people') || [], subjects: g(lk, 'subjects') || [] };
+        } catch (err) { wf.setMessage('oaRaMessage', 'Failed to load the subjects: ' + (err.message || err), 'error'); }
+    }
+
+    // ---------------------------------------------------------------
+    // List
+    // ---------------------------------------------------------------
+    async function reload() {
+        const body = document.getElementById('oaRaBody');
+        state.open = null; state.ws = null; state.dirty = false;
+        if (!state.orgId) { body.innerHTML = '<p class="pm-empty">Select an organization.</p>'; return; }
+        const qs = '?organizationId=' + encodeURIComponent(state.orgId)
+                 + '&status=' + encodeURIComponent(document.getElementById('oaRaFilterStatus').value)
+                 + '&period=' + encodeURIComponent(document.getElementById('oaRaFilterPeriod').value)
+                 + '&band=' + encodeURIComponent(document.getElementById('oaRaFilterBand').value)
+                 + '&currentOnly=' + (document.getElementById('oaRaFilterCurrent').value === '1')
+                 + '&search=' + encodeURIComponent(document.getElementById('oaRaSearch').value.trim());
+        body.innerHTML = '<p class="pm-empty">Loading...</p>';
+        try { state.rows = rowsOf(await getJson(API + '/assessments' + qs)); }
+        catch (err) { body.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>'; return; }
+        fillFilter('oaRaFilterPeriod', 'All periods', state.rows.map(function (r) { return [g(r, 'assessmentPeriod'), g(r, 'assessmentPeriod')]; }));
+        fillFilter('oaRaFilterBand', 'All bands', state.rows.filter(function (r) { return g(r, 'finalBandCode'); })
+                                                            .map(function (r) { return [g(r, 'finalBandCode'), g(r, 'finalBandName')]; }));
+        render();
+    }
+    function fillFilter(id, blank, pairs) {
+        const sel = document.getElementById(id), keep = sel.value, seen = {};
+        const opts = pairs.filter(function (p) { if (!p[0] || seen[p[0]]) return false; seen[p[0]] = 1; return true; });
+        if (keep && !seen[keep]) opts.push([keep, keep]);
+        sel.innerHTML = '<option value="">' + esc(blank) + '</option>' + opts.map(function (p) {
+            return '<option value="' + esc(p[0]) + '"' + (String(p[0]) === keep ? ' selected' : '') + '>' + esc(p[1]) + '</option>';
+        }).join('');
+    }
+    function render() {
+        const rows = [];
+        state.rows.forEach(function (r) {
+            const id = String(g(r, 'rbiaAssessmentId')), open = state.open === id;
+            const band = (g(r, 'finalBandName') || '') + (g(r, 'isOverridden') ? ' (override)' : '');
+            rows.push('<tr class="' + (open ? 'oa-pl-open is-selected' : '') + '">'
+                + td(g(r, 'assessmentRef')) + td(codeName(g(r, 'universeRef'), g(r, 'subjectName'))) + td(g(r, 'assessmentPeriod'))
+                + td(TYPE[g(r, 'assessmentType')] || g(r, 'assessmentType')) + td(sc(g(r, 'inherentScore'))) + td(sc(g(r, 'controlScore')))
+                + td(sc(g(r, 'residualScore'))) + td(band) + td(g(r, 'finalPriority')) + td(g(r, 'frequencyMonths') ? g(r, 'frequencyMonths') + ' months' : '')
+                + td((STATUS[g(r, 'status')] || g(r, 'status')) + (g(r, 'isCurrent') ? ' (current)' : '')) + td(g(r, 'assessorName')) + td(d10(g(r, 'approvedDt')))
+                + '<td><button type="button" class="pm-action-trigger" data-menu="' + esc(id) + '" aria-haspopup="menu" aria-expanded="false" title="Actions">'
+                + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="visually-hidden">Actions</span></button></td></tr>');
+            if (open) rows.push('<tr class="oa-pl-items-row is-selected"><td colspan="14"><div class="oa-pl-items" id="oaRaWs">' + (state.ws ? workspaceHtml() : '<p class="pm-empty">Loading...</p>') + '</div></td></tr>');
+        });
+        document.getElementById('oaRaBody').innerHTML = '<div class="oa-pl-wrap">' + table(
+            ['Ref', 'Subject', 'Period', 'Type', 'Inherent', 'Control Eff.', 'Residual', 'Band', 'Priority', 'Frequency', 'Status', 'Assessor', 'Approved', ''],
+            rows, 'No RBIA assessments. Use Start Assessments (the RBIA methodology must be published first).') + '</div>';
+        document.querySelectorAll('#oaRaBody [data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () {
+                return [{ icon: 'fa-folder-open', label: state.open === id ? 'Close' : 'Open', run: function () { toggle(id); } }];
+            });
+        });
+    }
+    async function toggle(id) {
+        if (!await leave()) return;
+        if (state.open === id) { state.open = null; state.ws = null; render(); return; }
+        state.open = id; state.ws = null; render();
+        loadWorkspace(id);
+    }
+
+    // ---------------------------------------------------------------
+    // Start assessments (inline panel, not a popup)
+    // ---------------------------------------------------------------
+    function openStart() {
+        const subjects = state.lookups.subjects.filter(function (s) { return g(s, 'statusCode') === 'ACTIVE'; })
+            .map(function (s) { return { value: String(g(s, 'id')), label: codeName(g(s, 'code'), g(s, 'name')) }; });
+        const people = state.lookups.people.map(function (p) {
+            return '<option value="' + esc(g(p, 'id')) + '">' + esc(g(p, 'name') + (g(p, 'designation') ? ' (' + g(p, 'designation') + ')' : '')) + '</option>';
+        }).join('');
+        const host = document.getElementById('oaRaStart');
+        host.innerHTML = '<div class="oa-pl-items">'
+            + '<p class="oa-pl-plan-facts"><strong>Start Assessments</strong> -- on the published RBIA methodology; a subject with an open assessment is skipped.</p>'
+            + '<div class="oa-pl-plan-grid">'
+            + (subjects.length ? '<label class="pm-field oa-pl-span-2"><span>Subjects (Active) <span class="required">*</span></span>' + window.gracCheckCombo.html(subjects, [], { ariaLabel: 'Subjects' }) + '</label>'
+                               : '<p class="oa-pl-plan-facts oa-pl-span-2">No Active Audit Universe subject.</p>')
+            + '<label class="pm-field"><span>Assessment Period <span class="required">*</span></span><input class="pm-input" id="oaRaStPeriod" maxlength="60" placeholder="e.g. FY 2026-27" /></label>'
+            + '<label class="pm-field"><span>Type</span><select class="pm-input" id="oaRaStType"><option value="ANNUAL">Annual</option><option value="INITIAL">Initial</option><option value="EVENT">Event-driven</option></select></label>'
+            + '<label class="pm-field"><span>Assessor <span class="required">*</span></span><select class="pm-input" id="oaRaStAssessor"><option value="">Choose...</option>' + people + '</select></label>'
+            + '<label class="pm-field oa-pl-span-all"><span>Trigger / Reason</span><input class="pm-input" id="oaRaStReason" maxlength="1000" placeholder="Required for an event-driven assessment" /></label>'
+            + '</div><div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="start-save">Create</a> <a href="#" data-do="start-cancel">Cancel</a></div></div>';
+        host.hidden = false;
+    }
+    function closeStart() { const h = document.getElementById('oaRaStart'); h.hidden = true; h.innerHTML = ''; }
+    async function saveStart() {
+        const combo = document.querySelector('#oaRaStart [data-checkcombo]');
+        const ids = combo ? window.gracCheckCombo.values(combo).map(Number) : [];
+        const period = document.getElementById('oaRaStPeriod').value.trim();
+        const type = document.getElementById('oaRaStType').value;
+        const reason = document.getElementById('oaRaStReason').value.trim();
+        const assessor = document.getElementById('oaRaStAssessor').value;
+        if (!ids.length) { await window.gracUi.alert('Choose at least one subject.', { type: 'error' }); return; }
+        if (!period) { await window.gracUi.alert('Enter the assessment period.', { type: 'error' }); return; }
+        if (assessor === '') { await window.gracUi.alert('Choose the assessor.', { type: 'error' }); return; }
+        if (type === 'EVENT' && !reason) { await window.gracUi.alert('Give the trigger of the event-driven assessment.', { type: 'error' }); return; }
+        try {
+            const r = await post('/assessments', { organizationId: Number(state.orgId), subjectIds: ids, period: period, type: type,
+                                                   triggerReason: reason || null, assessorEmployeeId: Number(assessor), actor: null });
+            const n = g(r, 'createdCount') || 0;
+            wf.setMessage('oaRaMessage', n + ' assessment(s) created' + (n < ids.length ? '; ' + (ids.length - n) + ' skipped (an open assessment exists).' : '.'), 'ok');
+            closeStart();
+            reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // ---------------------------------------------------------------
+    // Workspace (child row)
+    // ---------------------------------------------------------------
+    async function loadWorkspace(id) {
+        try {
+            const d = await getJson(API + '/assessments/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId));
+            const a = g(d, 'assessment') || {};
+            const ws = { d: d, a: a, intel: null, subject: null, snapshot: null };
+            const snap = g(a, 'riskSnapshotJson');
+            if (snap) { try { ws.snapshot = JSON.parse(snap); } catch (_) { ws.snapshot = null; } }
+            const sid = g(a, 'universeSubjectId');
+            const qs = '?organizationId=' + encodeURIComponent(state.orgId);
+            const [subj, intel] = await Promise.all([
+                getJson(UAPI + '/universe/' + encodeURIComponent(sid) + qs).catch(function () { return null; }),
+                ws.snapshot ? Promise.resolve(null) : getJson(UAPI + '/universe/' + encodeURIComponent(sid) + '/risk-intelligence' + qs).catch(function () { return null; })
+            ]);
+            const s = subj ? g(subj, 'subject') : null;
+            ws.subject = Array.isArray(s) ? s[0] : s;
+            ws.intel = ws.snapshot || intel;
+            if (state.open !== id) return;
+            state.ws = ws; state.dirty = false;
+            render();
+        } catch (err) {
+            const host = document.getElementById('oaRaWs');
+            if (host) host.innerHTML = '<p class="pm-empty">Failed to load: ' + esc(err.message || err) + '</p>';
+        }
+    }
+    function canEdit() { const a = state.ws.a; return !!g(a, 'isAssessor') && (g(a, 'status') === 'Draft' || g(a, 'status') === 'Returned'); }
+    function indicators() {
+        const ws = state.ws, sm = ((ws.intel && g(ws.intel, 'summary')) || [])[0] || {};
+        const risks = (ws.intel && g(ws.intel, 'risks')) || [];
+        const treat = risks.reduce(function (n, r) { return n + Number(g(r, 'openTreatmentActions') || 0); }, 0);
+        return {
+            CRITICALITY: 'Business criticality: ' + ((ws.subject && g(ws.subject, 'criticalityName')) || 'not set'),
+            REG_SIGNIFICANCE: 'Regulatory significance: ' + ((ws.subject && g(ws.subject, 'regSignificanceName')) || 'not set'),
+            LINKED_RISKS: 'Linked enterprise risks: ' + (g(sm, 'confirmedRisks') || 0),
+            ABOVE_APPETITE: 'Linked risks above appetite: ' + (g(sm, 'aboveAppetite') || 0),
+            OPEN_TREATMENT: 'Open risk treatment actions: ' + treat,
+            OPEN_GAPS: 'Open gaps: ' + (g(sm, 'openGaps') || 0),
+            OPEN_FINDINGS: 'Previous audit findings: ' + (g(sm, 'findings') || 0)
+        };
+    }
+    function workspaceHtml() {
+        const ws = state.ws, d = ws.d, a = ws.a, edit = canEdit(), dis = edit ? '' : ' disabled';
+        const levels = g(d, 'levels') || [], options = g(d, 'options') || [], bands = g(d, 'bands') || [];
+        const questions = g(d, 'questions') || [], params = g(d, 'parameters') || [];
+        const ind = indicators();
+        const sm = ((ws.intel && g(ws.intel, 'summary')) || [])[0] || {};
+        let html = '<div class="oa-pl-plan-grid">'
+            + fact('Assessment', g(a, 'assessmentRef') + ' (v' + (g(a, 'assessmentVersion') || 1) + ')')
+            + fact('Subject', codeName(g(a, 'universeRef'), g(a, 'subjectName')))
+            + fact('Period / Type', g(a, 'assessmentPeriod') + ' / ' + (TYPE[g(a, 'assessmentType')] || g(a, 'assessmentType')))
+            + fact('Trigger / Reason', g(a, 'triggerReason'))
+            + fact('Methodology', 'v' + g(a, 'methodologyVersion') + ' - ' + g(a, 'methodologyName'))
+            + fact('Status', STATUS[g(a, 'status')] || g(a, 'status'))
+            + fact('Assessor', g(a, 'assessorName'))
+            + fact('Reviewer', g(a, 'reviewerName') ? g(a, 'reviewerName') + ' ' + d10(g(a, 'reviewedDt')) : '')
+            + fact('Approver', g(a, 'approverName') ? g(a, 'approverName') + ' ' + d10(g(a, 'approvedDt')) : '')
+            + fact('Previous Assessment', g(a, 'previousRef') ? g(a, 'previousRef') + ': ' + (g(a, 'previousBandName') || '') + ' (' + sc(g(a, 'previousResidualScore')) + ') ' + d10(g(a, 'previousApprovedDt')) : '')
+            + '</div>';
+
+        html += '<h3>Enterprise Risk Intelligence</h3>'
+            + (ws.intel ? '<div class="oa-pl-plan-grid">'
+                + fact('Linked risks', g(sm, 'confirmedRisks') || 0) + fact('Above appetite', g(sm, 'aboveAppetite') || 0)
+                + fact('Accepted risks', g(sm, 'acceptedRisks') || 0) + fact('Open gaps', g(sm, 'openGaps') || 0)
+                + fact('Previous audit findings', g(sm, 'findings') || 0)
+                + '</div><p class="oa-pl-plan-facts">' + (ws.snapshot ? 'Frozen at approval on ' + esc(d10(g(ws.snapshot, 'capturedUtc'))) + '.'
+                                                                      : 'Live from Risk Management, Gap Center and Findings; it is frozen into the assessment when approved. Details: Risk Intelligence.') + '</p>'
+                         : '<p class="oa-pl-plan-facts">The risk intelligence could not be loaded.</p>');
+
+        html += '<h3>Questionnaire</h3>';
+        params.forEach(function (p) {
+            const pid = String(g(p, 'rbiaParameterId'));
+            const qs = questions.filter(function (q) { return String(g(q, 'rbiaParameterId')) === pid; });
+            html += '<p class="oa-pl-plan-facts"><strong>' + esc(g(p, 'parameterName')) + '</strong> -- ' + esc(KIND[g(p, 'parameterKind')] || g(p, 'parameterKind'))
+                  + ', weight ' + esc(g(p, 'weightPct')) + '%' + (g(p, 'assessmentFocus') ? '. ' + esc(g(p, 'assessmentFocus')) : '') + '</p>';
+            html += table(['Question', 'Answer', 'Comment', 'Evidence Reference'], qs.map(function (q) {
+                const qid = String(g(q, 'rbiaQuestionId'));
+                const cur = g(q, 'isNotApplicable') ? 'NA'
+                          : g(q, 'answerMode') === 'OPTIONS' ? (g(q, 'rbiaOptionId') != null ? 'O' + g(q, 'rbiaOptionId') : '')
+                          : (g(q, 'levelValue') != null ? 'L' + g(q, 'levelValue') : '');
+                const choices = g(q, 'answerMode') === 'OPTIONS'
+                    ? options.filter(function (o) { return String(g(o, 'rbiaQuestionId')) === qid; }).map(function (o) { return ['O' + g(o, 'rbiaOptionId'), g(o, 'optionLabel') + ' (' + g(o, 'optionScore') + ')']; })
+                    : levels.map(function (l) { return ['L' + g(l, 'levelValue'), g(l, 'levelValue') + ' - ' + g(l, 'levelName')]; });
+                choices.unshift(['', 'Not answered']); choices.push(['NA', 'Not applicable']);
+                const hint = g(q, 'indicatorCode') && ind[g(q, 'indicatorCode')];
+                return '<tr><td>' + esc(g(q, 'questionText'))
+                     + (g(q, 'guidance') ? '<div class="oa-ra-hint">' + esc(g(q, 'guidance')) + '</div>' : '')
+                     + (g(q, 'evidenceExpectation') ? '<div class="oa-ra-hint">Evidence: ' + esc(g(q, 'evidenceExpectation')) + '</div>' : '')
+                     + (hint ? '<div class="oa-ra-hint">Indicator: ' + esc(hint) + '</div>' : '') + '</td>'
+                     + '<td style="min-width:200px;"><select class="pm-input" data-ans="' + esc(qid) + '"' + dis + '>'
+                     + choices.map(function (c) { return '<option value="' + esc(c[0]) + '"' + (c[0] === cur ? ' selected' : '') + '>' + esc(c[1]) + '</option>'; }).join('') + '</select>'
+                     + (g(q, 'answerScore') != null ? '<div class="oa-ra-hint">Score ' + esc(sc(g(q, 'answerScore'))) + '</div>' : '') + '</td>'
+                     + '<td><textarea class="pm-input" rows="2" maxlength="2000" data-cmt="' + esc(qid) + '"' + dis + '>' + esc(g(q, 'comment')) + '</textarea></td>'
+                     + '<td><input class="pm-input" maxlength="1000" data-evd="' + esc(qid) + '" value="' + esc(g(q, 'evidenceReference')) + '"' + dis + ' /></td></tr>';
+            }), 'No questions.');
+        });
+
+        html += '<h3>Scores</h3>' + table(['Parameter', 'Kind', 'Weight %', 'Answered', 'Score (0-100)'], params.map(function (p) {
+            return '<tr>' + td(g(p, 'parameterName')) + td(KIND[g(p, 'parameterKind')] || g(p, 'parameterKind')) + td(g(p, 'weightPct'))
+                 + td((g(p, 'answeredCount') || 0) + ' of ' + (g(p, 'questionCount') || 0)) + td(sc(g(p, 'parameterScore'))) + '</tr>';
+        }), 'No parameters.');
+        html += '<div class="oa-pl-plan-grid" style="margin-top:8px;">'
+            + fact('Inherent Audit Risk', sc(g(a, 'inherentScore'))) + fact('Control Effectiveness', sc(g(a, 'controlScore')))
+            + fact('Residual Audit Risk', sc(g(a, 'residualScore'))) + fact('System Band', g(a, 'systemBandName'))
+            + fact('Final Band', g(a, 'finalBandName')) + fact('Audit Priority', g(a, 'finalPriority'))
+            + fact('Audit Frequency', g(a, 'frequencyMonths') ? g(a, 'frequencyMonths') + ' months' : '') + fact('Next Audit Due', d10(g(a, 'nextAuditDue')))
+            + '</div><p class="oa-pl-plan-facts">Scores are recalculated on every save.</p>';
+
+        const ov = g(a, 'overrideBandId');
+        html += '<h3>Band Override</h3><div class="oa-pl-plan-grid">'
+            + '<label class="pm-field"><span>Proposed Band</span><select class="pm-input" id="oaRaOvBand"' + dis + '><option value="">No override (system band)</option>'
+            + bands.map(function (b) { const id = String(g(b, 'rbiaBandId')); return '<option value="' + esc(id) + '"' + (ov != null && String(ov) === id ? ' selected' : '') + '>' + esc(g(b, 'bandName') + ' (' + g(b, 'minScore') + '-' + g(b, 'maxScore') + ')') + '</option>'; }).join('')
+            + '</select></label>'
+            + '<label class="pm-field oa-pl-span-2"><span>Justification</span><textarea class="pm-input" id="oaRaOvWhy" rows="2" maxlength="2000"' + dis + '>' + esc(g(a, 'overrideJustification')) + '</textarea></label>'
+            + '<label class="pm-field"><span>Supporting Evidence</span><input class="pm-input" id="oaRaOvEvd" maxlength="1000" value="' + esc(g(a, 'overrideEvidence')) + '"' + dis + ' /></label>'
+            + '</div><p class="oa-pl-plan-facts">An override needs a justification; the approver approves it with the assessment.</p>';
+
+        html += '<h3>History</h3>' + table(['When', 'Action', 'From', 'To', 'By', 'Comment'], (g(d, 'history') || []).map(function (h) {
+            return '<tr>' + td(String(g(h, 'actionDt') || '').replace('T', ' ').substring(0, 16)) + td(ACTION[g(h, 'actionCode')] || g(h, 'actionCode'))
+                 + td(STATUS[g(h, 'fromStatus')] || g(h, 'fromStatus')) + td(STATUS[g(h, 'toStatus')] || g(h, 'toStatus')) + td(g(h, 'actorName')) + td(g(h, 'comment')) + '</tr>';
+        }), 'No history.');
+
+        const st = g(a, 'status'), btn = [];
+        if (edit) btn.push(['save', 'Save'], ['SUBMIT', 'Submit']);
+        if ((g(a, 'isAssessor') || g(a, 'isHeadOfInternalAudit')) && (st === 'Draft' || st === 'Returned')) btn.push(['CANCEL', 'Cancel Assessment']);
+        if (st === 'InReview' && g(a, 'canReview')) btn.push(['REVIEW', 'Review'], ['RETURN', 'Return']);
+        if (st === 'PendingApproval' && g(a, 'canApprove')) btn.push(['APPROVE', 'Approve'], ['RETURN', 'Return']);
+        if (st === 'Approved' && g(a, 'isCurrent')) btn.push(['REASSESS', 'Reassess']);
+        html += '<div class="oa-pl-items-foot">' + btn.map(function (b) { return '<a href="#" class="oa-pl-add" data-ws="' + b[0] + '">' + esc(b[1]) + '</a>'; }).join(' ') + '</div>';
+        return html;
+    }
+
+    function responses() {
+        return Array.prototype.map.call(document.querySelectorAll('#oaRaWs [data-ans]'), function (sel) {
+            const qid = sel.getAttribute('data-ans'), v = sel.value;
+            return { questionId: Number(qid),
+                     levelValue: v.charAt(0) === 'L' ? Number(v.substring(1)) : null,
+                     optionId: v.charAt(0) === 'O' ? Number(v.substring(1)) : null,
+                     notApplicable: v === 'NA',
+                     comment: (document.querySelector('#oaRaWs [data-cmt="' + qid + '"]').value || '').trim() || null,
+                     evidenceReference: (document.querySelector('#oaRaWs [data-evd="' + qid + '"]').value || '').trim() || null };
+        });
+    }
+    async function saveWs(quiet) {
+        const band = document.getElementById('oaRaOvBand').value;
+        const why = document.getElementById('oaRaOvWhy').value.trim();
+        if (band !== '' && !why) { await window.gracUi.alert('Give the justification of the band override.', { type: 'error' }); return false; }
+        try {
+            await post('/assessments/' + encodeURIComponent(state.open) + '/save', {
+                organizationId: Number(state.orgId), rowVersionNo: g(state.ws.a, 'rowVersionNo'), responses: responses(),
+                override: { bandId: band === '' ? null : Number(band), justification: why || null, evidence: document.getElementById('oaRaOvEvd').value.trim() || null },
+                actor: null });
+            state.dirty = false;
+            if (quiet !== true) { wf.setMessage('oaRaMessage', 'Assessment saved; scores recalculated.', 'ok'); await loadWorkspace(state.open); }
+            return true;
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); return false; }
+    }
+    async function onWorkspaceClick(e) {
+        const a = e.target.closest('[data-ws]');
+        if (!a || !state.ws) return;
+        e.preventDefault();
+        const what = a.getAttribute('data-ws');
+        if (what === 'save') { saveWs(); return; }
+        const LABEL = { SUBMIT: 'Submit', REVIEW: 'Review', APPROVE: 'Approve', RETURN: 'Return', CANCEL: 'Cancel Assessment', REASSESS: 'Reassess' };
+        let comment = null;
+        if (what === 'RETURN' || what === 'CANCEL' || what === 'REASSESS') {
+            comment = await window.gracUi.prompt('Reason (required):', { title: LABEL[what], inputLabel: 'Reason', confirmText: LABEL[what] });
+            if (comment == null) return;
+            comment = String(comment).trim();
+            if (!comment) { await window.gracUi.alert('Give the reason.', { type: 'error' }); return; }
+        } else {
+            const msg = what === 'SUBMIT' ? 'Save and submit the assessment for ' + (g(state.ws.a, 'requireReview') ? 'review' : 'approval') + '?'
+                      : what === 'APPROVE' ? 'Approve the assessment? Its band sets the audit priority and frequency, the enterprise risk intelligence is frozen into it, and the previous assessment is superseded.'
+                      : 'Mark the assessment reviewed and send it for approval?';
+            comment = await window.gracUi.prompt(msg + ' Comment (optional):', { title: LABEL[what], inputLabel: 'Comment', confirmText: LABEL[what] });
+            if (comment == null) return;
+            comment = String(comment).trim() || null;
+        }
+        if (what === 'SUBMIT' && !await saveWs(true)) return;
+        try {
+            const fresh = what === 'SUBMIT' ? g(await getJson(API + '/assessments/' + encodeURIComponent(state.open) + '?organizationId=' + encodeURIComponent(state.orgId)), 'assessment') : state.ws.a;
+            const r = await post('/assessments/' + encodeURIComponent(state.open) + '/action', {
+                organizationId: Number(state.orgId), action: what, comment: comment, rowVersionNo: g(fresh, 'rowVersionNo'), actor: null });
+            const newId = g(r, 'newAssessmentId');
+            wf.setMessage('oaRaMessage', (ACTION[what] || what) + (newId != null ? ': a new draft assessment was created for the subject.' : '.'), 'ok');
+            state.dirty = false;
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); loadWorkspace(state.open); }
+    }
+})();
+</script>

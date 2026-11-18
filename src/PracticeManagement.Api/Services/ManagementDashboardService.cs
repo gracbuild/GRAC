@@ -3,7 +3,7 @@
 //
 // Facade over the module dashboard procedures -- one call, four result
 // sets, org-scoped:
-//   governance       sp_dashboard_governance        (+ caller scoping)
+//   governance       sp_dashboard_governance        (+ caller scoping; 573: + @release_id)
 //   issues-actions   sp_dashboard_issues_actions
 //   audit-assurance  sp_dashboard_audit_assurance
 //   asset-contract   sp_dashboard_asset_contract    (451)
@@ -23,8 +23,11 @@ namespace PracticeManagement.Api.Services;
 public interface IManagementDashboardService
 {
     /// <summary>Null when <paramref name="module"/> is not a dashboard.</summary>
+    /// <param name="releaseId">573: Governance only -- limit the figures to one
+    /// framework release; null = all frameworks. Ignored by other modules.</param>
     Task<ManagementDashboard?> GetAsync(string module, long organizationId,
-        long? callerEmployeeId, bool callerIsAdmin, CancellationToken cancellationToken);
+        long? callerEmployeeId, bool callerIsAdmin, CancellationToken cancellationToken,
+        long? releaseId = null);
 }
 
 public sealed class ManagementDashboardService(IConfiguration configuration) : IManagementDashboardService
@@ -47,8 +50,15 @@ public sealed class ManagementDashboardService(IConfiguration configuration) : I
         "governance", "documents"
     };
 
+    // 573: procedures that take @release_id (framework filter).
+    private static readonly HashSet<string> ReleaseScoped = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "governance"
+    };
+
     public async Task<ManagementDashboard?> GetAsync(string module, long organizationId,
-        long? callerEmployeeId, bool callerIsAdmin, CancellationToken cancellationToken)
+        long? callerEmployeeId, bool callerIsAdmin, CancellationToken cancellationToken,
+        long? releaseId = null)
     {
         if (!Procedures.TryGetValue(module ?? "", out var procedure)) return null;
 
@@ -66,6 +76,10 @@ public sealed class ManagementDashboardService(IConfiguration configuration) : I
             AddParam(command, "@caller_employee_id", DbType.Int64, (object?)callerEmployeeId ?? DBNull.Value);
             AddParam(command, "@is_admin", DbType.Boolean, callerIsAdmin);
         }
+        // 573: only sent when a framework is chosen, so "All frameworks"
+        // keeps working on a database where 573 has not run yet.
+        if (releaseId is > 0 && ReleaseScoped.Contains(module!))
+            AddParam(command, "@release_id", DbType.Int64, releaseId.Value);
 
         var kpis = new List<ManagementDashboardKpi>();
         var ageing = new List<ManagementDashboardAgeingBand>();

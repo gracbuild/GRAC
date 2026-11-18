@@ -34,13 +34,15 @@ public sealed class ManagementDashboardController(
 
     [HttpGet("{module}")]
     public async Task<IActionResult> Get(string module, [FromQuery] long organizationId,
+        [FromQuery] long? releaseId = null,   // 573: Governance framework filter
         CancellationToken cancellationToken = default)
     {
         if (organizationId <= 0) return BadRequest(new { error = "organizationId is required." });
         try
         {
             var dashboard = await dashboardService.GetAsync(module, organizationId,
-                CallerEmployeeId, CallerIsAdmin, cancellationToken);
+                CallerEmployeeId, CallerIsAdmin, cancellationToken,
+                releaseId is > 0 ? releaseId : null);
             return dashboard is null
                 ? NotFound(new { error = $"Unknown dashboard '{module}'." })
                 : Ok(dashboard);

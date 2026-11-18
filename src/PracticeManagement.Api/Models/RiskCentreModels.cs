@@ -865,6 +865,20 @@ public sealed record RiskResidualDetail(
     long? AssessedByEmployeeId,
     string? AssessedByName);
 
+// 576: one acceptance or review of a risk, for the history on the Review
+// page. Description = the note / remark as typed; a pre-576 row the
+// backfill could not split carries its full generated text.
+public sealed record RiskDecisionHistoryRow(
+    long HistoryId,
+    string EventType,          // Accepted | Reviewed
+    DateTime EventDate,        // when it was recorded
+    DateTime? AcceptedOn,      // acceptances: the acceptance date entered
+    string? ByName,
+    string? Description,
+    string? FromStatusCode,
+    string? ToStatusCode,
+    DateTime RecordedOn);
+
 public sealed record RiskResidualVersionRow(
     long RiskResidualAnalysisId,
     int ResidualVersion,
@@ -1089,8 +1103,11 @@ public sealed record RiskHeatmapCell(
     int LikelihoodValue, int ImpactValue, string RatingCode, string RatingName,
     int? RatingScore, string? ColourHex, int RiskCount);
 
+// 574: + the open risks rated on an earlier likelihood / impact scale or
+// risk matrix (not plotted; re-assessment needed). 0 before 574.
 public sealed record RiskHeatmapCoverage(
-    int OpenRisks, int InherentRated, int ResidualRated, int ResidualPending);
+    int OpenRisks, int InherentRated, int ResidualRated, int ResidualPending,
+    int InherentReassessment = 0, int ResidualReassessment = 0, int ReassessmentNeeded = 0);
 
 // Pending (upcoming) and overdue reviews. DaysOverdue = today -
 // next_review_date; the band's min/max are what the Review Risk list is

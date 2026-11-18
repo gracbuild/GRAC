@@ -172,20 +172,26 @@
     const code = F(org, "Code");
     const name = F(org, "Name");
 
-    document.getElementById("ovHeading").textContent = name || code || "Organization";
+    document.getElementById("ovHeading").textContent = name || code || "Legal Entity";
     document.getElementById("ovSubHeading").textContent =
-      "Everything recorded for this organization, read-only.";
+      "Everything recorded for this Legal Entity, read-only.";
     document.getElementById("ovTitle").textContent = [code, name].filter(Boolean).join(" - ");
     const chip = document.getElementById("ovStatusChip");
     chip.textContent = F(org, "Status") || "-";
 
+    // 570: this page shows a Legal Entity -- the organization row is the
+    // Legal Entity level of the Organization Registry. Organization and
+    // Parent Legal Entity come from sp_org_organization_list (570); the
+    // full sheet-02 record is on Organization Registry -> Legal Entities.
     facts("ovDetails", [
-      ["Organisation Short Name", F(org, "Code")],
-      ["Organisation Long Name", F(org, "Name")],
+      ["Organization", F(org, "RegistryOrganization") || "Not yet assigned"],
+      ["Parent Legal Entity", F(org, "ParentLegalEntity")],
+      ["Legal Entity Code", F(org, "Code")],
+      ["Legal Entity Name", F(org, "Name")],
       ["Industry", F(org, "Industry")],
       ["Entity Type", F(org, "EntityType")],
       ["SPOC Name", F(org, "SpocName")],
-      ["Organisation Status", F(org, "Status")]
+      ["Legal Entity Status", F(org, "Status")]
     ]);
 
     const frameworkCount = Number(F(org, "FrameworkCount") || 0);

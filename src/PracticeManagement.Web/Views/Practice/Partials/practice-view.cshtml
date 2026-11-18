@@ -424,6 +424,14 @@
             <label class="pm-field"><span>Applicability Status<span class="required"> *</span></span><select id="pvApStatus" required></select></label>
             <label class="pm-field"><span>Owner</span><select id="pvApOwner"></select></label>
             <label class="pm-field full"><span>Reason / Justification</span><textarea id="pvApReason" rows="3"></textarea></label>
+            @* 2026-11-16 (sir): marking a practice Applicable also picks its
+               teams, so one Save records the applicability AND creates the
+               Practice Instances (the same POST practice-configure/instances
+               Assign Team uses) -- no second step. Shown only while the
+               status is Applicable; the same team list as Assign Team
+               (Shared/practice-teams.js, which draws it into the host).
+               Assign Team stays for adding teams later. *@
+            <div class="pm-field full" id="pvApTeamsHost" style="display:contents"></div>
         </div>
         <div class="pm-dialog-actions">
             <button type="button" class="pm-button" id="pvApplicabilityCancel">Cancel / Back</button>
@@ -444,6 +452,7 @@
 <script src="~/js/Shared/obligation-form.js" asp-append-version="true"></script>
 <script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
 <script src="~/js/Shared/practice-details.js" asp-append-version="true"></script>
+<script src="~/js/Shared/practice-teams.js" asp-append-version="true"></script>
 
 <script>
 (function () {
@@ -469,8 +478,10 @@
     // waits on it for its Owner and Status lists.
     let pvLookupsReady = Promise.resolve();
     const canEditApplicability = @(pvCanEditApplicability ? "true" : "false");
-    let teams = [];
-    const selected = new Set();
+    // Team pickers (2026-11-16): Shared/practice-teams.js. cfgPicker is the
+    // Assign Team dialog's list; apPicker the applicability dialog's, drawn
+    // into #pvApTeamsHost by wire().
+    let cfgPicker = null, apPicker = null;
 
     // ---- migration 307: the practice's own obligations ---------------
     // Authored here, applying to every Practice Instance of the practice.
@@ -801,15 +812,13 @@
         // losing a selection this way costs a re-tick, not data.
         dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
         document.getElementById('pvSaveBtn').addEventListener('click', saveConfigure);
-        document.getElementById('pvTeamSearch').addEventListener('input', renderTeams);
-        document.getElementById('pvSelectAllBtn').addEventListener('click', function () {
-            visibleTeams().forEach(t => { if (!t.alreadyConfigured) selected.add(t.teamId); });
-            renderTeams();
-        });
-        document.getElementById('pvClearBtn').addEventListener('click', function () {
-            selected.clear(); renderTeams();
-        });
+        const teams = window.gracPracticeTeams;
+        cfgPicker = teams.picker({ list: 'pvTeamList', search: 'pvTeamSearch', count: 'pvSelectionCount',
+                                   selectAll: 'pvSelectAllBtn', clear: 'pvClearBtn', save: 'pvSaveBtn' });
+        document.getElementById('pvApTeamsHost').outerHTML = teams.blockHtml('pvAp');
+        apPicker = teams.picker(teams.ids('pvAp'));
     }
+
 
     // ---------- 1. Practice details ----------------------------------
     async function loadPractice() {
@@ -908,8 +917,11 @@
     }
 
     function syncReasonLock() {
-        document.getElementById('pvApReason').disabled =
-            document.getElementById('pvApStatus').value === 'Applicable';
+        const applicable = document.getElementById('pvApStatus').value === 'Applicable';
+        document.getElementById('pvApReason').disabled = applicable;
+        // 2026-11-16: Applicable shows the team list (loaded once per open).
+        document.getElementById('pvApTeamsBlock').hidden = !applicable;
+        if (applicable && !apPicker.loaded) apPicker.load(organizationId, practiceId);
     }
 
     function setApMessage(text) {
@@ -999,6 +1011,7 @@
             document.getElementById('pvApStatus').innerHTML = optionList(statuses, status, 'Select...');
             document.getElementById('pvApOwner').innerHTML  = optionList(ownerItems, ownerId, 'Select...');
             document.getElementById('pvApReason').value = O(rec, 'ExclusionJustification') || '';
+            apPicker.reset();
             syncReasonLock();
             dlg.showModal();
         } catch (err) {
@@ -1038,6 +1051,7 @@
             const body = await r.json().catch(() => ({}));
             if (!r.ok || body.success === false)
                 throw new Error(body.message || body.Message || ('Save failed (HTTP ' + r.status + ').'));
+            const teamIds = data.applicabilityStatus === 'Applicable' ? apPicker.selectedIds() : [];
             document.getElementById('pvApplicabilityDialog').close();
             const msg = body.message || body.Message || '';
             if (msg && msg !== 'Saved successfully.') alert(msg);
@@ -1045,6 +1059,22 @@
             // and marking Applicable can create the practice row -- 218),
             // so re-read the practice and the panels that hang off it.
             await loadPractice();
+            // 2026-11-16: the teams ticked in the dialog -- now that the
+            // practice row exists -- become Practice Instances, the same
+            // call and summary as Assign Team.
+            if (teamIds.length) {
+                window.__wfCommon.setMessage('pvInstanceMessage', '', '');
+                if (!(practiceId > 0)) {
+                    window.__wfCommon.setMessage('pvInstanceMessage',
+                        'Applicability saved, but the practice record was not found, so no instances were created. Use Actions > Assign Team.', 'error');
+                } else {
+                    const res = await window.gracPracticeTeams.createInstances(organizationId, practiceId, teamIds);
+                    window.__wfCommon.setMessage('pvInstanceMessage', res.ok
+                        ? window.gracPracticeTeams.summaryText(res.body)
+                        : 'Applicability saved, but the practice instances were not created: ' + res.error + ' Use Actions > Assign Team.',
+                        res.ok ? window.gracPracticeTeams.summary(res.body).kind : 'error');
+                }
+            }
             loadObligations();
             loadInstances();
             loadPracticeObligations();
@@ -1079,107 +1109,12 @@
         document.getElementById('pvOutcome').hidden = true;
         msg('', '');
         document.getElementById('pvConfigureDialog').showModal();
-        await loadTeams();
-    }
-
-    async function loadTeams() {
-        const host = document.getElementById('pvTeamList');
-        host.innerHTML = '<div class="pm-empty compact">Loading teams...</div>';
-        try {
-            const r = await fetch(U('/practice/api/workflow/practice-configure/teams?organizationId=')
-                        + encodeURIComponent(organizationId) + '&practiceId=' + encodeURIComponent(practiceId),
-                        { credentials: 'same-origin' });
-            if (!r.ok) {
-                host.innerHTML = '<div class="pm-empty compact">Could not load teams (HTTP ' + r.status + ').</div>';
-                return;
-            }
-            const body = await r.json();
-            teams = (body.data || body.Data || []).map(t => ({
-                teamId:            Number(t.teamId ?? t.TeamId),
-                teamName:          t.teamName ?? t.TeamName ?? '',
-                managerName:       t.teamManagerName ?? t.TeamManagerName ?? '',
-                hasManager:        !!(t.hasManager ?? t.HasManager),
-                departmentName:    t.departmentName ?? t.DepartmentName ?? '',
-                alreadyConfigured: !!(t.alreadyConfigured ?? t.AlreadyConfigured),
-                existingCode:      t.existingInstanceCode ?? t.ExistingInstanceCode ?? ''
-            }));
-            selected.clear();
-            renderTeams();
-        } catch (err) {
-            console.error('practice-view: team load failed', err);
-            host.innerHTML = '<div class="pm-empty compact">Could not load teams.</div>';
-        }
-    }
-
-    function visibleTeams() {
-        const q = (document.getElementById('pvTeamSearch').value || '').trim().toLowerCase();
-        if (!q) return teams;
-        return teams.filter(t => (t.teamName + ' ' + t.managerName + ' ' + t.departmentName)
-                                 .toLowerCase().includes(q));
-    }
-
-    function renderTeams() {
-        const host = document.getElementById('pvTeamList');
-        const list = visibleTeams();
-
-        if (!teams.length) {
-            host.innerHTML = '<div class="pm-empty compact">'
-                + 'No active teams in this organization. Add teams under Organization / Team Management first.'
-                + '</div>';
-            updateCount();
-            return;
-        }
-        if (!list.length) {
-            host.innerHTML = '<div class="pm-empty compact">No team matches that filter.</div>';
-            updateCount();
-            return;
-        }
-
-        host.innerHTML = '<table class="pm-table"><thead><tr>'
-            + '<th style="width:3rem"></th><th>Team</th><th>Manager (becomes owner)</th>'
-            + '<th>Department</th><th>State</th></tr></thead><tbody>'
-            + list.map(t => {
-                const done = t.alreadyConfigured;
-                const checked = done || selected.has(t.teamId);
-                const owner = t.hasManager
-                    ? esc(t.managerName)
-                    : '<span class="pm-text-warning" title="The instance will be created without an owner">'
-                      + 'No manager set</span>';
-                const state = done
-                    ? '<span class="pm-badge">Configured' + (t.existingCode ? ' - ' + esc(t.existingCode) : '') + '</span>'
-                    : '';
-                return '<tr>'
-                    + '<td><input type="checkbox" data-team="' + t.teamId + '"'
-                        + (checked ? ' checked' : '')
-                        + (done ? ' disabled title="This team already has an instance for this practice"' : '')
-                        + '></td>'
-                    + '<td>' + esc(t.teamName) + '</td>'
-                    + '<td>' + owner + '</td>'
-                    + '<td>' + esc(t.departmentName) + '</td>'
-                    + '<td>' + state + '</td>'
-                    + '</tr>';
-            }).join('')
-            + '</tbody></table>';
-
-        host.querySelectorAll('input[data-team]').forEach(cb => {
-            cb.addEventListener('change', function () {
-                const id = Number(this.getAttribute('data-team'));
-                if (this.checked) selected.add(id); else selected.delete(id);
-                updateCount();
-            });
-        });
-        updateCount();
-    }
-
-    function updateCount() {
-        const n = selected.size;
-        document.getElementById('pvSelectionCount').textContent =
-            n + ' selected' + (n ? ' -- ' + n + ' instance' + (n === 1 ? '' : 's') + ' will be created' : '');
-        document.getElementById('pvSaveBtn').disabled = n === 0;
+        await cfgPicker.load(organizationId, practiceId);
     }
 
     async function saveConfigure() {
-        if (!selected.size) return;
+        const teamIds = cfgPicker.selectedIds();
+        if (!teamIds.length) return;
         const openSeq = configureOpenSeq;
         const btn = document.getElementById('pvSaveBtn');
         btn.disabled = true;
@@ -1190,25 +1125,16 @@
         window.__wfCommon.setMessage('pvInstanceMessage', '', '');
 
         try {
-            const r = await fetch(U('/practice/api/workflow/practice-configure/instances'), {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                body: JSON.stringify({
-                    organizationId: organizationId,
-                    practiceId:     practiceId,
-                    teamIds:        Array.from(selected)
-                })
-            });
-            const body = await r.json().catch(() => ({}));
-            if (!r.ok) {
+            const res = await window.gracPracticeTeams.createInstances(organizationId, practiceId, teamIds);
+            if (!res.ok) {
                 // FAILURE: the dialog stays open with the error and the
                 // selection intact, so the operator can fix it and retry.
                 // Nothing below runs.
-                msg(body.error || ('Could not create the instances (HTTP ' + r.status + ').'), 'error');
+                msg(res.error, 'error');
                 btn.disabled = false;
                 return;
             }
+            const body = res.body;
 
             // SUCCESS. Outcome first, so the message and the per-team table
             // are on screen while the dialog is still up.
@@ -1217,7 +1143,7 @@
             // Then refresh, and finish refreshing BEFORE the dialog closes:
             // the operator should find the new instances already listed
             // behind it, not watch the section fill in afterwards.
-            await loadTeams();          // re-read so the new ones show as Configured
+            await cfgPicker.load(organizationId, practiceId); // re-read so the new ones show as Configured
             await loadPractice();       // instance count on the header
             await loadInstances();      // and the instances Configure just created
             // Migration 307: a new instance needs its copies of the
@@ -1227,9 +1153,8 @@
             // Carry the same summary onto the page, where it survives the
             // close -- otherwise the only record of what happened would
             // shut with the dialog.
-            const summary = outcomeSummary(body);
             window.__wfCommon.setMessage('pvInstanceMessage',
-                summary.text + (summary.note ? ' ' + summary.note : ''), summary.kind);
+                window.gracPracticeTeams.summaryText(body), window.gracPracticeTeams.summary(body).kind);
 
             // Close on a short delay rather than instantly: the message
             // inside the dialog is the confirmation, and a modal that
@@ -1247,38 +1172,11 @@
         }
     }
 
-    // Say what actually happened rather than a blanket "Saved". A batch
-    // that skipped every team looks identical to a successful one unless
-    // the counts are spelled out.
-    //
-    // Built in one place because it is now shown in TWO: inside the dialog
-    // while it is still open, and on the page after the dialog closes
-    // itself. Two copies of this sentence would eventually disagree.
-    function outcomeSummary(body) {
-        const created = Number(body.createdCount ?? 0);
-        const already = Number(body.alreadyConfiguredCount ?? 0);
-        const noOwner = Number(body.withoutOwnerCount ?? 0);
-
-        const parts = [];
-        parts.push(created + ' instance' + (created === 1 ? '' : 's') + ' created');
-        if (already) parts.push(already + ' team' + (already === 1 ? '' : 's') + ' already had one');
-        if (noOwner) parts.push(noOwner + ' created without an owner');
-
-        return {
-            text: parts.join('. ') + '.',
-            kind: created ? 'ok' : 'info',
-            // An instance with no owner is not assurance-eligible, so the
-            // page keeps saying so after the dialog has gone.
-            note: noOwner
-                ? 'An instance with no owner is not assurance-eligible. Set a team manager, '
-                  + 'or set the owner directly on the instance under Governance / Practice Instances.'
-                : null
-        };
-    }
-
+    // The outcome sentence is gracPracticeTeams.summary (Shared/practice-teams.js,
+    // 2026-11-16) -- one place, shown in the dialog and on the page.
     function renderOutcome(body) {
         const rows    = body.data || body.Data || [];
-        const summary = outcomeSummary(body);
+        const summary = window.gracPracticeTeams.summary(body);
         msg(summary.text, summary.kind);
 
         const host = document.getElementById('pvOutcome');
@@ -1303,7 +1201,7 @@
             }).join('')
             + '</tbody></table>';
 
-        // The same sentence outcomeSummary carries onto the page, from the
+        // The same sentence gracPracticeTeams.summary carries onto the page, from the
         // same place -- two copies of it would eventually disagree.
         if (summary.note) {
             host.insertAdjacentHTML('beforeend',

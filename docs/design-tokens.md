@@ -151,3 +151,11 @@ read at 400:
   `font-weight: 400`. `.pm-checkcombo-trigger` keeps its deliberate 500.
 
 CSS only.
+
+## Grid and toolbar conventions (2026-11-16)
+
+- **Grid values are never bold.** Cells use the normal weight. Only column headers and group or section header rows (for example, the practice group row on Operationalize or an asset report family row) are emphasised. Status chips and badges keep their own style.
+- **The search box is the last filter in every list toolbar.** The order is: organization and other selects or combos, then date or owner filters, then the search box, then Clear Filter, Refresh and the action buttons.
+  - Applied to: the shared practice.js toolbar (`Manage.cshtml`, one `#search` after `#dateToFilter`), Asset Attestation, Asset Contracts (list, coverage gaps, coverage finder), Asset Option Lists, Asset Register, Asset Reports (run and schedule filters), Evidence Automation (events, bindings), Evidence Center, Operationalize, and TPRM Engagements, Reviews, Risk Register and Third Parties.
+  - **Left alone on purpose:** a search box that filters a *picker* (the CI search beside the CI select on Asset Relationships Impact and Business Services Impact) stays beside its picker. On Asset Form Templates the selects that follow the field library search ("Into section") are targets for an action, not filters.
+

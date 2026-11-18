@@ -282,7 +282,6 @@
     #qsSetView .qs-read-sub { font-size: 12px; color: var(--fg-muted); margin-top: 4px; white-space: pre-wrap; }
     /* 551: the impact note reads as a warning; the open version is marked. */
     #qsSetView .qs-impact-note { display: block; background: var(--warning-100, #fef3c7); color: var(--warning-700, #b45309); margin: 0 0 8px; }
-    #qsSetView tr.qs-version-current > td { font-weight: 600; }
 </style>
 
 <script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
@@ -626,12 +625,13 @@
 
     async function recommend(id) {
         const rows = await loadImpact(id);
-        const note = await window.gracUi.prompt({
-            title: 'Recommend for approval',
-            message: (rows.length
+        // gracUi.prompt(message, opts) -- grac-dialog.js (an options object
+        // as the first argument showed "[object Object]").
+        const note = await window.gracUi.prompt(
+            (rows.length
                 ? 'Approving this version will change ' + rows.length + ' audit(s):\n' + impactLines(rows) + '\n\n'
                 : '') + 'What changed in this version? (optional)',
-            multiline: true, confirmText: 'Recommend' });
+            { title: 'Recommend for approval', multiline: true, confirmText: 'Recommend' });
         if (note === null) return;
         try {
             await setAction(id, 'submit', { note: note || null });
@@ -661,7 +661,7 @@
     }
 
     async function returnToDraft(id) {
-        const reason = await window.gracUi.prompt({ title: 'Return to Draft', message: 'Reason (optional):', multiline: true, confirmText: 'Return' });
+        const reason = await window.gracUi.prompt('Reason (optional):', { title: 'Return to Draft', multiline: true, confirmText: 'Return' });
         if (reason === null) return;
         try {
             await setAction(id, 'return', { note: reason || null });

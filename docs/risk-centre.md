@@ -4302,3 +4302,51 @@ No database object other than menu rows; no API; `org_risk_config`, `org_risk_ac
 1. Run `533_risk_settings_menu_group.sql`; expect 3 PASS rows.
 2. Publish Web; hard refresh.
 3. Users sign out and back in (menu permissions are read at sign-in).
+
+## Update (migration 576, 2026-11-16): acceptance & review history
+
+**Why:** the Review page pre-fills only the *current* assessment's remark, and the register keeps only the *latest* acceptance note. After the next review, the earlier text was no longer visible anywhere on screen. It was still in `risk_register_history` (RiskAccepted / RiskReviewed), but folded into a generated sentence.
+
+**UI:** the Review page has a new panel, **Acceptance & review history**, below "Where it stands".
+- One row per acceptance or review, newest first: Event (Accepted / Reviewed), Date, By, Description.
+- Description is the note as typed; "No remark" when none was given.
+- Read-only. Values are not bold.
+
+**Database** (`576_risk_decision_history.sql`, with rollback):
+- `risk_register_history` gains three columns:
+  - `event_note`: the note as typed; `''` means none.
+  - `event_by_name`: who accepted or reviewed.
+  - `event_dt`: the acceptance date (it can be back-dated) or the review time.
+- `sp_risk_acceptance_save` (310 body) and `sp_risk_review_perform` (299 body) fill these columns.
+  - Bulk accept goes through `sp_risk_acceptance_save`, so it is covered.
+  - Bulk review's own rows already hold the remark as their text, so that procedure is unchanged.
+- Earlier rows are backfilled, best effort:
+  - A review row takes its remark and analyst from the Review analysis written within 60 seconds of it.
+  - An acceptance row takes who and when from "Risk accepted by X on date". Its note is the text after "Risk version N.". For each risk's latest acceptance, the note is the register's `acceptance_note`.
+  - A row the backfill cannot split still shows its full text.
+- `sp_risk_decision_history_list @risk_register_id` returns `HistoryId, EventType, EventDate, AcceptedOn, ByName, Description, FromStatusCode, ToStatusCode, RecordedOn`.
+  - `EventDate` is when the event was **recorded**.
+  - `AcceptedOn` is the acceptance date entered on the form. The page shows it under the description when it differs from `EventDate`.
+
+**API:**
+- `GET /api/practice/risk-centre/register/{riskId}/decision-history` (Web proxy `/practice/api/risk-centre/register/{riskId}/decision-history`, session guard).
+- Returns `RiskDecisionHistoryRow[]`: `historyId, eventType, eventDate, acceptedOn, byName, description, fromStatusCode, toStatusCode, recordedOn`.
+
+**Follow-up (same day):**
+- The panel moved to the **end** of the Review page.
+- Event, Date and By are narrow columns; Description takes the rest of the width, left-aligned.
+- History rows are dated and sorted by when they were recorded.
+- The Accept page now defaults the acceptance date to **today** unless the risk is currently Accepted. Before this, a risk coming back for acceptance after a review reused the previous acceptance date, so a new acceptance was stored with the old date.
+
+
+**Accept page too (2026-11-18, sir):** the Accept page shows the same **Acceptance & review history** panel, below the Acceptance decision and above the action bar (`#acHistoryPanel`, `#acHistoryBody`). `renderDecisionHistory(riskId, prefix)` now takes the host prefix (`rv` Review, `ac` Accept), so both pages use one renderer and the existing `GET register/{riskId}/decision-history`; the history CSS is keyed on `.risk-history-panel` for both. No database or Api change.
+
+## Update (migration 579, 2026-11-17): Workflow and Methodology directly under Risk Management
+
+- **Workflow** (`risk-settings`) and **Methodology** (`risk-methodology`) now sit directly under **Risk Management**, after Calendar (display order 291 / 292). Before this they were under the Risk Management -> Settings group added in 533.
+- The menu keys and URLs are unchanged, so role permissions carry over.
+- `risk-centre-settings` is now empty, so it is set **Inactive**. Its row and permission rows are kept.
+- `274_menu_master_seed.sql` is updated.
+- Re-running 533 puts the two pages back under the group. Run 579 again after it.
+- Rollback: `579_risk_settings_menu_flatten_rollback.sql`.
+

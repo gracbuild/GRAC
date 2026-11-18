@@ -646,3 +646,17 @@ because it renders the same values.
 2. Redeploy Web and hard-refresh the browser, because `practice.js` changed.
 3. For organizations created before this fix: open each one, type the Admin Email and Name,
    and Save. This provisions the admin and emails the credentials.
+
+## 2026-11-16: the list is "Legal Entities" (migration 570)
+
+The Organization Registry (migrations 569-572, `docs/organization-registry.md`)
+makes the organization row the **Legal Entity** level under a new
+**Organization** level. This list is therefore renamed *Legal Entities*
+(menu_master and 274, `PracticeScreen` title, column headings "Legal Entity
+Code / Name / Status"), gains an *Organization* column, and the module now
+lands on *Organization Registry* (first menu). `sp_org_organization_list` was
+re-issued by 570 from 518's body with `RegistryOrganizationId / Code /
+RegistryOrganization` and `ParentLegalEntityId / ParentLegalEntity` added;
+nothing else in it changed. The view page reads "Legal Entity" and shows the
+Organization and parent Legal Entity. "Add Organization" is "Add Legal Entity"
+and still opens Organization Setup.

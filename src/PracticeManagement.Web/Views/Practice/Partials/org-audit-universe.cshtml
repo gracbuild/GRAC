@@ -1,0 +1,933 @@
+@*
+    Audit Universe (577, CR2 - AA Part A -- Audit Intelligence)
+
+    A governed inventory of auditable subjects. It REFERENCES Organization
+    Registry records (the registry stays the source of organizational
+    identity); Assets and Third Parties are not Universe masters.
+
+    UX (the Audit Plans list and child rows, no popups; filters are selects):
+      * View "Audit Universe Register": every subject -- hierarchy (by
+        Parent Subject) or flat. A row (or its chevron) opens the subject
+        under it: details, its Organization Registry records (shown from
+        the registry), relationships, sub-subjects and history. Edit turns
+        it into the form; "+ Add Subject" opens the form at the top.
+        3-dot: Open, Edit, Add Sub-subject, Submit for Validation, Discard,
+        Approve, Return, Mark Reviewed, Deactivate, Reactivate, Retire.
+      * View "Discover from Registry": the registry records (Legal Entity,
+        Organization Units, Locations / Branches, Departments, Business
+        Functions, Business Processes) not yet in the Universe; tick and
+        Include (Discovered subjects), Exclude (reason) or Release.
+      * View "Universe History": every change, inclusion, exclusion,
+        ownership change and approval.
+    Approve / Return / Mark Reviewed / Deactivate / Retire are for the Head
+    of Internal Audit (a role with that responsibility); nobody approves
+    their own submission. The server checks every action.
+*@
+@model PracticeManagement.Web.Models.PracticeScreen
+
+<partial name="Partials/_workflow-common" />
+
+<div class="pm-page-heading compact">
+    <div>
+        <p class="pm-eyebrow">@Model.Group / @Model.Title</p>
+        <h1>@Model.Title</h1>
+        <p>@Model.Description</p>
+    </div>
+</div>
+
+<section class="pm-panel" id="oaUnUnavailable" hidden>
+    <div class="pm-empty">
+        <i class="fa-solid fa-globe pm-empty-icon" aria-hidden="true"></i>
+        <h2 id="oaUnUnavailableTitle">The Audit Universe is not available.</h2>
+        <p id="oaUnUnavailableBody">Ask a GRAC Admin to enable this screen.</p>
+    </div>
+</section>
+
+<section class="pm-panel" id="oaUnRoot" hidden>
+    <div class="pm-toolbar" style="flex-wrap:wrap; gap:8px;">
+        <select id="oaUnFilterOrg"><option value="">Loading organizations...</option></select>
+        <select id="oaUnFilterView">
+            <option value="register">Audit Universe Register</option>
+            <option value="discover">Discover from Registry</option>
+            <option value="history">Universe History</option>
+        </select>
+        <select id="oaUnFilterLayout" data-for="register">
+            <option value="tree">Hierarchy</option>
+            <option value="flat">Flat list</option>
+        </select>
+        <select id="oaUnFilterCategory" data-for="register"><option value="">All categories</option></select>
+        <select id="oaUnFilterStatus" data-for="register"><option value="">All statuses</option></select>
+        <select id="oaUnFilterSource" data-for="register">
+            <option value="">All sources</option>
+            <option value="REGISTRY">Organization Registry</option>
+            <option value="MANUAL">Manually Created</option>
+            <option value="OTHER">Other</option>
+        </select>
+        <select id="oaUnFilterCriticality" data-for="register"><option value="">All criticality</option></select>
+        <select id="oaUnFilterOwner" data-for="register"><option value="">All owners</option></select>
+        <select id="oaUnFilterDepartment" data-for="register"><option value="">All departments</option></select>
+        <select id="oaUnFilterKind" data-for="discover" hidden>
+            <option value="">All record types</option>
+            <option value="LEGAL_ENTITY">Legal Entity</option>
+            <option value="UNIT">Organization Units</option>
+            <option value="LOCATION">Locations / Branches</option>
+            <option value="DEPARTMENT">Departments</option>
+            <option value="FUNCTION">Business Functions</option>
+            <option value="PROCESS">Business Processes</option>
+        </select>
+        <select id="oaUnFilterShow" data-for="discover" hidden>
+            <option value="NEW">Not yet in the Universe</option>
+            <option value="INCLUDED">In the Universe</option>
+            <option value="EXCLUDED">Excluded</option>
+            <option value="ALL">All records</option>
+        </select>
+        <select id="oaUnFilterAction" data-for="history" hidden>
+            <option value="">All changes</option>
+            <option value="DISCOVER">Included from the registry</option>
+            <option value="CREATE">Created</option>
+            <option value="UPDATE">Changed</option>
+            <option value="SUBMIT">Submitted for validation</option>
+            <option value="APPROVE">Approved</option>
+            <option value="RETURN">Returned</option>
+            <option value="REVIEW">Reviewed</option>
+            <option value="DEACTIVATE">Deactivated</option>
+            <option value="REACTIVATE">Reactivated</option>
+            <option value="RETIRE">Retired</option>
+            <option value="DISCARD">Discarded</option>
+            <option value="LINK">Registry record linked</option>
+            <option value="UNLINK">Registry record removed</option>
+            <option value="RELATE">Relationship added</option>
+            <option value="UNRELATE">Relationship ended</option>
+            <option value="EXCLUDE">Registry record excluded</option>
+            <option value="RELEASE">Exclusion released</option>
+            <option value="MASTER">Configuration changed</option>
+            <option value="MAP_SUGGEST">Mapping suggestions refreshed</option>
+            <option value="MAP_ADD">Mapping added</option>
+            <option value="MAP_CONFIRM">Mapping confirmed</option>
+            <option value="MAP_REJECT">Mapping rejected</option>
+            <option value="MAP_DEACTIVATE">Mapping deactivated</option>
+            <option value="MAP_REACTIVATE">Mapping reactivated</option>
+        </select>
+        <input id="oaUnSearch" type="text" placeholder="Search..." />
+        <button class="pm-button icon" id="oaUnRefreshBtn" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        </button>
+        <button class="pm-button primary" id="oaUnAddBtn" type="button" data-for="register">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add Subject
+        </button>
+    </div>
+    <div class="pm-toolbar" id="oaUnDiscoverBar" style="flex-wrap:wrap; gap:8px; margin-top:8px;" hidden>
+        <select id="oaUnIncludeCategory"><option value="">Category: by record type</option></select>
+        <button class="pm-button primary" id="oaUnIncludeBtn" type="button">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Include Selected
+        </button>
+        <button class="pm-button" id="oaUnExcludeBtn" type="button">
+            <i class="fa-solid fa-ban" aria-hidden="true"></i> Exclude Selected
+        </button>
+        <button class="pm-button" id="oaUnReleaseBtn" type="button">
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Release Exclusion
+        </button>
+        <span id="oaUnSelectedCount" style="color:var(--fg-subtle);">0 selected</span>
+    </div>
+    <div class="pm-message" id="oaUnMessage" style="display:none;"></div>
+
+    <div class="pm-table-wrap oa-pl-wrap" style="margin-top:12px;">
+        <table>
+            <thead id="oaUnHead"></thead>
+            <tbody id="oaUnBody">
+                <tr><td class="pm-empty">Select an organization.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<style>
+    .oa-un-detail h3 { font-size: 14px; margin: 16px 0 6px; color: var(--fg-strong); }
+    .oa-un-detail h3:first-of-type { margin-top: 4px; }
+    .oa-un-detail .pm-table-wrap { margin: 6px 0; }
+    .oa-un-facts .pm-field > div { white-space: pre-wrap; }
+    .oa-un-sub { color: var(--fg-subtle); }
+    .oa-un-indent { display: inline-block; }
+    .oa-un-inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 6px; }
+    .oa-un-inline .pm-field { min-width: 180px; }
+</style>
+
+<script src="~/js/Shared/page-actions-menu.js" asp-append-version="true"></script>
+<script>
+(function () {
+    'use strict';
+    const wf = window.__wfCommon;
+    if (!wf) { console.error('__wfCommon missing'); return; }
+
+    const API     = '/practice/api/org-assurance';
+    const FEATURE = 'screen.org-assurance-plans';
+    const U       = p => String(window.appBasePath || window.pmPathBase || '').replace(/\/+$/, '') + p;
+    const SOURCE  = { REGISTRY: 'Organization Registry', MANUAL: 'Manually Created', OTHER: 'Other' };
+    const KINDS   = [['LEGAL_ENTITY', 'Legal Entity'], ['UNIT', 'Organization Unit'], ['LOCATION', 'Location / Branch'],
+                     ['DEPARTMENT', 'Department'], ['FUNCTION', 'Business Function'], ['PROCESS', 'Business Process']];
+    const ACTION  = { DISCOVER: 'Included from the registry', CREATE: 'Created', UPDATE: 'Changed', SUBMIT: 'Submitted for validation',
+                      APPROVE: 'Approved', RETURN: 'Returned', REVIEW: 'Reviewed', DEACTIVATE: 'Deactivated', REACTIVATE: 'Reactivated',
+                      RETIRE: 'Retired', DISCARD: 'Discarded', LINK: 'Registry record linked', UNLINK: 'Registry record removed',
+                      RELATE: 'Relationship added', UNRELATE: 'Relationship ended', EXCLUDE: 'Registry record excluded',
+                      RELEASE: 'Exclusion released', MASTER: 'Configuration changed',
+                      // 580: Framework & Practice Mapping
+                      MAP_SUGGEST: 'Mapping suggestions refreshed', MAP_ADD: 'Mapping added', MAP_CONFIRM: 'Mapping confirmed',
+                      MAP_REJECT: 'Mapping rejected', MAP_DEACTIVATE: 'Mapping deactivated', MAP_REACTIVATE: 'Mapping reactivated' };
+
+    const state = {
+        orgId    : '',
+        view     : 'register',
+        rows     : {},        // register: subjectId -> row; discover: kind|id -> row
+        open     : null,      // the open subject id
+        edit     : null,      // { id|null, parentId, form: { ... }, sources: [...] }
+        detail   : null,      // { id, subject, sources, relationships, children, history }
+        masters  : [],
+        lookups  : { people: [], units: [], departments: [], subjects: [] },
+        records  : [],        // every registry record (forms)
+        selected : {}         // discover: kind|id -> true
+    };
+
+    function g(o, k) {
+        if (!o) return undefined;
+        if (o[k] !== undefined) return o[k];
+        const p = k.charAt(0).toUpperCase() + k.slice(1);
+        return o[p] !== undefined ? o[p] : undefined;
+    }
+    function rowsOf(b) { return Array.isArray(b) ? b : ((b && (b.data || b.Data)) || []); }
+    function esc(x) { return wf.escape(x == null ? '' : String(x)); }
+    function d10(x) { return x ? String(x).substring(0, 10) : ''; }
+    function dt16(x) { return x ? String(x).replace('T', ' ').substring(0, 16) : ''; }
+    function codeName(code, name) { return code ? code + ' - ' + (name || '') : (name || ''); }
+    function num(v) { return v === '' || v == null ? null : Number(v); }
+    async function getJson(path) {
+        const r = await fetch(U(path), { credentials: 'same-origin' });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    async function post(path, body) {
+        const r = await fetch(U(API + path), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        let j = null; try { j = await r.json(); } catch (_) { }
+        if (!r.ok) throw new Error((j && (j.error || j.Error)) || ('HTTP ' + r.status));
+        return j;
+    }
+    function trigger(id) {
+        return '<button type="button" class="pm-action-trigger" data-menu="' + esc(id) + '"'
+             + ' aria-haspopup="menu" aria-expanded="false" title="Actions">'
+             + '<i class="fas fa-ellipsis-v fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>'
+             + '<span class="visually-hidden">Actions</span></button>';
+    }
+    function toggleCell(id, open, title, text) {
+        return '<span class="task-tree-cell"><button type="button" class="task-tree-toggle' + (open ? ' is-open' : '') + '"'
+             + ' aria-expanded="' + (open ? 'true' : 'false') + '" title="' + esc(title) + '">'
+             + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span class="visually-hidden">' + esc(title) + '</span></button>'
+             + '<span>' + esc(text) + '</span></span>';
+    }
+    function table(head, rows, empty) {
+        return '<div class="pm-table-wrap"><table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('')
+             + '</tr></thead><tbody>' + (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" class="pm-empty">' + esc(empty) + '</td></tr>')
+             + '</tbody></table></div>';
+    }
+    function masters(group, activeOnly) {
+        return state.masters.filter(function (m) { return g(m, 'masterGroup') === group && (!activeOnly || g(m, 'isActive')); });
+    }
+    function statusName(code) {
+        const m = state.masters.find(function (x) { return g(x, 'masterGroup') === 'STATUS' && g(x, 'code') === code; });
+        // 580: the mapping statuses in the history
+        const map = { SUGGESTED: 'Suggested', CONFIRMED: 'Confirmed', REJECTED: 'Rejected' };
+        return m ? g(m, 'name') : (map[code] || code);
+    }
+    function options(list, selected, blank, label) {
+        return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '')
+             + list.map(function (x) {
+                   const id = String(g(x, 'masterId') != null ? g(x, 'masterId') : g(x, 'id'));
+                   return '<option value="' + esc(id) + '"' + (selected != null && String(selected) === id ? ' selected' : '') + '>'
+                        + esc(label ? label(x) : g(x, 'name')) + '</option>';
+               }).join('');
+    }
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+    let booted = false;
+    async function boot() {
+        if (booted) return;
+        booted = true;
+        const orgs = await wf.loadOrgs();
+        if (!orgs.length) {
+            wf.unavailable('oaUnUnavailable', 'oaUnUnavailableTitle', 'oaUnUnavailableBody', 'No accessible organizations', 'Contact your GRAC Admin.');
+            return;
+        }
+        wf.populateOrgSelect('oaUnFilterOrg', orgs);
+        state.orgId = document.getElementById('oaUnFilterOrg').value || '';
+        if (!await wf.checkFeature(FEATURE, state.orgId)) {
+            wf.unavailable('oaUnUnavailable', 'oaUnUnavailableTitle', 'oaUnUnavailableBody',
+                'The Audit Universe is not available for this organization.', 'Ask a GRAC Admin to enable ' + FEATURE + '.');
+            return;
+        }
+        document.getElementById('oaUnRoot').hidden = false;
+        wire();
+        await loadReference();
+        reload();
+    }
+
+    function wire() {
+        document.getElementById('oaUnFilterOrg').addEventListener('change', async function (e) {
+            state.orgId = e.target.value || ''; closeAll(); state.selected = {};
+            await loadReference(); reload();
+        });
+        document.getElementById('oaUnFilterView').addEventListener('change', function (e) {
+            state.view = e.target.value; closeAll(); state.selected = {};
+            showFilters(); reload();
+        });
+        ['oaUnFilterLayout', 'oaUnFilterCategory', 'oaUnFilterStatus', 'oaUnFilterSource', 'oaUnFilterCriticality', 'oaUnFilterOwner',
+         'oaUnFilterDepartment', 'oaUnFilterKind', 'oaUnFilterShow', 'oaUnFilterAction'].forEach(function (id) {
+            document.getElementById(id).addEventListener('change', function () { if (id === 'oaUnFilterShow' || id === 'oaUnFilterKind') state.selected = {}; reload(); });
+        });
+        document.getElementById('oaUnSearch').addEventListener('input', function () {
+            clearTimeout(window.__oaUnSearchTimer);
+            window.__oaUnSearchTimer = setTimeout(reload, 250);
+        });
+        document.getElementById('oaUnRefreshBtn').addEventListener('click', async function () { await loadReference(); reload(); });
+        document.getElementById('oaUnAddBtn').addEventListener('click', function () { openForm(null, null); });
+        document.getElementById('oaUnIncludeBtn').addEventListener('click', function () { applyDiscovery('INCLUDE'); });
+        document.getElementById('oaUnExcludeBtn').addEventListener('click', function () { applyDiscovery('EXCLUDE'); });
+        document.getElementById('oaUnReleaseBtn').addEventListener('click', function () { applyDiscovery('RELEASE'); });
+        const body = document.getElementById('oaUnBody');
+        body.addEventListener('click', onClick);
+        body.addEventListener('change', onChange);
+        document.getElementById('oaUnHead').addEventListener('change', function (e) {
+            if (e.target.id === 'oaUnSelectAll') selectAll(e.target.checked);
+        });
+    }
+    function showFilters() {
+        document.querySelectorAll('#oaUnRoot [data-for]').forEach(function (el) { el.hidden = el.getAttribute('data-for') !== state.view; });
+        document.getElementById('oaUnDiscoverBar').hidden = state.view !== 'discover';
+        document.getElementById('oaUnSearch').placeholder = state.view === 'discover' ? 'Search code / name...'
+            : state.view === 'history' ? 'Search subject / details / person...' : 'Search Universe ID / subject...';
+    }
+    function closeAll() { state.open = null; state.edit = null; state.detail = null; }
+
+    // Masters, people, units, departments, subjects and registry records --
+    // the filters and the subject form.
+    async function loadReference() {
+        if (!state.orgId) return;
+        const q = '?organizationId=' + encodeURIComponent(state.orgId);
+        try {
+            const res = await Promise.all([
+                getJson(API + '/universe-masters' + q),
+                getJson(API + '/universe-lookups' + q),
+                getJson(API + '/universe-discovery' + q + '&show=ALL')
+            ]);
+            state.masters = rowsOf(res[0]);
+            const lk = res[1] || {};
+            state.lookups = { people: g(lk, 'people') || [], units: g(lk, 'units') || [], departments: g(lk, 'departments') || [], subjects: g(lk, 'subjects') || [] };
+            state.records = rowsOf(res[2]);
+        } catch (err) { wf.setMessage('oaUnMessage', 'Failed to load the configuration: ' + (err.message || err), 'error'); }
+        const keep = function (id) { return document.getElementById(id).value; };
+        const cat = keep('oaUnFilterCategory'), st = keep('oaUnFilterStatus'), cr = keep('oaUnFilterCriticality'),
+              ow = keep('oaUnFilterOwner'), dp = keep('oaUnFilterDepartment'), ic = keep('oaUnIncludeCategory');
+        document.getElementById('oaUnFilterCategory').innerHTML = options(masters('CATEGORY'), cat, 'All categories');
+        document.getElementById('oaUnFilterStatus').innerHTML = '<option value="">All statuses</option>' + masters('STATUS').map(function (m) {
+            return '<option value="' + esc(g(m, 'code')) + '"' + (st === g(m, 'code') ? ' selected' : '') + '>' + esc(g(m, 'name')) + '</option>';
+        }).join('');
+        document.getElementById('oaUnFilterCriticality').innerHTML = options(masters('CRITICALITY'), cr, 'All criticality');
+        document.getElementById('oaUnFilterOwner').innerHTML = options(state.lookups.people, ow, 'All owners');
+        document.getElementById('oaUnFilterDepartment').innerHTML = options(state.lookups.departments, dp, 'All departments',
+            function (x) { return codeName(g(x, 'code'), g(x, 'name')); });
+        document.getElementById('oaUnIncludeCategory').innerHTML = options(masters('CATEGORY', true), ic, 'Category: by record type',
+            function (x) { return 'Category: ' + g(x, 'name'); });
+    }
+
+    async function reload() {
+        const head = document.getElementById('oaUnHead');
+        const body = document.getElementById('oaUnBody');
+        if (!state.orgId) { body.innerHTML = '<tr><td class="pm-empty">Select an organization.</td></tr>'; return; }
+        const search = document.getElementById('oaUnSearch').value.trim();
+        const qs = new URLSearchParams();
+        qs.set('organizationId', state.orgId);
+        if (search) qs.set('search', search);
+        if (state.view === 'discover') {
+            head.innerHTML = '<tr><th style="width:36px;"><input type="checkbox" id="oaUnSelectAll" title="Select all" /></th><th>Record Type</th><th>Code</th>'
+                           + '<th>Name</th><th>Type</th><th>Registry Status</th><th>Owner / Head</th><th>In Universe</th><th>Excluded</th></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="pm-empty">Loading...</td></tr>';
+            const kind = document.getElementById('oaUnFilterKind').value;
+            if (kind) qs.set('kind', kind);
+            qs.set('show', document.getElementById('oaUnFilterShow').value || 'NEW');
+            try { renderDiscover(rowsOf(await getJson(API + '/universe-discovery?' + qs.toString()))); }
+            catch (err) { body.innerHTML = '<tr><td colspan="9" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+            return;
+        }
+        if (state.view === 'history') {
+            head.innerHTML = '<tr><th>When</th><th>Subject / Record</th><th>Change</th><th>Status</th><th>Details</th><th>By</th></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="pm-empty">Loading...</td></tr>';
+            const action = document.getElementById('oaUnFilterAction').value;
+            if (action) qs.set('action', action);
+            try { renderHistory(rowsOf(await getJson(API + '/universe-history?' + qs.toString()))); }
+            catch (err) { body.innerHTML = '<tr><td colspan="6" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+            return;
+        }
+        head.innerHTML = '<tr><th>Universe ID</th><th>Subject</th><th>Category</th><th>Parent</th><th>Source</th><th>Subject Owner</th>'
+                       + '<th>Business Unit / Department</th><th>Business Criticality</th><th>Regulatory Significance</th><th>Status</th>'
+                       + '<th>Last Reviewed</th><th></th></tr>';
+        body.innerHTML = '<tr><td colspan="12" class="pm-empty">Loading...</td></tr>';
+        [['oaUnFilterCategory', 'categoryId'], ['oaUnFilterStatus', 'status'], ['oaUnFilterSource', 'source'],
+         ['oaUnFilterCriticality', 'criticalityId'], ['oaUnFilterOwner', 'ownerEmployeeId'], ['oaUnFilterDepartment', 'departmentId']]
+            .forEach(function (p) { const v = document.getElementById(p[0]).value; if (v) qs.set(p[1], v); });
+        try { renderRegister(rowsOf(await getJson(API + '/universe?' + qs.toString()))); }
+        catch (err) { body.innerHTML = '<tr><td colspan="12" class="pm-empty">Failed to load: ' + esc(err.message || err) + '</td></tr>'; }
+    }
+
+    // -----------------------------------------------------------------
+    // Register
+    // -----------------------------------------------------------------
+    function ordered(rows) {
+        if (document.getElementById('oaUnFilterLayout').value === 'flat') return rows.map(function (r) { return { row: r, depth: 0 }; });
+        const byId = {}, kids = {};
+        rows.forEach(function (r) { byId[String(g(r, 'universeSubjectId'))] = r; });
+        const roots = [];
+        rows.forEach(function (r) {
+            const p = g(r, 'parentSubjectId');
+            if (p != null && byId[String(p)]) (kids[String(p)] = kids[String(p)] || []).push(r);
+            else roots.push(r);
+        });
+        const out = [], seen = {};
+        (function walk(list, depth) {
+            list.forEach(function (r) {
+                const id = String(g(r, 'universeSubjectId'));
+                if (seen[id]) return;
+                seen[id] = true;
+                out.push({ row: r, depth: depth });
+                if (kids[id]) walk(kids[id], depth + 1);
+            });
+        })(roots, 0);
+        return out;
+    }
+    function renderRegister(rows) {
+        const body = document.getElementById('oaUnBody');
+        state.rows = {};
+        let html = '';
+        if (state.edit && state.edit.id == null)
+            html += '<tr class="oa-pl-items-row is-selected" data-child="new"><td colspan="12"><div class="oa-pl-items">' + formHtml() + '</div></td></tr>';
+        html += ordered(rows).map(function (o) {
+            const x = o.row;
+            const id = String(g(x, 'universeSubjectId'));
+            state.rows[id] = x;
+            const open = state.open === id;
+            const unitDept = [codeName(g(x, 'divisionCode'), g(x, 'divisionName')), codeName(g(x, 'departmentCode'), g(x, 'departmentName'))]
+                .filter(function (v) { return v; }).join(' / ');
+            return '<tr class="pm-row-clickable' + (open ? ' oa-pl-open is-selected' : '') + '" data-key="' + esc(id) + '">'
+                 + '<td>' + toggleCell(id, open, 'Show the subject', g(x, 'universeRef')) + '</td>'
+                 + '<td style="white-space:normal;"><span class="oa-un-indent" style="padding-left:' + (o.depth * 18) + 'px;">'
+                 + (o.depth ? '<span class="oa-un-sub">&#8627; </span>' : '') + esc(g(x, 'subjectName')) + '</span></td>'
+                 + '<td>' + esc(g(x, 'categoryName') || '--') + (g(x, 'subcategoryName') ? '<br /><span class="oa-un-sub">' + esc(g(x, 'subcategoryName')) + '</span>' : '') + '</td>'
+                 + '<td>' + esc(g(x, 'parentRef') || '--') + '</td>'
+                 + '<td>' + esc(SOURCE[g(x, 'subjectSource')] || g(x, 'subjectSource')) + '</td>'
+                 + '<td>' + esc(g(x, 'ownerName') || '--') + '</td>'
+                 + '<td style="white-space:normal;">' + esc(unitDept || '--') + '</td>'
+                 + '<td>' + esc(g(x, 'criticalityName') || '--') + '</td>'
+                 + '<td>' + esc(g(x, 'regSignificanceName') || '--') + '</td>'
+                 + '<td>' + wf.badge(g(x, 'statusName') || statusName(g(x, 'statusCode'))) + '</td>'
+                 + '<td>' + esc(d10(g(x, 'lastReviewedOn')) || '--') + '</td>'
+                 + '<td>' + trigger(id) + '</td></tr>';
+        }).join('');
+        body.innerHTML = html || '<tr><td colspan="12" class="pm-empty">No subjects yet. Use "Discover from Registry" to include organizational records, or "+ Add Subject".</td></tr>';
+        body.querySelectorAll('[data-menu]').forEach(function (btn) {
+            const id = btn.getAttribute('data-menu');
+            window.gracPageActions.attach(btn, function () { return subjectMenu(id); });
+        });
+        if (state.open && state.rows[state.open]) {
+            if (state.edit && String(state.edit.id) === state.open) renderFormRow(state.open);
+            else openDetail(state.open);
+        } else if (state.open) closeAll();
+    }
+
+    function subjectMenu(id) {
+        const x = state.rows[id] || {};
+        const st = g(x, 'statusCode');
+        const hia = !!g(x, 'isApprover');
+        const items = [{ icon: 'fa-eye', label: state.open === id && !state.edit ? 'Hide' : 'Open', run: function () { toggle(id); } }];
+        if (st === 'DISCOVERED' || st === 'ACTIVE' || st === 'INACTIVE') items.push({ icon: 'fa-pen', label: 'Edit', run: function () { openForm(id, null); } });
+        if (st !== 'RETIRED') items.push({ icon: 'fa-sitemap', label: 'Add Sub-subject', run: function () { openForm(null, id); } });
+        if (st === 'DISCOVERED') {
+            items.push({ icon: 'fa-paper-plane', label: 'Submit for Validation', run: function () { act(id, 'SUBMIT'); } });
+            items.push({ icon: 'fa-trash-can', label: 'Discard', run: function () { act(id, 'DISCARD'); } });
+        }
+        if (st === 'UNDER_VALIDATION' && hia) {
+            if (!g(x, 'isMySubmission')) items.push({ icon: 'fa-check', label: 'Approve', run: function () { act(id, 'APPROVE'); } });
+            items.push({ icon: 'fa-rotate-left', label: 'Return', run: function () { act(id, 'RETURN'); } });
+        }
+        if (st === 'ACTIVE' && hia) {
+            items.push({ icon: 'fa-calendar-check', label: 'Mark Reviewed', run: function () { act(id, 'REVIEW'); } });
+            items.push({ icon: 'fa-circle-pause', label: 'Deactivate', run: function () { act(id, 'DEACTIVATE'); } });
+        }
+        if (st === 'INACTIVE') items.push({ icon: 'fa-circle-play', label: 'Reactivate', run: function () { act(id, 'REACTIVATE'); } });
+        if ((st === 'ACTIVE' || st === 'INACTIVE') && hia) items.push({ icon: 'fa-box-archive', label: 'Retire', run: function () { act(id, 'RETIRE'); } });
+        return items;
+    }
+
+    const PROMPT = {
+        SUBMIT:     [null, 'Submit the subject for validation by the Head of Internal Audit? Comments (optional):'],
+        APPROVE:    [false, 'Approve the subject into the Audit Universe? Comments (optional):'],
+        RETURN:     [true, 'Why is the subject returned?'],
+        REVIEW:     [false, 'Mark the subject reviewed today? Comments (optional):'],
+        DEACTIVATE: [true, 'Why is the subject taken out of the Audit Universe?'],
+        REACTIVATE: [true, 'Why is the subject brought back? It goes to validation again.'],
+        RETIRE:     [true, 'Why is the subject retired? A retired subject is kept for history only.'],
+        DISCARD:    [true, 'Why is the discovered subject discarded? It is kept as Retired.']
+    };
+    async function act(id, action) {
+        const x = state.rows[id] || {};
+        const p = PROMPT[action];
+        const title = ACTION[action] || action;
+        const comment = p[0] ? await window.gracUi.promptRequired(p[1], { title: title, confirmText: 'OK', multiline: true })
+                             : await window.gracUi.prompt(p[1], { title: title, confirmText: 'OK', multiline: true });
+        if (comment == null) return;
+        try {
+            await post('/universe/' + encodeURIComponent(id) + '/action',
+                       { organizationId: Number(state.orgId), action: action, comment: comment || null, versionNo: g(x, 'versionNo'), actor: null });
+            wf.setMessage('oaUnMessage', g(x, 'universeRef') + ': ' + title.toLowerCase() + '.', 'ok');
+            state.open = id; state.edit = null;
+            await loadReference();
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    function onClick(e) {
+        const t = e.target;
+        if (t.closest('.pm-action-trigger, .pm-action-menu')) return;
+        const a = t.closest('[data-do]');
+        if (a) { e.preventDefault(); doLink(a.getAttribute('data-do'), a); return; }
+        if (t.closest('.oa-pl-items, input, select, textarea, a, button')) return;
+        const tr = t.closest('tr[data-key]');
+        if (!tr) return;
+        if (state.view === 'register') toggle(tr.getAttribute('data-key'));
+        else if (state.view === 'discover') {
+            const cb = tr.querySelector('input[data-pick]');
+            if (cb) { cb.checked = !cb.checked; pick(cb); }
+        }
+    }
+    function onChange(e) {
+        const t = e.target;
+        if (t.matches('input[data-pick]')) { pick(t); return; }
+        if (t.id === 'oaUnFCategory') {
+            const sub = document.getElementById('oaUnFSubcategory');
+            if (sub) sub.innerHTML = subcategoryOptions(t.value, null);
+        }
+        if (t.id === 'oaUnFSrcKind') {
+            const rec = document.getElementById('oaUnFSrcRecord');
+            if (rec) rec.innerHTML = recordOptions(t.value);
+        }
+    }
+    function doLink(what, el) {
+        if (what === 'save') saveForm();
+        else if (what === 'cancel') { const id = state.edit && state.edit.id; state.edit = null; if (id == null) { state.open = null; reload(); } else openDetail(String(id)); }
+        else if (what === 'edit') openForm(state.open, null);
+        else if (what === 'src-add') addSource();
+        else if (what === 'src-remove') { readForm(); state.edit.sources.splice(Number(el.getAttribute('data-i')), 1); redrawForm(); }
+        else if (what === 'src-primary') { readForm(); state.edit.sources.forEach(function (s, i) { s.isPrimary = i === Number(el.getAttribute('data-i')); }); redrawForm(); }
+        else if (what === 'rel-add') addRelationship();
+        else if (what === 'rel-end') endRelationship(el.getAttribute('data-id'));
+        else if (what === 'goto') goTo(el.getAttribute('data-id'));
+    }
+
+    function rowEl(id) { return document.querySelector('#oaUnBody tr[data-key="' + id + '"]'); }
+    function setOpen(id, open) {
+        const tr = rowEl(id);
+        if (!tr) return;
+        tr.classList.toggle('oa-pl-open', open); tr.classList.toggle('is-selected', open);
+        const b = tr.querySelector('.task-tree-toggle');
+        if (b) { b.classList.toggle('is-open', open); b.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+    }
+    function host(id) {
+        document.querySelectorAll('#oaUnBody tr.oa-pl-items-row').forEach(function (r) { if (r.getAttribute('data-child') !== id) r.remove(); });
+        let child = document.querySelector('#oaUnBody tr.oa-pl-items-row[data-child="' + id + '"]');
+        if (!child) {
+            const parent = rowEl(id);
+            if (!parent) return null;
+            child = document.createElement('tr');
+            child.className = 'oa-pl-items-row is-selected';
+            child.setAttribute('data-child', id);
+            child.innerHTML = '<td colspan="12"><div class="oa-pl-items"></div></td>';
+            parent.insertAdjacentElement('afterend', child);
+        }
+        return child.querySelector('.oa-pl-items');
+    }
+    function toggle(id) {
+        if (state.open === id && !state.edit) {
+            const child = document.querySelector('#oaUnBody tr.oa-pl-items-row');
+            if (child) child.remove();
+            setOpen(id, false); state.open = null; state.detail = null;
+            return;
+        }
+        state.edit = null;
+        openDetail(id);
+    }
+    async function goTo(id) {
+        if (!state.rows[id]) {
+            document.getElementById('oaUnFilterCategory').value = ''; document.getElementById('oaUnFilterStatus').value = '';
+            document.getElementById('oaUnFilterSource').value = ''; document.getElementById('oaUnFilterCriticality').value = '';
+            document.getElementById('oaUnFilterOwner').value = ''; document.getElementById('oaUnFilterDepartment').value = '';
+            document.getElementById('oaUnSearch').value = '';
+            state.open = id; state.edit = null;
+            await reload();
+        } else { state.edit = null; openDetail(id); }
+        const tr = rowEl(id);
+        if (tr) tr.scrollIntoView({ block: 'center' });
+    }
+
+    // One subject, read view.
+    async function openDetail(id) {
+        if (state.open && state.open !== id) setOpen(state.open, false);
+        state.open = id;
+        setOpen(id, true);
+        const h = host(id);
+        if (!h) return;
+        h.innerHTML = '<p class="oa-pl-plan-facts">Loading the subject...</p>';
+        try {
+            const j = await getJson(API + '/universe/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId));
+            state.detail = { id: id, subject: g(j, 'subject') || {}, sources: g(j, 'sources') || [], relationships: g(j, 'relationships') || [],
+                             children: g(j, 'children') || [], history: g(j, 'history') || [] };
+            h.innerHTML = detailHtml();
+        } catch (err) { h.innerHTML = '<p class="oa-pl-plan-facts">Failed to load: ' + esc(err.message || err) + '</p>'; }
+    }
+    function masterName(id) {
+        const m = state.masters.find(function (x) { return String(g(x, 'masterId')) === String(id); });
+        return m ? g(m, 'name') : '';
+    }
+    function lookupName(list, id, withCode) {
+        const x = (state.lookups[list] || []).find(function (r) { return String(g(r, 'id')) === String(id); });
+        return x ? (withCode ? codeName(g(x, 'code'), g(x, 'name')) : g(x, 'name')) : '';
+    }
+    function fact(label, value) {
+        return '<div class="pm-field"><span>' + esc(label) + '</span><div>' + (value ? esc(value) : '--') + '</div></div>';
+    }
+    function changesHtml(json) {
+        if (!json) return '';
+        let list = [];
+        try { list = JSON.parse(json) || []; } catch (_) { return ''; }
+        if (!Array.isArray(list)) return '';
+        return list.map(function (c) {
+            return '<div>' + esc(g(c, 'field')) + ': ' + esc(g(c, 'before') == null ? '--' : g(c, 'before')) + ' &rarr; '
+                 + esc(g(c, 'after') == null ? '--' : g(c, 'after')) + '</div>';
+        }).join('');
+    }
+    function detailHtml() {
+        const d = state.detail, s = d.subject;
+        const st = g(s, 'statusCode');
+        const parent = state.lookups.subjects.find(function (x) { return String(g(x, 'id')) === String(g(s, 'parentSubjectId')); });
+        let html = '<div class="oa-un-detail"><h3>' + esc(g(s, 'universeRef') + ' - ' + g(s, 'subjectName')) + '</h3>'
+            + '<div class="oa-pl-plan-grid oa-un-facts">'
+            + fact('Status', statusName(st)) + fact('Subject Source', SOURCE[g(s, 'subjectSource')] || g(s, 'subjectSource'))
+            + fact('Subject Category', masterName(g(s, 'categoryId'))) + fact('Subcategory', masterName(g(s, 'subcategoryId')))
+            + fact('Audit Classification', masterName(g(s, 'classificationId'))) + fact('Regulatory Significance', masterName(g(s, 'regSignificanceId')))
+            + fact('Business Criticality', masterName(g(s, 'criticalityId'))) + fact('Parent Subject', parent ? codeName(g(parent, 'code'), g(parent, 'name')) : '')
+            + fact('Subject Owner', lookupName('people', g(s, 'ownerEmployeeId'))) + fact('Business Unit', lookupName('units', g(s, 'divisionId'), true))
+            + fact('Department', lookupName('departments', g(s, 'departmentId'), true)) + fact('Effective From', d10(g(s, 'effectiveFrom')))
+            + fact('Last Reviewed On', d10(g(s, 'lastReviewedOn'))) + fact('Approved By', g(s, 'approvedBy') ? g(s, 'approvedBy') + ' (' + d10(g(s, 'approvedDt')) + ')' : '')
+            + fact('Submitted By', g(s, 'submittedBy') ? g(s, 'submittedBy') + ' (' + d10(g(s, 'submittedDt')) + ')' : '')
+            + fact('Created', (g(s, 'enteredBy') || '') + ' ' + d10(g(s, 'enteredDt')))
+            + '<div class="pm-field oa-pl-span-all"><span>Description</span><div>' + (g(s, 'description') ? esc(g(s, 'description')) : '--') + '</div></div>'
+            + (g(s, 'remarks') ? '<div class="pm-field oa-pl-span-all"><span>Remarks</span><div>' + esc(g(s, 'remarks')) + '</div></div>' : '')
+            + '</div>';
+
+        html += '<h3>Organization Registry Records</h3>'
+            + table(['Record Type', 'Code', 'Name', 'Type', 'Registry Status', 'Owner / Head', 'Primary'], d.sources.map(function (r) {
+                  return '<tr><td>' + esc(g(r, 'kindLabel')) + '</td><td>' + esc(g(r, 'recordCode') || '--') + '</td>'
+                       + '<td>' + esc(g(r, 'isMissing') ? 'Record no longer in the registry' : g(r, 'recordName')) + '</td>'
+                       + '<td>' + esc(g(r, 'typeLabel') || '--') + '</td><td>' + esc(g(r, 'recordStatus') || '--') + '</td>'
+                       + '<td>' + esc(g(r, 'recordOwnerName') || '--') + '</td><td>' + esc(g(r, 'isPrimary') ? 'Yes' : '') + '</td></tr>';
+              }), 'No registry record is linked (a manually created subject).');
+
+        html += '<h3>Relationships</h3>'
+            + table(['Relationship', 'Subject', 'Status', 'Remarks', 'Added', ''], d.relationships.map(function (r) {
+                  const out = g(r, 'direction') === 'OUT';
+                  const phrase = out ? 'This subject ' + String(g(r, 'relationshipName')).toLowerCase() : String(g(r, 'relationshipName')) + ' this subject';
+                  return '<tr><td>' + esc(phrase) + '</td>'
+                       + '<td><a href="#" data-do="goto" data-id="' + esc(g(r, 'otherSubjectId')) + '">' + esc(codeName(g(r, 'otherRef'), g(r, 'otherName'))) + '</a></td>'
+                       + '<td>' + esc(statusName(g(r, 'otherStatusCode'))) + '</td><td style="white-space:normal;">' + esc(g(r, 'remarks') || '') + '</td>'
+                       + '<td>' + esc((g(r, 'enteredBy') || '') + ' ' + d10(g(r, 'enteredDt'))) + '</td>'
+                       + '<td>' + (st !== 'RETIRED' && g(r, 'otherStatusCode') !== 'RETIRED' ? '<a href="#" data-do="rel-end" data-id="' + esc(g(r, 'universeRelationshipId')) + '">End</a>' : '') + '</td></tr>';
+              }), 'No relationships.');
+        if (st !== 'RETIRED') {
+            const others = state.lookups.subjects.filter(function (x) { return String(g(x, 'id')) !== String(d.id) && g(x, 'statusCode') !== 'RETIRED'; });
+            html += '<div class="oa-un-inline">'
+                + '<label class="pm-field"><span>This subject</span><select class="pm-input" id="oaUnRelType">' + options(masters('RELATIONSHIP', true), null, 'Choose a relationship...') + '</select></label>'
+                + '<label class="pm-field"><span>Subject</span><select class="pm-input" id="oaUnRelOther">' + options(others, null, 'Choose a subject...', function (x) { return codeName(g(x, 'code'), g(x, 'name')); }) + '</select></label>'
+                + '<label class="pm-field"><span>Remarks</span><input class="pm-input" id="oaUnRelRemarks" maxlength="1000" /></label>'
+                + '<a href="#" class="oa-pl-add" data-do="rel-add" style="margin-bottom:8px;">Add Relationship</a></div>';
+        }
+
+        html += '<h3>Sub-subjects</h3>'
+            + table(['Universe ID', 'Subject', 'Status'], d.children.map(function (c) {
+                  return '<tr><td><a href="#" data-do="goto" data-id="' + esc(g(c, 'universeSubjectId')) + '">' + esc(g(c, 'universeRef')) + '</a></td>'
+                       + '<td>' + esc(g(c, 'subjectName')) + '</td><td>' + esc(statusName(g(c, 'statusCode'))) + '</td></tr>';
+              }), 'No sub-subjects.');
+
+        html += '<h3>History</h3>'
+            + table(['When', 'Change', 'Status', 'Details', 'By'], d.history.map(function (h) {
+                  return '<tr><td>' + esc(dt16(g(h, 'actionDt'))) + '</td><td>' + esc(ACTION[g(h, 'actionCode')] || g(h, 'actionCode')) + '</td>'
+                       + '<td>' + esc(statusLine(h)) + '</td>'
+                       + '<td style="white-space:normal;">' + esc(g(h, 'comment') || '') + changesHtml(g(h, 'changesJson')) + '</td>'
+                       + '<td>' + esc(g(h, 'actorName')) + '</td></tr>';
+              }), 'No history.');
+        html += '</div><div class="oa-pl-items-foot">'
+              + (st === 'DISCOVERED' || st === 'ACTIVE' || st === 'INACTIVE' ? '<a href="#" class="oa-pl-add" data-do="edit">Edit Subject</a>' : '')
+              + '</div>';
+        return html;
+    }
+    function statusLine(h) {
+        const f = g(h, 'fromStatus'), t = g(h, 'toStatus');
+        if (!f && !t) return '';
+        if (f && t && f !== t) return statusName(f) + ' -> ' + statusName(t);
+        return statusName(t || f);
+    }
+
+    async function addRelationship() {
+        const type = document.getElementById('oaUnRelType').value, other = document.getElementById('oaUnRelOther').value;
+        if (!type || !other) { await window.gracUi.alert('Choose the relationship and the subject.', { type: 'error' }); return; }
+        try {
+            await post('/universe-relationships', { organizationId: Number(state.orgId), universeRelationshipId: null,
+                fromSubjectId: Number(state.detail.id), toSubjectId: Number(other), relationshipTypeId: Number(type),
+                remarks: document.getElementById('oaUnRelRemarks').value.trim() || null, isActive: true, actor: null });
+            wf.setMessage('oaUnMessage', 'Relationship added.', 'ok');
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    async function endRelationship(relId) {
+        if (!await window.gracUi.confirm('End this relationship? It stays in the history.', { type: 'warning', title: 'End Relationship', confirmText: 'End' })) return;
+        try {
+            await post('/universe-relationships', { organizationId: Number(state.orgId), universeRelationshipId: Number(relId), isActive: false, actor: null });
+            wf.setMessage('oaUnMessage', 'Relationship ended.', 'ok');
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // -----------------------------------------------------------------
+    // The subject form (add / edit) in a child row
+    // -----------------------------------------------------------------
+    async function openForm(id, parentId) {
+        try {
+            if (id == null) {
+                state.edit = { id: null, version: null, source: 'MANUAL',
+                               form: { parentSubjectId: parentId != null ? String(parentId) : '' }, sources: [] };
+                state.open = null;
+                await reload();
+                return;
+            }
+            const j = await getJson(API + '/universe/' + encodeURIComponent(id) + '?organizationId=' + encodeURIComponent(state.orgId));
+            const s = g(j, 'subject') || {};
+            state.edit = { id: String(id), version: g(s, 'versionNo'), source: g(s, 'subjectSource'), status: g(s, 'statusCode'),
+                           form: {
+                               subjectName: g(s, 'subjectName') || '', description: g(s, 'description') || '',
+                               categoryId: g(s, 'categoryId'), subcategoryId: g(s, 'subcategoryId'), classificationId: g(s, 'classificationId'),
+                               regSignificanceId: g(s, 'regSignificanceId'), criticalityId: g(s, 'criticalityId'),
+                               parentSubjectId: g(s, 'parentSubjectId'), ownerEmployeeId: g(s, 'ownerEmployeeId'),
+                               divisionId: g(s, 'divisionId'), departmentId: g(s, 'departmentId'),
+                               effectiveFrom: d10(g(s, 'effectiveFrom')), remarks: g(s, 'remarks') || ''
+                           },
+                           sources: (g(j, 'sources') || []).map(function (r) {
+                               return { kind: g(r, 'sourceKind'), id: g(r, 'recordId'), isPrimary: !!g(r, 'isPrimary'),
+                                        label: g(r, 'kindLabel') + ': ' + codeName(g(r, 'recordCode'), g(r, 'recordName')) };
+                           }) };
+            if (state.open && state.open !== String(id)) setOpen(state.open, false);
+            state.open = String(id);
+            renderFormRow(String(id));
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+    function renderFormRow(id) {
+        setOpen(id, true);
+        const h = host(id);
+        if (h) h.innerHTML = formHtml();
+    }
+    function redrawForm() {
+        const el = document.querySelector('#oaUnBody .oa-un-form');
+        if (el) el.outerHTML = formHtml();
+    }
+    function subcategoryOptions(categoryId, selected) {
+        const list = masters('SUBCATEGORY').filter(function (m) {
+            return String(g(m, 'parentMasterId')) === String(categoryId) && (g(m, 'isActive') || String(g(m, 'masterId')) === String(selected));
+        });
+        return options(list, selected, list.length ? '(none)' : 'No subcategories for this category');
+    }
+    function activeOr(group, selected) {
+        return masters(group).filter(function (m) { return g(m, 'isActive') || String(g(m, 'masterId')) === String(selected); });
+    }
+    function recordOptions(kind) {
+        const list = state.records.filter(function (r) { return g(r, 'sourceKind') === kind; });
+        return '<option value="">' + esc(list.length ? 'Choose a record...' : 'No records of this type') + '</option>'
+             + list.map(function (r) {
+                   return '<option value="' + esc(g(r, 'recordId')) + '">' + esc(codeName(g(r, 'recordCode'), g(r, 'recordName'))
+                        + (g(r, 'recordStatus') && g(r, 'recordStatus') !== 'Active' ? ' (' + g(r, 'recordStatus') + ')' : '')) + '</option>';
+               }).join('');
+    }
+    function formHtml() {
+        const e = state.edit, f = e.form;
+        const self = e.id;
+        const parents = state.lookups.subjects.filter(function (x) {
+            return String(g(x, 'id')) !== String(self) && (g(x, 'statusCode') !== 'RETIRED' || String(g(x, 'id')) === String(f.parentSubjectId));
+        });
+        const sel = function (id, label, list, value, blank, lab, required) {
+            return '<label class="pm-field"><span>' + esc(label) + (required ? ' <span class="required">*</span>' : '') + '</span>'
+                 + '<select class="pm-input" id="' + id + '">' + options(list, value, blank, lab) + '</select></label>';
+        };
+        const cn = function (x) { return codeName(g(x, 'code'), g(x, 'name')); };
+        return '<div class="oa-un-form"><p class="oa-pl-plan-facts"><strong>' + esc(e.id == null ? 'New Audit Universe Subject' : 'Edit ' + (g(state.rows[e.id], 'universeRef') || '')) + '</strong>'
+             + (e.id == null ? ' -- it starts as Discovered; submit it for validation when ready.'
+                             : e.status === 'ACTIVE' ? ' -- the subject is Active; every change is recorded in its history.' : '') + '</p>'
+             + '<div class="oa-pl-plan-grid">'
+             + '<label class="pm-field oa-pl-span-2"><span>Subject Name <span class="required">*</span></span><input class="pm-input" id="oaUnFName" maxlength="300" value="' + esc(f.subjectName || '') + '" /></label>'
+             + sel('oaUnFCategory', 'Subject Category', activeOr('CATEGORY', f.categoryId), f.categoryId, 'Choose...', null, true)
+             + '<label class="pm-field"><span>Subcategory</span><select class="pm-input" id="oaUnFSubcategory">' + subcategoryOptions(f.categoryId, f.subcategoryId) + '</select></label>'
+             + sel('oaUnFClass', 'Audit Classification', activeOr('CLASSIFICATION', f.classificationId), f.classificationId, '(none)')
+             + sel('oaUnFReg', 'Regulatory Significance', activeOr('REG_SIGNIFICANCE', f.regSignificanceId), f.regSignificanceId, '(none)')
+             + sel('oaUnFCrit', 'Business Criticality', activeOr('CRITICALITY', f.criticalityId), f.criticalityId, '(none)')
+             + sel('oaUnFParent', 'Parent Subject', parents, f.parentSubjectId, '(none -- top level)', cn)
+             + sel('oaUnFOwner', 'Subject Owner', state.lookups.people, f.ownerEmployeeId, 'Choose...', null, true)
+             + sel('oaUnFUnit', 'Business Unit', state.lookups.units, f.divisionId, '(none)', cn)
+             + sel('oaUnFDept', 'Department', state.lookups.departments, f.departmentId, '(none)', cn)
+             + '<label class="pm-field"><span>Effective From</span><input class="pm-input" type="date" id="oaUnFFrom" value="' + esc(f.effectiveFrom || '') + '" /></label>'
+             + (e.id == null
+                 ? '<label class="pm-field"><span>Subject Source</span><select class="pm-input" id="oaUnFSource"><option value="MANUAL"' + (e.source !== 'OTHER' ? ' selected' : '') + '>Manually Created</option>'
+                   + '<option value="OTHER"' + (e.source === 'OTHER' ? ' selected' : '') + '>Other</option></select></label>'
+                 : '<div class="pm-field"><span>Subject Source</span><div>' + esc(SOURCE[e.source] || e.source) + '</div></div>')
+             + '<label class="pm-field oa-pl-span-all"><span>Subject Description</span><textarea class="pm-input" id="oaUnFDesc" rows="3">' + esc(f.description || '') + '</textarea></label>'
+             + '<label class="pm-field oa-pl-span-all"><span>Remarks</span><textarea class="pm-input" id="oaUnFRemarks" rows="2" maxlength="2000">' + esc(f.remarks || '') + '</textarea></label>'
+             + '</div>'
+             + '<p class="oa-pl-plan-facts" style="margin-top:10px;"><strong>Organization Registry Records</strong> -- the organizational records this subject covers (one subject may span several).</p>'
+             + table(['Record', 'Primary', ''], e.sources.map(function (s, i) {
+                   return '<tr><td>' + esc(s.label) + '</td><td>' + (s.isPrimary ? 'Yes' : '<a href="#" data-do="src-primary" data-i="' + i + '">Make primary</a>') + '</td>'
+                        + '<td><a href="#" data-do="src-remove" data-i="' + i + '">Remove</a></td></tr>';
+               }), 'No registry record linked.')
+             + '<div class="oa-un-inline">'
+             + '<label class="pm-field"><span>Record Type</span><select class="pm-input" id="oaUnFSrcKind">' + KINDS.map(function (k, i) {
+                   return '<option value="' + k[0] + '"' + (i === 0 ? ' selected' : '') + '>' + esc(k[1]) + '</option>';
+               }).join('') + '</select></label>'
+             + '<label class="pm-field" style="min-width:280px;"><span>Record</span><select class="pm-input" id="oaUnFSrcRecord">' + recordOptions(KINDS[0][0]) + '</select></label>'
+             + '<a href="#" class="oa-pl-add" data-do="src-add" style="margin-bottom:8px;">Link Record</a></div>'
+             + '<div class="oa-pl-items-foot"><a href="#" class="oa-pl-add" data-do="save">Save Subject</a>'
+             + '<a href="#" class="oa-pl-more" data-do="cancel">Cancel</a></div></div>';
+    }
+    function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+    function readForm() {
+        const f = state.edit.form;
+        f.subjectName = val('oaUnFName'); f.categoryId = val('oaUnFCategory'); f.subcategoryId = val('oaUnFSubcategory');
+        f.classificationId = val('oaUnFClass'); f.regSignificanceId = val('oaUnFReg'); f.criticalityId = val('oaUnFCrit');
+        f.parentSubjectId = val('oaUnFParent'); f.ownerEmployeeId = val('oaUnFOwner'); f.divisionId = val('oaUnFUnit');
+        f.departmentId = val('oaUnFDept'); f.effectiveFrom = val('oaUnFFrom'); f.description = val('oaUnFDesc'); f.remarks = val('oaUnFRemarks');
+        if (state.edit.id == null) state.edit.source = val('oaUnFSource') || 'MANUAL';
+    }
+    async function addSource() {
+        const kind = val('oaUnFSrcKind'), id = val('oaUnFSrcRecord');
+        if (!kind || !id) { await window.gracUi.alert('Choose the record to link.', { type: 'error' }); return; }
+        readForm();
+        if (state.edit.sources.some(function (s) { return s.kind === kind && String(s.id) === String(id); })) return;
+        const r = state.records.find(function (x) { return g(x, 'sourceKind') === kind && String(g(x, 'recordId')) === String(id); }) || {};
+        state.edit.sources.push({ kind: kind, id: Number(id), isPrimary: !state.edit.sources.length,
+                                  label: (g(r, 'kindLabel') || kind) + ': ' + codeName(g(r, 'recordCode'), g(r, 'recordName')) });
+        redrawForm();
+    }
+    async function saveForm() {
+        readForm();
+        const e = state.edit, f = e.form;
+        if (!f.subjectName.trim()) { await window.gracUi.alert('Give the subject a name.', { type: 'error' }); return; }
+        if (!f.categoryId) { await window.gracUi.alert('Choose the Subject Category.', { type: 'error' }); return; }
+        try {
+            const res = await post('/universe', {
+                organizationId: Number(state.orgId), universeSubjectId: e.id != null ? Number(e.id) : null, versionNo: e.version,
+                subjectName: f.subjectName.trim(), description: f.description.trim() || null,
+                categoryId: num(f.categoryId), subcategoryId: num(f.subcategoryId), classificationId: num(f.classificationId),
+                regSignificanceId: num(f.regSignificanceId), criticalityId: num(f.criticalityId), parentSubjectId: num(f.parentSubjectId),
+                subjectSource: e.id == null ? e.source : null, ownerEmployeeId: num(f.ownerEmployeeId), divisionId: num(f.divisionId),
+                departmentId: num(f.departmentId), effectiveFrom: f.effectiveFrom || null, remarks: f.remarks.trim() || null,
+                sources: e.sources.map(function (s) { return { kind: s.kind, id: Number(s.id), isPrimary: !!s.isPrimary }; }), actor: null });
+            const id = g(res, 'universeSubjectId');
+            state.edit = null;
+            state.open = id != null ? String(id) : null;
+            wf.setMessage('oaUnMessage', 'Subject saved.', 'ok');
+            await loadReference();
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // -----------------------------------------------------------------
+    // Discover from the Organization Registry
+    // -----------------------------------------------------------------
+    function key(x) { return g(x, 'sourceKind') + '|' + g(x, 'recordId'); }
+    function renderDiscover(rows) {
+        const body = document.getElementById('oaUnBody');
+        state.rows = {};
+        body.innerHTML = rows.length ? rows.map(function (x) {
+            const k = key(x);
+            state.rows[k] = x;
+            return '<tr class="pm-row-clickable" data-key="' + esc(k) + '">'
+                 + '<td><input type="checkbox" data-pick="' + esc(k) + '"' + (state.selected[k] ? ' checked' : '') + ' /></td>'
+                 + '<td>' + esc(g(x, 'kindLabel')) + '</td><td>' + esc(g(x, 'recordCode') || '--') + '</td>'
+                 + '<td style="white-space:normal;">' + esc(g(x, 'recordName')) + '</td><td>' + esc(g(x, 'typeLabel') || '--') + '</td>'
+                 + '<td>' + esc(g(x, 'recordStatus') || '--') + '</td><td>' + esc(g(x, 'ownerName') || '--') + '</td>'
+                 + '<td>' + esc(g(x, 'subjectRefs') || '--') + '</td>'
+                 + '<td style="white-space:normal;">' + (g(x, 'isExcluded') ? esc(g(x, 'exclusionReason')) + '<br /><span class="oa-un-sub">'
+                       + esc((g(x, 'excludedBy') || '') + ' ' + d10(g(x, 'excludedDt'))) + '</span>' : '--') + '</td></tr>';
+        }).join('') : '<tr><td colspan="9" class="pm-empty">No registry records match.</td></tr>';
+        Object.keys(state.selected).forEach(function (k) { if (!state.rows[k]) delete state.selected[k]; });
+        countSelected();
+    }
+    function pick(cb) {
+        const k = cb.getAttribute('data-pick');
+        if (cb.checked) state.selected[k] = true; else delete state.selected[k];
+        countSelected();
+    }
+    function selectAll(on) {
+        document.querySelectorAll('#oaUnBody input[data-pick]').forEach(function (cb) { cb.checked = on; pick(cb); });
+    }
+    function countSelected() {
+        document.getElementById('oaUnSelectedCount').textContent = Object.keys(state.selected).length + ' selected';
+    }
+    async function applyDiscovery(action) {
+        const keys = Object.keys(state.selected);
+        if (!keys.length) { await window.gracUi.alert('Tick the records first.', { type: 'error' }); return; }
+        let reason = null;
+        if (action === 'EXCLUDE') {
+            reason = await window.gracUi.promptRequired('Why are these ' + keys.length + ' record(s) not independently auditable?',
+                { title: 'Exclude from the Audit Universe', confirmText: 'Exclude', multiline: true });
+            if (reason == null) return;
+        } else if (action === 'RELEASE') {
+            reason = await window.gracUi.prompt('Lift the exclusion of ' + keys.length + ' record(s)? Comments (optional):',
+                { title: 'Release Exclusion', confirmText: 'Release', multiline: true });
+            if (reason == null) return;
+        } else if (!await window.gracUi.confirm('Include ' + keys.length + ' record(s) in the Audit Universe as Discovered subjects? Records already in the Universe or excluded are skipped.',
+                     { type: 'confirm', title: 'Include in the Audit Universe', confirmText: 'Include' })) return;
+        const cat = document.getElementById('oaUnIncludeCategory').value;
+        try {
+            const res = await post('/universe-discovery', {
+                organizationId: Number(state.orgId), action: action,
+                records: keys.map(function (k) { const p = k.split('|'); return { kind: p[0], id: Number(p[1]) }; }),
+                reason: reason || null, categoryId: action === 'INCLUDE' && cat ? Number(cat) : null, actor: null });
+            const n = g(res, 'appliedCount') || 0;
+            wf.setMessage('oaUnMessage', action === 'INCLUDE' ? n + ' subject(s) added to the Universe as Discovered.'
+                : action === 'EXCLUDE' ? n + ' record(s) excluded.' : n + ' exclusion(s) released.', 'ok');
+            state.selected = {};
+            await loadReference();
+            await reload();
+        } catch (err) { await window.gracUi.alert(err.message || String(err), { type: 'error' }); }
+    }
+
+    // -----------------------------------------------------------------
+    // Universe History
+    // -----------------------------------------------------------------
+    function renderHistory(rows) {
+        const body = document.getElementById('oaUnBody');
+        state.rows = {};
+        body.innerHTML = rows.length ? rows.map(function (h) {
+            const subj = g(h, 'universeRef') ? codeName(g(h, 'universeRef'), g(h, 'subjectName')) : (g(h, 'kindLabel') || '--');
+            return '<tr><td>' + esc(dt16(g(h, 'actionDt'))) + '</td><td style="white-space:normal;">' + esc(subj) + '</td>'
+                 + '<td>' + esc(ACTION[g(h, 'actionCode')] || g(h, 'actionCode')) + '</td><td>' + esc(statusLine(h)) + '</td>'
+                 + '<td style="white-space:normal;">' + esc(g(h, 'comment') || '') + changesHtml(g(h, 'changesJson')) + '</td>'
+                 + '<td>' + esc(g(h, 'actorName')) + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="pm-empty">No changes recorded.</td></tr>';
+    }
+})();
+</script>

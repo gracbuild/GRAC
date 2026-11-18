@@ -574,3 +574,14 @@ rather than inventing a new one. One new SELECT column,
   in front of an unmodified dialog and unmodified save shape.
 - Calendar/List **visibility** of schedulers is unchanged for everyone;
   only the ability to reach and submit an edit is owner-gated.
+
+## Update (2026-11-16): Reviewer and Approver columns, no bold values
+
+**Columns:** Obligation Name / Type / Frequency / Owner / **Reviewer** / **Approver** / Next Schedule Date.
+- **Reviewer / Approver** are the schedule's own setting (migration 526, `assurance_schedule_rule.reviewer_employee_id` / `approver_employee_id`), set with the row's **Review / Approval** action.
+  - When not set, the cell shows a muted **No reviewer** / **No approver**.
+  - Search also matches the reviewer and approver names.
+  - Saving Review / Approval now refreshes the calendar, so the List shows the new names at once.
+- **API** (`assurance-calendar-events` query, result set 1 = rules; `PracticeRepositoryService.QueryCalendarEventsAsync`): each rule row also carries `reviewer_employee_id`, `reviewer_name`, `approver_employee_id`, `approver_name`. The names are left-joined from `organization_employee`. No database change.
+- **Obligation Name** is no longer bold: `.cal-sched-obligation` drops `font-weight: 600`, because values in a grid are never bold.
+
